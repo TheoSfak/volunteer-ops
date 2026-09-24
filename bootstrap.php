@@ -17,6 +17,7 @@ require_once __DIR__ . '/includes/functions-warroom.php';
 require_once __DIR__ . '/includes/functions-warroom-assistant.php';
 require_once __DIR__ . '/includes/functions-vitals.php';
 require_once __DIR__ . '/includes/functions-vitals-report.php';
+require_once __DIR__ . '/includes/functions-triage.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/i18n.php';
 require_once __DIR__ . '/includes/permissions.php';

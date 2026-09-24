@@ -8166,6 +8166,18 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
         }
     }
 
+    // Mass-casualty triage. Same loader and same wording as the live
+    // Δραστηριότητα tab (mission-history.php) — see loadTriageActivityEvents()
+    // for why the two share it — in Greek, like the rest of this archive.
+    // Unscoped like incidents above: triage is everybody's on the ground.
+    // Never a name or a phone.
+    foreach (loadTriageActivityEvents($missionId) as $e) {
+        $icon = ['mci_activated' => '🚨', 'mci_deactivated' => '🏁', 'mci_ccp_set' => '🏥', 'mci_green_set' => '🟩',
+                 'bulk_green' => '🚶', 'status' => '🚑'][$e['kind']]
+            ?? ['red' => '🔴', 'yellow' => '🟡', 'green' => '🟢', 'black' => '⚫'][$e['category'] ?? ''] ?? '🏷️';
+        $events[] = ['icon' => $icon, 'text' => h(triageActivityText($e, 'el')), 'ts' => $e['ts']];
+    }
+
     // Points of interest: one "reported" event per photo (independent
     // corroboration from several volunteers each shows up individually,
     // same as the live Δραστηριότητα tab's own choice for this — see

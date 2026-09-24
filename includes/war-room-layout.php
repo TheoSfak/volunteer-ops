@@ -13,7 +13,7 @@ if (!defined('VOLUNTEEROPS')) {
 }
 
 /**
- * The 42 admin-desktop-view cards, in default reading order, split into the
+ * The 43 admin-desktop-view cards, in default reading order, split into the
  * two drag zones (main/left column, sidebar/right column). This list IS the
  * server-side whitelist — api-war-room-layout.php rejects any card id not
  * present here.
@@ -21,7 +21,7 @@ if (!defined('VOLUNTEEROPS')) {
 function warRoomDefaultLayout(): array {
     return [
         'main' => [
-            'mapCard', 'weatherCard', 'missingPersonCard', 'trailEventsCard', 'shortageFormCard', 'incidentFormCard',
+            'triageCard', 'mapCard', 'weatherCard', 'missingPersonCard', 'trailEventsCard', 'shortageFormCard', 'incidentFormCard',
             'shortageListCard', 'incidentsListCard', 'poiListCard', 'sectorsListCard', 'teamsCard',
             'participantsCard', 'liveStreamsCard', 'requestLocationCard', 'requestPhotoCard',
             'requestVideoCard', 'requestLiveCard', 'requestTaskCard', 'requestSpeakCard', 'activityCard', 'chatCard',
@@ -124,14 +124,30 @@ function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool 
         $result[$zone] = $zoneIds;
     }
     // Anything that renders today but the saved layout never placed at all
-    // (brand-new admin, or a card added after they last customized) gets
-    // appended to its default zone, in default relative order.
+    // (brand-new admin, or a card added after they last customized) goes to
+    // its default zone, just before the first card that follows it in the
+    // default order and is already there — so a new card lands where it
+    // belongs instead of at the bottom of the column. That matters for
+    // triageCard: it is added above the map, and a Μαζικό Συμβάν card that
+    // turned up under twenty others on every coordinator's saved layout would
+    // be found last, which is the one thing it must not be. With no such
+    // successor in the zone it is appended, as before.
     foreach (['main', 'sidebar'] as $zone) {
-        foreach ($rendered[$zone] as $id) {
-            if (!isset($claimed[$id])) {
-                $result[$zone][] = $id;
-                $claimed[$id] = true;
+        $defaultOrder = $rendered[$zone];
+        foreach ($defaultOrder as $pos => $id) {
+            if (isset($claimed[$id])) {
+                continue;
             }
+            $insertAt = count($result[$zone]);
+            for ($next = $pos + 1; $next < count($defaultOrder); $next++) {
+                $at = array_search($defaultOrder[$next], $result[$zone], true);
+                if ($at !== false) {
+                    $insertAt = $at;
+                    break;
+                }
+            }
+            array_splice($result[$zone], $insertAt, 0, [$id]);
+            $claimed[$id] = true;
         }
     }
 
@@ -161,6 +177,7 @@ function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool 
  */
 function warRoomCardLabels(): array {
     return [
+        'triageCard' => t('triage.card_title'),
         'mapCard' => t('map.title'),
         'weatherCard' => t('weather.card_title'),
         'missingPersonCard' => t('missing_person.card_title'),

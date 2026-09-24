@@ -162,6 +162,9 @@ $incidentDetail = array_map(function ($row) {
     $row['resolved_at'] = $row['resolved_at'] ? date('d/m/Y H:i', strtotime($row['resolved_at'])) : null;
     return $row;
 }, loadIncidentDetailForMissionReport($missionId));
+// Mass-casualty triage — null (and the whole section skipped) on a mission
+// that never had a Μαζικό Συμβάν. Always masked, never notes.
+$triageReport = loadTriageReportForMission($missionId);
 
 $totalOrders = count($report['detail']);
 $fulfillCount = count(array_filter($report['detail'], fn($d) => $d['fulfill_minutes'] !== null));
@@ -1000,6 +1003,48 @@ if ($trActive) {
         <?php endforeach; ?>
     <?php endif; ?>
 </div>
+
+<?php if ($triageReport): ?>
+<?php
+$triageHex = ['red' => ['#c62828', '#fff'], 'yellow' => ['#f9a825', '#1f1300'], 'green' => ['#2e7d32', '#fff'], 'black' => ['#212121', '#fff']];
+$triageDt = fn($v) => $v ? date('d/m/Y H:i', strtotime($v)) : '—';
+?>
+<div class="pr-card">
+    <h2>🚨 Μαζικό Συμβάν &mdash; Διαλογή Θυμάτων</h2>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+        <?php foreach (TRIAGE_CATEGORIES as $cat): ?>
+        <div style="min-width:110px;padding:6px 10px;border-radius:8px;text-align:center;background:<?= $triageHex[$cat][0] ?>;color:<?= $triageHex[$cat][1] ?>;">
+            <div style="font-size:18pt;font-weight:800;line-height:1;"><?= (int) $triageReport['counts'][$cat] + ($cat === 'green' ? (int) $triageReport['walking'] : 0) ?></div>
+            <div style="font-size:8pt;"><?= h(triageCategoryLabel($cat, 'el')) ?> · <?= h(t('triage.cat_desc.' . $cat, [], 'el')) ?></div>
+        </div>
+        <?php endforeach; ?>
+    </div>
+    <div class="event-time" style="margin-bottom:8px;">
+        Αρχική διαλογή: Κόκκινα <?= (int) $triageReport['initial_counts']['red'] ?> · Κίτρινα <?= (int) $triageReport['initial_counts']['yellow'] ?> · Πράσινα <?= (int) $triageReport['initial_counts']['green'] ?> · Μαύρα <?= (int) $triageReport['initial_counts']['black'] ?>
+        <?= $triageReport['walking'] ? ' · Περιπατητικοί χωρίς κάρτα: ' . (int) $triageReport['walking'] : '' ?>
+        · Επανεκτιμήσεις: <?= (int) $triageReport['retriaged'] ?> (επιδείνωση: <?= (int) $triageReport['deteriorated'] ?>)
+        · Διακομίστηκαν: <?= (int) $triageReport['transported'] ?>
+    </div>
+    <div class="event-time" style="margin-bottom:8px;">
+        Ενεργοποίηση: <?= $triageDt($triageReport['activated_at']) ?>
+        · Πρώτο θύμα: <?= $triageDt($triageReport['first_victim_at']) ?>
+        · Τελευταίο κόκκινο διακομίστηκε: <?= $triageDt($triageReport['last_red_out_at']) ?>
+    </div>
+    <?php foreach ($triageReport['victims'] as $v): ?>
+    <div class="event-row">
+        <div>
+            <span class="badge" style="background:<?= $triageHex[$v['category']][0] ?>;color:<?= $triageHex[$v['category']][1] ?>;"><?= h(triageCategoryLabel($v['category'], 'el')) ?></span>
+            <strong><?= h($v['code']) ?></strong><?= $v['age_group'] === 'child' ? ' (παιδί)' : '' ?>
+            — <?= h(triageReasonLabel($v['reason_key'], 'el')) ?>
+            <?= $v['first_category'] !== $v['category'] ? ' · αρχικά ' . h(triageCategoryLabel($v['first_category'], 'el')) : '' ?>
+            <?= $v['patient_name'] ? ' · ' . h($v['patient_name']) : '' ?><?= $v['estimated_age'] ? ', ' . h($v['estimated_age']) : '' ?>
+        </div>
+        <div class="event-time">Διαλογή <?= h($v['first_at']) ?> από <?= h($v['created_by'] ?? '—') ?>
+            · <?= h(triageStatusLabel($v['status'], 'el')) ?><?= $v['status'] === 'transported' ? ' ' . h(trim(implode(' · ', array_filter([$v['vehicle'], $v['destination'], $v['status_at']])))) : '' ?></div>
+    </div>
+    <?php endforeach; ?>
+</div>
+<?php endif; ?>
 
 <div class="pr-card">
     <h2>🕒 Δραστηριότητα</h2>

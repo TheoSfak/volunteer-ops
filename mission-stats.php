@@ -129,6 +129,9 @@ $pingCount = (int) dbFetchValue(
 // health data: command staff, after the fact, not the live roster.
 $vitalsReport = loadVitalsReportForMission($missionId);
 $chatCount = (int) dbFetchValue("SELECT COUNT(*) FROM mission_chat_messages WHERE mission_id = ?", [$missionId]);
+// Mass-casualty triage recap — null on a mission that never had a Μαζικό
+// Συμβάν, and then the card below is not rendered at all.
+$triageReport = loadTriageReportForMission($missionId);
 
 // Recap map data: last-known ping per volunteer, dispatch points/areas, geo-tagged photos.
 $lastPings = dbFetchAll(
@@ -755,6 +758,34 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<?php if ($triageReport): ?>
+<!-- Mass-casualty triage: totals per colour, what re-triage found, and the
+     three times a debrief asks for. Greek-only like the rest of this page. -->
+<div class="mstats-card">
+    <h2><i class="bi bi-clipboard2-pulse text-danger"></i>Μαζικό Συμβάν &mdash; Διαλογή Θυμάτων</h2>
+    <div class="row g-2 mb-2">
+        <?php foreach (['red' => ['#c62828', '#fff'], 'yellow' => ['#f9a825', '#1f1300'], 'green' => ['#2e7d32', '#fff'], 'black' => ['#212121', '#fff']] as $cat => [$bg, $fg]): ?>
+        <div class="col-6 col-lg-3">
+            <div class="text-center rounded-3 py-2" style="background:<?= $bg ?>;color:<?= $fg ?>;">
+                <div style="font-size:1.8rem;font-weight:800;line-height:1;"><?= (int) $triageReport['counts'][$cat] + ($cat === 'green' ? (int) $triageReport['walking'] : 0) ?></div>
+                <div class="small"><?= h(triageCategoryLabel($cat, 'el')) ?> · <?= h(t('triage.cat_desc.' . $cat, [], 'el')) ?></div>
+            </div>
+        </div>
+        <?php endforeach; ?>
+    </div>
+    <div class="small text-muted">
+        Θύματα με κάρτα: <?= count($triageReport['victims']) ?><?= $triageReport['walking'] ? ' · Περιπατητικοί χωρίς κάρτα: ' . (int) $triageReport['walking'] : '' ?>
+        · Επανεκτιμήσεις: <?= (int) $triageReport['retriaged'] ?> (επιδείνωση: <?= (int) $triageReport['deteriorated'] ?>)
+        · Διακομίστηκαν: <?= (int) $triageReport['transported'] ?>
+    </div>
+    <div class="small text-muted">
+        Ενεργοποίηση <?= $triageReport['activated_at'] ? date('d/m H:i', strtotime($triageReport['activated_at'])) : '—' ?>
+        · Πρώτο θύμα <?= $triageReport['first_victim_at'] ? date('d/m H:i', strtotime($triageReport['first_victim_at'])) : '—' ?>
+        · Τελευταίο κόκκινο διακομίστηκε <?= $triageReport['last_red_out_at'] ? date('d/m H:i', strtotime($triageReport['last_red_out_at'])) : '—' ?>
+    </div>
+</div>
+<?php endif; ?>
 
 <!-- Activity over time -->
 <div class="mstats-card">

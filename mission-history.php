@@ -628,6 +628,24 @@ foreach ($incidentRows as $row) {
     }
 }
 
+// ── mass-casualty triage: switch, casualties, re-triage, walking, transport ─
+// Visible to every approved participant, like incidents above, and like the
+// live triage board itself (the mission owner's decision: every colour is
+// everyone's business on the ground). The loader and the wording are shared
+// with loadMissionActivityEventsForReport() so the two timelines cannot say
+// different things; neither ever carries a casualty's name or phone.
+foreach (loadTriageActivityEvents($missionId) as $e) {
+    $icon = ['mci_activated' => '🚨', 'mci_deactivated' => '🏁', 'mci_ccp_set' => '🏥', 'mci_green_set' => '🟩',
+             'bulk_green' => '🚶', 'status' => '🚑'][$e['kind']]
+        ?? ['red' => '🔴', 'yellow' => '🟡', 'green' => '🟢', 'black' => '⚫'][$e['category'] ?? ''] ?? '🏷️';
+    $events[] = [
+        'icon' => $icon,
+        'text' => h(triageActivityText($e, $viewerLang)),
+        'time' => date('d/m H:i', $e['ts']),
+        'ts'   => $e['ts'],
+    ];
+}
+
 // ── points of interest: reported (per photo) / checked (per POI group) ─────
 // Visible to every approved participant, same policy as incidents above — a
 // physical clue found during a search is not team-private. One "reported"

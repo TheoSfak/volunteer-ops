@@ -7067,6 +7067,133 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 166,
+            'description' => "Mass-casualty triage («Μαζικό Συμβάν»). mission_mci is the per-mission switch plus the casualty collection point and green area; mission_mci_log keeps every switch/point change for the timeline. mission_triage_victims is one row per casualty, identified by the phone's own uuid, by the physical triage card number once one is attached (unique per mission: the same card is the same person), and by a phone-made T<user>-<n> code when there is no card. mission_triage_assessments keeps every START/JumpSTART answer set, so a re-triage is a new row and the victim's category is always the latest by FIELD time, never by arrival order. mission_triage_bulk counts walking wounded sent to the green area without tagging each; mission_triage_status_log records every move to the collection point or away in a vehicle.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_mci (
+                    mission_id INT UNSIGNED NOT NULL PRIMARY KEY,
+                    is_active TINYINT(1) NOT NULL DEFAULT 0,
+                    activated_at DATETIME NULL,
+                    activated_by INT UNSIGNED NULL,
+                    deactivated_at DATETIME NULL,
+                    deactivated_by INT UNSIGNED NULL,
+                    ccp_lat DECIMAL(10,7) NULL COMMENT 'Casualty collection point',
+                    ccp_lng DECIMAL(10,7) NULL,
+                    green_lat DECIMAL(10,7) NULL COMMENT 'Where the walking wounded are sent',
+                    green_lng DECIMAL(10,7) NULL,
+                    updated_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (activated_by) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (deactivated_by) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_mci_log (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    action ENUM('activated','deactivated','ccp_set','green_set') NOT NULL,
+                    user_id INT UNSIGNED NULL,
+                    lat DECIMAL(10,7) NULL,
+                    lng DECIMAL(10,7) NULL,
+                    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_mci_log_mission (mission_id, created_at),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_triage_victims (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    victim_uuid VARCHAR(64) NOT NULL COMMENT 'Made by the phone, so an offline triage has an identity before the server sees it',
+                    card_no VARCHAR(30) NULL COMMENT 'Physical triage card, normalised; the same card is the same person',
+                    fallback_code VARCHAR(20) NOT NULL COMMENT 'T<user>-<n>, made by the phone when there is no card',
+                    category ENUM('red','yellow','green','black') NOT NULL COMMENT 'Latest assessment by field time',
+                    reason VARCHAR(40) NULL,
+                    age_group ENUM('adult','child') NOT NULL DEFAULT 'adult',
+                    lat DECIMAL(10,7) NULL,
+                    lng DECIMAL(10,7) NULL,
+                    accuracy_m DECIMAL(8,2) NULL,
+                    status ENUM('on_scene','at_ccp','transported') NOT NULL DEFAULT 'on_scene',
+                    status_at DATETIME NULL,
+                    status_by INT UNSIGNED NULL,
+                    transport_vehicle VARCHAR(100) NULL,
+                    transport_destination VARCHAR(255) NULL,
+                    patient_name VARCHAR(255) NULL,
+                    estimated_age VARCHAR(50) NULL,
+                    gender ENUM('male','female','unknown') NULL,
+                    phone VARCHAR(30) NULL,
+                    notes TEXT NULL COMMENT 'Command staff only',
+                    created_by INT UNSIGNED NULL,
+                    team_id INT UNSIGNED NULL,
+                    first_assessed_at DATETIME NOT NULL,
+                    last_assessed_at DATETIME NOT NULL,
+                    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_triage_victim_uuid (mission_id, victim_uuid),
+                    UNIQUE KEY uk_triage_card (mission_id, card_no),
+                    UNIQUE KEY uk_triage_fallback (mission_id, fallback_code),
+                    INDEX idx_triage_board (mission_id, status, category),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (status_by) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_triage_assessments (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    victim_id INT UNSIGNED NOT NULL,
+                    mission_id INT UNSIGNED NOT NULL,
+                    assessment_uuid VARCHAR(64) NOT NULL COMMENT 'Made by the phone; an offline replay of the same assessment is recognised and ignored',
+                    category ENUM('red','yellow','green','black') NOT NULL,
+                    reason VARCHAR(40) NULL,
+                    protocol ENUM('start','jumpstart','direct') NOT NULL,
+                    answers VARCHAR(255) NULL COMMENT 'JSON of the yes/no answers on the route taken; NULL for a direct choice',
+                    previous_category ENUM('red','yellow','green','black') NULL COMMENT 'NULL = first triage of this casualty',
+                    assessed_by INT UNSIGNED NULL,
+                    team_id INT UNSIGNED NULL,
+                    lat DECIMAL(10,7) NULL,
+                    lng DECIMAL(10,7) NULL,
+                    accuracy_m DECIMAL(8,2) NULL,
+                    assessed_at DATETIME NOT NULL COMMENT 'Field time',
+                    reported_at DATETIME NULL COMMENT 'The phone''s own claim, kept even when not trusted',
+                    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_triage_assessment_uuid (mission_id, assessment_uuid),
+                    INDEX idx_triage_assessment_victim (victim_id, assessed_at),
+                    FOREIGN KEY (victim_id) REFERENCES mission_triage_victims(id) ON DELETE CASCADE,
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (assessed_by) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_triage_bulk (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    client_uuid VARCHAR(64) NOT NULL,
+                    walking_count SMALLINT UNSIGNED NOT NULL,
+                    reported_by INT UNSIGNED NULL,
+                    team_id INT UNSIGNED NULL,
+                    lat DECIMAL(10,7) NULL,
+                    lng DECIMAL(10,7) NULL,
+                    accuracy_m DECIMAL(8,2) NULL,
+                    reported_at DATETIME NOT NULL,
+                    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_triage_bulk_uuid (mission_id, client_uuid),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (reported_by) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_triage_status_log (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    victim_id INT UNSIGNED NOT NULL,
+                    mission_id INT UNSIGNED NOT NULL,
+                    status ENUM('on_scene','at_ccp','transported') NOT NULL,
+                    vehicle VARCHAR(100) NULL,
+                    destination VARCHAR(255) NULL,
+                    user_id INT UNSIGNED NULL,
+                    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_triage_status_mission (mission_id, created_at),
+                    FOREIGN KEY (victim_id) REFERENCES mission_triage_victims(id) ON DELETE CASCADE,
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

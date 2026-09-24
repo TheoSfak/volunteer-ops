@@ -87,6 +87,7 @@ const ASSISTANT_TARGETS = [
     'sos'       => 'sosAlertsCard',
     'shortage'  => 'shortageListCard',
     'incident'  => 'incidentsListCard',
+    'triage'    => 'triageCard',
     'order'     => 'reportModal',
     'dispatch'  => 'dispatchCard',
     'sector'    => 'sectorsListCard',
@@ -359,6 +360,16 @@ function collectMissionAssistantRaw(int $missionId, int $userId, array $missionS
          LEFT JOIN mission_teams mt ON mt.id = i.team_id
          WHERE i.mission_id = ? AND i.resolved_at IS NULL
          ORDER BY i.created_at ASC",
+        [$missionId]
+    );
+
+    // ── Mass-casualty triage: casualties not yet gone ───────────────────────
+    // Category and times only — the same "no casualty identity in a summary
+    // strip" rule as incidents above.
+    $raw['triage'] = dbFetchAll(
+        "SELECT id, category, UNIX_TIMESTAMP(first_assessed_at) AS first_ts, UNIX_TIMESTAMP(last_assessed_at) AS last_ts
+         FROM mission_triage_victims
+         WHERE mission_id = ? AND status <> 'transported'",
         [$missionId]
     );
 
@@ -744,6 +755,47 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
             'ts'     => (int) $row['ts'],
             'is_new' => $isNew($row['ts']),
             'target' => ASSISTANT_TARGETS['incident'],
+        ];
+    }
+
+    // ── Mass-casualty triage ────────────────────────────────────────────────
+    // Two aggregate rows, never one per casualty: thirty casualties would
+    // otherwise push everything else off a panel capped at twelve lines.
+    // Reds waiting for an ambulance are critical for as long as they wait;
+    // anyone past their re-triage interval is high (see
+    // TRIAGE_RETRIAGE_MINUTES — START is a snapshot, a yellow can be red ten
+    // minutes later).
+    $triageRows = $raw['triage'] ?? [];
+    $waitingReds = array_values(array_filter($triageRows, fn($r) => $r['category'] === 'red'));
+    if ($waitingReds) {
+        $oldestTs = min(array_map(fn($r) => (int) $r['first_ts'], $waitingReds));
+        $pending[] = [
+            'kind'   => 'triage',
+            'ref'    => 'TRIAGE-RED',
+            'sev'    => 'critical',
+            'icon'   => 'bi-truck',
+            'title'  => assistantPlural('triage.assistant_red_waiting_one', 'triage.assistant_red_waiting', count($waitingReds), ['minutes' => (int) floor(($nowTs - $oldestTs) / 60)], $lang),
+            'detail' => '',
+            'ts'     => $oldestTs,
+            'is_new' => $isNew($oldestTs),
+            'target' => ASSISTANT_TARGETS['triage'],
+        ];
+    }
+    $dueRows = array_values(array_filter($triageRows, fn($r) =>
+        isset(TRIAGE_RETRIAGE_MINUTES[$r['category']])
+        && ($nowTs - (int) $r['last_ts']) >= TRIAGE_RETRIAGE_MINUTES[$r['category']] * 60));
+    if ($dueRows) {
+        $oldestDue = min(array_map(fn($r) => (int) $r['last_ts'], $dueRows));
+        $pending[] = [
+            'kind'   => 'triage',
+            'ref'    => 'TRIAGE-DUE',
+            'sev'    => 'high',
+            'icon'   => 'bi-alarm',
+            'title'  => assistantPlural('triage.assistant_retriage_due_one', 'triage.assistant_retriage_due', count($dueRows), [], $lang),
+            'detail' => '',
+            'ts'     => $oldestDue,
+            'is_new' => $isNew($oldestDue),
+            'target' => ASSISTANT_TARGETS['triage'],
         ];
     }
 

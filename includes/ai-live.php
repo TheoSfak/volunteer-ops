@@ -771,6 +771,7 @@ function aiLiveTempo(int $missionId, int $minutes = AI_LIVE_TREND_MINUTES): arra
     $sources = [
         'ελλειψεις'    => ['mission_shortage_reports', 'created_at'],
         'περιστατικα'  => ['mission_incidents', 'created_at'],
+        'διαλογη_θυματων' => ['mission_triage_assessments', 'assessed_at'],
         'σηματα_sos'   => ['mission_sos_alerts', 'created_at'],
         'εντολες'      => ['mission_orders', 'created_at'],
         'σημεια_ενδιαφεροντος' => ['mission_points_of_interest', 'created_at'],
@@ -1532,6 +1533,35 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     if ($incidents) {
         $digest['περιστατικα'] = $incidents;
         $digest['σημειωση_περιστατικων'] = 'Τα περιστατικα ΔΕΝ ειναι δειγμα κακης αποδοσης. Υπαρχουν για να εξηγουν γιατι μια ομαδα φαινεται αργη. Στοιχεια ασθενων δεν περιλαμβανονται σκοπιμα.';
+    }
+
+    // ── mass-casualty triage: colours, waiting and where — never who ─────
+    // The live question a coordinator asks during a pile-up is "how many
+    // reds are still here and how long have they waited", so that is what
+    // this carries. Position is kept (a casualty's location is operational,
+    // not identity); name, age, phone and notes never are.
+    $triageState = loadTriageStateForMission($missionId, false, 0);
+    if ($triageState && ($triageState['active'] || $triageState['victims'])) {
+        $waitingRed = [];
+        foreach ($triageState['victims'] as $v) {
+            if ($v['category'] !== 'red' || $v['status'] === 'transported') {
+                continue;
+            }
+            $waitingRed[] = [
+                'κωδικος'    => $v['code'],
+                'κατασταση'  => $v['status'],
+                'λεπτα_αναμονης' => $ageMin($v['first_ts']),
+                'θεση'       => aiLivePositionText($v['lat'], $v['lng'], $baseLat, $baseLng),
+            ];
+        }
+        $digest['μαζικο_συμβαν_διαλογη'] = [
+            'ενεργο'            => $triageState['active'],
+            'ανα_κατηγορια'     => $triageState['counts'],
+            'περιπατητικοι'     => $triageState['walking'],
+            'κοκκινα_σε_αναμονη' => $waitingRed,
+            'σημειο_συγκεντρωσης' => $triageState['ccp'] ? aiLivePositionText($triageState['ccp']['lat'], $triageState['ccp']['lng'], $baseLat, $baseLng) : null,
+            'σημειωση'          => 'Μονο κατηγοριες, χρονοι και θεσεις. Στοιχεια θυματων δεν περιλαμβανονται σκοπιμα.',
+        ];
     }
 
     // ── SOS ──────────────────────────────────────────────────────────────

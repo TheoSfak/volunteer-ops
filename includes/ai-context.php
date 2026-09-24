@@ -212,7 +212,13 @@ function aiMissionForbiddenNames(int $missionId): array {
     // Patient names live on incidents and must never reach a model in any
     // form; they are added to the forbidden list so that even a stray mention
     // inside someone else's free text is caught.
-    foreach (dbFetchAll("SELECT patient_name FROM mission_incidents WHERE mission_id = ? AND patient_name IS NOT NULL", [$missionId]) as $row) {
+    // Casualties named at the triage collection point are patients too.
+    foreach (dbFetchAll(
+        "SELECT patient_name FROM mission_incidents WHERE mission_id = ? AND patient_name IS NOT NULL
+         UNION ALL
+         SELECT patient_name FROM mission_triage_victims WHERE mission_id = ? AND patient_name IS NOT NULL",
+        [$missionId, $missionId]
+    ) as $row) {
         // Anything in brackets is a DESCRIPTION, not part of the name, and it
         // must not become a forbidden word. Coordinators really do type
         // "Νίκος Βαρδάκης (διασώστης ΑΛΦΑ)" — and with the bracketed half
@@ -728,6 +734,25 @@ function buildMissionAiDigest(int $missionId, array $mission, array $score, arra
                 'πληθος'   => (int) $r['n'],
                 'ανοιχτα'  => (int) $r['open_n'],
             ], $incidentCounts),
+        ];
+    }
+
+    // ── mass-casualty triage: counts and timing only ─────────────────────
+    // Same rule as incidents: how many of each colour and how the evacuation
+    // went, never who. Absent entirely on a mission with no Μαζικό Συμβάν.
+    $triageReport = loadTriageReportForMission($missionId);
+    if ($triageReport) {
+        $digest['μαζικο_συμβαν_διαλογη'] = [
+            'σημειωση'                 => 'Μονο πληθη και χρονοι. Κανενα στοιχειο θυματος δεν διατιθεται και δεν πρεπει να ζητηθει.',
+            'τελικη_κατηγορια'         => $triageReport['counts'],
+            'αρχικη_κατηγορια'         => $triageReport['initial_counts'],
+            'περιπατητικοι_χωρις_καρτα' => $triageReport['walking'],
+            'επανεκτιμησεις'           => $triageReport['retriaged'],
+            'επιδεινωσεις'             => $triageReport['deteriorated'],
+            'διακομιστηκαν'            => $triageReport['transported'],
+            'ενεργοποιηση'             => $triageReport['activated_at'],
+            'πρωτο_θυμα'               => $triageReport['first_victim_at'],
+            'τελευταιο_κοκκινο_διακομιδη' => $triageReport['last_red_out_at'],
         ];
     }
 

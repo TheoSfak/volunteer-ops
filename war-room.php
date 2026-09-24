@@ -1597,6 +1597,9 @@ if (get('ajax') === '1') {
     $routes = loadRoutesForUser($missionId, (int)$user['id'], $canManageWarRoom);
     $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
     $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom) : [];
+    // Mass-casualty triage board. Null on a mission that never had a Μαζικό
+    // Συμβάν, so an ordinary mission's poll carries one null and nothing else.
+    $triage = ($canManageWarRoom || $isApprovedParticipant) ? loadTriageStateForMission($missionId, $canManageWarRoom, (int) $user['id']) : null;
     $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
     // Command staff only, same as $sosAlerts: a volunteer's tab must not
     // carry other people's voice messages, and has nothing to do with them.
@@ -1671,6 +1674,7 @@ if (get('ajax') === '1') {
         'routes' => $routes,
         'shortageReports' => $shortageReports,
         'incidents' => $incidents,
+        'triage' => $triage,
         'sosAlerts' => $sosAlerts,
         'voiceMessages' => $voiceMessages,
         'pointsOfInterest' => $pointsOfInterest,
@@ -1805,6 +1809,7 @@ $myLive = loadMyLiveStreamForUser($missionId, (int)$user['id']);
 $routes = loadRoutesForUser($missionId, (int)$user['id'], $canManageWarRoom);
 $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
 $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom) : [];
+$triage = ($canManageWarRoom || $isApprovedParticipant) ? loadTriageStateForMission($missionId, $canManageWarRoom, (int) $user['id']) : null;
 $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
 $voiceMessages = $canManageWarRoom ? loadUnacknowledgedVoiceMessagesForMission($missionId) : [];
 $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
@@ -2474,7 +2479,17 @@ include __DIR__ . '/includes/header.php';
     #mapCard.wr-draw-active .leaflet-sector-pane,
     #mapCard.wr-draw-active .leaflet-area-pane,
     #mapCard.wr-draw-active .leaflet-sector-pane .leaflet-interactive,
-    #mapCard.wr-draw-active .leaflet-area-pane .leaflet-interactive { pointer-events: none; }
+    #mapCard.wr-draw-active .leaflet-area-pane .leaflet-interactive,
+    /* The same second gotcha applies to the two built-in panes at the top of
+       this rule: their pointer-events:none never reached a restricted-area
+       polygon, a search ring or a marker icon, so a click placed on one of
+       them (an annotation stroke, the triage collection point) was eaten by
+       it. Found placing a collection point on top of a hazard zone. The
+       triage pane is covered for the same reason. */
+    #mapCard.wr-draw-active .leaflet-overlay-pane .leaflet-interactive,
+    #mapCard.wr-draw-active .leaflet-marker-pane .leaflet-interactive,
+    #mapCard.wr-draw-active .leaflet-triage-pane,
+    #mapCard.wr-draw-active .leaflet-triage-pane .leaflet-interactive { pointer-events: none; }
     .wr-anno-arrowhead { width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 16px solid; filter: drop-shadow(0 1px 2px #0008); }
     .wr-anno-text-label { display: inline-block; padding: 2px 8px; border-radius: 4px; color: #fff; font-weight: 600; font-size: .78rem; white-space: nowrap; box-shadow: 0 1px 3px #0006; }
     .wr-weather-ctl { background: #fff; padding: .5rem .6rem .45rem; }
@@ -3253,6 +3268,63 @@ include __DIR__ . '/includes/header.php';
         15%, 55% { box-shadow: 0 0 0 4px rgba(37,99,235,.55); }
         35%, 75% { box-shadow: 0 0 0 0 rgba(37,99,235,0); }
     }
+
+    /* ── Mass-casualty triage ────────────────────────────────────────────
+       The four colours are the international triage-tag colours, not the
+       app's theme: a rescuer's eye is trained on these exact ones. Black is
+       a very dark grey so white text and the card border stay visible. */
+    .triage-bg-red    { background: #c62828 !important; color: #fff !important; }
+    .triage-bg-yellow { background: #f9a825 !important; color: #1f1300 !important; }
+    .triage-bg-green  { background: #2e7d32 !important; color: #fff !important; }
+    .triage-bg-black  { background: #212121 !important; color: #fff !important; }
+    .triage-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; flex: none; }
+    .triage-big-btn { min-height: 96px; font-size: 1.25rem; font-weight: 600; }
+    /* Four equal columns that always fit a 360px phone: the default button
+       padding pushed «Μαύρο» off the edge of the screen. */
+    .triage-quick-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
+    .triage-quick-btn { min-height: 48px; font-weight: 600; border: 0; padding-left: 2px; padding-right: 2px; font-size: .92rem; }
+    .triage-counts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
+    .triage-count { border-radius: 8px; padding: 6px 4px; text-align: center; line-height: 1.15; }
+    .triage-count .n { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .triage-count .l { font-size: .75rem; }
+    .triage-row { border-bottom: 1px solid #e9ecef; padding: 6px 0; }
+    .triage-row.is-gone { opacity: .55; }
+    .triage-row summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+    .triage-reason { flex: 1 1 0; min-width: 0; }
+    /* On a phone the finding gets its own line under the code: squeezed
+       between the code and the status it was cut to one letter. */
+    @media (max-width: 575.98px) {
+        .triage-reason { order: 9; flex-basis: 100%; padding-left: 20px; color: #555; }
+    }
+    .triage-row summary::-webkit-details-marker { display: none; }
+    .triage-code { font-family: SFMono-Regular, Consolas, monospace; font-weight: 700; min-width: 4.2em; }
+    .triage-due { color: #b45309; font-weight: 600; }
+    /* The flow: one question per screen, over everything except the SOS /
+       zone alarms (2000+), which must still be able to take the screen. */
+    .triage-flow { position: fixed; inset: 0; z-index: 1990; background: #fff; display: flex; flex-direction: column; overflow-y: auto; }
+    .triage-flow-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #fdecea; color: #b71c1c; font-size: .9rem; }
+    .triage-flow-body { flex: 1; display: flex; flex-direction: column; padding: 18px 16px 16px; max-width: 560px; width: 100%; margin: 0 auto; }
+    .triage-question { font-size: 1.7rem; font-weight: 700; line-height: 1.3; margin: 18px 0 8px; }
+    .triage-hint { color: #555; font-size: 1rem; }
+    /* ΝΑΙ and ΟΧΙ deliberately look the same: in START "yes" is the good
+       answer to some questions and the bad one to others, and a green ΝΑΙ
+       would nudge a rescuer towards it. */
+    .triage-yn { display: flex; gap: 12px; margin-top: auto; padding-top: 20px; }
+    .triage-yn button { flex: 1; height: 120px; font-size: 2rem; font-weight: 800; border-radius: 14px; border: 3px solid #1f2937; background: #f3f4f6; color: #111827; }
+    .triage-yn button:active { background: #1f2937; color: #fff; }
+    .triage-result { flex: 1; display: flex; flex-direction: column; align-items: center; text-align: center; padding: 22px 16px 16px; }
+    .triage-result .cat { font-size: 2.6rem; font-weight: 800; letter-spacing: .04em; }
+    .triage-result .code { font-family: SFMono-Regular, Consolas, monospace; font-size: 3.4rem; font-weight: 800; letter-spacing: .06em; line-height: 1.1; }
+    .triage-result .panel { background: rgba(255,255,255,.95); color: #111; border-radius: 12px; padding: 12px; width: 100%; max-width: 480px; margin-top: 14px; text-align: left; }
+    .triage-card-input { font-family: SFMono-Regular, Consolas, monospace; font-size: 1.5rem; text-align: center; letter-spacing: .08em; text-transform: uppercase; }
+    .triage-card-input::placeholder { text-transform: none; letter-spacing: normal; }
+    .triage-scanner { position: fixed; inset: 0; z-index: 1995; background: #000; display: flex; align-items: center; justify-content: center; }
+    .triage-scanner video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .triage-scanner-frame { position: relative; width: 80vw; max-width: 520px; height: 42vw; max-height: 280px; border: 4px solid rgba(255,255,255,.9); border-radius: 14px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.45); }
+    .triage-scanner-status { position: absolute; top: 18px; left: 0; right: 0; text-align: center; color: #fff; font-size: 1.1rem; font-weight: 600; text-shadow: 0 1px 3px #000; }
+    .triage-scanner-close { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); }
+    .triage-marker { color: #fff; font: 700 11px/1 SFMono-Regular, Consolas, monospace; padding: 3px 5px; border-radius: 6px; border: 2px solid #fff; box-shadow: 0 1px 4px #0008; white-space: nowrap; }
+    .triage-marker.is-gone { opacity: .45; }
 </style>
 
 <div class="war-room-hero p-4 mb-4 shadow-sm">
@@ -3681,6 +3753,66 @@ include __DIR__ . '/includes/header.php';
         <div id="wrZoneSidebar" class="wr-zone"></div>
     </div>
 </div>
+<?php endif; ?>
+
+<?php if ($canManageWarRoom || $isApprovedParticipant): ?>
+<!-- Mass-casualty triage (Μαζικό Συμβάν). Above the map on purpose: in a
+     pile-up this is the card that matters, and a volunteer on the desktop
+     page (no tabs, no drag zones) sees the HTML order. Command staff always
+     get it — collapsed to one line while the switch is off — because it is
+     where the switch lives. A volunteer only sees it while the switch is on;
+     renderTriage() shows and hides it as the poll reports the state, so the
+     button appears on every phone the moment command switches it on. -->
+<div class="row g-4 mb-4 wr-legacy-row">
+    <div class="col-12">
+        <div class="card shadow-sm border-danger<?= ($canManageWarRoom || !empty($triage['active'])) ? '' : ' d-none' ?>" id="triageCard" data-card-id="triageCard">
+            <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <h5 class="mb-0"><i class="bi bi-clipboard2-pulse me-1"></i><?= t('triage.card_title') ?>
+                    <span class="badge bg-light text-danger ms-1 align-middle d-none" id="triageMciBadge"><?= t('triage.mci_badge') ?></span></h5>
+                <?php if ($canManageWarRoom): ?>
+                <div class="d-flex gap-1 flex-wrap">
+                    <a class="btn btn-sm btn-outline-light d-none" id="triageHandoverBtn" href="mission-triage-handover.php?id=<?= $missionId ?>" target="_blank" rel="noopener"><i class="bi bi-printer me-1"></i><?= t('triage.handover_btn') ?></a>
+                    <button type="button" class="btn btn-sm btn-light" id="triageMciToggle"></button>
+                </div>
+                <?php endif; ?>
+            </div>
+            <div class="card-body">
+                <div id="triageStatusLine" class="small mb-2"></div>
+                <?php if ($isApprovedParticipant): ?>
+                <div id="triageFieldControls" class="d-none mb-3">
+                    <div class="btn-group w-100 mb-2" role="group" aria-label="<?= t('triage.adult') ?> / <?= t('triage.child') ?>">
+                        <input type="radio" class="btn-check" name="triageAgeGroup" id="triageAgeAdult" value="adult" checked>
+                        <label class="btn btn-outline-dark" for="triageAgeAdult"><i class="bi bi-person-standing me-1"></i><?= t('triage.adult') ?></label>
+                        <input type="radio" class="btn-check" name="triageAgeGroup" id="triageAgeChild" value="child">
+                        <label class="btn btn-outline-dark" for="triageAgeChild"><i class="bi bi-person-arms-up me-1"></i><?= t('triage.child') ?></label>
+                    </div>
+                    <button type="button" class="btn btn-danger w-100 triage-big-btn" id="triageStartBtn">
+                        <i class="bi bi-clipboard2-pulse d-block mb-1" style="font-size:1.8rem;"></i><?= t('triage.triage_btn') ?>
+                    </button>
+                    <div class="small text-muted mt-2 mb-1"><?= t('triage.quick_label') ?></div>
+                    <div class="triage-quick-grid mb-2">
+                        <?php foreach (TRIAGE_CATEGORIES as $cat): ?>
+                        <button type="button" class="btn triage-quick-btn triage-bg-<?= $cat ?>" data-category="<?= $cat ?>"><?= t('triage.cat.' . $cat) ?></button>
+                        <?php endforeach; ?>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-outline-success flex-fill" id="triageBulkBtn"><i class="bi bi-person-walking me-1"></i><?= t('triage.bulk_btn') ?></button>
+                        <button type="button" class="btn btn-outline-dark flex-fill" id="triageRetriageBtn"><i class="bi bi-arrow-repeat me-1"></i><?= t('triage.retriage_btn') ?></button>
+                    </div>
+                    <div class="small text-muted mt-2"><i class="bi bi-wifi-off me-1"></i><?= t('triage.offline_note') ?></div>
+                </div>
+                <?php endif; ?>
+                <div id="triageBoard"></div>
+            </div>
+        </div>
+    </div>
+</div>
+<?php if ($isApprovedParticipant): ?>
+<!-- The triage flow itself: one question per screen, full screen, big
+     buttons. Filled by the triageFlow* functions; nothing in here is
+     server-rendered except the shell. -->
+<div id="triageFlow" class="triage-flow d-none" role="dialog" aria-modal="true" aria-label="<?= t('triage.card_title') ?>"></div>
+<?php endif; ?>
 <?php endif; ?>
 
 <div class="row g-4 mb-4 wr-legacy-row wr-stack-row">
@@ -5798,6 +5930,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg==" crossorigin="anonymous"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-utils.js?v=<?= APP_VERSION ?>"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/triage.js?v=<?= APP_VERSION ?>"></script>
 <?php if (vitalsEnabled()): ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/vitals-sensor.js?v=<?= APP_VERSION ?>"></script>
 <?php endif; ?>
@@ -5944,6 +6077,17 @@ let missionIncidents = <?= json_encode($incidents) ?>;
 // hides the seen/resolve action buttons for everyone except command staff, since
 // the server already strips patient name/phone/notes from their copy of the data.
 const canManageIncidents = <?= json_encode($canManageWarRoom) ?>;
+// Mass-casualty triage board (null on a mission that never had one). See the
+// triage section further down for what reads these.
+let triageState = <?= json_encode($triage, JSON_UNESCAPED_UNICODE) ?>;
+const TRIAGE_CAN_MANAGE = <?= json_encode($canManageWarRoom) ?>;
+const TRIAGE_CAN_FIELD = <?= json_encode($isApprovedParticipant) ?>;
+const TRIAGE_MISSION_ID = <?= $missionId ?>;
+// Server clock minus this device's clock, in seconds, measured once at load.
+// Ages on the board ("waiting 14′") come from server timestamps, and a phone
+// whose clock is five minutes out would otherwise show every red five
+// minutes fresher or staler than it is.
+const TRIAGE_CLOCK_OFFSET_S = <?= time() ?> - Math.floor(Date.now() / 1000);
 let sosAlerts = <?= json_encode($sosAlerts) ?>;
 let voiceMessages = <?= json_encode($voiceMessages, JSON_UNESCAPED_UNICODE) ?>;
 let pointsOfInterest = <?= json_encode($pointsOfInterest) ?>;
@@ -6215,7 +6359,9 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
     const CARDS_BY_TAB = {
         // The volunteer's own orders lead, because that is what they opened
         // the page for. Everything else is reference material.
-        me:    ['myLocationCard', 'myTasksCard', 'mySectorsCard', 'myRouteCard',
+        // triageCard first: it is hidden unless Μαζικό Συμβάν is on, and
+        // when it is on, nothing on this tab matters more.
+        me:    ['triageCard', 'myLocationCard', 'myTasksCard', 'mySectorsCard', 'myRouteCard',
                 'restrictedAreaProximityCard'],
         map:   ['mapCard', 'missingPersonCard', 'weatherCard', 'sectorsListCard', 'poiListCard'],
         team:  ['nearbyTeamsCard', 'teamsCard', 'participantsCard', 'chatCard'],
@@ -11316,9 +11462,10 @@ function postRouteAction(action, id, extra) {
 // network happened to come back — see resolveEventTimestamp() in
 // includes/functions-warroom.php, which both replayed endpoints share.
 //
-// Two kinds ride this queue:
+// Three kinds ride this queue:
 //   kind:'route'  → mission-route.php  (depart/arrive/complete)
 //   kind:'status' → volunteer-status.php (on_way/on_site/needs_help, i.e. SOS)
+//   kind:'triage' → mission-triage.php (assess/set_card/merge/bulk_green)
 //
 // Desk-side admin actions (cancel/skip/edit_waypoint/create, SOS acknowledge/
 // resolve) deliberately do NOT go through this — they're not the ones losing
@@ -11425,6 +11572,11 @@ function postRouteActionQueueable(action, id, extra) {
 }
 
 function sendQueuedItem(item) {
+    // Triage writes carry their own ids (victim / assessment / bulk uuid), so
+    // a replay that already landed is recognised server-side and ignored.
+    if (item.kind === 'triage') {
+        return postTriage(Object.assign({}, item.params, {queued: '1'}));
+    }
     if (item.kind === 'status') {
         return postFieldStatus(item.prId, item.status, item.extra || {}).then(result => {
             // markFieldStatusQueued() left the badge saying "not sent yet".
@@ -12193,6 +12345,812 @@ function renderIncidentLayer(items) {
     });
     sharedMarkerCluster.addLayers(currentIncidentMarkers);
 }
+
+// ── Mass-casualty triage (Μαζικό Συμβάν) ────────────────────────────────────
+// The board, the map layer and the field flow. The protocol trees, card-number
+// normalisation and the camera scanner live in assets/js/triage.js, which the
+// server's fixture tests share; everything here is the page around them. All
+// writes go to mission-triage.php, and the three a rescuer makes in the field
+// (assess, set_card, bulk_green) fall back to the offline queue on a network
+// error, like an SOS does.
+
+const TRIAGE_CAT_HEX = {red: '#c62828', yellow: '#f9a825', green: '#2e7d32', black: '#212121'};
+const TRIAGE_CAT_TEXT = {red: '#fff', yellow: '#1f1300', green: '#fff', black: '#fff'};
+
+function triageNowTs() { return Math.floor(Date.now() / 1000) + TRIAGE_CLOCK_OFFSET_S; }
+function triageMinutesSince(ts) { return Math.max(0, Math.floor((triageNowTs() - ts) / 60)); }
+function triageCatLabel(cat) { return t('triage.cat.' + cat); }
+
+function postTriage(params) {
+    const body = new URLSearchParams(Object.assign({csrf_token: csrfToken, mission_id: TRIAGE_MISSION_ID}, params));
+    return fetch('mission-triage.php', {method: 'POST', body}).then(response => {
+        if (!checkSessionAlive(response)) return null;
+        return response.json();
+    }).catch(() => ({ok: false, error: t('common.network_error'), networkError: true}));
+}
+function postTriageQueueable(params) {
+    return postTriage(params).then(result => {
+        if (!result || result.networkError) {
+            enqueueAction({kind: 'triage', params});
+            return {ok: true, queued: true};
+        }
+        return result;
+    });
+}
+// The board is fed by the 5-second poll; after our own write, ask for it now
+// rather than leaving the rescuer's casualty missing for up to five seconds.
+function triageRefreshSoon() {
+    setTimeout(() => { if (typeof pollWarRoomData === 'function') pollWarRoomData(); }, 300);
+}
+
+// ── Board ───────────────────────────────────────────────────────────────────
+const triageOpenRows = new Set();
+let triageListOpen = false;
+let triageBoardDirty = false;
+
+function renderTriage(state) {
+    triageState = state;
+    const card = document.getElementById('triageCard');
+    if (!card) return;
+    const active = !!(state && state.active);
+    // A volunteer only has this card while the switch is on. Command keeps
+    // it always: it is where the switch lives.
+    if (!TRIAGE_CAN_MANAGE) card.classList.toggle('d-none', !active);
+    document.getElementById('triageMciBadge')?.classList.toggle('d-none', !active);
+    const toggle = document.getElementById('triageMciToggle');
+    if (toggle) {
+        toggle.textContent = active ? t('triage.mci_deactivate_btn') : t('triage.mci_activate_btn');
+        toggle.className = 'btn btn-sm ' + (active ? 'btn-outline-light' : 'btn-light fw-bold text-danger');
+        toggle.dataset.active = active ? '1' : '0';
+    }
+    document.getElementById('triageHandoverBtn')?.classList.toggle('d-none', !(state && state.victims && state.victims.length));
+    document.getElementById('triageFieldControls')?.classList.toggle('d-none', !active);
+    // The first scan in a dead zone must not depend on a download, so the
+    // fallback decoder is fetched (and cached by the service worker) the
+    // moment the switch is seen on.
+    if (active) preloadTriageScanner();
+
+    const line = document.getElementById('triageStatusLine');
+    if (line) {
+        if (active) {
+            line.className = 'small mb-2 text-danger fw-semibold';
+            line.textContent = t('triage.mci_active_since', {time: state.activated_at || '', name: state.activated_by || '—'});
+        } else if (state) {
+            line.className = 'small mb-2 text-muted';
+            line.textContent = t('triage.mci_closed_note');
+        } else {
+            line.className = 'small mb-0 text-muted';
+            line.textContent = TRIAGE_CAN_MANAGE ? t('triage.mci_inactive_help') : '';
+        }
+    }
+    renderTriageBoard(state);
+    renderTriageLayer(state);
+}
+
+function triagePointBtnHtml(kind, point) {
+    const label = kind === 'ccp' ? t('triage.set_ccp_btn') : t('triage.set_green_btn');
+    const icon = kind === 'ccp' ? 'bi-hospital' : 'bi-people';
+    const tone = kind === 'ccp' ? 'danger' : 'success';
+    return `<div class="btn-group btn-group-sm">
+        <button type="button" class="btn btn-outline-${tone} triage-pick-btn" data-kind="${kind}"><i class="bi ${icon} me-1"></i>${escapeHtml(label)}${point ? ' <i class="bi bi-check-lg"></i>' : ''}</button>
+        ${point ? `<button type="button" class="btn btn-outline-secondary triage-clear-point" data-kind="${kind}" title="${escapeHtml(t('triage.clear_point'))}"><i class="bi bi-x-lg"></i></button>` : ''}
+    </div>`;
+}
+
+function triageRowHtml(v) {
+    const gone = v.status === 'transported';
+    const since = triageMinutesSince(v.last_ts);
+    const dueAfter = TRIAGE_RETRIAGE_MINUTES[v.category];
+    const due = !gone && dueAfter && since >= dueAfter;
+    const who = [v.patient_name, v.estimated_age, v.phone].filter(Boolean).join(' · ');
+    const transport = [v.vehicle, v.destination].filter(Boolean).join(' · ');
+    const history = (v.history || []).map(h => `<div><span class="triage-dot triage-bg-${h.category}"></span> ${escapeHtml(h.at)} ${escapeHtml(triageCatLabel(h.category))} — ${escapeHtml(h.reason || '')} <span class="text-muted">(${escapeHtml(h.by || '—')})</span></div>`).join('');
+    const statusBadge = gone ? 'bg-secondary' : (v.status === 'at_ccp' ? 'bg-primary' : 'bg-light text-dark border');
+    const actions = TRIAGE_CAN_MANAGE ? `
+        <div class="d-flex gap-1 flex-wrap mt-2">
+            <button type="button" class="btn btn-sm btn-outline-primary triage-status-btn" data-status="at_ccp" ${v.status === 'at_ccp' ? 'disabled' : ''}><i class="bi bi-hospital me-1"></i>${t('triage.to_ccp_btn')}</button>
+            ${v.status !== 'on_scene' ? `<button type="button" class="btn btn-sm btn-outline-secondary triage-status-btn" data-status="on_scene">${t('triage.status.on_scene')}</button>` : ''}
+        </div>
+        <div class="input-group input-group-sm mt-1">
+            <input type="text" class="form-control triage-vehicle" maxlength="100" placeholder="${escapeHtml(t('triage.vehicle_placeholder'))}" value="${escapeHtml(v.vehicle || '')}">
+            <input type="text" class="form-control triage-dest" maxlength="255" placeholder="${escapeHtml(t('triage.destination_placeholder'))}" value="${escapeHtml(v.destination || '')}">
+            <button type="button" class="btn btn-danger triage-transport-btn"><i class="bi bi-truck me-1"></i>${t('triage.transport_btn')}</button>
+        </div>
+        <details class="mt-1 triage-details-form">
+            <summary class="small text-primary">${t('triage.details_btn')}</summary>
+            <div class="row g-1 mt-1">
+                <div class="col-12"><input type="text" class="form-control form-control-sm" data-f="patient_name" maxlength="255" placeholder="${escapeHtml(t('incident.patient_name_placeholder'))}" value="${escapeHtml(v.patient_name || '')}"></div>
+                <div class="col-6"><input type="text" class="form-control form-control-sm" data-f="estimated_age" maxlength="50" placeholder="${escapeHtml(t('incident.age_placeholder'))}" value="${escapeHtml(v.estimated_age || '')}"></div>
+                <div class="col-6"><select class="form-select form-select-sm" data-f="gender">
+                    <option value="">${escapeHtml(t('incident.gender_placeholder'))}</option>
+                    ${['male', 'female', 'unknown'].map(g => `<option value="${g}" ${v.gender === g ? 'selected' : ''}>${escapeHtml(t('incident.gender.' + g))}</option>`).join('')}
+                </select></div>
+                <div class="col-12"><input type="tel" class="form-control form-control-sm" data-f="phone" maxlength="30" placeholder="${escapeHtml(t('incident.phone_placeholder'))}" value="${escapeHtml(v.phone || '')}"></div>
+                <div class="col-12"><textarea class="form-control form-control-sm" data-f="notes" rows="2" maxlength="2000" placeholder="${escapeHtml(t('incident.notes_placeholder'))}">${escapeHtml(v.notes || '')}</textarea></div>
+                <div class="col-12"><button type="button" class="btn btn-sm btn-primary w-100 triage-details-save">${t('triage.details_save')}</button></div>
+            </div>
+        </details>` : '';
+    return `<details class="triage-row${gone ? ' is-gone' : ''}" data-victim-id="${v.id}" ${triageOpenRows.has(v.id) ? 'open' : ''}>
+        <summary>
+            <span class="triage-dot triage-bg-${v.category}"></span>
+            <span class="triage-code">${escapeHtml(v.code)}</span>
+            ${v.age_group === 'child' ? `<span class="badge bg-info text-dark">${t('triage.child_badge')}</span>` : ''}
+            ${due ? `<i class="bi bi-alarm triage-due" title="${escapeHtml(t('triage.retriage_due', {minutes: since}))}"></i>` : ''}
+            <span class="small text-truncate triage-reason">${escapeHtml(v.reason || '')}</span>
+            <span class="badge ${statusBadge} ms-auto">${escapeHtml(t('triage.status.' + v.status))}</span>
+            <span class="small text-muted">${escapeHtml(v.first_at)}</span>
+        </summary>
+        <div class="ps-4 pt-1 small">
+            ${due ? `<div class="triage-due"><i class="bi bi-alarm me-1"></i>${t('triage.retriage_due', {minutes: since})}</div>`
+                  : `<div class="text-muted">${t('triage.last_assessed', {minutes: since})}</div>`}
+            ${gone && transport ? `<div><i class="bi bi-truck me-1"></i>${escapeHtml(transport)}${v.status_at ? ' (' + escapeHtml(v.status_at) + ')' : ''}</div>` : ''}
+            ${who ? `<div><i class="bi bi-person me-1"></i>${escapeHtml(who)}</div>` : ''}
+            ${v.notes ? `<div class="fst-italic">"${escapeHtml(v.notes)}"</div>` : ''}
+            <div class="text-muted">${escapeHtml(v.created_by || '')}${v.team_label ? ' (' + escapeHtml(v.team_label) + ')' : ''}</div>
+            <div class="mt-1"><div class="fw-semibold">${t('triage.history')}</div>${history}</div>
+            ${navigationBtnHtml(v.lat, v.lng, {block: true})}
+            ${actions}
+        </div>
+    </details>`;
+}
+
+function renderTriageBoard(state) {
+    const board = document.getElementById('triageBoard');
+    if (!board) return;
+    // Never rebuild under someone's fingers: a coordinator half-way through
+    // typing a hospital name would lose it to the next poll. Picked up again
+    // the moment focus leaves (see the focusout listener below).
+    const focused = document.activeElement;
+    if (focused && board.contains(focused) && /^(INPUT|TEXTAREA|SELECT)$/.test(focused.tagName)) {
+        triageBoardDirty = true;
+        return;
+    }
+    triageBoardDirty = false;
+    if (!state || (!state.active && !state.victims.length && !state.walking)) {
+        board.innerHTML = '';
+        return;
+    }
+    const c = state.counts;
+    const total = c.red + c.yellow + c.green + c.black + state.walking;
+    const counts = `<div class="triage-counts mb-2">${TRIAGE_CATEGORY_ORDER.map(cat => `
+        <div class="triage-count triage-bg-${cat}"><div class="n">${c[cat] + (cat === 'green' ? state.walking : 0)}</div><div class="l">${escapeHtml(t('triage.cat_tile.' + cat))}</div></div>`).join('')}</div>`;
+    const walking = state.walking ? `<div class="small text-muted mb-1"><i class="bi bi-person-walking me-1"></i>${t('triage.walking_count', {n: state.walking})}</div>` : '';
+    const waiting = state.victims.filter(v => v.category === 'red' && v.status !== 'transported');
+    const oldest = waiting.length ? waiting.reduce((a, b) => (a.first_ts <= b.first_ts ? a : b)) : null;
+    const waitingText = waiting.length === 0 ? t('triage.waiting_red_none')
+        : (waiting.length === 1 ? t('triage.waiting_red_one') : t('triage.waiting_red', {n: waiting.length}));
+    const waitingLine = `<div class="alert ${waiting.length ? 'alert-danger fw-semibold' : 'alert-secondary'} py-1 px-2 small mb-2"><i class="bi bi-truck me-1"></i>${escapeHtml(waitingText)}${oldest ? ' · ' + escapeHtml(t('triage.oldest', {code: oldest.code, minutes: triageMinutesSince(oldest.first_ts)})) : ''}</div>`;
+    const points = TRIAGE_CAN_MANAGE ? `<div class="d-flex gap-1 flex-wrap mb-2">${triagePointBtnHtml('ccp', state.ccp)}${triagePointBtnHtml('green', state.green)}</div>` : '';
+    const list = state.victims.length ? state.victims.map(triageRowHtml).join('') : `<p class="text-muted small mb-0">${t('triage.empty')}</p>`;
+    const heading = `${t('triage.list_title')} · ${t('triage.total', {n: total})}`;
+    // A volunteer's list starts folded: their job is the button above it.
+    const listBlock = TRIAGE_CAN_MANAGE
+        ? `<div class="small fw-semibold text-muted mb-1">${heading}</div>${list}`
+        : `<details id="triageListDetails" ${triageListOpen ? 'open' : ''}><summary class="small fw-semibold text-muted mb-1">${heading}</summary>${list}</details>`;
+    board.innerHTML = counts + walking + waitingLine + points + listBlock;
+
+    board.querySelectorAll('details.triage-row').forEach(d => d.addEventListener('toggle', () => {
+        const id = parseInt(d.dataset.victimId, 10);
+        if (d.open) triageOpenRows.add(id); else triageOpenRows.delete(id);
+    }));
+    board.querySelector('#triageListDetails')?.addEventListener('toggle', e => { triageListOpen = e.target.open; });
+    board.querySelectorAll('.triage-pick-btn').forEach(b => b.addEventListener('click', () => triageStartPick(b.dataset.kind)));
+    board.querySelectorAll('.triage-clear-point').forEach(b => b.addEventListener('click', () => {
+        b.disabled = true;
+        postTriage({action: 'point', kind: b.dataset.kind}).then(r => {
+            if (r && r.ok) renderTriage(r.triage); else { b.disabled = false; alert((r && r.error) || t('common.failed')); }
+        });
+    }));
+    if (!TRIAGE_CAN_MANAGE) return;
+    board.querySelectorAll('details.triage-row').forEach(row => {
+        const victimId = row.dataset.victimId;
+        const setStatus = (status, extra, btn) => {
+            if (btn) btn.disabled = true;
+            postTriage(Object.assign({action: 'status', victim_id: victimId, status}, extra || {})).then(r => {
+                if (r && r.ok) { document.activeElement?.blur(); renderTriage(r.triage); }
+                else { if (btn) btn.disabled = false; alert((r && r.error) || t('common.failed')); }
+            });
+        };
+        row.querySelectorAll('.triage-status-btn').forEach(b => b.addEventListener('click', () => setStatus(b.dataset.status, null, b)));
+        row.querySelector('.triage-transport-btn')?.addEventListener('click', e => setStatus('transported', {
+            vehicle: row.querySelector('.triage-vehicle').value,
+            destination: row.querySelector('.triage-dest').value,
+        }, e.currentTarget));
+        row.querySelector('.triage-details-save')?.addEventListener('click', e => {
+            const btn = e.currentTarget;
+            const params = {action: 'details', victim_id: victimId};
+            row.querySelectorAll('.triage-details-form [data-f]').forEach(f => { params[f.dataset.f] = f.value; });
+            btn.disabled = true;
+            postTriage(params).then(r => {
+                btn.disabled = false;
+                if (r && r.ok) { document.activeElement?.blur(); triageRefreshSoon(); }
+                else alert((r && r.error) || t('common.failed'));
+            });
+        });
+    });
+}
+
+document.getElementById('triageBoard')?.addEventListener('focusout', () => {
+    setTimeout(() => { if (triageBoardDirty) renderTriageBoard(triageState); }, 0);
+});
+// Ages ("waiting 14′", "due for re-triage") move on their own; the poll only
+// re-renders when the data changes.
+setInterval(() => { if (triageState && triageState.victims && triageState.victims.length) renderTriageBoard(triageState); }, 30000);
+
+document.getElementById('triageMciToggle')?.addEventListener('click', e => {
+    const btn = e.currentTarget;
+    const turnOn = btn.dataset.active !== '1';
+    if (!confirm(turnOn ? t('triage.mci_activate_confirm') : t('triage.mci_deactivate_confirm'))) return;
+    btn.disabled = true;
+    postTriage({action: 'mci', active: turnOn ? '1' : '0'}).then(r => {
+        btn.disabled = false;
+        if (r && r.ok) renderTriage(r.triage);
+        else alert((r && r.error) || t('common.failed'));
+    });
+});
+
+// ── Map ─────────────────────────────────────────────────────────────────────
+// Its own layer, deliberately NOT the shared marker cluster the incidents and
+// pins use: in a pile-up the casualties are a metre apart, and a cluster
+// bubble that hides three reds behind a "5" is the one thing this map must
+// never do. Reds sit on top of everything else in the pane.
+let triageLayer = null;
+let triageLayerSig = null;
+function renderTriageLayer(state) {
+    if (!map) return;
+    if (!triageLayer) {
+        map.createPane('triagePane');
+        map.getPane('triagePane').style.zIndex = 640;
+        triageLayer = L.layerGroup().addTo(map);
+    }
+    const victims = (state && state.victims) || [];
+    const sig = JSON.stringify([victims.map(v => [v.id, v.code, v.category, v.status, v.lat, v.lng, v.reason]), state && state.ccp, state && state.green]);
+    if (sig === triageLayerSig) return;
+    triageLayerSig = sig;
+    triageLayer.clearLayers();
+    if (!state) return;
+    // Casualties within about a metre of each other share ONE marker, a
+    // stack of their codes, reds first. That is the normal case, not an edge
+    // one: a rescuer kneeling between three people records all three from
+    // the same spot, and three separate markers at one coordinate would
+    // cover each other so that only the top one could ever be seen or
+    // tapped. Positions are never nudged apart — the stack sits exactly
+    // where they were recorded. Gone (transported) casualties stack at the
+    // bottom and fade.
+    const rank = v => (v.status === 'transported' ? 10 : 0) + TRIAGE_CATEGORY_ORDER.indexOf(v.category);
+    const groups = new Map();
+    victims.filter(v => v.lat !== null && v.lng !== null).forEach(v => {
+        const key = v.lat.toFixed(5) + ',' + v.lng.toFixed(5);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(v);
+    });
+    groups.forEach(group => {
+        group.sort((a, b) => rank(a) - rank(b));
+        const lead = group[0];
+        const chips = group.map(v => `<div class="triage-marker${v.status === 'transported' ? ' is-gone' : ''}" style="background:${TRIAGE_CAT_HEX[v.category]};color:${TRIAGE_CAT_TEXT[v.category]};">${escapeHtml(v.code)}</div>`).join('');
+        const icon = L.divIcon({
+            className: '',
+            html: `<div style="transform:translate(-50%,-50%);display:inline-flex;flex-direction:column;gap:2px;">${chips}</div>`,
+            iconSize: [0, 0], iconAnchor: [0, 0],
+        });
+        const popup = group.map(v => `<strong>${escapeHtml(v.code)} — ${escapeHtml(triageCatLabel(v.category))}</strong>`
+            + (v.age_group === 'child' ? ` <span class="badge bg-info text-dark">${t('triage.child_badge')}</span>` : '')
+            + `<br>${escapeHtml(v.reason || '')}`
+            + `<br><span class="small">${escapeHtml(t('triage.status.' + v.status))}${v.destination ? ' · ' + escapeHtml(v.destination) : ''}</span>`
+            + `<br><span class="small text-muted">${escapeHtml(v.first_at)} · ${escapeHtml(v.created_by || '')}</span>`).join('<hr class="my-1">')
+            + accuracyLineHtml(lead.accuracy_m)
+            + '<br>' + navigationBtnHtml(lead.lat, lead.lng);
+        L.marker([lead.lat, lead.lng], {icon, pane: 'triagePane', zIndexOffset: (4 - Math.min(rank(lead), 4)) * 100 - (lead.status === 'transported' ? 1000 : 0)})
+            .bindPopup(popup).addTo(triageLayer);
+    });
+    const pointIcon = (bg, iconClass, label) => L.divIcon({
+        className: '',
+        html: `<div class="triage-marker" style="background:${bg};transform:translate(-50%,-50%);display:inline-block;font-family:inherit;"><i class="bi ${iconClass} me-1"></i>${escapeHtml(label)}</div>`,
+        iconSize: [0, 0], iconAnchor: [0, 0],
+    });
+    if (state.ccp) {
+        L.marker([state.ccp.lat, state.ccp.lng], {icon: pointIcon('#0d47a1', 'bi-hospital', t('triage.ccp')), pane: 'triagePane', zIndexOffset: 2000})
+            .bindPopup(`<strong>${escapeHtml(t('triage.ccp_full'))}</strong><br>${navigationBtnHtml(state.ccp.lat, state.ccp.lng)}`).addTo(triageLayer);
+    }
+    if (state.green) {
+        L.marker([state.green.lat, state.green.lng], {icon: pointIcon('#2e7d32', 'bi-people', t('triage.green_area')), pane: 'triagePane', zIndexOffset: 2000})
+            .bindPopup(`<strong>${escapeHtml(t('triage.green_area'))}</strong><br>${navigationBtnHtml(state.green.lat, state.green.lng)}`).addTo(triageLayer);
+    }
+}
+
+// Command drops the collection point / green area with one tap on the map.
+// The click handler is kept by reference so Esc removes exactly it — a bare
+// map.off('click') would also strip every other tool's click handler.
+let triagePickKind = null;
+let triagePickHandler = null;
+function triageStopPick() {
+    if (map && triagePickHandler) map.off('click', triagePickHandler);
+    triagePickHandler = null;
+    triagePickKind = null;
+    document.getElementById('mapCard')?.classList.remove('wr-draw-active');
+    document.getElementById('triagePickHint')?.remove();
+}
+function triageStartPick(kind) {
+    if (!map) return;
+    triageStopPick();
+    triagePickKind = kind;
+    document.dispatchEvent(new CustomEvent('wr-goto-tab', {detail: {tab: 'map'}}));
+    const mapCardEl = document.getElementById('mapCard');
+    mapCardEl?.classList.add('wr-draw-active');
+    const hint = document.createElement('div');
+    hint.id = 'triagePickHint';
+    hint.className = 'alert alert-danger py-1 px-2 small m-2';
+    hint.style.cssText = 'position:absolute;top:0;left:50%;transform:translateX(-50%);z-index:1000;';
+    hint.textContent = t('triage.pick_hint');
+    document.getElementById('warRoomMap')?.parentElement?.appendChild(hint);
+    mapCardEl?.scrollIntoView({behavior: 'smooth', block: 'center'});
+    setTimeout(() => { if (map) map.invalidateSize(); }, 80);
+    triagePickHandler = e => {
+        if (triagePickKind !== kind) return;
+        triageStopPick();
+        postTriage({action: 'point', kind, lat: e.latlng.lat, lng: e.latlng.lng}).then(r => {
+            if (r && r.ok) renderTriage(r.triage); else alert((r && r.error) || t('common.failed'));
+        });
+    };
+    map.on('click', triagePickHandler);
+}
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && triagePickKind) triageStopPick();
+});
+
+// ── Field flow ──────────────────────────────────────────────────────────────
+// One question per screen, the screen is the whole phone, and the colour
+// shows the moment it is known. Everything the rescuer taps is on the phone:
+// the questions come from TRIAGE_PROTOCOLS, so a dead zone costs nothing but
+// the delivery, which the offline queue then does.
+let triageFlowState = null;
+
+function triageFlowEl() { return document.getElementById('triageFlow'); }
+function triageAgeGroup() { return document.getElementById('triageAgeChild')?.checked ? 'child' : 'adult'; }
+
+// The code a phone makes up for a casualty with no card: T<user>-<n>. The
+// counter lives on this device (localStorage) AND on the server (my_next_seq),
+// and the larger wins — the server does not know about triages still queued
+// on this phone, and a cleared browser does not know about ones already sent.
+function triageNextFallbackCode() {
+    const key = 'wr_triage_seq_' + TRIAGE_MISSION_ID + '_' + WR_MY_USER_ID;
+    let seq = (triageState && triageState.my_next_seq) || 1;
+    try { seq = Math.max(seq, parseInt(localStorage.getItem(key) || '0', 10) || 0); } catch (e) {}
+    try { localStorage.setItem(key, String(seq + 1)); } catch (e) {}
+    return triageFallbackCode(WR_MY_USER_ID, seq);
+}
+
+function triageFindVictimByCard(raw) {
+    const card = normalizeTriageCardNo(raw);
+    if (!card || !triageState || !triageState.victims) return null;
+    return triageState.victims.find(v => v.card_no === card || normalizeTriageCardNo(v.code) === card) || null;
+}
+
+function triageCloseFlow() {
+    triageFlowState = null;
+    const el = triageFlowEl();
+    if (el) { el.classList.add('d-none'); el.innerHTML = ''; }
+    document.body.style.overflow = '';
+}
+function triageShowFlow(html) {
+    const el = triageFlowEl();
+    if (!el) return null;
+    el.innerHTML = html;
+    el.classList.remove('d-none');
+    el.scrollTop = 0;
+    document.body.style.overflow = 'hidden';
+    return el;
+}
+function triageGpsText(flow) {
+    if (!flow || !flow.fixDone) return `<i class="bi bi-geo-alt me-1"></i>${t('triage.gps_waiting')}`;
+    if (!flow.fix) return `<i class="bi bi-geo-alt me-1"></i>${t('triage.gps_none')}`;
+    return `<i class="bi bi-geo-alt-fill me-1"></i>${flow.fix.acc !== null ? t('triage.gps_ok', {m: Math.round(flow.fix.acc)}) : t('triage.gps_ok', {m: '?'})}`;
+}
+function triageHeadHtml(flow) {
+    return `<div class="triage-flow-head"><span><i class="bi bi-exclamation-triangle-fill me-1"></i>${t('triage.mci_badge')}</span><span class="triage-gps">${flow ? triageGpsText(flow) : ''}</span></div>`;
+}
+// A fast double tap on ΝΑΙ must not answer the NEXT question too — the next
+// screen puts a button in the very same place. Taps in the first moment
+// after a screen appears are ignored.
+const TRIAGE_TAP_GUARD_MS = 350;
+function triageGuarded(flow) { return performance.now() - (flow.renderedAt || 0) < TRIAGE_TAP_GUARD_MS; }
+
+function triageOpenFlow(opts) {
+    const o = opts || {};
+    const existing = o.existing || null;
+    const ageGroup = o.ageGroup || (existing ? existing.age_group : triageAgeGroup());
+    const flow = {
+        protocol: ageGroup === 'child' ? 'jumpstart' : 'start',
+        ageGroup,
+        answers: {},
+        asked: [],
+        direct: false,
+        existing,
+        cardNo: o.cardNo || (existing ? existing.card_no : null),
+        victimUuid: existing ? existing.uuid : triageUuid(),
+        assessmentUuid: triageUuid(),
+        fallbackCode: null,
+        fix: null,
+        fixDone: false,
+        sent: false,
+        sendPromise: null,
+    };
+    triageFlowState = flow;
+    // Started now, in the tap's own gesture, and awaited only when the colour
+    // is known — the questions take longer than a GPS fix, so by the time the
+    // record goes out the position is almost always already there.
+    flow.fixPromise = (navigator.geolocation ? acquireBestFix(10000, ONE_SHOT_GOOD_ENOUGH_M) : Promise.resolve({fix: null}))
+        .then(({fix}) => {
+            flow.fix = fix;
+            flow.fixDone = true;
+            if (triageFlowState === flow) {
+                const gpsEl = triageFlowEl()?.querySelector('.triage-gps');
+                if (gpsEl) gpsEl.innerHTML = triageGpsText(flow);
+            }
+            return fix;
+        });
+    if (o.direct) {
+        flow.direct = true;
+        if (o.direct === 'black') triageRenderBlackConfirm(flow);
+        else triageFinish(flow, o.direct, 'direct');
+        return;
+    }
+    triageRenderQuestion(flow);
+}
+
+function triageRenderQuestion(flow) {
+    const step = triageStep(flow.protocol, flow.answers);
+    if (!step) { triageCloseFlow(); return; }
+    if (step.category) {
+        if (step.category === 'black') triageRenderBlackConfirm(flow, step);
+        else triageFinish(flow, step.category, step.reason);
+        return;
+    }
+    const q = step.question;
+    const hintKey = (q === 'walk' && flow.ageGroup === 'child') ? 'triage.q.walk_hint_child' : 'triage.q.' + q + '_hint';
+    const hint = (WR_STRINGS[hintKey] || WR_STRINGS_FALLBACK[hintKey]) ? t(hintKey) : '';
+    const who = flow.existing ? flow.existing.code : flow.cardNo;
+    const el = triageShowFlow(triageHeadHtml(flow) + `<div class="triage-flow-body">
+        <div class="small text-muted">${t('triage.step', {n: flow.asked.length + 1})} · ${flow.protocol === 'jumpstart' ? t('triage.protocol_jumpstart') : t('triage.protocol_start')}${who ? ' · <span class="triage-code">' + escapeHtml(who) + '</span>' : ''}</div>
+        <div class="triage-question">${escapeHtml(t('triage.q.' + q))}</div>
+        ${hint ? `<div class="triage-hint">${escapeHtml(hint)}</div>` : ''}
+        <div class="triage-yn"><button type="button" data-yn="1">${t('triage.yes')}</button><button type="button" data-yn="0">${t('triage.no')}</button></div>
+        <div class="d-flex gap-2 mt-3">
+            <button type="button" class="btn btn-lg btn-outline-secondary flex-fill" data-act="back" ${flow.asked.length ? '' : 'disabled'}><i class="bi bi-arrow-left me-1"></i>${t('triage.back')}</button>
+            <button type="button" class="btn btn-lg btn-outline-danger flex-fill" data-act="cancel">${t('triage.cancel')}</button>
+        </div>
+    </div>`);
+    flow.renderedAt = performance.now();
+    el.querySelectorAll('[data-yn]').forEach(b => b.addEventListener('click', () => {
+        if (triageGuarded(flow)) return;
+        flow.answers[q] = b.dataset.yn === '1';
+        flow.asked.push(q);
+        if (navigator.vibrate) navigator.vibrate(25);
+        triageRenderQuestion(flow);
+    }));
+    el.querySelector('[data-act="back"]').addEventListener('click', () => {
+        const last = flow.asked.pop();
+        if (last) delete flow.answers[last];
+        triageRenderQuestion(flow);
+    });
+    el.querySelector('[data-act="cancel"]').addEventListener('click', triageCloseFlow);
+}
+
+// Black is the one answer that cannot be taken back on the ground — nobody
+// goes back to a casualty marked dead — so it always takes a second, deliberate
+// tap, whether the protocol reached it or a trained rescuer chose it.
+function triageRenderBlackConfirm(flow, step) {
+    const el = triageShowFlow(triageHeadHtml(flow) + `<div class="triage-flow-body">
+        <div class="triage-question">${t('triage.black_confirm_title')}</div>
+        <div class="triage-hint mb-2">${escapeHtml(step ? t('triage.reason.' + step.reason) : t('triage.reason.direct'))}</div>
+        <div class="triage-hint">${t('triage.black_confirm_text')}</div>
+        <div class="mt-auto pt-3">
+            <button type="button" class="btn w-100 triage-bg-black" style="height:96px;font-size:1.4rem;font-weight:800;" data-act="confirm">${t('triage.black_confirm_btn')}</button>
+            <button type="button" class="btn btn-lg btn-outline-secondary w-100 mt-2" data-act="back"><i class="bi bi-arrow-left me-1"></i>${t('triage.back')}</button>
+        </div>
+    </div>`);
+    flow.renderedAt = performance.now();
+    el.querySelector('[data-act="confirm"]').addEventListener('click', () => {
+        if (triageGuarded(flow)) return;
+        triageFinish(flow, 'black', step ? step.reason : 'direct');
+    });
+    el.querySelector('[data-act="back"]').addEventListener('click', () => {
+        if (flow.direct) { triageCloseFlow(); return; }
+        const last = flow.asked.pop();
+        if (last) delete flow.answers[last];
+        triageRenderQuestion(flow);
+    });
+}
+
+function triageAssessParams(flow) {
+    const p = {
+        action: 'assess',
+        victim_uuid: flow.victimUuid,
+        assessment_uuid: flow.assessmentUuid,
+        protocol: flow.direct ? 'direct' : flow.protocol,
+        answers: JSON.stringify(flow.direct ? {} : flow.answers),
+        age_group: flow.ageGroup,
+        reported_at: flow.decidedAt,
+    };
+    if (flow.direct) p.category = flow.category;
+    if (flow.fallbackCode) p.fallback_code = flow.fallbackCode;
+    if (flow.cardNo) p.card_no = flow.cardNo;
+    if (flow.fix) {
+        p.lat = flow.fix.lat;
+        p.lng = flow.fix.lng;
+        if (flow.fix.acc !== null) p.accuracy = flow.fix.acc;
+    }
+    return p;
+}
+
+function triageFinish(flow, category, reason) {
+    flow.category = category;
+    flow.reason = reason;
+    flow.decidedAt = new Date().toISOString();
+    if (!flow.existing && !flow.fallbackCode) flow.fallbackCode = triageNextFallbackCode();
+    if (navigator.vibrate) navigator.vibrate(category === 'red' ? [120, 60, 120] : 80);
+    triageRenderResult(flow);
+    // The record goes out as soon as the position is in (or its budget ran
+    // out) — never later, and never waiting on the card number, which can
+    // follow separately.
+    flow.sendPromise = flow.fixPromise.then(() => triageSendAssessment(flow));
+}
+
+function triageSetSaveState(flow, state, error) {
+    if (triageFlowState !== flow) return;
+    const el = triageFlowEl()?.querySelector('.triage-save-state');
+    if (!el) return;
+    const map_ = {
+        saving: `<span class="spinner-border spinner-border-sm me-1"></span>${t('triage.saving')}`,
+        saved: `<i class="bi bi-check-circle-fill me-1"></i>${t('triage.saved')}`,
+        queued: `<i class="bi bi-wifi-off me-1"></i>${t('triage.queued')}`,
+        failed: `<i class="bi bi-exclamation-triangle-fill me-1"></i>${escapeHtml(t('triage.save_failed', {error: error || t('common.failed')}))}`,
+    };
+    el.innerHTML = map_[state] || '';
+}
+
+function triageSendAssessment(flow) {
+    flow.sent = true;
+    triageSetSaveState(flow, 'saving');
+    return postTriageQueueable(triageAssessParams(flow)).then(result => {
+        if (result && result.ok) {
+            triageSetSaveState(flow, result.queued ? 'queued' : 'saved');
+            if (result.victim) {
+                // The server may have matched the card to a casualty this
+                // phone never knew about — from here on, that is the record.
+                flow.victimUuid = result.victim.uuid;
+                if (result.victim.card_no && !flow.cardNo) flow.cardNo = result.victim.card_no;
+            }
+            if (result.card_conflict) triageSubmitCard(flow, result.card_conflict);
+            triageRefreshSoon();
+        } else {
+            triageSetSaveState(flow, 'failed', result && result.error);
+        }
+        return result;
+    });
+}
+
+function triageRenderResult(flow) {
+    const cat = flow.category;
+    // Light buttons on red/green/black, dark ones on yellow.
+    const onDark = cat !== 'yellow';
+    const knownCard = flow.cardNo || (flow.existing && flow.existing.card_no);
+    const codeBlock = knownCard
+        ? `<div class="mt-3 small">${t('triage.card_label')}</div><div class="code">${escapeHtml(knownCard)}</div>`
+        : `<div class="panel">
+                <label class="form-label fw-semibold mb-1" for="triageCardInput">${t('triage.card_label')}</label>
+                <div class="input-group input-group-lg">
+                    <input type="text" id="triageCardInput" class="form-control triage-card-input" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" placeholder="${escapeHtml(t('triage.card_placeholder'))}">
+                    <button type="button" class="btn btn-dark" data-act="scan"><i class="bi bi-upc-scan me-1"></i>${t('triage.scan_btn')}</button>
+                </div>
+                <button type="button" class="btn btn-primary w-100 mt-2" data-act="save-card"><i class="bi bi-check-lg me-1"></i>${t('triage.card_save')}</button>
+                <div class="triage-card-state small mt-1"></div>
+                <button type="button" class="btn btn-link btn-sm px-0 mt-1" data-act="no-card">${t('triage.no_card')}</button>
+                <div class="triage-fallback d-none mt-1">
+                    <div class="small">${t('triage.no_card_code')}</div>
+                    <div class="triage-code" style="font-size:2.4rem;">${escapeHtml(flow.fallbackCode || (flow.existing ? flow.existing.code : ''))}</div>
+                </div>
+           </div>`;
+    const el = triageShowFlow(`<div class="triage-result triage-bg-${cat}">
+        <div class="small">${escapeHtml(t('triage.cat_desc.' + cat))}</div>
+        <div class="cat">${escapeHtml(triageCatLabel(cat).toLocaleUpperCase(jsLocale))}</div>
+        <div>${escapeHtml(t('triage.reason.' + flow.reason))}</div>
+        ${flow.existing && flow.existing.category !== cat ? `<div class="small mt-1">${escapeHtml(triageCatLabel(flow.existing.category))} → ${escapeHtml(triageCatLabel(cat))}</div>` : ''}
+        ${codeBlock}
+        <div class="triage-save-state small mt-2 fw-semibold"></div>
+        <div class="w-100 mt-auto pt-3" style="max-width:480px;">
+            <button type="button" class="btn ${onDark ? 'btn-light' : 'btn-dark'} btn-lg w-100 fw-bold" style="height:64px;" data-act="next"><i class="bi bi-plus-circle me-1"></i>${t('triage.next_btn')}</button>
+            <button type="button" class="btn ${onDark ? 'btn-outline-light' : 'btn-outline-dark'} w-100 mt-2" data-act="close">${t('triage.close_btn')}</button>
+        </div>
+    </div>`);
+    flow.renderedAt = performance.now();
+    if (flow.sent) triageSetSaveState(flow, 'saving');
+    el.querySelector('[data-act="next"]').addEventListener('click', () => {
+        if (triageGuarded(flow)) return;
+        triageOpenFlow({ageGroup: triageAgeGroup()});
+    });
+    el.querySelector('[data-act="close"]').addEventListener('click', triageCloseFlow);
+    const input = el.querySelector('#triageCardInput');
+    if (!input) return;
+    el.querySelector('[data-act="save-card"]').addEventListener('click', () => triageSubmitCard(flow, input.value));
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); triageSubmitCard(flow, input.value); } });
+    el.querySelector('[data-act="scan"]').addEventListener('click', () => triageScanInto(input, () => triageSubmitCard(flow, input.value)));
+    el.querySelector('[data-act="no-card"]').addEventListener('click', e => {
+        el.querySelector('.triage-fallback').classList.remove('d-none');
+        e.currentTarget.remove();
+    });
+}
+
+function triageScanInto(input, then) {
+    openTriageScanner({
+        labels: {hint: t('triage.scan_hint'), loading: t('triage.scan_loading'), close: t('triage.close_btn')},
+        onResult: text => {
+            input.value = text;
+            input.dispatchEvent(new Event('input', {bubbles: true}));
+            if (then) then();
+        },
+        onError: key => alert(t(key)),
+    });
+}
+
+function triageCardState(flow, html) {
+    if (triageFlowState !== flow) return;
+    const el = triageFlowEl()?.querySelector('.triage-card-state');
+    if (el) el.innerHTML = html;
+}
+
+// A card number is attached with the assessment when it is typed before the
+// record goes out, and with its own request after. A card already on this
+// mission means one of two things — the same person triaged twice, or a
+// mistyped number — and only the rescuer standing there can tell which.
+function triageSubmitCard(flow, raw) {
+    const card = normalizeTriageCardNo(raw);
+    if (!card) { triageCardState(flow, `<span class="text-danger">${t('triage.err_card_invalid')}</span>`); return; }
+    const owner = triageFindVictimByCard(card);
+    if (owner && owner.uuid !== flow.victimUuid) {
+        triageShowCardConflict(flow, card, {code: owner.code, category: owner.category, at: owner.last_at});
+        return;
+    }
+    flow.cardNo = card;
+    if (!flow.sent) {
+        triageCardState(flow, `<span class="text-success fw-semibold">${escapeHtml(t('triage.card_saved', {card}))}</span>`);
+        return;
+    }
+    triageCardState(flow, `<span class="spinner-border spinner-border-sm me-1"></span>${t('triage.saving')}`);
+    (flow.sendPromise || Promise.resolve()).then(() => postTriageQueueable({action: 'set_card', victim_uuid: flow.victimUuid, card_no: card})).then(r => {
+        if (r && r.ok) {
+            triageCardState(flow, `<span class="text-success fw-semibold">${escapeHtml(t('triage.card_saved', {card}))}</span>${r.queued ? ' · ' + t('triage.queued') : ''}`);
+            triageRefreshSoon();
+        } else if (r && r.error_key === 'triage.err_card_in_use' && r.owner) {
+            triageShowCardConflict(flow, card, r.owner);
+        } else {
+            triageCardState(flow, `<span class="text-danger">${escapeHtml((r && r.error) || t('common.failed'))}</span>`);
+        }
+    });
+}
+
+function triageShowCardConflict(flow, card, owner) {
+    triageCardState(flow, `<div class="alert alert-warning py-2 mb-0 mt-1">
+        <div>${escapeHtml(t('triage.card_in_use', {card, category: triageCatLabel(owner.category), time: owner.at || ''}))}</div>
+        <div class="d-flex gap-1 mt-2">
+            <button type="button" class="btn btn-sm btn-dark flex-fill" data-act="merge-yes">${t('triage.merge_yes')}</button>
+            <button type="button" class="btn btn-sm btn-outline-dark flex-fill" data-act="merge-no">${t('triage.merge_no')}</button>
+        </div></div>`);
+    const root = triageFlowEl();
+    root?.querySelector('[data-act="merge-no"]')?.addEventListener('click', () => {
+        triageCardState(flow, '');
+        root.querySelector('#triageCardInput')?.focus();
+    });
+    root?.querySelector('[data-act="merge-yes"]')?.addEventListener('click', () => {
+        if (!flow.sent) {
+            // Not sent yet: simply send it as that card's re-triage.
+            flow.cardNo = card;
+            const owner_ = triageFindVictimByCard(card);
+            if (owner_) { flow.victimUuid = owner_.uuid; flow.existing = owner_; flow.fallbackCode = null; }
+            triageCardState(flow, `<span class="text-success fw-semibold">${escapeHtml(t('triage.merged', {card}))}</span>`);
+            return;
+        }
+        (flow.sendPromise || Promise.resolve()).then(() => postTriageQueueable({action: 'merge', victim_uuid: flow.victimUuid, card_no: card})).then(r => {
+            if (r && r.ok) {
+                if (r.victim) flow.victimUuid = r.victim.uuid;
+                flow.cardNo = card;
+                triageCardState(flow, `<span class="text-success fw-semibold">${escapeHtml(t('triage.merged', {card}))}</span>`);
+                triageRefreshSoon();
+            } else {
+                triageCardState(flow, `<span class="text-danger">${escapeHtml((r && r.error) || t('common.failed'))}</span>`);
+            }
+        });
+    });
+}
+
+// Re-triage: find the casualty by the card already on them.
+function triageOpenRetriage() {
+    const el = triageShowFlow(triageHeadHtml(null) + `<div class="triage-flow-body">
+        <div class="triage-question">${t('triage.retriage_title')}</div>
+        <div class="triage-hint mb-3">${t('triage.retriage_help')}</div>
+        <div class="input-group input-group-lg">
+            <input type="text" id="triageRetriageInput" class="form-control triage-card-input" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" placeholder="${escapeHtml(t('triage.card_placeholder'))}">
+            <button type="button" class="btn btn-dark" data-act="scan"><i class="bi bi-upc-scan me-1"></i>${t('triage.scan_btn')}</button>
+        </div>
+        <div class="triage-retriage-found small mt-2"></div>
+        <div class="mt-auto pt-3">
+            <button type="button" class="btn btn-danger btn-lg w-100" style="height:72px;" data-act="start" disabled><i class="bi bi-clipboard2-pulse me-1"></i>${t('triage.retriage_start')}</button>
+            <button type="button" class="btn btn-lg btn-outline-secondary w-100 mt-2" data-act="close">${t('triage.close_btn')}</button>
+        </div>
+    </div>`);
+    const input = el.querySelector('#triageRetriageInput');
+    const foundEl = el.querySelector('.triage-retriage-found');
+    const startBtn = el.querySelector('[data-act="start"]');
+    const lookup = () => {
+        const card = normalizeTriageCardNo(input.value);
+        const v = triageFindVictimByCard(input.value);
+        startBtn.disabled = !card;
+        if (!card) { foundEl.innerHTML = ''; return; }
+        foundEl.innerHTML = v
+            ? `<span class="triage-dot triage-bg-${v.category}"></span> ${escapeHtml(t('triage.retriage_found', {code: v.code, category: triageCatLabel(v.category), time: v.last_at, reason: v.reason || ''}))}`
+            : `<span class="text-muted">${t('triage.retriage_unknown')}</span>`;
+    };
+    input.addEventListener('input', lookup);
+    el.querySelector('[data-act="scan"]').addEventListener('click', () => triageScanInto(input));
+    el.querySelector('[data-act="close"]').addEventListener('click', triageCloseFlow);
+    startBtn.addEventListener('click', () => {
+        const card = normalizeTriageCardNo(input.value);
+        if (!card) return;
+        const v = triageFindVictimByCard(card);
+        triageOpenFlow(v ? {existing: v} : {cardNo: card});
+    });
+    setTimeout(() => input.focus(), 50);
+}
+
+// Walking wounded sent to the green area, counted without a card each.
+function triageOpenBulk() {
+    let count = 1;
+    const el = triageShowFlow(triageHeadHtml(null) + `<div class="triage-flow-body">
+        <div class="triage-question">${t('triage.bulk_prompt')}</div>
+        <div class="d-flex align-items-center justify-content-center gap-3 my-3">
+            <button type="button" class="btn btn-outline-dark btn-lg" style="width:72px;height:72px;font-size:2rem;" data-d="-1">−</button>
+            <div class="triage-bulk-n fw-bold" style="font-size:3.4rem;min-width:3ch;text-align:center;">1</div>
+            <button type="button" class="btn btn-outline-dark btn-lg" style="width:72px;height:72px;font-size:2rem;" data-d="1">+</button>
+        </div>
+        <div class="d-flex gap-2 justify-content-center mb-3">${[2, 5, 10, 20].map(n => `<button type="button" class="btn btn-outline-success" data-set="${n}">${n}</button>`).join('')}</div>
+        <div class="triage-bulk-state small text-center"></div>
+        <div class="mt-auto pt-3">
+            <button type="button" class="btn btn-lg w-100 triage-bg-green" style="height:72px;font-weight:700;" data-act="send"><i class="bi bi-person-walking me-1"></i>${t('triage.bulk_btn')}</button>
+            <button type="button" class="btn btn-lg btn-outline-secondary w-100 mt-2" data-act="close">${t('triage.cancel')}</button>
+        </div></div>`);
+    const nEl = el.querySelector('.triage-bulk-n');
+    const setCount = n => { count = Math.max(1, Math.min(200, n)); nEl.textContent = String(count); };
+    el.querySelectorAll('[data-d]').forEach(b => b.addEventListener('click', () => setCount(count + parseInt(b.dataset.d, 10))));
+    el.querySelectorAll('[data-set]').forEach(b => b.addEventListener('click', () => setCount(parseInt(b.dataset.set, 10))));
+    el.querySelector('[data-act="close"]').addEventListener('click', triageCloseFlow);
+    el.querySelector('[data-act="send"]').addEventListener('click', e => {
+        e.currentTarget.disabled = true;
+        const params = {action: 'bulk_green', client_uuid: triageUuid(), count, reported_at: new Date().toISOString()};
+        // The position the phone already holds, if fresh: this is a count,
+        // not a casualty, and nobody should wait on a GPS fix for it.
+        if (latestAutoPosition && Date.now() - latestAutoPosition.timestamp < 60000) {
+            params.lat = latestAutoPosition.coords.latitude;
+            params.lng = latestAutoPosition.coords.longitude;
+            if (typeof latestAutoPosition.coords.accuracy === 'number') params.accuracy = latestAutoPosition.coords.accuracy;
+        }
+        postTriageQueueable(params).then(r => {
+            const stateEl = el.querySelector('.triage-bulk-state');
+            if (r && r.ok) {
+                stateEl.innerHTML = `<span class="text-success fw-semibold">${escapeHtml(t('triage.bulk_sent', {count}))}</span>${r.queued ? '<br>' + t('triage.queued') : ''}`;
+                triageRefreshSoon();
+                setTimeout(triageCloseFlow, 1200);
+            } else {
+                stateEl.innerHTML = `<span class="text-danger">${escapeHtml((r && r.error) || t('common.failed'))}</span>`;
+                e.currentTarget.disabled = false;
+            }
+        });
+    });
+}
+
+document.getElementById('triageStartBtn')?.addEventListener('click', () => triageOpenFlow({ageGroup: triageAgeGroup()}));
+document.querySelectorAll('.triage-quick-btn').forEach(b => b.addEventListener('click', () => triageOpenFlow({direct: b.dataset.category, ageGroup: triageAgeGroup()})));
+document.getElementById('triageBulkBtn')?.addEventListener('click', triageOpenBulk);
+document.getElementById('triageRetriageBtn')?.addEventListener('click', triageOpenRetriage);
 
 let poiRenderedSig = null;
 function renderPointsOfInterest(items) {
@@ -13377,6 +14335,7 @@ setTimeout(() => {
     renderMyRoutes(routes);
     renderShortageReports(shortageReports);
     renderMissionIncidents(missionIncidents);
+    renderTriage(triageState);
     renderPointsOfInterest(pointsOfInterest);
     renderSosAlerts(sosAlerts);
     renderVoiceMessages(voiceMessages);
@@ -17675,6 +18634,9 @@ function pollWarRoomData() {
             renderMissionIncidents(missionIncidents);
             renderIncidentLayer(missionIncidents);
         }
+        // `in`, not a truthy check: null is this key's normal value on a
+        // mission that has never had a Μαζικό Συμβάν.
+        if ('triage' in data) renderTriage(data.triage);
         if (data.sosAlerts) {
             renderSosAlerts(sosAlerts = data.sosAlerts);
             updateSosAlarmState(sosAlerts);

@@ -94,6 +94,12 @@ define('WAR_ROOM_ACTION_SCRIPTS', [
     // redirected by bootstrap.php's guest gate and lost without a trace —
     // and guests are the volunteers the command post knows least about.
     'mission-gps-error.php',
+    // mission-triage.php (Μαζικό Συμβάν / mass-casualty triage) is tapped
+    // from a phone in the middle of an incident, often after minutes with the
+    // screen locked, and partner-org guests triage too. The handover page is
+    // opened from the same tab by command.
+    'mission-triage.php',
+    'mission-triage-handover.php',
 ]);
 
 function initSession() {

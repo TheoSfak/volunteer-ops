@@ -1,0 +1,40 @@
+{
+    "about": "Shared by tests/TriageProtocolTest.php (triageEvaluate / normalizeTriageCardNo in includes/functions-triage.php) and tests/js/triage.test.js (the same functions in assets/js/triage.js). Every leaf of both protocol trees is here, so a changed branch in either language fails CI. expect null = incomplete or invalid answers.",
+    "protocol_cases": [
+        {"name": "START walks -> green", "protocol": "start", "answers": {"walk": true}, "expect": {"category": "green", "reason": "walks", "path": {"walk": true}}},
+        {"name": "START apnoeic, breathes after airway -> red", "protocol": "start", "answers": {"walk": false, "breathing": false, "airway": true}, "expect": {"category": "red", "reason": "breathes_after_airway", "path": {"walk": false, "breathing": false, "airway": true}}},
+        {"name": "START apnoeic after airway -> black", "protocol": "start", "answers": {"walk": false, "breathing": false, "airway": false}, "expect": {"category": "black", "reason": "apneic", "path": {"walk": false, "breathing": false, "airway": false}}},
+        {"name": "START breathing over 30 -> red", "protocol": "start", "answers": {"walk": false, "breathing": true, "rr_over_30": true}, "expect": {"category": "red", "reason": "rr_over_30", "path": {"walk": false, "breathing": true, "rr_over_30": true}}},
+        {"name": "START poor perfusion -> red", "protocol": "start", "answers": {"walk": false, "breathing": true, "rr_over_30": false, "perfusion": true}, "expect": {"category": "red", "reason": "poor_perfusion", "path": {"walk": false, "breathing": true, "rr_over_30": false, "perfusion": true}}},
+        {"name": "START obeys commands -> yellow", "protocol": "start", "answers": {"walk": false, "breathing": true, "rr_over_30": false, "perfusion": false, "obeys": true}, "expect": {"category": "yellow", "reason": "obeys", "path": {"walk": false, "breathing": true, "rr_over_30": false, "perfusion": false, "obeys": true}}},
+        {"name": "START does not obey -> red", "protocol": "start", "answers": {"walk": false, "breathing": true, "rr_over_30": false, "perfusion": false, "obeys": false}, "expect": {"category": "red", "reason": "no_obey", "path": {"walk": false, "breathing": true, "rr_over_30": false, "perfusion": false, "obeys": false}}},
+        {"name": "START answers as 1/0 are accepted", "protocol": "start", "answers": {"walk": 0, "breathing": 1, "rr_over_30": 1}, "expect": {"category": "red", "reason": "rr_over_30", "path": {"walk": false, "breathing": true, "rr_over_30": true}}},
+        {"name": "START answers off the route are dropped from the path", "protocol": "start", "answers": {"walk": true, "breathing": false, "obeys": true}, "expect": {"category": "green", "reason": "walks", "path": {"walk": true}}},
+        {"name": "START incomplete -> null", "protocol": "start", "answers": {"walk": false, "breathing": true}, "expect": null},
+        {"name": "START no answers -> null", "protocol": "start", "answers": {}, "expect": null},
+        {"name": "START non yes/no answer -> null", "protocol": "start", "answers": {"walk": "maybe"}, "expect": null},
+        {"name": "JumpSTART walks -> green", "protocol": "jumpstart", "answers": {"walk": true}, "expect": {"category": "green", "reason": "walks", "path": {"walk": true}}},
+        {"name": "JumpSTART breathes after airway -> red", "protocol": "jumpstart", "answers": {"walk": false, "breathing": false, "airway": true}, "expect": {"category": "red", "reason": "breathes_after_airway", "path": {"walk": false, "breathing": false, "airway": true}}},
+        {"name": "JumpSTART apnoeic, no pulse -> black", "protocol": "jumpstart", "answers": {"walk": false, "breathing": false, "airway": false, "pulse_apneic": false}, "expect": {"category": "black", "reason": "apneic_no_pulse", "path": {"walk": false, "breathing": false, "airway": false, "pulse_apneic": false}}},
+        {"name": "JumpSTART breathes after 5 rescue breaths -> red", "protocol": "jumpstart", "answers": {"walk": false, "breathing": false, "airway": false, "pulse_apneic": true, "rescue_breaths": true}, "expect": {"category": "red", "reason": "breathes_after_rescue", "path": {"walk": false, "breathing": false, "airway": false, "pulse_apneic": true, "rescue_breaths": true}}},
+        {"name": "JumpSTART apnoeic after rescue breaths -> black", "protocol": "jumpstart", "answers": {"walk": false, "breathing": false, "airway": false, "pulse_apneic": true, "rescue_breaths": false}, "expect": {"category": "black", "reason": "apneic", "path": {"walk": false, "breathing": false, "airway": false, "pulse_apneic": true, "rescue_breaths": false}}},
+        {"name": "JumpSTART breathing under 15 or over 45 -> red", "protocol": "jumpstart", "answers": {"walk": false, "breathing": true, "rr_child": true}, "expect": {"category": "red", "reason": "rr_child", "path": {"walk": false, "breathing": true, "rr_child": true}}},
+        {"name": "JumpSTART no palpable pulse -> red", "protocol": "jumpstart", "answers": {"walk": false, "breathing": true, "rr_child": false, "pulse": false}, "expect": {"category": "red", "reason": "no_pulse", "path": {"walk": false, "breathing": true, "rr_child": false, "pulse": false}}},
+        {"name": "JumpSTART AVPU appropriate -> yellow", "protocol": "jumpstart", "answers": {"walk": false, "breathing": true, "rr_child": false, "pulse": true, "avpu": true}, "expect": {"category": "yellow", "reason": "avpu_ok", "path": {"walk": false, "breathing": true, "rr_child": false, "pulse": true, "avpu": true}}},
+        {"name": "JumpSTART AVPU inappropriate -> red", "protocol": "jumpstart", "answers": {"walk": false, "breathing": true, "rr_child": false, "pulse": true, "avpu": false}, "expect": {"category": "red", "reason": "avpu", "path": {"walk": false, "breathing": true, "rr_child": false, "pulse": true, "avpu": false}}},
+        {"name": "JumpSTART is not START: RR over 30 is not asked", "protocol": "jumpstart", "answers": {"walk": false, "breathing": true, "rr_over_30": true}, "expect": null},
+        {"name": "unknown protocol -> null", "protocol": "salt", "answers": {"walk": true}, "expect": null}
+    ],
+    "card_cases": [
+        {"name": "plain digits", "raw": "0457", "expect": "0457"},
+        {"name": "spaces around and inside", "raw": "  04 57 ", "expect": "0457"},
+        {"name": "lower case latin", "raw": "ab-12", "expect": "AB-12"},
+        {"name": "greek look-alike capitals fold to latin", "raw": "ΑΒ-12", "expect": "AB-12"},
+        {"name": "greek lower case folds too", "raw": "κτ007", "expect": "KT007"},
+        {"name": "accented greek is dropped, not folded", "raw": "ά12", "expect": "12"},
+        {"name": "punctuation dropped", "raw": "#12/34.5", "expect": "12345"},
+        {"name": "leading and trailing dashes trimmed", "raw": "--12--", "expect": "12"},
+        {"name": "empty after cleaning -> null", "raw": " ### ", "expect": null},
+        {"name": "capped at 30 characters", "raw": "1234567890123456789012345678901234567890", "expect": "123456789012345678901234567890"}
+    ]
+}
