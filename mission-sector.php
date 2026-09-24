@@ -73,11 +73,19 @@ function notifySectorStatusChanged(int $missionId, string $missionTitle, ?int $r
             'status' => sectorStatusLabel($newStatus, $lang),
             'name'   => $actorName,
         ], $lang);
-        sendNotification($recipientId, t('sector.status_changed_notify_title', ['mission' => $missionTitle], $lang), $message, 'info', 'mission_sector_status', [
+        $pushData = [
             'url' => $warRoomUrl,
             'tag' => 'sector-status-mission-' . $missionId,
             'bannerMission' => $missionId,
-        ]);
+        ];
+        // Command sending a finished sector back for a recheck is a new order
+        // to the team, not news about one — so it opens as the order popup,
+        // like the assignment did (see war-room.php's banners). Every other
+        // status change stays a ticker line.
+        if ($actorIsAdmin && $newStatus === 'needs_recheck') {
+            $pushData['sectorId'] = (int) $sector['id'];
+        }
+        sendNotification($recipientId, t('sector.status_changed_notify_title', ['mission' => $missionTitle], $lang), $message, 'info', 'mission_sector_status', $pushData);
     }
 }
 

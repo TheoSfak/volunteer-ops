@@ -56,6 +56,11 @@ function notifyRouteTeam(int $missionId, int $routeId, int $excludeUserId, strin
             'url' => $warRoomUrl,
             'tag' => 'route-' . $code . '-mission-' . $missionId,
             'bannerMission' => $missionId,
+            // Opens as an order-popup notice («Κατάλαβα») rather than a ticker
+            // line: a cancelled route or a dropped point changes what the team
+            // is doing right now. See war-room.php's banners.
+            'popupInfo' => $code,
+            'routeId' => $routeId,
         ]);
     }
 }

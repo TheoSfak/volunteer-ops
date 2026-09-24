@@ -1571,6 +1571,10 @@ if (get('ajax') === '1') {
             $popup = ['kind' => 'dispatch', 'id' => (int) $bannerData['dispatchId']];
         } elseif (!empty($bannerData['sectorId'])) {
             $popup = ['kind' => 'sector', 'id' => (int) $bannerData['sectorId']];
+        } elseif (!empty($bannerData['popupInfo'])) {
+            // A notice rather than an order: nothing to acknowledge server-side,
+            // just «Κατάλαβα» (route cancelled, route point skipped).
+            $popup = ['kind' => 'info', 'info' => (string) $bannerData['popupInfo'], 'id' => (int) ($bannerData['routeId'] ?? 0)];
         }
         $banners[] = [
             'id' => (int) $bannerRow['id'],
@@ -10392,10 +10396,17 @@ function opModelFromSector(sector) {
     const searching = sector.status === 'in_progress' || sector.status === 'needs_recheck';
     const area = (areas || []).find(a => a.id === sector.area_id);
     const nav = opPolygonNav(sector.geo);
+    // Sent back by command for another pass: a new order about the same
+    // sector, so it says so, with command's reason when there is one (the
+    // log runs oldest to newest).
+    const recheck = sector.status === 'needs_recheck';
+    const recheckLog = recheck ? (sector.status_log || []).filter(l => l.to_status === 'needs_recheck').pop() : null;
+    const note = recheckLog && recheckLog.note ? String(recheckLog.note).trim() : '';
     return {
         key: 'sector:' + sector.id, kind: 'sector', id: sector.id, type: 'sector',
-        cat: 'move', icon: 'bi-grid-3x3-gap-fill', title: t('popup.type.sector'),
-        text: sector.label + (area ? ' — ' + area.label : ''),
+        cat: recheck ? 'task' : 'move', icon: recheck ? 'bi-arrow-repeat' : 'bi-grid-3x3-gap-fill',
+        title: t(recheck ? 'popup.type.sector_recheck' : 'popup.type.sector'),
+        text: sector.label + (area ? ' — ' + area.label : '') + (note ? '\n' + note : ''),
         meta: t('popup.to_team', {team: sector.team_label}),
         acked: acked, outstanding: true,
         steps: [t('popup.step.ack'), t('popup.step.travel'), t('popup.step.search'), t('popup.step.complete')],
@@ -10622,8 +10633,26 @@ let opRenderedSig = null;
 let opMiniMap = null;
 let opHighlightLayer = null;
 let opToastTimer = null;
+// Notices — «Κατάλαβα» and nothing to do server-side: a route cancelled, a
+// route point skipped, the team you are now on. They are not rows of "Οι
+// Εντολές μου", so they live here until dismissed and are merged in on every
+// sync. Keyed 'info:<banner id>' or 'team:<team id>'.
+const opInfo = new Map();
 // Orders put off with «Αργότερα», so a reload does not throw them back up.
 const OP_LATER_STORE = 'wrOpLater_<?= $missionId ?>';
+// The team this device last said «Κατάλαβα» to, so the team notice appears
+// once per team rather than on every load.
+const OP_TEAM_STORE = 'wrOpTeamSeen_<?= $missionId ?>';
+// Who is on which team as of this page load — the poll only sends teams with
+// its first full payload, and the team notice has to be possible before then.
+const WR_TEAMS_AT_LOAD = <?= json_encode(array_values(array_map(fn($team) => [
+    'id' => (int) $team['id'],
+    'codename' => $team['codename'],
+    'team_number' => $team['team_number'],
+    'leader_id' => $team['leader_id'],
+    'leader_name' => $team['leader_name'],
+    'members' => array_map(fn($m) => ['user_id' => (int) $m['user_id'], 'name' => $m['name']], $team['members']),
+], $teams)), JSON_UNESCAPED_UNICODE) ?>;
 // How long a banner may wait for its order to appear in the page state before
 // it is drawn as an ordinary ticker line instead — so it is never lost.
 const OP_PENDING_MS = 20000;
@@ -10640,7 +10669,7 @@ function opRememberLater(keys) {
 }
 
 function orderPopupSync(entries) {
-    const models = entries.map(entry => entry.popup).filter(Boolean);
+    const models = entries.map(entry => entry.popup).filter(Boolean).concat(Array.from(opInfo.values()));
     const previous = opEntries;
     opEntries = new Map(models.map(m => [m.key, m]));
     if (opSynced) {
@@ -10696,6 +10725,13 @@ function opKeyForRef(ref) {
 // ticker draws nothing for it.
 function orderPopupTakeBanner(b) {
     if (!b.popup || !document.getElementById('orderPopupRoot')) return false;
+    if (b.popup.kind === 'info') {
+        const key = 'info:' + b.id;
+        opInfo.set(key, opModelFromNotice(key, b));
+        refreshMyOrdersCard();
+        opArrive(key, b);
+        return true;
+    }
     const key = opKeyForRef(b.popup);
     if (key) {
         if (!opEntries.get(key).outstanding) return false;
@@ -10732,6 +10768,88 @@ function opArrive(key, b) {
     opIndex = 0;
     opShownKey = key;
     orderPopupRender();
+}
+
+// A route cancelled or a route point skipped by someone else. The text is the
+// notification's own, already in this person's language.
+function opModelFromNotice(key, b) {
+    const cancelled = b.popup.info === 'mission_route_cancelled';
+    const route = (routes || []).find(r => String(r.id) === String(b.popup.id));
+    return {
+        key: key, kind: 'info', id: b.popup.id, type: cancelled ? 'route_cancelled' : 'route_skipped',
+        cat: cancelled ? 'task' : 'info', icon: cancelled ? 'bi-sign-stop-fill' : 'bi-skip-forward-fill',
+        title: t(cancelled ? 'popup.type.route_cancelled' : 'popup.type.route_skipped'),
+        text: b.message,
+        meta: route ? (route.title || t('route.default_title')) : '',
+        acked: false, outstanding: true, steps: [t('popup.step.seen')], step: 0, stepTimes: {},
+        hint: '', speakText: '', target: null,
+        // A cancelled route has left the card; a skipped point is still on it.
+        card: cancelled ? null : 'myRouteCard',
+        cardLabel: t('popup.btn.show_route'),
+    };
+}
+
+function opModelFromTeam(team) {
+    const label = teamLabel(team.codename, team.team_number);
+    // Not me, and not the leader, who already has a line of their own.
+    const mates = (team.members || [])
+        .filter(m => Number(m.user_id) !== WR_MY_USER_ID && Number(m.user_id) !== Number(team.leader_id))
+        .map(m => m.name);
+    const leader = Number(team.leader_id) === WR_MY_USER_ID
+        ? t('popup.team_leader_self')
+        : (team.leader_name ? t('popup.team_leader', {name: team.leader_name}) : '');
+    return {
+        key: 'team:' + team.id, kind: 'team', id: team.id, type: 'team',
+        cat: 'move', icon: 'bi-people-fill', title: t('popup.type.team'),
+        text: t('popup.team_text', {team: label}),
+        meta: [leader, mates.length ? t('popup.team_members', {names: mates.join(', ')}) : ''].filter(Boolean).join(' · '),
+        acked: false, outstanding: true, steps: [t('popup.step.seen')], step: 0, stepTimes: {},
+        hint: '', speakText: '', target: null,
+        card: 'teamsCard', cardLabel: t('popup.btn.show_team'),
+    };
+}
+
+// Works out from the rosters, not from a notification, whether this person is
+// on a team they have not said «Κατάλαβα» to — so a volunteer put on a team
+// while their phone was in a pocket still sees it the next time they look.
+// Returns the notice's key when it has just been added.
+function opCheckTeam(teamList) {
+    const mine = (teamList || []).find(team => (team.members || []).some(m => Number(m.user_id) === WR_MY_USER_ID));
+    const key = mine ? 'team:' + mine.id : null;
+    for (const k of Array.from(opInfo.keys())) {
+        if (k.startsWith('team:') && k !== key) opInfo.delete(k);
+    }
+    let seen = null;
+    try { seen = localStorage.getItem(OP_TEAM_STORE); } catch (e) {}
+    if (!mine) {
+        try { localStorage.removeItem(OP_TEAM_STORE); } catch (e) {}
+        return null;
+    }
+    if (String(mine.id) === seen) return null;
+    const isNew = !opInfo.has(key);
+    // Refreshed even when already shown, so a teammate added a minute later
+    // appears in it.
+    opInfo.set(key, opModelFromTeam(mine));
+    return isNew ? key : null;
+}
+opCheckTeam(WR_TEAMS_AT_LOAD);
+// The poll's rosters (see the wr-teams-updated dispatch in pollWarRoomData).
+// A new team here means someone just put this person on it: that arrives like
+// an order, with the sound.
+document.addEventListener('wr-teams-updated', e => {
+    const hadTeamNotice = Array.from(opInfo.keys()).some(k => k.startsWith('team:'));
+    const added = opCheckTeam(e.detail && e.detail.teams);
+    const hasTeamNotice = Array.from(opInfo.keys()).some(k => k.startsWith('team:'));
+    if (added || hadTeamNotice || hasTeamNotice) refreshMyOrdersCard();
+    if (added) opArrive(added, {});
+});
+
+function opDismissNotice(m) {
+    if (m.kind === 'team') {
+        try { localStorage.setItem(OP_TEAM_STORE, String(m.id)); } catch (e) {}
+    }
+    opInfo.delete(m.key);
+    refreshMyOrdersCard();
 }
 
 function opList() {
@@ -10844,6 +10962,7 @@ function opDirectionsHtml(m) {
 // by doing so, received it.
 function opGoAction(m) {
     const mapLess = !map || !m.target;
+    if (m.kind === 'info' || m.kind === 'team') return ['dismiss', 'bi-check2', t('popup.btn.got_it')];
     switch (m.type) {
         case 'photo': return ['camera', 'bi-camera-fill', t('popup.btn.open_camera')];
         case 'video': return ['video', 'bi-camera-reels-fill', t('popup.btn.open_video')];
@@ -10869,6 +10988,7 @@ function opArrivalCardHtml(m, i, n) {
             <div class="wr-op-actions mt-2">
                 <button type="button" class="btn btn-primary w-100 fw-semibold" data-op="${op}"><i class="bi ${icon} me-1"></i>${escapeHtml(label)}</button>
                 ${m.type === 'speak' ? opReplayBtnHtml() : ''}
+                ${opNoticeCardBtnHtml(m)}
                 <button type="button" class="btn btn-outline-secondary w-100 mt-2" data-op="min">${escapeHtml(t('popup.btn.later'))}</button>
             </div>
         </div>
@@ -10900,10 +11020,18 @@ function opReviewCardHtml(m, i, n) {
     </div>`;
 }
 
+// A notice's way to the thing it is about («Δες την ομάδα», «Δες τη
+// διαδρομή»), under its «Κατάλαβα».
+function opNoticeCardBtnHtml(m) {
+    return (m.kind === 'info' || m.kind === 'team') && m.card
+        ? opBtn('card', 'bi-box-arrow-up-right', m.cardLabel, 'btn-outline-primary')
+        : '';
+}
+
 function opStepActionsHtml(m, k, state) {
     if (state === 'current' && k === 0) {
         const [op, icon, label] = opGoAction(m);
-        return opBtn(op, icon, label);
+        return opBtn(op, icon, label) + opNoticeCardBtnHtml(m);
     }
     if (state === 'current') {
         switch (m.type) {
@@ -11097,6 +11225,7 @@ function opAcknowledge(m, btn) {
 
 function opAct(op, m, btn) {
     if (op === 'replay') { speakAnnouncement(m.speakText); return; }
+    if (op === 'dismiss') { opDismissNotice(m); return; }
     // The team steps record the receipt themselves, server-side.
     const ack = (!m.acked && !['complete', 'arrive', 'depart', 'dcomplete'].includes(op)) ? opAcknowledge(m, btn) : null;
     switch (op) {
