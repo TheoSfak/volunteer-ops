@@ -237,6 +237,61 @@ function gpsFilterStep(?array $prev, float $lat, float $lng, float $accuracy, ?f
 }
 
 /**
+ * Most fixes the Android app may send in one request when it empties the
+ * backlog it kept through a signal outage (v3.322.0). Its own batches are 50;
+ * the cap only bounds what a malformed or hostile body can make one PHP
+ * request do.
+ */
+const NATIVE_PING_BATCH_MAX = 100;
+
+/**
+ * One fix from the Android app's JSON body, recorded. Shared by the single
+ * and the batch shape of mobile-ping-location.php so the two can never read a
+ * field differently. The field names are the plugin's (locationToJson() in
+ * BackgroundGeolocationService.java).
+ */
+function recordNativePingFromJson(array $user, int $shiftId, array $body): array {
+    $accuracy = (isset($body['accuracy']) && is_numeric($body['accuracy']))
+        ? min((float) $body['accuracy'], 5000.0)
+        : null;
+    // Same reject-not-clamp rule as ping-location.php: an out-of-range
+    // battery value is garbage, and a clamp could fake a critical reading.
+    $rawBattery = $body['battery_level'] ?? null;
+    $battery = (is_numeric($rawBattery) && (int) $rawBattery >= 0 && (int) $rawBattery <= 100)
+        ? (int) $rawBattery
+        : null;
+    return recordVolunteerPing(
+        $user, $shiftId,
+        (float) ($body['latitude'] ?? 0), (float) ($body['longitude'] ?? 0),
+        $accuracy, $battery,
+        'auto', // only ever the passive background watcher, never the manual button
+        'native',
+        parseFixAgeMs($body['fix_age_ms'] ?? null),
+        // Location.isFromMockProvider(). Only a real boolean true counts: a
+        // missing or odd value must not turn an older build's pings away.
+        ($body['simulated'] ?? false) === true,
+        parseSpeedMps($body['speed'] ?? null)
+    );
+}
+
+/**
+ * A backlog the Android app kept through a signal outage, recorded in the
+ * order sent — oldest first, which is what lets every fix through: the write
+ * path skips a fix older than the newest one already stored, so a newer fix
+ * arriving first would have cost the whole backlog. Each is judged exactly
+ * as if it had arrived on its own, at its own fix time.
+ */
+function recordNativePingBatch(array $user, int $shiftId, array $items): array {
+    $results = [];
+    foreach (array_slice(array_values($items), 0, NATIVE_PING_BATCH_MAX) as $item) {
+        $results[] = is_array($item)
+            ? recordNativePingFromJson($user, $shiftId, $item)
+            : ['ok' => false, 'error' => 'Malformed fix'];
+    }
+    return $results;
+}
+
+/**
  * Count a refused fix for the GPS quality report. The refused position is
  * never stored — that is what refusing it means — so without this nothing
  * could ever say that one phone was turned away forty times and another

@@ -130,6 +130,62 @@ final class GpsFixIntegrityTest extends TestCase
         $this->assertNull($this->gpsError(), 'a walk must not flag the phone as producing impossible jumps');
     }
 
+    // ── The backlog kept through a signal outage (v3.322.0) ─────────────────
+
+    /** A native JSON fix, as BackgroundGeolocationService.locationToJson() sends it. */
+    private function nativeFix(float $metresNorth, int $ageMs, bool $mock = false): array
+    {
+        return ['latitude' => $this->northOf(35.33, $metresNorth), 'longitude' => 25.13, 'accuracy' => 8.0,
+                'speed' => 1.2, 'simulated' => $mock, 'fix_age_ms' => $ageMs, 'battery_level' => 70];
+    }
+
+    public function testAFiveMinuteOutageArrivesWholeInOrderAndAtItsOwnTimes(): void
+    {
+        // The last position before the gorge, then the fixes taken during five
+        // and a half minutes without signal, walking north at 1.2 m/s (36m
+        // every 30s), all delivered in one request once signal returns.
+        $this->seedPing(35.33, 360, 'native');
+        $backlog = [];
+        for ($i = 0; $i < 12; $i++) {
+            $backlog[] = $this->nativeFix(($i + 1) * 36, (330 - $i * 30) * 1000);
+        }
+        $results = recordNativePingBatch(dbFetchOne("SELECT * FROM users WHERE id = ?", [$this->volunteerId]), $this->shiftId, $backlog);
+
+        $this->assertCount(12, $results);
+        foreach ($results as $i => $r) {
+            $this->assertTrue($r['ok'], "fix $i refused: " . ($r['error'] ?? ''));
+            $this->assertArrayNotHasKey('skipped', $r, "fix $i skipped");
+        }
+        $this->assertSame(13, $this->pingCount());
+        $times = array_map('intval', array_column(dbFetchAll(
+            "SELECT UNIX_TIMESTAMP(created_at) AS t FROM volunteer_pings WHERE user_id = ? AND shift_id = ? ORDER BY id",
+            [$this->volunteerId, $this->shiftId]
+        ), 't'));
+        for ($i = 2; $i < 13; $i++) {
+            $this->assertEqualsWithDelta(30, $times[$i] - $times[$i - 1], 1, 'each fix stored 30s after the one before');
+        }
+        $this->assertNull($this->gpsError(), 'a walk through a dead zone is not an impossible jump');
+    }
+
+    public function testEachFixInABacklogIsJudgedOnItsOwn(): void
+    {
+        $backlog = [$this->nativeFix(0, 60000), $this->nativeFix(30, 30000, true), $this->nativeFix(60, 0)];
+        $results = recordNativePingBatch(dbFetchOne("SELECT * FROM users WHERE id = ?", [$this->volunteerId]), $this->shiftId, $backlog);
+        $this->assertTrue($results[0]['ok']);
+        $this->assertFalse($results[1]['ok'], 'the mock fix is refused');
+        $this->assertTrue($results[2]['ok'], 'and the fix after it still lands');
+        $this->assertSame(2, $this->pingCount());
+    }
+
+    public function testABacklogIsCappedAndMalformedEntriesAreRefusedNotFatal(): void
+    {
+        $backlog = array_fill(0, NATIVE_PING_BATCH_MAX + 20, 'not a fix');
+        $results = recordNativePingBatch(dbFetchOne("SELECT * FROM users WHERE id = ?", [$this->volunteerId]), $this->shiftId, $backlog);
+        $this->assertCount(NATIVE_PING_BATCH_MAX, $results);
+        $this->assertFalse($results[0]['ok']);
+        $this->assertSame(0, $this->pingCount());
+    }
+
     public function testAClientThatSendsNoFixAgeIsStampedWithTheArrivalTimeAsBefore(): void
     {
         $result = recordVolunteerPing($this->user(), $this->shiftId, 35.33, 25.13, 8.0, 80, 'auto', 'native');

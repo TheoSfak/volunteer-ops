@@ -47,6 +47,20 @@ if (!$user) {
     exit;
 }
 
+// Which phone this is, as the app reports it ("samsung SM-A525F · Android 14").
+// Kept on the token rather than on every ping: it identifies the device and
+// does not change between fixes, and the token row is already written on every
+// request, so recording it costs no extra query. Before v3.320.0 every label
+// was the literal 'Android', which made "which phones give bad positions"
+// unanswerable.
+$touchToken = function ($rawDevice) use ($tokenHash): void {
+    $device = is_string($rawDevice) ? trim(preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $rawDevice)) : '';
+    dbExecute(
+        "UPDATE mobile_api_tokens SET last_used_at = NOW(), device_label = COALESCE(?, device_label) WHERE token_hash = ?",
+        [$device !== '' ? mb_substr($device, 0, 100) : null, $tokenHash]
+    );
+};
+
 // Two request shapes land here: plain form fields (curl/manual testing) and
 // @capgo/background-geolocation's native JSON body (native HTTP delivery,
 // posted straight from the Android foreground service — see
@@ -57,60 +71,48 @@ if (!$user) {
 // Content-Type rather than probing both shapes for every field.
 $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
 if (stripos($contentType, 'application/json') !== false) {
-    $body = json_decode(file_get_contents('php://input'), true) ?? [];
+    $body = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($body)) {
+        $body = [];
+    }
+    $shiftId = (int) get('shift_id');
 
-    $shiftId  = (int) get('shift_id');
-    $lat      = (float) ($body['latitude'] ?? 0);
-    $lng      = (float) ($body['longitude'] ?? 0);
-    $source   = 'auto'; // this path is only ever the passive background watcher, never the manual "send now" button
-    $rawAccuracy = $body['accuracy'] ?? null;
-    $rawBattery  = $body['battery_level'] ?? null;
-    // Measured on the phone against its monotonic clock at the moment of
-    // sending, so it includes any time the fix spent in the offline queue.
-    // Missing from app versions before 1.1.13 / 1.0.14.
-    $fixAgeMs = parseFixAgeMs($body['fix_age_ms'] ?? null);
-    // Android's Location.isFromMockProvider(). Only a real boolean true counts:
-    // the plugin has always sent this field, and a missing or odd value must
-    // not turn every ping from an older build into a refusal.
-    $isMock   = ($body['simulated'] ?? false) === true;
-    $rawDevice = isset($body['device']) && is_string($body['device']) ? $body['device'] : null;
-    // Location.getSpeed() (Doppler, m/s) — the plugin has always sent it,
-    // null when the fix carries no speed.
-    $speedMps = parseSpeedMps($body['speed'] ?? null);
-} else {
-    $shiftId  = (int) post('shift_id');
-    $lat      = (float) post('lat');
-    $lng      = (float) post('lng');
-    $source   = post('source') === 'auto' ? 'auto' : 'manual';
-    $rawAccuracy = post('accuracy');
-    $rawBattery  = post('battery_level');
-    $fixAgeMs = parseFixAgeMs(post('fix_age_ms'));
-    $isMock   = false;
-    $rawDevice = null;
-    $speedMps = parseSpeedMps(post('speed'));
+    // A JSON LIST is the backlog the app kept while it had no signal
+    // (v3.322.0), oldest first. One request for up to 50 fixes, so the phone
+    // catches up in seconds once signal returns instead of replaying one POST
+    // per fix — which is what used to hold its CURRENT position back behind
+    // the backlog. The reply says "batch": an older server would answer a
+    // list with a single "invalid coordinates", and the app reads the missing
+    // "batch" as "resend these one at a time" rather than as delivered.
+    if ($body !== [] && array_is_list($body)) {
+        $last = end($body);
+        $touchToken(is_array($last) ? ($last['device'] ?? null) : null);
+        $results = recordNativePingBatch($user, $shiftId, $body);
+        echo json_encode(['ok' => true, 'batch' => count($results), 'results' => $results]);
+        exit;
+    }
+
+    $touchToken($body['device'] ?? null);
+    // 'native': bearer-token auth means this can only be the Capacitor Android
+    // background-location plugin, which keeps reporting with the screen off.
+    echo json_encode(recordNativePingFromJson($user, $shiftId, $body));
+    exit;
 }
 
-// Which phone this is, as the app reports it ("samsung SM-A525F · Android 14").
-// Kept on the token rather than on every ping: it identifies the device and
-// does not change between fixes, and the token row is already written on every
-// request, so recording it costs no extra query. Before v3.320.0 every label
-// was the literal 'Android', which made "which phones give bad positions"
-// unanswerable.
-$device = $rawDevice !== null ? trim(preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $rawDevice)) : '';
-dbExecute(
-    "UPDATE mobile_api_tokens SET last_used_at = NOW(), device_label = COALESCE(?, device_label) WHERE token_hash = ?",
-    [$device !== '' ? mb_substr($device, 0, 100) : null, $tokenHash]
-);
-
+$touchToken(null);
+$shiftId  = (int) post('shift_id');
+$source   = post('source') === 'auto' ? 'auto' : 'manual';
+$rawAccuracy = post('accuracy');
 $accuracy = ($rawAccuracy !== null && $rawAccuracy !== '' && is_numeric($rawAccuracy))
     ? min((float) $rawAccuracy, 5000)
     : null;
 // Same hard-bound reject-not-clamp rule as ping-location.php — see the
 // comment there for why an out-of-range battery value is dropped, not capped.
+$rawBattery = post('battery_level');
 $batteryLevel = ($rawBattery !== null && $rawBattery !== '' && is_numeric($rawBattery) && (int) $rawBattery >= 0 && (int) $rawBattery <= 100)
     ? (int) $rawBattery
     : null;
-
-// 'native': bearer-token auth means this can only be the Capacitor Android
-// background-location plugin, which keeps reporting with the screen off.
-echo json_encode(recordVolunteerPing($user, $shiftId, $lat, $lng, $accuracy, $batteryLevel, $source, 'native', $fixAgeMs, $isMock, $speedMps));
+echo json_encode(recordVolunteerPing(
+    $user, $shiftId, (float) post('lat'), (float) post('lng'), $accuracy, $batteryLevel, $source, 'native',
+    parseFixAgeMs(post('fix_age_ms')), false, parseSpeedMps(post('speed'))
+));
