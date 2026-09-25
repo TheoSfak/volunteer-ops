@@ -6,11 +6,11 @@
 
 require_once __DIR__ . '/bootstrap.php';
 
-// Redirect to login preserving the return URL
-if (!isLoggedIn()) {
-    $returnUrl = urlencode('checkin.php?token=' . htmlspecialchars(get('token', ''), ENT_QUOTES));
-    redirect('login.php?returnUrl=' . $returnUrl);
-}
+// Not signed in: requireLogin() remembers this page (rememberLoginReturnTo()),
+// so login.php brings the volunteer straight back to it. This used to send
+// login.php?returnUrl=..., a parameter login.php never read — the volunteer
+// landed on the dashboard and had to scan the QR code a second time.
+requireLogin();
 
 // Feature gate
 if (getSetting('qr_checkin_enabled', '0') !== '1') {
