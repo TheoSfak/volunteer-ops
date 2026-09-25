@@ -246,6 +246,37 @@ final class GpsFixIntegrityTest extends TestCase
         $this->assertSame('implausible', $this->gpsError());
     }
 
+    public function testAMotorbikeThePhoneSaysIsMovingIsRecordedAtTheNormalCadence(): void
+    {
+        // v3.331.0, from a real ride: 49 km/h against a walking-pace limit.
+        // 272m in 20s = 49 km/h. With the phone's own Doppler speed saying
+        // 13.5 m/s (48.6 km/h), it is travel: stored.
+        $this->seedPing(35.33, 20, 'native');
+        $ride = recordVolunteerPing($this->user(), $this->shiftId, $this->northOf(35.33, 272), 25.13, 6.0, 80, 'auto', 'native', 0, false, 13.5);
+        $this->assertTrue($ride['ok'], $ride['error'] ?? '');
+        $this->assertSame(2, $this->pingCount());
+    }
+
+    public function testTheSameJumpWithoutASpeedOrStandingStillIsStillRefused(): void
+    {
+        foreach ([null, 0.2] as $speed) {
+            dbExecute("DELETE FROM volunteer_pings WHERE user_id = ? AND shift_id = ?", [$this->volunteerId, $this->shiftId]);
+            $this->seedPing(35.33, 20, 'native');
+            $jump = recordVolunteerPing($this->user(), $this->shiftId, $this->northOf(35.33, 272), 25.13, 6.0, 80, 'auto', 'native', 0, false, $speed);
+            $this->assertFalse($jump['ok'], 'speed ' . var_export($speed, true));
+            $this->assertSame('implausible', $this->gpsError());
+        }
+    }
+
+    public function testASpikeWhileRidingIsStillRefused(): void
+    {
+        // Riding at 48.6 km/h, but the fix lands 1.7km on: 306 km/h.
+        $this->seedPing(35.33, 20, 'native');
+        $spike = recordVolunteerPing($this->user(), $this->shiftId, $this->northOf(35.33, 1700), 25.13, 6.0, 80, 'auto', 'native', 0, false, 13.5);
+        $this->assertFalse($spike['ok']);
+        $this->assertSame('implausible', $this->gpsError());
+    }
+
     // ── One phone, one stream ───────────────────────────────────────────────
 
     public function testThePagesAutomaticFixIsNotStoredWhileTheNativeServiceIsDelivering(): void

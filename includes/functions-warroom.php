@@ -3164,7 +3164,21 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
                     ? (float) $prev['accuracy_meters'] + (float) $accuracy
                     : 75.0;
                 $impliedKmh = $jumpMeters / $elapsed * 3.6;
-                if ($impliedKmh > $maxSpeedKmh && $jumpMeters > $uncertainty) {
+                // v3.331.0: unless the phone itself says it is moving that
+                // fast. GNSS measures speed from the Doppler shift of the
+                // satellite signals, independently of the position: a phone
+                // standing still reads ~0 however far its fix jumps, one on a
+                // motorbike reads what the bike is doing. The staleness rule
+                // above only kept a vehicle from vanishing; it still refused
+                // every fix inside the window, so a real motorbike ride on
+                // yphresies.gr (25/09/2026, limit 15 km/h, cadence 20 s) was
+                // stored once every 1-2 minutes and «Πορεία Ομάδων» drew a
+                // line of long gaps. Twice the Doppler plus 10 km/h: the
+                // implied figure is an average over the interval, the Doppler
+                // an instant reading, and bends and junctions pull them apart.
+                // A client that sends no speed is judged exactly as before.
+                $movingAsFastAsItJumps = $speedMps !== null && $impliedKmh <= 2 * $speedMps * 3.6 + 10;
+                if ($impliedKmh > $maxSpeedKmh && $jumpMeters > $uncertainty && !$movingAsFastAsItJumps) {
                     // Cleared by the next accepted ping, so a one-off jump
                     // shows for at most one cadence; only a phone that keeps
                     // producing them stays flagged to the command post.
