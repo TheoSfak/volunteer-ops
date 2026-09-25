@@ -161,6 +161,48 @@ final class GpsEstimationTest extends TestCase
         $this->assertLessThanOrEqual(3.0, $walkMax, sprintf('slow-walk lag %.1fm', $walkMax));
     }
 
+    // ── v3.328.0: a bad fix after minutes of standing ───────────────────────
+
+    public function testOneBadFixAfterStandingIsNotReadAsMovement(): void
+    {
+        // Four tight ±3m fixes, then one ±21m fix 9m away. Unweighted, the
+        // two halves' averages moved 5m — over the ±3m bar — and it counted
+        // as a walk.
+        $at = fn(float $n, float $e, float $acc, int $age) => ['lat' => 35.33 + $n / 111320.0, 'lng' => 25.13 + $e / (111320.0 * cos(deg2rad(35.33))), 'acc' => $acc, 'age' => $age];
+        $standing = [$at(0.4, -0.3, 3.0, 25), $at(0.0, 0.0, 3.0, 39), $at(-0.3, 0.2, 3.0, 53), $at(-0.5, 0.2, 3.0, 67)];
+        $bad = [35.33 + 9.0 / 111320.0, 25.13 + 2.0 / (111320.0 * cos(deg2rad(35.33)))];
+        $this->assertFalse(gpsFixesShowMovement($bad[0], $bad[1], 21.2, $standing));
+        // The same step with the phone as sure of it as of the others is.
+        $this->assertTrue(gpsFixesShowMovement($bad[0], $bad[1], 3.0, [$at(3.0, 0.7, 3.0, 25), $at(0.0, 0.0, 3.0, 39), $at(-3.0, -0.6, 3.0, 53), $at(-6.0, -1.2, 3.0, 67)]));
+    }
+
+    public function testTheRealRecordingDoesNotJumpWhenAFewBadFixesArriveWhileStanding(): void
+    {
+        // The same Xiaomi recording: after minutes at ±3m, three fixes at
+        // ±21, ±20 and ±15m arrive 9m away (t=799..830). v3.322.1 moved the
+        // pin 7m on the first of them alone, 9.7m over the three. Replayed
+        // with no Doppler speed, as a Wi-Fi/cell fix arrives (with a speed of
+        // 0 it is 0.4m and 2.8m); what is left is mostly the rule that the
+        // estimate stays within half a fix's own accuracy of it.
+        $fixes = json_decode(file_get_contents(__DIR__ . '/fixtures/gps-live-walk-relative.json'), true)['fixes'];
+        $lat0 = 35.33; $lng0 = 25.13; $mLat = 111320.0; $mLng = 111320.0 * cos(deg2rad($lat0));
+        $prev = null; $before = null; $moves = [];
+        foreach ($fixes as $i => [$t, $n, $e, $acc]) {
+            if ($t > 830) break;
+            $recent = [];
+            for ($j = $i - 1; $j >= 0 && $j >= $i - 4; $j--) {
+                $recent[] = ['lat' => $lat0 + $fixes[$j][1] / $mLat, 'lng' => $lng0 + $fixes[$j][2] / $mLng, 'acc' => (float) $fixes[$j][3], 'age' => $t - $fixes[$j][0]];
+            }
+            $last = $prev;
+            $prev = gpsFilterStep($prev, $lat0 + $n / $mLat, $lng0 + $e / $mLng, (float) $acc, null, $i ? $t - $fixes[$i - 1][0] : 0, 60, $recent);
+            if ($t === 774) $before = $prev;
+            if ($t >= 799) $moves[] = hypot(($prev['lat'] - $last['lat']) * $mLat, ($prev['lng'] - $last['lng']) * $mLng);
+        }
+        $this->assertLessThan(1.5, $moves[0],sprintf('first bad fix moved the estimate %.1fm', $moves[0]));
+        $total = hypot(($prev['lat'] - $before['lat']) * $mLat, ($prev['lng'] - $before['lng']) * $mLng);
+        $this->assertLessThan(5.0, $total,sprintf('three bad fixes moved the estimate %.1fm', $total));
+    }
+
     public function testMovementIsReadFromASteadyRunNotFromScatter(): void
     {
         $at = fn(float $n, float $e, int $age) => ['lat' => 35.33 + $n / 111320.0, 'lng' => 25.13 + $e / (111320.0 * cos(deg2rad(35.33))), 'acc' => 6.0, 'age' => $age];

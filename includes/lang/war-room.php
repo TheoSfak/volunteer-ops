@@ -497,6 +497,7 @@ return [
         'map.btn_satellite_view' => 'Δορυφορική προβολή',
         'map.btn_street_view' => 'Προβολή χάρτη',
         'map.btn_topo_view' => 'Τοπογραφική προβολή (ισοϋψείς)',
+        'map.btn_cadastre_view' => 'Αεροφωτογραφία Κτηματολογίου (πιο ακριβής θέση)',
 
         // Geographic export (exports/export-mission-geo.php) — GPX/KML/GeoJSON
         'geo.export_btn' => 'Εξαγωγή χάρτη',
@@ -2543,6 +2544,7 @@ return [
         'map.btn_satellite_view' => 'Satellite view',
         'map.btn_street_view' => 'Map view',
         'map.btn_topo_view' => 'Topographic view (contour lines)',
+        'map.btn_cadastre_view' => 'Hellenic Cadastre aerial photo (more accurate positions)',
 
         // Geographic export (exports/export-mission-geo.php) — GPX/KML/GeoJSON
         'geo.export_btn' => 'Export map',

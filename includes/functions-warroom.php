@@ -249,10 +249,23 @@ function gpsFilterStep(?array $prev, float $lat, float $lng, float $accuracy, ?f
         $k = 1 - $cap / $jump;
     }
     $pNew = (1 - $k) * $p;
+    // The halving is measured against the accuracy the phone has TYPICALLY
+    // been giving (median of this fix and its recent ones), not this fix
+    // alone (v3.328.0): one ±21m fix after minutes of ±3m ones set the
+    // estimate's own uncertainty to 10m, and that let the next bad fixes drag
+    // it a couple of metres each. A steady ±20m stream still reads ±10m.
+    $accs = [max($accuracy, 3.0)];
+    foreach ($recentRaw as $f) {
+        if (isset($f['acc'], $f['age']) && $f['age'] >= 0 && $f['age'] < $staleSeconds) {
+            $accs[] = max((float) $f['acc'], 3.0);
+        }
+    }
+    sort($accs);
+    $typicalAcc = $accs[intdiv(count($accs) - 1, 2)];
     return [
         'lat' => $prev['lat'] + $k * $dn / $mPerDegLat,
         'lng' => $prev['lng'] + $k * $de / $mPerDegLng,
-        'acc' => round(max(sqrt($pNew), 0.5 * sqrt($r), 2.0), 2),
+        'acc' => round(max(sqrt($pNew), 0.5 * $typicalAcc, 2.0), 2),
     ];
 }
 
@@ -265,6 +278,13 @@ function gpsFilterStep(?array $prev, float $lat, float $lng, float $accuracy, ?f
  * fixes step a few metres at a time, always in roughly the same direction.
  * Needs three fixes; with fewer there is nothing to judge and the answer is
  * no — the Doppler speed and the jump test still apply.
+ *
+ * Each half counts its fixes by the accuracy the phone gave them, and must
+ * move by more than that half's own typical accuracy (v3.328.0). Before, one
+ * ±21m fix after five minutes of ±3m ones outweighed them all: the halves'
+ * plain averages moved 5m, the ±3m of the rest set the bar, and the filter
+ * followed the bad fix 7m — a pin that jumps when its owner stands still
+ * (the real Xiaomi recording, t=799). With equal accuracies nothing changes.
  */
 function gpsFixesShowMovement(float $lat, float $lng, float $accuracy, array $recentRaw): bool {
     $pts = [['lat' => $lat, 'lng' => $lng, 'acc' => $accuracy]];
@@ -280,22 +300,29 @@ function gpsFixesShowMovement(float $lat, float $lng, float $accuracy, array $re
     $mLng = 111320.0 * cos(deg2rad($lat));
     $xy = array_map(fn($p) => [((float) $p['lat'] - $lat) * $mLat, ((float) $p['lng'] - $lng) * $mLng], $pts);
     $half = intdiv($n, 2);
-    $mean = function (array $s) {
-        $c = count($s);
-        return [array_sum(array_column($s, 0)) / $c, array_sum(array_column($s, 1)) / $c];
+    // Where a half says the person was (inverse-variance weighted mean) and
+    // how sure it is of that (the accuracy of a typical fix in it). Floored
+    // at 3m like the filter itself, so a phone claiming 0.5m cannot outvote
+    // everything else.
+    $mean = function (array $idx) use ($xy, $pts, $accuracy) {
+        $sw = $sN = $sE = 0.0;
+        foreach ($idx as $i) {
+            $w = 1 / max((float) ($pts[$i]['acc'] ?? $accuracy), 3.0) ** 2;
+            $sw += $w;
+            $sN += $w * $xy[$i][0];
+            $sE += $w * $xy[$i][1];
+        }
+        return [$sN / $sw, $sE / $sw, sqrt(count($idx) / $sw)];
     };
-    [$aN, $aE] = $mean(array_slice($xy, 0, $half));      // newer half
-    [$bN, $bE] = $mean(array_slice($xy, $n - $half));    // older half
+    [$aN, $aE, $aAcc] = $mean(range(0, $half - 1));      // newer half
+    [$bN, $bE, $bAcc] = $mean(range($n - $half, $n - 1)); // older half
     $net = hypot($aN - $bN, $aE - $bE);
     $path = 0.0;
     for ($i = 1; $i < $n; $i++) {
         $path += hypot($xy[$i][0] - $xy[$i - 1][0], $xy[$i][1] - $xy[$i - 1][1]);
     }
     $straight = $path > 0 ? hypot($xy[0][0] - $xy[$n - 1][0], $xy[0][1] - $xy[$n - 1][1]) / $path : 0.0;
-    $accs = array_map(fn($p) => (float) ($p['acc'] ?? $accuracy), $pts);
-    sort($accs);
-    $medAcc = $accs[intdiv($n, 2)];
-    return $net > max(3.0, 0.8 * $medAcc) && $straight > 0.5;
+    return $net > max(3.0, 0.8 * max($aAcc, $bAcc)) && $straight > 0.5;
 }
 
 /**

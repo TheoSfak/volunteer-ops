@@ -6656,7 +6656,7 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
 // title advertise the state a click would move TO (matching
 // mapFullscreenToggle's own convention), so it stays self-explanatory now
 // that there are three stops instead of two.
-const MAP_BASE_LAYER_CYCLE = ['street', 'topo', 'satellite'];
+const MAP_BASE_LAYER_CYCLE = ['street', 'topo', 'satellite', 'cadastre'];
 // Every layer may be zoomed past the depth its tiles actually reach, with
 // Leaflet upscaling the deepest real tile — the trick OpenTopoMap has used
 // here since v3.186.0, now applied to all three.
@@ -6683,11 +6683,29 @@ function addMapBaseLayers(targetMap, toggleBtnId) {
             maxNativeZoom: 19,
             maxZoom: MAP_MAX_ZOOM,
         }),
+        // The Hellenic Cadastre's orthophoto, for judging a pin against the
+        // ground. Esri's mosaic is only specified to ~5 m, and over Heraklion
+        // it sits ~3 m WSW of this one (image correlation at five sites,
+        // 2026-09-25) — so a phone that is right looks 3 m wrong on it. Greece
+        // only; a plain WMS, asked for in lat/lng per tile, which over one
+        // tile differs from the map's projection by far under a pixel.
+        cadastre: L.tileLayer.wms('https://gis.ktimanet.gr/wms/wmsopen/wmsserver.aspx', {
+            layers: 'BASEMAP',
+            format: 'image/jpeg',
+            crs: L.CRS.EPSG4326,
+            tileSize: 512,
+            attribution: '© Ελληνικό Κτηματολόγιο',
+            maxZoom: MAP_MAX_ZOOM,
+        }),
     };
-    const nextBtnState = {
-        street:    {icon: 'bi-triangle',        title: 'map.btn_topo_view'},
-        topo:      {icon: 'bi-globe-americas',  title: 'map.btn_satellite_view'},
-        satellite: {icon: 'bi-map',             title: 'map.btn_street_view'},
+    // Keyed by the layer each entry describes; the button shows the one a
+    // click moves to. (It used to be keyed by the layer showing but looked up
+    // by the next, so it always advertised the wrong stop.)
+    const layerBtnState = {
+        street:    {icon: 'bi-map',             title: 'map.btn_street_view'},
+        topo:      {icon: 'bi-triangle',        title: 'map.btn_topo_view'},
+        satellite: {icon: 'bi-globe-americas',  title: 'map.btn_satellite_view'},
+        cadastre:  {icon: 'bi-airplane',        title: 'map.btn_cadastre_view'},
     };
 
     let currentKey = localStorage.getItem('wr_map_base_layer');
@@ -6699,8 +6717,8 @@ function addMapBaseLayers(targetMap, toggleBtnId) {
         const refreshBtn = () => {
             // What a click moves TO, not what is showing now.
             const nextKey = MAP_BASE_LAYER_CYCLE[(MAP_BASE_LAYER_CYCLE.indexOf(currentKey) + 1) % MAP_BASE_LAYER_CYCLE.length];
-            btn.innerHTML = '<i class="bi ' + nextBtnState[nextKey].icon + '"></i>';
-            btn.title = t(nextBtnState[nextKey].title);
+            btn.innerHTML = '<i class="bi ' + layerBtnState[nextKey].icon + '"></i>';
+            btn.title = t(layerBtnState[nextKey].title);
         };
         refreshBtn();
         btn.addEventListener('click', () => {
