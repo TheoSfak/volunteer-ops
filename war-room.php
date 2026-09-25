@@ -1141,6 +1141,21 @@ $missionShiftPlaceholders = implode(',', array_fill(0, count($missionShiftBinds)
 // See actionRoomParticipantIds().
 $actionRoomParticipantIds = actionRoomParticipantIds($missionId);
 $iTakePartInActionRoom = in_array((int)$user['id'], $actionRoomParticipantIds, true);
+// What this page was built from, as far as the GPS tick goes. Command staff:
+// the whole ticked set — the eight recipient lists, the route composer, the
+// team forms' ticks and the roster switches are all rendered from it.
+// Anybody else: only their own tick, which decides whether their page tracks
+// them at all. The poll sends it every tick, and a page whose value no longer
+// matches reloads itself (reloadForGpsChange()), so a switch flipped on one
+// screen reaches every card on every screen without anyone pressing F5.
+$gpsParticipationSig = (function () use ($canManageWarRoom, $iTakePartInActionRoom, $actionRoomParticipantIds) {
+    if (!$canManageWarRoom) {
+        return $iTakePartInActionRoom ? 'in' : 'out';
+    }
+    $ids = array_map('intval', $actionRoomParticipantIds);
+    sort($ids);
+    return substr(md5(implode(',', $ids)), 0, 12);
+})();
 
 $continuousFieldMinutesByVolunteerId = computeContinuousFieldMinutesByVolunteerId($missionId);
 $warRoomMaxShiftMinutes = (int) getSetting('war_room_max_shift_minutes', '480');
@@ -1722,6 +1737,8 @@ if (get('ajax') === '1') {
         // where nobody has pressed anything hashes identically tick after
         // tick and costs no bandwidth at all.
         'ackTracker' => $canManageWarRoom ? loadAckTrackerCardsForMission($missionId) : null,
+        // See $gpsParticipationSig.
+        'gpsSig' => $gpsParticipationSig,
     ];
 
     // Don't re-send 51KB that the client already has.
@@ -15957,6 +15974,7 @@ document.querySelectorAll('.participant-gps-check').forEach(box => {
                     return;
                 }
                 applyGpsParticipationToRow(uid, wanted);
+                reloadForGpsChange(true);
             })
             .catch(() => { box.checked = !wanted; })
             .finally(() => { box.disabled = false; });
@@ -15978,6 +15996,130 @@ function applyGpsParticipationToRow(uid, takesPart) {
         document.getElementById('suggest-replacement-btn-' + uid)?.classList.add('d-none');
     }
 }
+
+// ── A GPS switch reaches every card ─────────────────────────────────────────
+// Everything the tick decides is rendered by PHP at page load: the eight
+// recipient lists, the route composer's picker, the team forms' own ticks and
+// every roster switch. The switch used to repaint only its own row, so a
+// volunteer just given GPS could not be sent an order until the coordinator
+// pressed F5 — and a team form still holding the OLD tick undid the switch
+// the next time that team was saved. Patching each card by hand would be
+// eight chances to forget one, so the page reloads itself instead: from the
+// switch on this screen, and from the poll on every other screen, the
+// volunteer's own phone included ($gpsParticipationSig). What the viewer was
+// looking at comes back with it — scroll position, which cards were open,
+// lists scrolled inside cards, the map view. Three seconds' grace so that a
+// handover (one off, one on) is one reload, and none at all while a window
+// is open or something is being typed.
+const GPS_PARTICIPATION_SIG = <?= json_encode($gpsParticipationSig) ?>;
+const GPS_RELOAD_VIEW_KEY = 'wr-gps-reload-view-<?= $missionId ?>';
+const GPS_RELOAD_GRACE_MS = 3000;
+let gpsReloadDeadline = 0;
+let gpsReloadTimer = null;
+
+function gpsReloadBlocked() {
+    if (document.querySelector('.modal.show')) return true;
+    const a = document.activeElement;
+    if (a && (a.tagName === 'TEXTAREA' || a.isContentEditable
+        || (a.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'file', 'color', 'hidden'].includes(a.type)))) {
+        return true;
+    }
+    // Typed and not sent: a reload would throw it away.
+    return [...document.querySelectorAll('textarea')].some(el => el.offsetParent !== null && el.value.trim() !== el.defaultValue.trim());
+}
+
+// extend: a switch flipped here restarts the grace period, so the next one
+// can follow; the poll only starts it, or a busy poll would postpone forever.
+function reloadForGpsChange(extend) {
+    if (extend || !gpsReloadTimer) gpsReloadDeadline = Date.now() + GPS_RELOAD_GRACE_MS;
+    if (gpsReloadTimer) return;
+    let toast = document.getElementById('gpsReloadToast');
+    if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'gpsReloadToast';
+        toast.className = 'alert alert-info shadow d-flex align-items-center gap-2 mb-0 py-2';
+        toast.setAttribute('role', 'status');
+        // Bottom right, clear of the sidebar, and above both the phone tab bar
+        // and the assistant button (#assistantFab: 52px, 96px up).
+        toast.style.cssText = 'position:fixed;right:16px;bottom:160px;z-index:2000;max-width:min(460px, calc(100vw - 32px));';
+        toast.innerHTML = '<i class="bi bi-arrow-repeat"></i><span class="small" id="gpsReloadText"></span>'
+            + '<button type="button" class="btn btn-sm btn-primary ms-auto text-nowrap" id="gpsReloadNow">' + escapeHtml(t('gps_reload.now')) + '</button>';
+        document.body.appendChild(toast);
+        document.getElementById('gpsReloadNow').addEventListener('click', saveViewAndReload);
+    }
+    const tick = () => {
+        const text = document.getElementById('gpsReloadText');
+        if (gpsReloadBlocked()) {
+            gpsReloadDeadline = Date.now() + GPS_RELOAD_GRACE_MS;
+            text.textContent = t('gps_reload.waiting');
+            return;
+        }
+        const left = Math.ceil((gpsReloadDeadline - Date.now()) / 1000);
+        if (left <= 0) {
+            saveViewAndReload();
+            return;
+        }
+        text.textContent = t('gps_reload.countdown', {s: left});
+    };
+    tick();
+    gpsReloadTimer = setInterval(tick, 250);
+}
+
+function saveViewAndReload() {
+    clearInterval(gpsReloadTimer);
+    const view = {at: Date.now(), y: window.scrollY, open: {}, inner: {}};
+    document.querySelectorAll('.collapse[id]').forEach(el => { view.open[el.id] = el.classList.contains('show'); });
+    document.querySelectorAll('[id]').forEach(el => { if (el.scrollTop > 0) view.inner[el.id] = el.scrollTop; });
+    if (typeof map !== 'undefined' && map) {
+        const c = map.getCenter();
+        view.map = [c.lat, c.lng, map.getZoom()];
+    }
+    try { sessionStorage.setItem(GPS_RELOAD_VIEW_KEY, JSON.stringify(view)); } catch (e) {}
+    try { history.scrollRestoration = 'manual'; } catch (e) {}
+    location.reload();
+}
+
+// The other half: put the view back. Runs while the page is still loading
+// (this script sits after every card's markup and after the map), then once
+// more at load and shortly after, since the lists drawn from the first poll
+// can still push things down.
+(function restoreViewAfterGpsReload() {
+    let view = null;
+    try {
+        view = JSON.parse(sessionStorage.getItem(GPS_RELOAD_VIEW_KEY) || 'null');
+        sessionStorage.removeItem(GPS_RELOAD_VIEW_KEY);
+    } catch (e) {}
+    if (!view || Date.now() - view.at > 60000) return;
+    try { history.scrollRestoration = 'manual'; } catch (e) {}
+    for (const [id, shown] of Object.entries(view.open || {})) {
+        const el = document.getElementById(id);
+        if (!el || el.classList.contains('show') === shown) continue;
+        el.classList.toggle('show', shown);
+        document.querySelectorAll('[data-bs-target="#' + CSS.escape(id) + '"]').forEach(h => {
+            h.classList.toggle('collapsed', !shown);
+            h.setAttribute('aria-expanded', shown ? 'true' : 'false');
+        });
+    }
+    if (view.map && typeof map !== 'undefined' && map) {
+        map.setView([view.map[0], view.map[1]], view.map[2], {animate: false});
+    }
+    // A jump, not a glide: the page's html has scroll-behavior: smooth, which
+    // turned this into a 3000px animation — and in a tab that is not on screen
+    // an animation never runs, so the page simply stayed at the top.
+    const place = () => {
+        const html = document.documentElement;
+        const behavior = html.style.scrollBehavior;
+        html.style.scrollBehavior = 'auto';
+        for (const [id, top] of Object.entries(view.inner || {})) {
+            const el = document.getElementById(id);
+            if (el) el.scrollTop = top;
+        }
+        window.scrollTo(0, view.y || 0);
+        html.style.scrollBehavior = behavior;
+    };
+    place();
+    window.addEventListener('load', () => { place(); setTimeout(place, 400); }, {once: true});
+})();
 
 function openSuggestReplacementModal(volunteerId, volunteerName) {
     const modalEl = document.getElementById('suggestReplacementModal');
@@ -18661,6 +18803,8 @@ function pollWarRoomData() {
         // call in this same tick must see the new registry, not the previous cycle's.
         if (data.k9Handlers) k9Handlers = data.k9Handlers;
         if (data.teamCaptains) teamCaptains = data.teamCaptains;
+        // Somebody's GPS tick changed since this page was built.
+        if (data.gpsSig && data.gpsSig !== GPS_PARTICIPATION_SIG) reloadForGpsChange(false);
         renderPins(pins = data.pins || []);
         if (data.dispatches) renderDispatches(dispatches = data.dispatches);
         if (data.annotations) renderAnnotations(annotations = data.annotations);
