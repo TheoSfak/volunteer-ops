@@ -69,10 +69,10 @@ index 0000000..b0b19e5
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
 new file mode 100644
-index 0000000..f0f03b0
+index 0000000..e53aa75
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
-@@ -0,0 +1,513 @@
+@@ -0,0 +1,576 @@
 +package com.capgo.capacitor_background_geolocation;
 +
 +import android.app.Notification;
@@ -84,11 +84,16 @@ index 0000000..f0f03b0
 +import android.content.SharedPreferences;
 +import android.graphics.drawable.Icon;
 +import android.media.AudioAttributes;
++import android.media.AudioManager;
 +import android.net.Uri;
 +import android.media.RingtoneManager;
 +import android.os.Build;
 +import android.os.Bundle;
 +import android.os.PowerManager;
++import android.os.VibrationAttributes;
++import android.os.VibrationEffect;
++import android.os.Vibrator;
++import android.os.VibratorManager;
 +
 +import com.getcapacitor.Logger;
 +
@@ -156,10 +161,9 @@ index 0000000..f0f03b0
 +    //
 +    // Since v3.332.0 this is the «Εντολές» channel only: alerts the web shows
 +    // as a banner (`urgent`). Everything else goes to CHANNEL_UPDATES_ID.
-+    // Before, every notification rang like an order — through Do Not Disturb
-+    // and with the triple buzz — and a phone that buzzes the same for "your
-+    // shift was approved" as for "go to point 3" teaches its owner to ignore
-+    // both.
++    // Before, every notification rang like an order — heads-up, with the
++    // triple buzz — and a phone that buzzes the same for "your shift was
++    // approved" as for "go to point 3" teaches its owner to ignore both.
 +    private static final String CHANNEL_ID = "volunteerops_alerts_v2";
 +    private static final String CHANNEL_NAME = "Εντολές";
 +    private static final String CHANNEL_UPDATES_ID = "volunteerops_updates";
@@ -423,6 +427,61 @@ index 0000000..f0f03b0
 +
 +        if (state == STATE_NEW && urgent) {
 +            wakeScreen(context);
++            vibrateForOrder(context, manager);
++        }
++    }
++
++    // Longer than the channel's own pattern: it has to be felt through a
++    // jacket, while walking.
++    private static final long[] ORDER_VIBRATION = { 0, 700, 300, 700, 300, 700 };
++
++    /**
++     * An order buzzes the phone from here, as an alarm, instead of relying on
++     * the channel's vibration alone. That one was reported missing on a real
++     * phone (v3.332.1: "the phone wakes and I hear the sound, no vibration"):
++     * the channel asks for it, but a phone whose notification vibration is off
++     * — the default in Sound mode on several makers' phones — never buzzes for
++     * any notification. An order is the one thing a volunteer on a mission
++     * must not miss, so it vibrates as an alarm does (the user's choice).
++     *
++     * Two limits it keeps, the same ones the notification itself keeps: a phone
++     * switched to Silent stays silent, and Do Not Disturb holds unless the
++     * volunteer has let the «Εντολές» channel override it in the phone's
++     * settings. Needs android.permission.VIBRATE (the app's manifest).
++     */
++    private static void vibrateForOrder(Context context, NotificationManager manager) {
++        try {
++            AudioManager audio = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
++            if (audio != null && audio.getRingerMode() == AudioManager.RINGER_MODE_SILENT) return;
++            if (manager.getCurrentInterruptionFilter() > NotificationManager.INTERRUPTION_FILTER_ALL) {
++                NotificationChannel channel = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
++                    ? manager.getNotificationChannel(CHANNEL_ID) : null;
++                if (channel == null || !channel.canBypassDnd()) return;
++            }
++
++            Vibrator vibrator = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
++                ? ((VibratorManager) context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE)).getDefaultVibrator()
++                : (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
++            if (vibrator == null || !vibrator.hasVibrator()) return;
++
++            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
++                vibrator.vibrate(
++                    VibrationEffect.createWaveform(ORDER_VIBRATION, -1),
++                    VibrationAttributes.createForUsage(VibrationAttributes.USAGE_ALARM)
++                );
++            } else {
++                AudioAttributes alarm = new AudioAttributes.Builder()
++                    .setUsage(AudioAttributes.USAGE_ALARM)
++                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
++                    .build();
++                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
++                    vibrator.vibrate(VibrationEffect.createWaveform(ORDER_VIBRATION, -1), alarm);
++                } else {
++                    vibrator.vibrate(ORDER_VIBRATION, -1, alarm);
++                }
++            }
++        } catch (Exception e) {
++            Logger.debug("vibrateForOrder failed: " + e.getMessage());
 +        }
 +    }
 +
@@ -559,6 +618,10 @@ index 0000000..f0f03b0
 +            // Without this the notification is hidden behind "sensitive content"
 +            // on a locked screen on some ROMs - i.e. exactly when it matters.
 +            channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
++            // Ignored for an ordinary app: Android stores false whatever is
++            // asked here (read back on Android 15, v3.332.1). Only the
++            // volunteer can let «Εντολές» through Do Not Disturb, in the
++            // phone's settings for this channel. Kept for the ROMs that honour it.
 +            channel.setBypassDnd(true);
 +            Uri sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
 +            if (sound != null) {

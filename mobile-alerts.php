@@ -171,8 +171,9 @@ foreach ($rows as $row) {
     // global messages) as opposed to routine account noise, so it doubles as
     // the "is this worth waking someone up for" test - same signal the page
     // already uses, rather than a second, drifting definition. Since v3.332.0
-    // it also picks the app's channel: «Εντολές» (loud, through Do Not
-    // Disturb) or «Ενημερώσεις» (an ordinary notification).
+    // it also picks the app's channel: «Εντολές» (heads-up, and an
+    // alarm-strength buzz since v3.332.1) or «Ενημερώσεις» (an ordinary
+    // notification).
     $data = $row['data'] ? json_decode($row['data'], true) : null;
     $ref = notificationPopupRef($data);
     $path = mobileAlertPath($row);

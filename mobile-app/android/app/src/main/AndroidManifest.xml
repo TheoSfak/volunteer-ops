@@ -44,6 +44,13 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
+    <!-- Vibration. Missing until v3.332.1, which silently disabled two things:
+         every navigator.vibrate() in the Action Room page (a WebView ignores it
+         when the app does not hold this), and the alarm-strength buzz an order
+         now makes from AlertPoller. The notification channel's own vibration
+         needs no permission, but many phones switch notification vibration off. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <!-- Lets the app offer its own downloaded update to the package installer.
          Without it a downloaded APK just sits there and the user has to go
          hunting through a file manager. The system still asks the user to
