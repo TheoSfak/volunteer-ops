@@ -3364,6 +3364,15 @@ include __DIR__ . '/includes/header.php';
             <i class="bi bi-binoculars me-1"></i><?= t('assistant.btn') ?>
             <span id="assistantBtnBadge" class="assistant-badge d-none">0</span>
         </button>
+        <!-- «Μαζικό Συμβάν». Up here, next to «Βοηθός», because this is where a
+             coordinator looks for a command, and in BOTH views for the same
+             reason the assistant is: it is needed wherever they are standing.
+             It used to live only in the triage card's header, at its right
+             edge, which is exactly where the floating acknowledgement panel
+             sits — reported as "I cannot find the button". Off: switches it
+             on (with a confirm). On: turns red and takes you to the triage
+             card; ending it stays in the card, away from a stray tap. -->
+        <button type="button" id="mciHeroBtn" class="btn btn-outline-light"><i class="bi bi-clipboard2-pulse me-1"></i><span><?= t('triage.hero_btn') ?></span></button>
         <?php endif; ?>
         <?php if ($canManageWarRoom && !$volunteerTabs): ?>
         <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i><?= t('hero.btn_response_report') ?></button>
@@ -3766,13 +3775,13 @@ include __DIR__ . '/includes/header.php';
 <div class="row g-4 mb-4 wr-legacy-row">
     <div class="col-12">
         <div class="card shadow-sm border-danger<?= ($canManageWarRoom || !empty($triage['active'])) ? '' : ' d-none' ?>" id="triageCard" data-card-id="triageCard">
-            <div class="card-header bg-danger text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div class="card-header bg-danger text-white d-flex flex-column align-items-start gap-2">
                 <h5 class="mb-0"><i class="bi bi-clipboard2-pulse me-1"></i><?= t('triage.card_title') ?>
                     <span class="badge bg-light text-danger ms-1 align-middle d-none" id="triageMciBadge"><?= t('triage.mci_badge') ?></span></h5>
                 <?php if ($canManageWarRoom): ?>
                 <div class="d-flex gap-1 flex-wrap">
-                    <a class="btn btn-sm btn-outline-light d-none" id="triageHandoverBtn" href="mission-triage-handover.php?id=<?= $missionId ?>" target="_blank" rel="noopener"><i class="bi bi-printer me-1"></i><?= t('triage.handover_btn') ?></a>
                     <button type="button" class="btn btn-sm btn-light" id="triageMciToggle"></button>
+                    <a class="btn btn-sm btn-outline-light d-none" id="triageHandoverBtn" href="mission-triage-handover.php?id=<?= $missionId ?>" target="_blank" rel="noopener"><i class="bi bi-printer me-1"></i><?= t('triage.handover_btn') ?></a>
                 </div>
                 <?php endif; ?>
             </div>
@@ -12403,6 +12412,12 @@ function renderTriage(state) {
         toggle.className = 'btn btn-sm ' + (active ? 'btn-outline-light' : 'btn-light fw-bold text-danger');
         toggle.dataset.active = active ? '1' : '0';
     }
+    const heroBtn = document.getElementById('mciHeroBtn');
+    if (heroBtn) {
+        heroBtn.className = 'btn ' + (active ? 'btn-danger fw-bold' : 'btn-outline-light');
+        heroBtn.querySelector('span').textContent = active ? t('triage.hero_btn_active') : t('triage.hero_btn');
+        heroBtn.dataset.active = active ? '1' : '0';
+    }
     document.getElementById('triageHandoverBtn')?.classList.toggle('d-none', !(state && state.victims && state.victims.length));
     document.getElementById('triageFieldControls')?.classList.toggle('d-none', !active);
     // The first scan in a dead zone must not depend on a download, so the
@@ -12577,16 +12592,37 @@ document.getElementById('triageBoard')?.addEventListener('focusout', () => {
 // re-renders when the data changes.
 setInterval(() => { if (triageState && triageState.victims && triageState.victims.length) renderTriageBoard(triageState); }, 30000);
 
-document.getElementById('triageMciToggle')?.addEventListener('click', e => {
-    const btn = e.currentTarget;
-    const turnOn = btn.dataset.active !== '1';
+function triageSetMci(turnOn, btn) {
     if (!confirm(turnOn ? t('triage.mci_activate_confirm') : t('triage.mci_deactivate_confirm'))) return;
     btn.disabled = true;
     postTriage({action: 'mci', active: turnOn ? '1' : '0'}).then(r => {
         btn.disabled = false;
-        if (r && r.ok) renderTriage(r.triage);
-        else alert((r && r.error) || t('common.failed'));
+        if (r && r.ok) {
+            renderTriage(r.triage);
+            if (turnOn) triageGoToCard();
+        } else {
+            alert((r && r.error) || t('common.failed'));
+        }
     });
+}
+// The card may be on another tab (tabbed view) or far down the console.
+function triageGoToCard() {
+    document.dispatchEvent(new CustomEvent('wr-goto-tab', {detail: {tab: 'me'}}));
+    const card = document.getElementById('triageCard');
+    if (!card) return;
+    setTimeout(() => {
+        card.scrollIntoView({behavior: 'smooth', block: 'start'});
+        card.classList.remove('assistant-flash');
+        void card.offsetWidth;
+        card.classList.add('assistant-flash');
+    }, 80);
+}
+document.getElementById('triageMciToggle')?.addEventListener('click', e => {
+    triageSetMci(e.currentTarget.dataset.active !== '1', e.currentTarget);
+});
+document.getElementById('mciHeroBtn')?.addEventListener('click', e => {
+    if (e.currentTarget.dataset.active === '1') triageGoToCard();
+    else triageSetMci(true, e.currentTarget);
 });
 
 // ── Map ─────────────────────────────────────────────────────────────────────
