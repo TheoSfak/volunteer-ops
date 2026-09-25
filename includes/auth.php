@@ -269,6 +269,7 @@ function initSession() {
             && !rememberedDeviceStillValid()) {
             logout();
             session_start();
+            rememberLoginReturnTo();
             setFlash('warning', 'Η συνεδρία σας έληξε. Παρακαλώ συνδεθείτε ξανά.');
             redirect('login.php');
         }
@@ -317,6 +318,7 @@ function getCurrentUserId() {
  */
 function requireLogin() {
     if (!isLoggedIn()) {
+        rememberLoginReturnTo();
         setFlash('error', 'Παρακαλώ συνδεθείτε για να συνεχίσετε.');
         redirect('login.php');
     }
@@ -328,6 +330,75 @@ function requireLogin() {
         setFlash('error', 'Η συνεδρία σας έληξε. Παρακαλώ συνδεθείτε ξανά.');
         redirect('login.php');
     }
+}
+
+/**
+ * Where a signed-out visitor was headed, so login.php can send them on to it
+ * rather than to the dashboard. Every link the app emails out (a completed
+ * mission's debrief, a mission reminder, ...) is opened as often as not in a
+ * browser that is not signed in — a phone's mail app above all — and without
+ * this the person logged in and landed on the dashboard, the page they were
+ * sent to simply lost. That is how "the button in the email goes nowhere".
+ *
+ * Only a page the person themselves navigated to is kept: a background
+ * fetch() or poll that finds the session gone must not become where the next
+ * login lands. Stored as an app-relative path and checked again on the way
+ * out by safeLoginReturnTo(), so it can never point off-site.
+ */
+function rememberLoginReturnTo(): void {
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
+        return;
+    }
+    $fetchDest = $_SERVER['HTTP_SEC_FETCH_DEST'] ?? '';
+    $isPageLoad = $fetchDest !== ''
+        ? $fetchDest === 'document'
+        : stripos($_SERVER['HTTP_ACCEPT'] ?? '', 'text/html') !== false;
+    if (!$isPageLoad) {
+        return;
+    }
+
+    $uri = (string) ($_SERVER['REQUEST_URI'] ?? '');
+    $basePath = rtrim((string) parse_url(BASE_URL, PHP_URL_PATH), '/');
+    if ($basePath !== '') {
+        if (strpos($uri, $basePath . '/') !== 0) {
+            return;
+        }
+        $uri = substr($uri, strlen($basePath));
+    }
+    $target = safeLoginReturnTo(ltrim($uri, '/'));
+    if ($target !== null) {
+        $_SESSION['login_return_to'] = $target;
+    }
+}
+
+/**
+ * The stored destination, removed as it is read so it is used exactly once;
+ * null when there is none or it no longer passes the check.
+ */
+function takeLoginReturnTo(): ?string {
+    $target = $_SESSION['login_return_to'] ?? null;
+    unset($_SESSION['login_return_to']);
+    return is_string($target) ? safeLoginReturnTo($target) : null;
+}
+
+/**
+ * An app-relative "page.php" or "dir/page.php?query" and nothing else: no
+ * scheme, no leading or doubled slash, no "..", no whitespace (so no header
+ * injection), no fragment. Pages that end or restart a session are refused,
+ * or logging in would send someone straight back out.
+ */
+function safeLoginReturnTo(string $path): ?string {
+    if ($path === '' || strlen($path) > 1000) {
+        return null;
+    }
+    if (!preg_match('~^[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*\.php(?:\?[^\s#\\\\]*)?$~D', $path)) {
+        return null;
+    }
+    $script = strtolower(basename((string) parse_url($path, PHP_URL_PATH)));
+    if (in_array($script, ['login.php', 'logout.php', 'register.php', 'visitor-join.php', 'index.php'], true)) {
+        return null;
+    }
+    return $path;
 }
 
 /**

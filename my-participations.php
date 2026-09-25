@@ -16,6 +16,7 @@ $participations = dbFetchAll(
     "SELECT pr.*, 
             s.start_time, s.end_time, s.max_volunteers,
             m.id as mission_id, m.title as mission_title, m.location, m.status as mission_status, m.show_in_ops,
+            EXISTS (SELECT 1 FROM mission_debriefs md WHERE md.mission_id = m.id) as has_debrief,
             d.name as department_name,
             decider.name as decided_by_name
      FROM participation_requests pr
@@ -74,6 +75,14 @@ $pending  = array_filter($participations, fn($p) => $p['status'] === PARTICIPATI
 $approved = array_filter($participations, fn($p) => $p['status'] === PARTICIPATION_APPROVED);
 $rejected = array_filter($participations, fn($p) => $p['status'] === PARTICIPATION_REJECTED);
 $canceled = array_filter($participations, fn($p) => in_array($p['status'], [PARTICIPATION_CANCELED_BY_USER, PARTICIPATION_CANCELED_BY_ADMIN]));
+
+// The debrief lives on mission-view.php, which an approved participant can
+// open once the mission is closed or completed. This page is the one place a
+// volunteer can find a past mission again, so it links there — otherwise the
+// only way in was the completion email.
+$debriefLink = fn($p) => !empty($p['has_debrief']) && in_array($p['mission_status'], [STATUS_CLOSED, STATUS_COMPLETED], true)
+    ? 'mission-view.php?id=' . (int) $p['mission_id'] . '#debrief'
+    : null;
 
 // Active NOW: approved shifts currently in progress
 $now = time();
@@ -407,6 +416,9 @@ include __DIR__ . '/includes/header.php';
                         <tr class="<?= $isPast ? 'table-light' : '' ?>">
                             <td>
                                 <strong><?= h($p['mission_title']) ?></strong>
+                                <?php if ($url = $debriefLink($p)): ?>
+                                    <br><a href="<?= h($url) ?>" class="btn btn-xs btn-outline-success mt-1" style="font-size:.75rem;padding:1px 6px"><i class="bi bi-clipboard-check me-1"></i>Αναφορά (Debrief)</a>
+                                <?php endif; ?>
                                 <?php if ($p['notes']): ?>
                                     <br><small class="text-muted"><i class="bi bi-quote me-1"></i><?= h($p['notes']) ?></small>
                                 <?php endif; ?>
@@ -470,7 +482,10 @@ include __DIR__ . '/includes/header.php';
                 <div class="card mobile-card border-success <?= $isPast ? 'opacity-75' : '' ?>">
                     <div class="card-body">
                         <div class="mobile-card-header">
-                            <strong><?= h($p['mission_title']) ?></strong>
+                            <div><strong><?= h($p['mission_title']) ?></strong>
+                            <?php if ($url = $debriefLink($p)): ?>
+                                <div><a href="<?= h($url) ?>" class="btn btn-xs btn-outline-success mt-1" style="font-size:.75rem;padding:1px 6px"><i class="bi bi-clipboard-check me-1"></i>Αναφορά (Debrief)</a></div>
+                            <?php endif; ?></div>
                             <div>
                                 <?php if ($p['attended']): ?>
                                     <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Παρευρέθηκα</span>

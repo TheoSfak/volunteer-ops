@@ -130,7 +130,15 @@ if (!$canManageWarRoom && !$isApprovedParticipant) {
 }
 if ($mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
     setFlash('warning', t('wr.mission_not_active'));
-    redirect('mission-view.php?id=' . $missionId);
+    // Not mission-view.php for a partner-org guest: bootstrap.php's allow-list
+    // never lets them open it, and it sends a guest whose one mission this is
+    // straight back here — the two redirects bounced forever the moment that
+    // mission ended, so the guest could not use the app at all, not even to
+    // log in (dashboard.php is off their list too). profile.php is where a
+    // guest finds their finished missions and their feedback form for each.
+    // Not for a mission visitor, whose list has no profile.php either;
+    // bootstrap.php signs them out as soon as their mission is no longer open.
+    redirect(isExternalGuest() && !isMissionVisitor() ? 'profile.php' : 'mission-view.php?id=' . $missionId);
 }
 
 // Which LAYOUT this person gets — deliberately NOT the same question as

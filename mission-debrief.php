@@ -77,15 +77,26 @@ if (isPost()) {
                 $shiftIds = array_column($shifts, 'id');
                 if (!empty($shiftIds)) {
                     $ph = implode(',', array_fill(0, count($shiftIds), '?'));
+                    // Only people the link actually opens for. mission-view.php
+                    // lets an APPROVED participant see a completed mission, but
+                    // not a still-PENDING applicant (they never took part), and
+                    // not a guest: partner-org accounts are held off
+                    // mission-view.php entirely (bootstrap.php) and are asked
+                    // for their own feedback via mission-guest-debrief.php
+                    // instead, while mission visitors are gone once the mission
+                    // closes and only ever had a synthesized address. Both of
+                    // those used to get this email anyway, and its button led
+                    // nowhere — for a guest, into a redirect loop.
                     $participants = dbFetchAll(
                         "SELECT DISTINCT pr.volunteer_id, u.name, u.email
                          FROM participation_requests pr
                          JOIN users u ON pr.volunteer_id = u.id
-                         WHERE pr.shift_id IN ($ph) AND pr.status IN ('PENDING', 'APPROVED')",
-                        $shiftIds
+                         WHERE pr.shift_id IN ($ph) AND pr.status = ?
+                           AND u.is_external = 0 AND u.deleted_at IS NULL",
+                        array_merge($shiftIds, [PARTICIPATION_APPROVED])
                     );
-                    
-                    $missionUrl = rtrim(BASE_URL, '/') . '/mission-view.php?id=' . $id;
+
+                    $missionUrl = rtrim(BASE_URL, '/') . '/mission-view.php?id=' . $id . '#debrief';
                     $appName = getSetting('app_name', 'VolunteerOps');
                     
                     foreach ($participants as $p) {
@@ -96,7 +107,7 @@ if (isPost()) {
                             'Η αποστολή ολοκληρώθηκε επιτυχώς. Μπορείτε να δείτε την αναφορά (debrief) στη σελίδα της αποστολής.',
                             'success',
                             '',
-                            ['url' => 'mission-view.php?id=' . $id]
+                            ['url' => 'mission-view.php?id=' . $id . '#debrief']
                         );
                         
                         // Email notification

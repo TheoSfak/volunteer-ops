@@ -59,11 +59,29 @@ $canViewAllMissions = hasPagePermission('missions_view');   // see draft/closed/
 $canManageMissions  = hasPagePermission('missions_manage'); // edit/status/delete
 $canManageShifts    = hasPagePermission('shifts_manage');   // approve/reject participants
 
-// Non-admins can only view OPEN missions; users with missions_view see all statuses
+// Check if user has approved participation (for chat access, and for a
+// completed mission below)
+$isApprovedParticipant = false;
+if (!$canViewAllMissions) {
+    $isApprovedParticipant = dbFetchValue(
+        "SELECT COUNT(*) FROM participation_requests pr
+         INNER JOIN shifts s ON pr.shift_id = s.id
+         WHERE s.mission_id = ? AND pr.volunteer_id = ? AND pr.status = ?",
+        [$id, $user['id'], PARTICIPATION_APPROVED]
+    ) > 0;
+}
+
+// Non-admins can only view OPEN missions; users with missions_view see all statuses.
+// A COMPLETED mission stays open to the people who took part in it: that is
+// where its debrief is shown, and the "mission completed" email and
+// notification (mission-debrief.php) link every participant straight here.
+// Without this they were bounced to missions.php, so the button in that email
+// led nowhere.
 $allowedStatuses = [STATUS_OPEN, STATUS_CLOSED];
 $isResponsible = !empty($mission['responsible_user_id']) && $mission['responsible_user_id'] == $user['id'];
 $isMissingPersonMission = ((int)($mission['mission_type_id'] ?? 0) === missingPersonMissionTypeId());
-if (!$canViewAllMissions && !$isResponsible && !in_array($mission['status'], $allowedStatuses)) {
+$participantSeesCompleted = $isApprovedParticipant && $mission['status'] === STATUS_COMPLETED;
+if (!$canViewAllMissions && !$isResponsible && !$participantSeesCompleted && !in_array($mission['status'], $allowedStatuses)) {
     setFlash('error', 'Δεν έχετε πρόσβαση σε αυτή την αποστολή.');
     redirect('missions.php');
 }
@@ -92,16 +110,6 @@ if (!$canViewAllMissions) {
     }
 }
 
-// Check if user has approved participation (for chat access)
-$isApprovedParticipant = false;
-if (!$canViewAllMissions) {
-    $isApprovedParticipant = dbFetchValue(
-        "SELECT COUNT(*) FROM participation_requests pr
-         INNER JOIN shifts s ON pr.shift_id = s.id
-         WHERE s.mission_id = ? AND pr.volunteer_id = ? AND pr.status = ?",
-        [$id, $user['id'], PARTICIPATION_APPROVED]
-    ) > 0;
-}
 $canAccessChat = $canViewAllMissions || $isApprovedParticipant;
 
 // Get chat messages if user has access
@@ -834,8 +842,8 @@ include __DIR__ . '/includes/header.php';
         </div>
         
         <?php if ($debrief): ?>
-        <!-- Mission Debrief -->
-        <div class="card mb-4" style="border:2px solid #198754;border-radius:10px;overflow:hidden">
+        <!-- Mission Debrief (#debrief: the completion email links here) -->
+        <div class="card mb-4" id="debrief" style="border:2px solid #198754;border-radius:10px;overflow:hidden;scroll-margin-top:80px">
             <div class="card-header d-flex justify-content-between align-items-center py-2" style="background:linear-gradient(135deg,#d1f0e0 0%,#eafaf1 100%);border-bottom:2px solid #198754">
                 <h6 class="mb-0 fw-bold text-dark"><i class="bi bi-clipboard-check-fill me-2 text-success"></i>Αναφορά Μετά την Αποστολή (Debrief)</h6>
                 <span class="badge text-dark fw-normal" style="background:#b7e4c7;font-size:0.78rem"><i class="bi bi-person-fill me-1"></i><?= h($debrief['submitter_name']) ?></span>

@@ -5,9 +5,10 @@
 
 require_once __DIR__ . '/bootstrap.php';
 
-// Already logged in?
+// Already logged in? (A remembered device is signed back in before this runs,
+// so it too goes on to the page it was sent to — see rememberLoginReturnTo().)
 if (isLoggedIn()) {
-    redirect('dashboard.php');
+    redirect(takeLoginReturnTo() ?? 'dashboard.php');
 }
 
 $error = '';
@@ -35,7 +36,7 @@ if (isPost()) {
                 if (post('remember') === '1') {
                     issueRememberToken((int) $result['user']['id']);
                 }
-                redirect('dashboard.php');
+                redirect(takeLoginReturnTo() ?? 'dashboard.php');
             }
         } else {
             $error = $result['message'];
