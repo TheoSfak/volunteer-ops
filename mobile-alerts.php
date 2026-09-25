@@ -58,15 +58,31 @@ $userId = (int) $tokenRow['user_id'];
 
 $sinceId = isset($_GET['since_id']) ? (int) $_GET['since_id'] : 0;
 
+// v3.330.0: the same poll carries what the background service should be doing
+// for the shift it tracks — 'track', 'pause' or 'stop'
+// (nativeTrackingInstruction()). Only when the app says which shift (older
+// APKs do not, and get no field), and never on a failed lookup: a database
+// hiccup must not be the reason somebody's GPS switches off mid-search.
+$trackingShiftId = isset($_GET['shift_id']) ? (int) $_GET['shift_id'] : 0;
+$tracking = null;
+if ($trackingShiftId > 0) {
+    try {
+        $tracking = nativeTrackingInstruction($userId, $trackingShiftId);
+    } catch (Throwable $e) {
+        $tracking = null;
+    }
+}
+
 // First contact: hand back where the log currently is and nothing else, so
 // installing the app never fires a backlog of notifications at someone.
 if ($sinceId <= 0) {
     $maxRow = dbFetchOne("SELECT COALESCE(MAX(id), 0) AS max_id FROM notifications WHERE user_id = ?", [$userId]);
-    echo json_encode([
+    echo json_encode(array_filter([
         'ok' => true,
         'cursor' => (int) ($maxRow['max_id'] ?? 0),
         'alerts' => [],
-    ]);
+        'tracking' => $tracking,
+    ], fn($v) => $v !== null));
     exit;
 }
 
@@ -99,8 +115,9 @@ foreach ($rows as $row) {
     ];
 }
 
-echo json_encode([
+echo json_encode(array_filter([
     'ok' => true,
     'cursor' => $cursor,
     'alerts' => $alerts,
-]);
+    'tracking' => $tracking,
+], fn($v) => $v !== null));

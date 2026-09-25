@@ -2067,7 +2067,7 @@ CREATE TABLE IF NOT EXISTS `mission_action_room_participants` (
     `mission_id` INT UNSIGNED NOT NULL,
     `user_id` INT UNSIGNED NOT NULL,
     `added_by` INT UNSIGNED NULL,
-    `last_gps_error` ENUM('denied','unavailable','timeout','imprecise','implausible','unknown','mock','location_off','power_save') NULL COMMENT 'Last reason this volunteer produced no position; NULL = none outstanding',
+    `last_gps_error` ENUM('denied','unavailable','timeout','imprecise','implausible','unknown','mock','location_off','power_save','stopped_by_user') NULL COMMENT 'Last reason this volunteer produced no position; NULL = none outstanding',
     `last_gps_error_at` TIMESTAMP NULL COMMENT 'When that failure was reported',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (`mission_id`, `user_id`),

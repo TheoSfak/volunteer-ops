@@ -4074,6 +4074,7 @@ include __DIR__ . '/includes/header.php';
                          switch, battery saver). Filled from the app's own
                          diagnostics; stays hidden in a browser. -->
                     <div id="myNativeGpsNote" class="small mt-1 d-none"></div>
+                    <div id="myNativeGpsStopped" class="small mt-1 d-none"></div>
                     <?php endif; ?>
                 <?php endif; ?>
             </div>
@@ -16802,8 +16803,42 @@ async function offerNativeLocationSettings(Preferences) {
 // Set when start() was refused for a reason the volunteer can fix (permission,
 // location off). Coming back to the page after fixing it retries once.
 let nativeStartNeedsRetry = false;
+// ── «Διακοπή GPS» (v3.330.0) ────────────────────────────────────────────────
+// The app's notification has a stop button; closing the app does not stop
+// tracking. A deliberate stop is remembered by the phone for that shift, and
+// this page honours it: no quiet restart on the next reload, a line on the
+// volunteer's own card instead, with the button to start again.
+let nativeRestartRequested = false;
+function showNativeUserStopped(on) {
+    const el = document.getElementById('myNativeGpsStopped');
+    if (!el) return;
+    if (!on) {
+        el.classList.add('d-none');
+        el.innerHTML = '';
+        return;
+    }
+    if (!el.classList.contains('d-none')) return;
+    // Translated strings only — no user data.
+    el.innerHTML = `<div class="text-danger fw-bold"><i class="bi bi-geo-alt-slash me-1"></i>${escapeHtml(t('myping.native_user_stopped'))}</div>`
+        + `<button type="button" class="btn btn-sm btn-primary mt-1" id="myNativeGpsRestartBtn"><i class="bi bi-play-fill me-1"></i>${escapeHtml(t('myping.native_restart'))}</button>`;
+    el.classList.remove('d-none');
+    document.getElementById('myNativeGpsRestartBtn').addEventListener('click', () => {
+        nativeRestartRequested = true;
+        showNativeUserStopped(false);
+        bgTrackingKickedOff = false;
+        startNativeBackgroundTracking();
+    });
+}
+async function nativeStoppedByUser(shiftId) {
+    const state = await nativePluginCall('vopsTrackingState');
+    return !!(state && !state.running && String(state.userStoppedShift) === String(shiftId));
+}
+
 async function recheckNativeGps() {
     if (document.visibilityState !== 'visible' || !bgPluginReady() || !bgTrackingKickedOff) return;
+    // Stopped from the notification while this page stayed open.
+    const myPingButton = document.querySelector('.send-ping');
+    if (myPingButton && await nativeStoppedByUser(myPingButton.dataset.shiftId)) showNativeUserStopped(true);
     const diag = await refreshNativeGpsDiagnostics();
     if (nativeStartNeedsRetry && diag && diag.fine && diag.locationEnabled) {
         nativeStartNeedsRetry = false;
@@ -16829,6 +16864,19 @@ function startNativeBackgroundTracking() {
         const pingButton = document.querySelector('.send-ping');
 
         if (!pingButton) {
+            // v3.330.0: an app that can take the server's word leaves it to
+            // the server (mobile-alerts.php, nativeTrackingInstruction()):
+            // paused for somebody whose GPS tick was removed, so ticking them
+            // again resumes it without their touching the phone; stopped once
+            // their mission is over. This only asks for that answer now. It
+            // also no longer stops the tracking of ANOTHER mission's shift
+            // just because this page, for a mission they have no part in,
+            // has no GPS button. An older app gets the old stop.
+            if (typeof BackgroundGeolocation.vopsPollNow === 'function') {
+                bgDebugLog('no_ping_button', 'leaving track/pause/stop to the server');
+                nativePluginCall('vopsPollNow');
+                return;
+            }
             bgDebugLog('no_ping_button', 'not in an active approved participation on an open mission');
             try { await BackgroundGeolocation.stop(); } catch (e) {}
             return;
@@ -16862,6 +16910,13 @@ function startNativeBackgroundTracking() {
             bgDebugLog('hook_ready', 'pingButton found, token available');
 
             const shiftId = pingButton.dataset.shiftId;
+            // Stopped by the volunteer from the notification: not restarted
+            // behind their back — their card says so and offers it instead.
+            if (!nativeRestartRequested && await nativeStoppedByUser(shiftId)) {
+                bgDebugLog('user_stopped', 'not restarting: stopped from the notification, shift ' + shiftId);
+                showNativeUserStopped(true);
+                return;
+            }
             // Same subfolder trap as the media share link above: identical to
             // location.origin on a root-domain install (both live ones), but
             // the native service would post pings into a 404 anywhere else.
@@ -16873,7 +16928,12 @@ function startNativeBackgroundTracking() {
                 intervalMs: AUTO_PING_CADENCE_MS,
                 url: pingUrl,
                 authToken: token,
-                requestPermissions: true
+                requestPermissions: true,
+                // v3.330.0, ignored by older apps: what the notification says
+                // while the coordinator has this volunteer's GPS off, and the
+                // label of its «Διακοπή GPS» button.
+                pausedMessage: t('bgtrack.paused_text'),
+                stopLabel: t('bgtrack.stop_action')
             };
             // start() is a CALLBACK-type plugin method: Capacitor returns the
             // callback id at once and delivers a rejection to this callback,
@@ -16952,6 +17012,10 @@ function startNativeBackgroundTracking() {
             // Dispatched — a refusal, if any, arrives at onLocation.
             bgDebugLog('start_dispatched', '');
             refreshNativeGpsDiagnostics();
+            // A service the server had paused answers this start with
+            // ALREADY_STARTED and stays paused; asking now resumes it at once
+            // instead of at the next 30-second tick. Older apps: no-op.
+            nativePluginCall('vopsPollNow');
         } catch (e) {
             console.error('[BackgroundGeolocation] setup failed', e);
             bgDebugLog('hook_exception', (e && e.message) || String(e));

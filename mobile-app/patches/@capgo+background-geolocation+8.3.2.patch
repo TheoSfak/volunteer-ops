@@ -1,9 +1,9 @@
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
 new file mode 100644
-index 0000000..4501866
+index 0000000..e32481d
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
-@@ -0,0 +1,289 @@
+@@ -0,0 +1,299 @@
 +package com.capgo.capacitor_background_geolocation;
 +
 +import android.app.Notification;
@@ -91,21 +91,24 @@ index 0000000..4501866
 +            if (pingUrl == null || pingUrl.isEmpty() || authToken == null || authToken.isEmpty()) {
 +                return;
 +            }
-+            URL parsed = new URL(pingUrl);
-+            String base = parsed.getProtocol() + "://" + parsed.getAuthority();
++            String base = LocationStore.siteBase(context);
 +            if (executor == null) {
 +                executor = Executors.newSingleThreadExecutor();
 +            }
 +            Context app = context.getApplicationContext();
-+            executor.execute(() -> fetchAndNotify(app, base, authToken));
++            int shiftId = LocationStore.getShiftId(context);
++            executor.execute(() -> fetchAndNotify(app, base, authToken, shiftId));
 +        } catch (Exception ignore) {}
 +    }
 +
-+    private static void fetchAndNotify(Context context, String baseUrl, String authToken) {
++    private static void fetchAndNotify(Context context, String baseUrl, String authToken, int shiftId) {
 +        HttpURLConnection connection = null;
 +        try {
 +            long cursor = prefs(context).getLong(KEY_CURSOR, 0L);
-+            String url = baseUrl + "/mobile-alerts.php?since_id=" + cursor;
++            // VolunteerOps (v3.330.0): the shift this service tracks, so the
++            // reply can also say whether to keep tracking it — see
++            // BackgroundGeolocationService.applyTrackingInstruction().
++            String url = baseUrl + "/mobile-alerts.php?since_id=" + cursor + (shiftId > 0 ? "&shift_id=" + shiftId : "");
 +
 +            connection = (HttpURLConnection) new URL(url).openConnection();
 +            connection.setRequestMethod("GET");
@@ -130,6 +133,13 @@ index 0000000..4501866
 +            JSONObject body = new JSONObject(sb.toString());
 +            if (!body.optBoolean("ok", false)) {
 +                return;
++            }
++
++            // Absent from an older server's reply, and from any reply to a
++            // request without a shift: then nothing changes.
++            String tracking = body.optString("tracking", "");
++            if (!tracking.isEmpty()) {
++                BackgroundGeolocationService.applyTrackingInstruction(tracking);
 +            }
 +
 +            JSONArray alerts = body.optJSONArray("alerts");
@@ -294,7 +304,7 @@ index 0000000..4501866
 +    }
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java
-index 00b9e10..3554a71 100644
+index 00b9e10..a1c472e 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java
 @@ -1,6 +1,7 @@
@@ -320,7 +330,7 @@ index 00b9e10..3554a71 100644
  import java.net.URL;
  import java.util.Collections;
  import java.util.HashSet;
-@@ -47,10 +52,78 @@ import org.json.JSONObject;
+@@ -47,10 +52,106 @@ import org.json.JSONObject;
          @Permission(strings = { Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION }, alias = "location"),
          @Permission(strings = { Manifest.permission.ACCESS_BACKGROUND_LOCATION }, alias = "backgroundLocation"),
          @Permission(strings = { Manifest.permission.POST_NOTIFICATIONS }, alias = "notification")
@@ -344,6 +354,34 @@ index 00b9e10..3554a71 100644
 +    @PluginMethod
 +    public void vopsDiagnostics(PluginCall call) {
 +        call.resolve(VopsGpsHealth.diagnostics(getContext()));
++    }
++
++    /**
++     * VolunteerOps addition (v3.330.0): ask the server now, instead of at the
++     * next 30-second tick, whether the background service should track,
++     * pause or stop (see AlertPoller). The page calls it right after a GPS
++     * tick change reaches it, so a phone in the volunteer's hand follows at
++     * once. Its presence is also how the page knows this app can pause.
++     */
++    @PluginMethod
++    public void vopsPollNow(PluginCall call) {
++        AlertPoller.poll(getContext());
++        call.resolve();
++    }
++
++    /**
++     * VolunteerOps addition (v3.330.0): whether background tracking is on,
++     * paused by the server, and which shift (if any) the volunteer stopped
++     * with «Διακοπή GPS» — so the page can say so on their card and offer to
++     * start it again, instead of restarting it behind their back.
++     */
++    @PluginMethod
++    public void vopsTrackingState(PluginCall call) {
++        JSObject ret = new JSObject();
++        ret.put("running", LocationStore.isEnabled(getContext()));
++        ret.put("paused", LocationStore.isPaused(getContext()));
++        ret.put("userStoppedShift", LocationStore.getUserStoppedShift(getContext()));
++        call.resolve(ret);
 +    }
 +
 +    /**
@@ -400,7 +438,22 @@ index 00b9e10..3554a71 100644
      private final String pluginVersion = "";
  
      private CompletableFuture<BackgroundGeolocationService.LocalBinder> serviceConnectionFuture;
-@@ -97,9 +170,16 @@ public class BackgroundGeolocation extends Plugin {
+@@ -78,7 +179,13 @@ public class BackgroundGeolocation extends Plugin {
+             return;
+         }
+ 
+-        if (serviceConnectionFuture != null) {
++        // VolunteerOps patch (v3.330.0): the service can now stop itself — the
++        // server said "stop", or the volunteer pressed «Διακοπή GPS» — while
++        // this plugin still holds its binding. Rejecting that as
++        // ALREADY_STARTED would leave GPS off until the app was killed, so a
++        // cleared LocationStore (what every stop leaves behind) means
++        // "stopped", and the start goes through on the same binding.
++        if (serviceConnectionFuture != null && LocationStore.isEnabled(getContext())) {
+             call.reject("Service already started", "ALREADY_STARTED");
+             return;
+         }
+@@ -97,9 +204,16 @@ public class BackgroundGeolocation extends Plugin {
          }
  
          // location permission granted.
@@ -419,7 +472,31 @@ index 00b9e10..3554a71 100644
          }
  
          // Everything is OK, continuing to adding a watcher
-@@ -117,7 +197,10 @@ public class BackgroundGeolocation extends Plugin {
+@@ -111,13 +225,34 @@ public class BackgroundGeolocation extends Plugin {
+         if (call.getBoolean("stale", false)) {
+             fetchLastLocation(call);
+         }
++        // VolunteerOps (v3.330.0): the paused text and the stop button's
++        // label, in the volunteer's language, saved before the service first
++        // draws its notification.
++        LocationStore.saveTexts(getContext(), call.getString("pausedMessage", null), call.getString("stopLabel", null));
++        // Starting again is the answer to a deliberate stop (the page only
++        // starts over one when the volunteer asks it to).
++        LocationStore.setUserStoppedShift(getContext(), 0);
++        // Restarting a service that stopped itself: it is still bound but no
++        // longer started, and only a started service may run in the
++        // foreground. getServiceConnection() only starts it for a new binding.
++        if (serviceConnectionFuture != null) {
++            Intent serviceIntent = new Intent(getContext(), BackgroundGeolocationService.class);
++            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
++                getContext().startForegroundService(serviceIntent);
++            } else {
++                getContext().startService(serviceIntent);
++            }
++        }
+         getServiceConnection().thenAccept((serviceBinder) -> {
+             serviceBinder.start(
+                 call.getCallbackId(),
                  call.getString("backgroundTitle", "Using your location"),
                  call.getString("backgroundMessage", ""),
                  call.getFloat("distanceFilter", 0f),
@@ -432,7 +509,7 @@ index 00b9e10..3554a71 100644
          });
      }
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
-index 85f2a02..7f93aa9 100644
+index 85f2a02..9017ad4 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
 @@ -12,6 +12,7 @@ import android.graphics.Color;
@@ -465,7 +542,21 @@ index 85f2a02..7f93aa9 100644
  import org.json.JSONObject;
  
  // A bound and started service that is promoted to a foreground service
-@@ -40,8 +54,19 @@ public class BackgroundGeolocationService extends Service {
+@@ -31,6 +45,13 @@ import org.json.JSONObject;
+ public class BackgroundGeolocationService extends Service {
+ 
+     static final String ACTION_BROADCAST = (BackgroundGeolocationService.class.getPackage().getName() + ".broadcast");
++    // VolunteerOps patch (v3.330.0): the «Διακοπή GPS» button on this
++    // service's own notification. See onStartCommand().
++    static final String ACTION_VOPS_STOP_BY_USER = (BackgroundGeolocationService.class.getPackage().getName() + ".vopsStopByUser");
++    // The running instance, so AlertPoller (a static helper on its own
++    // thread) can hand it the server's track/pause/stop instruction. Only
++    // ever touched on the main thread.
++    private static BackgroundGeolocationService vopsInstance;
+     private final IBinder binder = new LocalBinder();
+ 
+     private static final double EARTH_RADIUS_M = 6371000;
+@@ -40,8 +61,19 @@ public class BackgroundGeolocationService extends Service {
  
      private String callbackId;
  
@@ -487,7 +578,7 @@ index 85f2a02..7f93aa9 100644
      private MediaPlayer mediaPlayer;
      private double[][] route;
      private double distanceThreshold;
-@@ -50,14 +75,17 @@ public class BackgroundGeolocationService extends Service {
+@@ -50,20 +82,104 @@ public class BackgroundGeolocationService extends Service {
      private Handler watchdogHandler = new Handler(Looper.getMainLooper());
      private Runnable watchdogRunnable;
      private Runnable restartRunnable;
@@ -507,7 +598,94 @@ index 85f2a02..7f93aa9 100644
  
      @Override
      public IBinder onBind(Intent intent) {
-@@ -78,7 +106,7 @@ public class BackgroundGeolocationService extends Service {
+         return binder;
+     }
+ 
++    @Override
++    public void onCreate() {
++        super.onCreate();
++        vopsInstance = this;
++    }
++
++    // ── VolunteerOps patch (v3.330.0): the server decides ────────────────────
++    // Nothing used to tell this service to stop. A volunteer whose GPS tick
++    // was removed, or whose mission had closed, kept GPS on and kept sending
++    // fixes the server refused, until they next opened the app. AlertPoller
++    // now brings back the server's word every 30 seconds
++    // (nativeTrackingInstruction() in includes/functions-warroom.php):
++    //   track — carry on (and resume, if paused);
++    //   pause — GPS off, service and alert polling kept, notification says
++    //           why; a coordinator ticking them again resumes it untouched;
++    //   stop  — end everything, as the page's own stop() would.
++    // Anything else, or no answer at all, changes nothing.
++    static void applyTrackingInstruction(String instruction) {
++        new Handler(Looper.getMainLooper()).post(() -> {
++            BackgroundGeolocationService service = vopsInstance;
++            if (service == null || service.nativePostUrl == null) return;
++            if ("pause".equals(instruction)) service.pauseTracking();
++            else if ("track".equals(instruction)) service.resumeTracking();
++            else if ("stop".equals(instruction)) service.stopTracking("server_stop");
++        });
++    }
++
++    private void pauseTracking() {
++        Context context = getApplicationContext();
++        if (LocationStore.isPaused(context)) return;
++        LocationStore.setPaused(context, true);
++        if (client != null && locationCallback != null) {
++            client.removeLocationUpdates(locationCallback);
++        }
++        // No fixes are expected now, so no "no fix arrived" reports either.
++        stopWatchdog();
++        VopsGpsHealth.clear();
++        promoteToForeground(LocationStore.getTitle(context), pausedMessage(context));
++        DebugLog.log(context, "tracking_paused", "server instruction");
++    }
++
++    private void resumeTracking() {
++        Context context = getApplicationContext();
++        if (!LocationStore.isPaused(context)) return;
++        LocationStore.setPaused(context, false);
++        if (client != null && locationCallback != null) {
++            requestLocationUpdates();
++            startWatchdog();
++        }
++        promoteToForeground(LocationStore.getTitle(context), LocationStore.getMessage(context));
++        DebugLog.log(context, "tracking_resumed", "server instruction");
++    }
++
++    private static String pausedMessage(Context context) {
++        String text = LocationStore.getPausedMessage(context);
++        return text.isEmpty() ? LocationStore.getMessage(context) : text;
++    }
++
++    // Everything the page's stop() does, reachable from here too: the server
++    // saying "stop" and the volunteer's own button both end the service.
++    // LocationStore.clear() is what lets the page's next start() go through
++    // again (BackgroundGeolocation.start() treats a cleared store as stopped).
++    private String stopTracking(String why) {
++        Context context = getApplicationContext();
++        DebugLog.log(context, "tracking_stopped", why);
++        LocationStore.clear(context);
++        nativePostUrl = null;
++        stopWatchdog();
++        // Must stop with the service: LocationStore.clear() above wipes the
++        // token, so every later poll would be a guaranteed 401.
++        stopAlertPolling();
++        if (client != null && locationCallback != null) {
++            client.removeLocationUpdates(locationCallback);
++        }
++        stopForeground(true);
++        stopSelf();
++        releaseMediaPlayer();
++        releaseWakeLock();
++        return callbackId;
++    }
++
+     // Some devices allow a foreground service to outlive the application's main
+     // activity, leading to nasty crashes as reported in issue #59. If we learn
+     // that the application has been killed, all watchers are stopped and the
+@@ -78,7 +194,7 @@ public class BackgroundGeolocationService extends Service {
              return false;
          }
          if (client != null && locationCallback != null) {
@@ -516,20 +694,59 @@ index 85f2a02..7f93aa9 100644
          }
          releaseMediaPlayer();
          releaseWakeLock();
-@@ -112,29 +140,30 @@ public class BackgroundGeolocationService extends Service {
+@@ -104,37 +220,68 @@ public class BackgroundGeolocationService extends Service {
+     @Override
+     public int onStartCommand(Intent intent, int flags, int startId) {
+         Context context = getApplicationContext();
++        // VolunteerOps patch (v3.330.0): «Διακοπή GPS» on the notification.
++        // Closing the app does NOT stop tracking — people swipe apps away out
++        // of habit, and the command post would lose them without knowing —
++        // so this is the one deliberate way for the volunteer to stop it,
++        // and the command post is told that they did.
++        if (intent != null && ACTION_VOPS_STOP_BY_USER.equals(intent.getAction())) {
++            if (LocationStore.isEnabled(context)) {
++                // Reported before stopTracking(), which wipes the URL and
++                // token the report is sent with (report() reads both now).
++                VopsGpsHealth.clear();
++                VopsGpsHealth.report(context, "stopped_by_user");
++                LocationStore.setUserStoppedShift(context, LocationStore.getShiftId(context));
++                stopTracking("stopped_by_user");
++            } else {
++                stopForeground(true);
++                stopSelf();
++            }
++            return START_NOT_STICKY;
++        }
+         if (!LocationStore.isEnabled(context)) {
+             // Not in native delivery mode: preserve the original behavior where the
+             // service does not outlive the app, so it is not sticky-restarted.
+             return START_NOT_STICKY;
+         }
          nativePostUrl = LocationStore.getUrl(context);
-         promoteToForeground(LocationStore.getTitle(context), LocationStore.getMessage(context));
+-        promoteToForeground(LocationStore.getTitle(context), LocationStore.getMessage(context));
++        // A service paused by the server stays paused through a restart.
++        boolean paused = LocationStore.isPaused(context);
++        promoteToForeground(LocationStore.getTitle(context), paused ? pausedMessage(context) : LocationStore.getMessage(context));
          if (client == null || locationCallback == null) {
-+            DebugLog.log(context, "onStartCommand_reestablish", "client or callback was null, re-registering");
++            DebugLog.log(context, "onStartCommand_reestablish", "client or callback was null, re-registering" + (paused ? " (paused)" : ""));
              acquireWakeLock();
 -            client = (LocationManager) getSystemService(Context.LOCATION_SERVICE);
 +            client = LocationServices.getFusedLocationProviderClient(context);
              currentDistanceFilter = LocationStore.getDistanceFilter(context);
 +            currentIntervalMs = LocationStore.getIntervalMs(context);
              locationCallback = createLocationListener(this);
-             requestLocationUpdates();
-             startWatchdog();
-         }
+-            requestLocationUpdates();
+-            startWatchdog();
+-        }
++            if (!paused) {
++                requestLocationUpdates();
++                startWatchdog();
++            }
++            // VolunteerOps (v3.330.0): a restarted service never started its
++            // alert poll again, so it delivered no orders — and the poll is
++            // now also the only way a paused service learns to resume.
++            startAlertPolling();
++        }
 +        // A service the system killed and restarted mid-outage still has
 +        // its kept fixes on disk; send them as soon as it can.
 +        VopsFixBuffer.drainAsync(context);
@@ -538,6 +755,9 @@ index 85f2a02..7f93aa9 100644
  
      @Override
      public void onDestroy() {
++        if (vopsInstance == this) {
++            vopsInstance = null;
++        }
          if (client != null && locationCallback != null) {
 -            client.removeUpdates(locationCallback);
 +            client.removeLocationUpdates(locationCallback);
@@ -553,7 +773,7 @@ index 85f2a02..7f93aa9 100644
      }
  
      private void releaseMediaPlayer() {
-@@ -183,10 +212,18 @@ public class BackgroundGeolocationService extends Service {
+@@ -183,10 +330,18 @@ public class BackgroundGeolocationService extends Service {
  
      private void restartLocationUpdates() {
          Logger.debug("Location watchdog timed out, restarting updates");
@@ -573,7 +793,7 @@ index 85f2a02..7f93aa9 100644
          if (restartRunnable != null) {
              watchdogHandler.removeCallbacks(restartRunnable);
          }
-@@ -194,11 +231,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -194,11 +349,7 @@ public class BackgroundGeolocationService extends Service {
              if (client == null || locationCallback == null) {
                  return;
              }
@@ -586,7 +806,7 @@ index 85f2a02..7f93aa9 100644
              startWatchdog();
          };
          watchdogHandler.postDelayed(restartRunnable, 10000);
-@@ -209,7 +242,17 @@ public class BackgroundGeolocationService extends Service {
+@@ -209,7 +360,17 @@ public class BackgroundGeolocationService extends Service {
          if (watchdogRunnable == null) {
              watchdogRunnable = this::restartLocationUpdates;
          }
@@ -605,7 +825,7 @@ index 85f2a02..7f93aa9 100644
      }
  
      private void stopWatchdog() {
-@@ -221,8 +264,48 @@ public class BackgroundGeolocationService extends Service {
+@@ -221,8 +382,52 @@ public class BackgroundGeolocationService extends Service {
          }
      }
  
@@ -644,6 +864,10 @@ index 85f2a02..7f93aa9 100644
 +    }
 +
      private void handleLocationChanged(android.location.Location location) {
++        // A fix already on its way when the pause arrived: not sent.
++        if (nativePostUrl != null && LocationStore.isPaused(getApplicationContext())) {
++            return;
++        }
          startWatchdog();
 +        VopsGpsHealth.clear();
 +        DebugLog.log(
@@ -654,7 +878,7 @@ index 85f2a02..7f93aa9 100644
          if (nativePostUrl != null) {
              postLocationNatively(location);
          }
-@@ -242,22 +325,22 @@ public class BackgroundGeolocationService extends Service {
+@@ -242,22 +447,22 @@ public class BackgroundGeolocationService extends Service {
  
      // Delivers a location to the configured URL from native code, so it works
      // even when the WebView/JavaScript layer no longer exists.
@@ -689,7 +913,7 @@ index 85f2a02..7f93aa9 100644
          JSONObject obj = new JSONObject();
          try {
              obj.put("latitude", location.getLatitude());
-@@ -276,38 +359,92 @@ public class BackgroundGeolocationService extends Service {
+@@ -276,38 +481,92 @@ public class BackgroundGeolocationService extends Service {
              // Lets the server distinguish native-delivered updates from those
              // forwarded by the JavaScript callback.
              obj.put("source", "native");
@@ -796,7 +1020,7 @@ index 85f2a02..7f93aa9 100644
          }
      }
  
-@@ -344,32 +481,42 @@ public class BackgroundGeolocationService extends Service {
+@@ -344,37 +603,39 @@ public class BackgroundGeolocationService extends Service {
              final String notificationTitle,
              final String notificationMessage,
              float distanceFilter,
@@ -816,6 +1040,9 @@ index 85f2a02..7f93aa9 100644
              nativePostUrl = (url == null || url.isEmpty()) ? null : url;
 -            LocationStore.saveSetup(getApplicationContext(), nativePostUrl, notificationTitle, notificationMessage, distanceFilter);
 +            LocationStore.saveSetup(getApplicationContext(), nativePostUrl, notificationTitle, notificationMessage, distanceFilter, intervalMs, authToken);
++            // VolunteerOps (v3.330.0): the page only starts tracking for
++            // somebody who has the GPS tick, so a start is never paused.
++            LocationStore.setPaused(getApplicationContext(), false);
 +            DebugLog.log(getApplicationContext(), "native_start", "intervalMs=" + intervalMs + " urlSet=" + (nativePostUrl != null));
  
              // The service may already be running (for example after a sticky
@@ -833,18 +1060,53 @@ index 85f2a02..7f93aa9 100644
          }
  
          String stop() {
-             LocationStore.clear(getApplicationContext());
-             nativePostUrl = null;
-             stopWatchdog();
+-            LocationStore.clear(getApplicationContext());
+-            nativePostUrl = null;
+-            stopWatchdog();
 -            client.removeUpdates(locationCallback);
-+            // Must stop with the service: LocationStore.clear() above wipes the
-+            // token, so every later poll would be a guaranteed 401.
-+            stopAlertPolling();
-+            client.removeLocationUpdates(locationCallback);
-             stopForeground(true);
-             stopSelf();
-             releaseMediaPlayer();
-@@ -462,7 +609,9 @@ public class BackgroundGeolocationService extends Service {
+-            stopForeground(true);
+-            stopSelf();
+-            releaseMediaPlayer();
+-            releaseWakeLock();
+-            return callbackId;
++            return stopTracking("page_stop");
+         }
+ 
+         void setPlannedRoute(String filePath, double[][] routeCoordinates, float distance) {
+@@ -453,6 +714,32 @@ public class BackgroundGeolocationService extends Service {
+             );
+         }
+ 
++        // VolunteerOps patch (v3.330.0): «Διακοπή GPS» — see onStartCommand().
++        // Only when the page supplied the label (an older page did not, and
++        // gets the notification exactly as before).
++        String stopLabel = LocationStore.getStopLabel(getApplicationContext());
++        if (!stopLabel.isEmpty() && LocationStore.isEnabled(getApplicationContext())) {
++            Intent stopIntent = new Intent(getApplicationContext(), BackgroundGeolocationService.class)
++                .setAction(ACTION_VOPS_STOP_BY_USER);
++            PendingIntent stopPending = PendingIntent.getService(
++                getApplicationContext(),
++                1,
++                stopIntent,
++                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
++            );
++            int icon = 0;
++            try {
++                String name = getAppString("capacitor_background_geolocation_notification_icon", "mipmap/ic_launcher", getApplicationContext());
++                String[] parts = name.split("/");
++                icon = getAppResourceIdentifier(parts[1], parts[0], getApplicationContext());
++            } catch (Exception ignored) {}
++            builder.addAction(new Notification.Action.Builder(
++                android.graphics.drawable.Icon.createWithResource(getApplicationContext(), icon),
++                stopLabel,
++                stopPending
++            ).build());
++        }
++
+         // Set the Channel ID for Android O.
+         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+             builder.setChannelId(BackgroundGeolocationService.class.getPackage().getName());
+@@ -462,7 +749,9 @@ public class BackgroundGeolocationService extends Service {
      }
  
      // Gets the identifier of the app's resource by name, returning 0 if not found.
@@ -857,7 +1119,7 @@ index 85f2a02..7f93aa9 100644
  
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/DebugLog.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/DebugLog.java
 new file mode 100644
-index 0000000..1b2b4ad
+index 0000000..9c0c750
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/DebugLog.java
 @@ -0,0 +1,74 @@
@@ -897,8 +1159,8 @@ index 0000000..1b2b4ad
 +            if (pingUrl == null || pingUrl.isEmpty() || authToken == null || authToken.isEmpty()) {
 +                return;
 +            }
-+            URL parsed = new URL(pingUrl);
-+            String debugUrl = parsed.getProtocol() + "://" + parsed.getAuthority() + "/mobile-debug-log.php";
++            // The site's folder included — see LocationStore.siteBase().
++            String debugUrl = LocationStore.siteBase(context) + "/mobile-debug-log.php";
 +            if (executor == null) {
 +                executor = Executors.newSingleThreadExecutor();
 +            }
@@ -936,10 +1198,10 @@ index 0000000..1b2b4ad
 +    }
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java
-index 2e19afe..d6437c3 100644
+index 2e19afe..28ccfac 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java
-@@ -22,6 +22,19 @@ final class LocationStore {
+@@ -22,6 +22,27 @@ final class LocationStore {
      private static final String KEY_TITLE = "title";
      private static final String KEY_MESSAGE = "message";
      private static final String KEY_DISTANCE_FILTER = "distanceFilter";
@@ -956,10 +1218,18 @@ index 2e19afe..d6437c3 100644
 +    // rejected: query strings land in plain text in the web server's access
 +    // log. A real Authorization header doesn't get logged that way.
 +    private static final String KEY_AUTH_TOKEN = "authToken";
++    // VolunteerOps patch (v3.330.0): the server can tell the service to pause
++    // (GPS tick removed mid-mission) and it must stay paused across a sticky
++    // restart, or a killed-and-restarted service would switch GPS back on.
++    // The two texts come from the page in the volunteer's own language, like
++    // the notification title and message above.
++    private static final String KEY_PAUSED = "vopsPaused";
++    private static final String KEY_PAUSED_MESSAGE = "vopsPausedMessage";
++    private static final String KEY_STOP_LABEL = "vopsStopLabel";
  
      private LocationStore() {}
  
-@@ -30,7 +43,7 @@ final class LocationStore {
+@@ -30,7 +51,7 @@ final class LocationStore {
      }
  
      // Persists the watcher config. A null or empty url disables native delivery.
@@ -968,7 +1238,7 @@ index 2e19afe..d6437c3 100644
          SharedPreferences.Editor editor = prefs(context).edit();
          if (url == null || url.isEmpty()) {
              editor.clear();
-@@ -40,7 +53,9 @@ final class LocationStore {
+@@ -40,7 +61,9 @@ final class LocationStore {
                  .putString(KEY_URL, url)
                  .putString(KEY_TITLE, title)
                  .putString(KEY_MESSAGE, message)
@@ -979,7 +1249,7 @@ index 2e19afe..d6437c3 100644
          }
          editor.apply();
      }
-@@ -70,25 +85,54 @@ final class LocationStore {
+@@ -70,25 +93,122 @@ final class LocationStore {
          return prefs(context).getFloat(KEY_DISTANCE_FILTER, 0f);
      }
  
@@ -989,6 +1259,74 @@ index 2e19afe..d6437c3 100644
 +
 +    static String getAuthToken(Context context) {
 +        return prefs(context).getString(KEY_AUTH_TOKEN, "");
++    }
++
++    // VolunteerOps patch — see KEY_PAUSED.
++    static void saveTexts(Context context, String pausedMessage, String stopLabel) {
++        prefs(context).edit()
++            .putString(KEY_PAUSED_MESSAGE, pausedMessage == null ? "" : pausedMessage)
++            .putString(KEY_STOP_LABEL, stopLabel == null ? "" : stopLabel)
++            .apply();
++    }
++
++    static String getPausedMessage(Context context) {
++        return prefs(context).getString(KEY_PAUSED_MESSAGE, "");
++    }
++
++    static String getStopLabel(Context context) {
++        return prefs(context).getString(KEY_STOP_LABEL, "");
++    }
++
++    static boolean isPaused(Context context) {
++        return prefs(context).getBoolean(KEY_PAUSED, false);
++    }
++
++    static void setPaused(Context context, boolean paused) {
++        // commit(), not apply(): a sticky restart right after a pause must
++        // read the new value, not the one still waiting to be written.
++        prefs(context).edit().putBoolean(KEY_PAUSED, paused).commit();
++    }
++
++    // VolunteerOps (v3.330.0): the shift whose tracking the volunteer ended
++    // with «Διακοπή GPS». Its own file, because every stop clears this one.
++    // The page reads it so that a reload does not quietly switch GPS back on
++    // behind somebody who deliberately turned it off; they restart it from
++    // their card instead. Cleared by any start.
++    private static final String USER_STOP_PREFS = "VolunteerOpsUserStop";
++
++    static void setUserStoppedShift(Context context, int shiftId) {
++        context.getSharedPreferences(USER_STOP_PREFS, Context.MODE_PRIVATE).edit().putInt("shift", shiftId).commit();
++    }
++
++    static int getUserStoppedShift(Context context) {
++        return context.getSharedPreferences(USER_STOP_PREFS, Context.MODE_PRIVATE).getInt("shift", 0);
++    }
++
++    // VolunteerOps (v3.330.0): the site's base URL — the ping URL without
++    // its file name — for the service's other endpoints. AlertPoller and
++    // DebugLog used scheme://host only, which is the site on both live
++    // domains but drops the folder of an install that lives in one
++    // (http://host/volunteerops/...), where every alert poll was a 404.
++    static String siteBase(Context context) {
++        String url = getUrl(context);
++        if (url == null || url.isEmpty()) return null;
++        int query = url.indexOf('?');
++        String path = query >= 0 ? url.substring(0, query) : url;
++        int slash = path.lastIndexOf('/');
++        return slash > path.indexOf("://") + 2 ? path.substring(0, slash) : path;
++    }
++
++    // The shift the service reports for, from its own ping URL
++    // (mobile-ping-location.php?shift_id=N). 0 when there is none.
++    static int getShiftId(Context context) {
++        String url = getUrl(context);
++        if (url == null) return 0;
++        java.util.regex.Matcher m = java.util.regex.Pattern.compile("[?&]shift_id=(\\d+)").matcher(url);
++        try {
++            return m.find() ? Integer.parseInt(m.group(1)) : 0;
++        } catch (NumberFormatException e) {
++            return 0;
++        }
 +    }
 +
      // POSTs a single location as JSON to the configured url. Runs synchronously,
@@ -1038,7 +1376,7 @@ index 2e19afe..d6437c3 100644
              try (OutputStream outputStream = connection.getOutputStream()) {
                  outputStream.write(body);
              }
-@@ -97,6 +141,15 @@ final class LocationStore {
+@@ -97,6 +217,15 @@ final class LocationStore {
              if (responseCode < HttpURLConnection.HTTP_OK || responseCode >= HttpURLConnection.HTTP_MULT_CHOICE) {
                  throw new IOException("Location POST failed with response code: " + responseCode);
              }

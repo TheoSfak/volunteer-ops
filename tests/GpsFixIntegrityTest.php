@@ -394,4 +394,49 @@ final class GpsFixIntegrityTest extends TestCase
         $this->assertSame(12.5, parseAccuracyMeters('12.5', 35.3));
         $this->assertSame(5000.0, parseAccuracyMeters('99999', 35.3));
     }
+
+    // ── v3.330.0: the phone is told to pause or stop ────────────────────────
+
+    public function testThePhoneTracksPausesAndStopsExactlyWhenTheServerWouldTakeOrRefuseItsFixes(): void
+    {
+        $this->assertSame('track', nativeTrackingInstruction($this->volunteerId, $this->shiftId));
+
+        // GPS tick removed mid-mission: paused, not stopped — a coordinator
+        // may tick them again (a phone handover), and the phone must follow.
+        setActionRoomParticipation($this->missionId, $this->volunteerId, false, $this->adminId);
+        forgetActionRoomParticipantIds($this->missionId);
+        $this->assertSame('pause', nativeTrackingInstruction($this->volunteerId, $this->shiftId));
+        $refused = recordVolunteerPing($this->user(), $this->shiftId, 35.33, 25.13, 8.0, 80, 'auto', 'native');
+        $this->assertFalse($refused['ok'], 'a paused phone is one whose fixes the server refuses');
+
+        setActionRoomParticipation($this->missionId, $this->volunteerId, true, $this->adminId);
+        forgetActionRoomParticipantIds($this->missionId);
+        $this->assertSame('track', nativeTrackingInstruction($this->volunteerId, $this->shiftId));
+
+        // Mission closed: stop — the service and its notification end.
+        dbExecute("UPDATE missions SET status = ? WHERE id = ?", [STATUS_COMPLETED, $this->missionId]);
+        $this->assertSame('stop', nativeTrackingInstruction($this->volunteerId, $this->shiftId));
+    }
+
+    public function testAnyoneNotApprovedOnThatShiftIsToldToStop(): void
+    {
+        $stranger = $this->makeUser('Not On This Shift');
+        $this->assertSame('stop', nativeTrackingInstruction($stranger, $this->shiftId));
+        dbExecute("UPDATE participation_requests SET status = ? WHERE shift_id = ? AND volunteer_id = ?", [PARTICIPATION_REJECTED, $this->shiftId, $this->volunteerId]);
+        $this->assertSame('stop', nativeTrackingInstruction($this->volunteerId, $this->shiftId));
+        $this->assertSame('stop', nativeTrackingInstruction($this->volunteerId, 0));
+    }
+
+    public function testStoppedByTheVolunteerIsARecordedReasonAPageSymptomCannotHide(): void
+    {
+        $this->assertContains('stopped_by_user', VOLUNTEER_GPS_CLIENT_REASONS);
+        $this->assertTrue(recordVolunteerGpsErrorReason($this->missionId, $this->volunteerId, 'stopped_by_user'));
+        $this->assertSame('stopped_by_user', $this->gpsError());
+        // The page's own "no position came" must not replace the reason why.
+        recordVolunteerGpsErrorReason($this->missionId, $this->volunteerId, 'timeout');
+        $this->assertSame('stopped_by_user', $this->gpsError());
+        // A fix that is accepted clears it, as it clears every other reason.
+        $this->assertTrue(recordVolunteerPing($this->user(), $this->shiftId, 35.33, 25.13, 8.0, 80, 'auto', 'native')['ok']);
+        $this->assertNull($this->gpsError());
+    }
 }

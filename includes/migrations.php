@@ -7194,6 +7194,17 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 167,
+            'description' => "Widen mission_action_room_participants.last_gps_error with 'stopped_by_user': the volunteer pressed «Διακοπή GPS» on the Android app's notification (v3.330.0), so the command post's roster says why their position stopped instead of reading like somebody resting. Appended last so no stored value is renumbered.",
+            'up' => function () {
+                dbExecute("ALTER TABLE mission_action_room_participants
+                           MODIFY COLUMN last_gps_error
+                           ENUM('denied','unavailable','timeout','imprecise','implausible','unknown','mock','location_off','power_save','stopped_by_user') NULL
+                           COMMENT 'Last reason this volunteer produced no position; NULL = none outstanding'");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

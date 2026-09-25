@@ -108,14 +108,15 @@ function setActionRoomParticipation(int $missionId, int $userId, bool $takesPart
 
 /**
  * Every value mission_action_room_participants.last_gps_error accepts, and so
- * the whitelist recordVolunteerGpsErrorReason() applies. The last three come
+ * the whitelist recordVolunteerGpsErrorReason() applies. The last four come
  * only from the Android app, which can see what a web page cannot: a fix from
- * a mock provider, the phone's location switch, and battery saver cutting GPS
- * with the screen off.
+ * a mock provider, the phone's location switch, battery saver cutting GPS
+ * with the screen off, and the volunteer pressing «Διακοπή GPS» on the app's
+ * notification (v3.330.0).
  */
 const VOLUNTEER_GPS_ERROR_REASONS = [
     'denied', 'unavailable', 'timeout', 'imprecise', 'implausible', 'unknown',
-    'mock', 'location_off', 'power_save',
+    'mock', 'location_off', 'power_save', 'stopped_by_user',
 ];
 
 /**
@@ -124,7 +125,7 @@ const VOLUNTEER_GPS_ERROR_REASONS = [
  * those are the server's own verdicts on a fix it received, and a client
  * claiming them would only be painting a warning nobody measured.
  */
-const VOLUNTEER_GPS_CLIENT_REASONS = ['denied', 'unavailable', 'timeout', 'imprecise', 'location_off', 'power_save'];
+const VOLUNTEER_GPS_CLIENT_REASONS = ['denied', 'unavailable', 'timeout', 'imprecise', 'location_off', 'power_save', 'stopped_by_user'];
 
 /**
  * How specific each reason is. recordVolunteerGpsErrorReason() never lets a
@@ -137,8 +138,42 @@ const VOLUNTEER_GPS_CLIENT_REASONS = ['denied', 'unavailable', 'timeout', 'impre
 const VOLUNTEER_GPS_REASON_TIERS = [
     'unavailable' => 1, 'timeout' => 1, 'unknown' => 1,
     'denied' => 2, 'imprecise' => 2, 'implausible' => 2,
-    'mock' => 3, 'location_off' => 3, 'power_save' => 3,
+    'mock' => 3, 'location_off' => 3, 'power_save' => 3, 'stopped_by_user' => 3,
 ];
+
+/**
+ * What the Android app's background service should be doing for one shift.
+ * Its alert poll (mobile-alerts.php) asks every 30 seconds, because nothing
+ * else ever told it to stop: the server refused the fixes of a volunteer
+ * whose GPS tick was removed, or whose mission had closed, and the phone kept
+ * its GPS on and kept sending them — until the volunteer next opened the app.
+ *
+ *   'track' — approved on an open Action Room mission and taking part;
+ *   'pause' — approved on it but without the GPS tick. GPS off, service kept,
+ *             because a coordinator can tick them again mid-mission (a phone
+ *             handover) and the phone must follow without being touched;
+ *   'stop'  — no approved participation on an open mission any more: the
+ *             service ends, notification and all. The page starts it again
+ *             if they are ever back.
+ *
+ * The same two checks recordVolunteerPing() refuses a fix on, so the phone
+ * never keeps producing fixes the server would only turn away.
+ */
+function nativeTrackingInstruction(int $userId, int $shiftId): string {
+    $missionId = dbFetchValue(
+        "SELECT s.mission_id FROM participation_requests pr
+           JOIN shifts s ON pr.shift_id = s.id
+           JOIN missions m ON s.mission_id = m.id
+          WHERE pr.shift_id = ? AND pr.volunteer_id = ? AND pr.status = ?
+            AND m.status = ? AND m.show_in_ops = 1 AND m.deleted_at IS NULL
+          LIMIT 1",
+        [$shiftId, $userId, PARTICIPATION_APPROVED, STATUS_OPEN]
+    );
+    if (!$missionId) {
+        return 'stop';
+    }
+    return isActionRoomParticipant((int) $missionId, $userId) ? 'track' : 'pause';
+}
 
 /**
  * A fix older than this when it reaches the server is history, not a
