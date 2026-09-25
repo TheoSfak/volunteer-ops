@@ -260,46 +260,11 @@ if ($action === 'status') {
 }
 
 if ($action === 'acknowledge') {
-    $sectorId = (int) post('id');
-    $sector = dbFetchOne("SELECT id, team_id, acknowledged_at, label FROM mission_search_sectors WHERE id = ? AND mission_id = ?", [$sectorId, $missionId]);
-    if (!$sector) {
-        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
+    // Shared with mobile-order-ack.php, the button on the app's notification.
+    $error = receiveMissionSector($mission, (int) post('id'), (int) $userId, $user['name'] ?? '', $canManageWarRoom, $isApprovedParticipant);
+    if ($error !== null) {
+        echo json_encode(['ok' => false, 'error' => $error]);
         exit;
-    }
-
-    if (!$canManageWarRoom) {
-        if (!$isApprovedParticipant) {
-            echo json_encode(['ok' => false, 'error' => t('sector.no_manage_permission')]);
-            exit;
-        }
-        $myTeamId = getUserTeamIdForMission($missionId, $userId);
-        if (!$sector['team_id'] || (int) $sector['team_id'] !== $myTeamId) {
-            echo json_encode(['ok' => false, 'error' => t('sector.not_your_team')]);
-            exit;
-        }
-    }
-
-    // Idempotent, same shape as mission-order.php's own acknowledge — a
-    // retry (flaky connection, double-tap) must not overwrite who/when
-    // first acknowledged.
-    if (!$sector['acknowledged_at']) {
-        dbExecute("UPDATE mission_search_sectors SET acknowledged_at = NOW(), acknowledged_by = ? WHERE id = ?", [$userId, $sectorId]);
-        logAudit('acknowledge_mission_sector', 'mission_search_sectors', $sectorId, null, ['mission_id' => $missionId]);
-
-        // Sector "Ελήφθη" is the exact counterpart of a Route Order's own
-        // acknowledge (mission-order.php), and follows it here too: the
-        // notification stays, the scrolling banner is gone, and the signal now
-        // lands on the sector's acknowledgement card instead. Inside the
-        // idempotency guard, so a double-tap or retry can't re-alert.
-        // Admin-acknowledged (a manager standing in for a team) is included
-        // deliberately: the notify helper already excludes the actor, so the
-        // rest of the command staff still learns it happened.
-        notifyCommandStaffQuiet(
-            $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId,
-            'mission_sector_acknowledged', 'sector.acknowledged_notify_title', [],
-            'sector.acknowledged_notify_message',
-            ['name' => $user['name'] ?? '', 'label' => $sector['label'], 'mission' => $mission['title']]
-        );
     }
 
     echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));

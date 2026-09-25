@@ -37,38 +37,6 @@ function notifyDispatchArrival(int $missionId, string $missionTitle, ?int $respo
 }
 
 /**
- * Notify command staff that a team confirmed receipt ("Ελήφθη") of a dispatch
- * point/area — the earlier stage of notifyDispatchArrival() above.
- *
- * No 'bannerMission' any more, and so no scrolling banner: this is a receipt,
- * and receipts are now rendered by the acknowledgement panel
- * (loadAckTrackerCardsForMission), which shows a dispatch's whole recipient
- * list with a box each rather than one marquee per person.
- *
- * notifyDispatchArrival() above deliberately keeps its banner. Arriving
- * somewhere is a change in the state of the operation; confirming you read the
- * order to go there is the closing half of something command already knows it
- * sent.
- */
-function notifyDispatchReceive(int $missionId, string $missionTitle, ?int $responsibleUserId, array $dispatch, ?string $teamLabel, string $receiverName, int $receiverId): void {
-    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-    $labelPart = $dispatch['label'] ? ' «' . $dispatch['label'] . '»' : '';
-
-    $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $receiverId);
-    $langByUserId = getUserLanguages($recipientIds);
-    foreach ($recipientIds as $recipientId) {
-        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
-        $kind = t($dispatch['type'] === 'point' ? 'dispatch.kind_of_point' : 'dispatch.kind_of_area', [], $lang);
-        $who = $teamLabel ? t('dispatch.team_label_prefix', ['team' => $teamLabel], $lang) : $receiverName;
-        $message = t('dispatch.receive_message', ['who' => $who, 'kind' => $kind, 'label_part' => $labelPart, 'mission' => $missionTitle], $lang);
-        sendNotification($recipientId, t('dispatch.receive_notify_title', [], $lang), $message, 'info', 'mission_dispatch_receive', [
-            'url' => $warRoomUrl,
-            'tag' => 'dispatch-receive-mission-' . $missionId,
-        ]);
-    }
-}
-
-/**
  * «Ξεκινάω» and «Ολοκληρώθηκε» — the two team steps either side of arrival
  * (see recordDispatchProgress()). Same recipients and wording shape as the two
  * functions above, and the same split between them: departing is quiet like a
@@ -149,37 +117,11 @@ if ($action === 'receive') {
         exit;
     }
 
-    $dispatchId = (int) post('id');
-    $dispatch = dbFetchOne("SELECT id, team_id, label, type FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$dispatchId, $missionId]);
-    if (!$dispatch) {
-        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
+    // Shared with mobile-order-ack.php, the button on the app's notification.
+    $error = receiveMissionDispatch($mission, (int) post('id'), (int) $userId, $user['name']);
+    if ($error !== null) {
+        echo json_encode(['ok' => false, 'error' => $error]);
         exit;
-    }
-
-    $myTeamId = getUserTeamIdForMission($missionId, $userId);
-    if ($dispatch['team_id'] && (int) $dispatch['team_id'] !== $myTeamId) {
-        echo json_encode(['ok' => false, 'error' => t('dispatch.not_your_team')]);
-        exit;
-    }
-
-    $existing = dbFetchOne("SELECT id FROM mission_dispatch_receipts WHERE dispatch_id = ? AND user_id = ?", [$dispatchId, $userId]);
-    if (!$existing) {
-        dbInsert(
-            "INSERT INTO mission_dispatch_receipts (dispatch_id, team_id, user_id, created_at) VALUES (?, ?, ?, NOW())",
-            [$dispatchId, $myTeamId, $userId]
-        );
-        logAudit('team_received_dispatch', 'mission_dispatch_points', $dispatchId, null, [
-            'mission_id' => $missionId, 'team_id' => $myTeamId, 'user_id' => $userId,
-        ]);
-
-        $teamLabel = null;
-        if ($myTeamId) {
-            $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$myTeamId]);
-            if ($teamRow) {
-                $teamLabel = teamLabel($teamRow['codename'], $teamRow['team_number']);
-            }
-        }
-        notifyDispatchReceive($missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $dispatch, $teamLabel, $user['name'], $userId);
     }
 
     $dispatches = loadMissionDispatchesForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant);

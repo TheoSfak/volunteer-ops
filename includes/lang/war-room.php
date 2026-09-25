@@ -1229,6 +1229,7 @@ return [
         'myping.native_open_settings' => 'Άνοιγμα ρυθμίσεων',
         'myping.native_user_stopped' => 'Σταμάτησες το GPS από την ειδοποίηση του κινητού. Το Επιχειρησιακό βλέπει ότι δεν στέλνεις στίγμα.',
         'myping.native_restart' => 'Ξεκίνα ξανά το GPS',
+        'myping.native_user_stopped_alerts' => 'Όσο είναι σταματημένο, οι εντολές δεν σε ειδοποιούν όταν η οθόνη είναι κλειστή.',
         'chat.load_error' => 'Σφάλμα φόρτωσης.',
         'dispatch.searching' => 'Αναζήτηση…',
         'dispatch.address_not_found' => 'Δεν βρέθηκε.',
@@ -1285,6 +1286,12 @@ return [
         'bgtrack.notification_text' => 'Η τοποθεσία σας κοινοποιείται στο Επιχειρησιακό όσο η βάρδια είναι ενεργή.',
         'bgtrack.paused_text' => 'GPS σε παύση: ο συντονιστής το απενεργοποίησε. Θα ξεκινήσει ξανά μόνο του αν το ενεργοποιήσει.',
         'bgtrack.stop_action' => 'Διακοπή GPS',
+        // The Android app's order notification (AlertPoller): the «Ελήφθη» button
+        // on it, and what the notification says after it was pressed.
+        'bgtrack.alert_ack' => 'Ελήφθη',
+        'bgtrack.alert_acked' => '✓ Στάλθηκε «Ελήφθη». Πάτα εδώ για να δεις την εντολή.',
+        'bgtrack.alert_ack_retry' => 'Δεν στάλθηκε, δεν υπάρχει σύνδεση. Δοκίμασε ξανά.',
+        'bgtrack.alert_ack_open_app' => 'Δεν στάλθηκε από εδώ. Πάτα για να ανοίξεις την εφαρμογή.',
 
         // mission-chat.php
         'chat.no_room_access' => 'Δεν έχετε πρόσβαση σε αυτό το chat.',
@@ -3258,6 +3265,7 @@ return [
         'myping.native_open_settings' => 'Open settings',
         'myping.native_user_stopped' => 'You stopped GPS from the notification on your phone. Operations can see you are not sending a position.',
         'myping.native_restart' => 'Start GPS again',
+        'myping.native_user_stopped_alerts' => 'While it is stopped, orders will not alert you when your screen is off.',
         'chat.load_error' => 'Loading error.',
         'dispatch.searching' => 'Searching…',
         'dispatch.address_not_found' => 'Not found.',
@@ -3305,6 +3313,10 @@ return [
         'bgtrack.notification_text' => 'Your location is being shared with Operations while your shift is active.',
         'bgtrack.paused_text' => 'GPS paused: your coordinator turned it off. It will restart by itself if they turn it back on.',
         'bgtrack.stop_action' => 'Stop GPS',
+        'bgtrack.alert_ack' => 'Received',
+        'bgtrack.alert_acked' => '✓ «Received» sent. Tap here to see the order.',
+        'bgtrack.alert_ack_retry' => 'Not sent: no connection. Try again.',
+        'bgtrack.alert_ack_open_app' => 'Could not be sent from here. Tap to open the app.',
 
         'chat.no_room_access' => 'You do not have access to this chat.',
         'chat.empty_message' => 'The message cannot be empty.',

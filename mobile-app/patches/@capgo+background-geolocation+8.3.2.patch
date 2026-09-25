@@ -1,9 +1,78 @@
+diff --git a/node_modules/@capgo/background-geolocation/android/src/main/AndroidManifest.xml b/node_modules/@capgo/background-geolocation/android/src/main/AndroidManifest.xml
+index d389cd7..6641eca 100644
+--- a/node_modules/@capgo/background-geolocation/android/src/main/AndroidManifest.xml
++++ b/node_modules/@capgo/background-geolocation/android/src/main/AndroidManifest.xml
+@@ -11,6 +11,14 @@
+             android:enabled="true"
+             android:exported="false" />
+ 
++        <!-- VolunteerOps: the «Ελήφθη» button on an order notification
++             (AlertPoller). Not exported: only this app's own notification
++             can send to it. -->
++        <receiver
++            android:name="com.capgo.capacitor_background_geolocation.AlertActionReceiver"
++            android:enabled="true"
++            android:exported="false" />
++
+         <receiver
+             android:name="com.capgo.capacitor_background_geolocation.GeofenceBootReceiver"
+             android:enabled="true"
+diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertActionReceiver.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertActionReceiver.java
+new file mode 100644
+index 0000000..b0b19e5
+--- /dev/null
++++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertActionReceiver.java
+@@ -0,0 +1,44 @@
++package com.capgo.capacitor_background_geolocation;
++
++import android.content.BroadcastReceiver;
++import android.content.Context;
++import android.content.Intent;
++import android.os.Bundle;
++
++/**
++ * VolunteerOps addition (v3.332.0, not upstream).
++ *
++ * The «Ελήφθη» button on an order notification (AlertPoller.show()). A
++ * volunteer can confirm an order from the lock screen, and the command post's
++ * acknowledgement panel ticks them off within seconds, without the phone
++ * being unlocked or the Action Room opened.
++ *
++ * Redraws the notification at once («Ελήφθη…», no button), so a second tap is
++ * not tempting while the request is out, then with the outcome.
++ */
++public class AlertActionReceiver extends BroadcastReceiver {
++
++    static final String ACTION_ACK = AlertActionReceiver.class.getPackage().getName() + ".vopsAlertAck";
++
++    @Override
++    public void onReceive(Context context, Intent intent) {
++        if (intent == null || !ACTION_ACK.equals(intent.getAction())) return;
++        final Bundle alert = intent.getExtras();
++        if (alert == null) return;
++        final Context app = context.getApplicationContext();
++
++        AlertPoller.show(app, alert, AlertPoller.STATE_SENDING);
++
++        // The request outlives onReceive(). goAsync() keeps the broadcast open
++        // until it is done; the connection's own 5 s timeouts keep that well
++        // inside the time Android allows a receiver.
++        final PendingResult pending = goAsync();
++        new Thread(() -> {
++            try {
++                AlertPoller.show(app, alert, AlertPoller.acknowledge(app, alert));
++            } finally {
++                pending.finish();
++            }
++        }, "VolunteerOpsAlertAck").start();
++    }
++}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
 new file mode 100644
-index 0000000..e32481d
+index 0000000..f0f03b0
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
-@@ -0,0 +1,299 @@
+@@ -0,0 +1,513 @@
 +package com.capgo.capacitor_background_geolocation;
 +
 +import android.app.Notification;
@@ -13,10 +82,12 @@ index 0000000..e32481d
 +import android.content.Context;
 +import android.content.Intent;
 +import android.content.SharedPreferences;
++import android.graphics.drawable.Icon;
 +import android.media.AudioAttributes;
 +import android.net.Uri;
 +import android.media.RingtoneManager;
 +import android.os.Build;
++import android.os.Bundle;
 +import android.os.PowerManager;
 +
 +import com.getcapacitor.Logger;
@@ -26,8 +97,10 @@ index 0000000..e32481d
 +
 +import java.io.BufferedReader;
 +import java.io.InputStreamReader;
++import java.io.OutputStream;
 +import java.net.HttpURLConnection;
 +import java.net.URL;
++import java.net.URLEncoder;
 +import java.nio.charset.StandardCharsets;
 +import java.util.concurrent.ExecutorService;
 +import java.util.concurrent.Executors;
@@ -45,6 +118,12 @@ index 0000000..e32481d
 + * This piggybacks on the background-location foreground service, which is
 + * already running and already awake with the screen off, so it costs no new
 + * service, no new notification, and no Firebase dependency.
++ *
++ * v3.332.0: tapping a notification opens that order in the Action Room
++ * (EXTRA_OPEN_URL, read by the app's MainActivity), an order still waiting
++ * for «Ελήφθη» carries that button so it can be answered without unlocking
++ * the phone (AlertActionReceiver), and only orders ring loud — everything
++ * else goes to an ordinary channel.
 + */
 +final class AlertPoller {
 +
@@ -74,11 +153,51 @@ index 0000000..e32481d
 +    // and the only way to re-register with the settings below is a new id.
 +    // If this ever needs correcting again, bump the suffix rather than editing
 +    // the channel definition, which would silently do nothing.
++    //
++    // Since v3.332.0 this is the «Εντολές» channel only: alerts the web shows
++    // as a banner (`urgent`). Everything else goes to CHANNEL_UPDATES_ID.
++    // Before, every notification rang like an order — through Do Not Disturb
++    // and with the triple buzz — and a phone that buzzes the same for "your
++    // shift was approved" as for "go to point 3" teaches its owner to ignore
++    // both.
 +    private static final String CHANNEL_ID = "volunteerops_alerts_v2";
++    private static final String CHANNEL_NAME = "Εντολές";
++    private static final String CHANNEL_UPDATES_ID = "volunteerops_updates";
 +    // Distinct from the plugin's own silent foreground-service notification
 +    // (NOTIFICATION_ID in BackgroundGeolocationService) so the two never
 +    // overwrite each other.
 +    private static final int NOTIFICATION_ID_BASE = 91000;
++
++    // Tapping a notification opens this URL in the app. MainActivity is the
++    // app's own class, outside this plugin, so both sides spell it out.
++    static final String EXTRA_OPEN_URL = "vopsOpenUrl";
++
++    // One alert as a Bundle: what the «Ελήφθη» button hands
++    // AlertActionReceiver, so the notification can be redrawn after the tap
++    // without asking the server what it said.
++    static final String A_ID = "vopsAlertId";
++    static final String A_WHEN = "vopsAlertWhen";
++    static final String A_TITLE = "vopsAlertTitle";
++    static final String A_MESSAGE = "vopsAlertMessage";
++    static final String A_URGENT = "vopsAlertUrgent";
++    static final String A_URL = "vopsAlertUrl";
++    static final String A_ACK_KIND = "vopsAlertAckKind";
++    static final String A_ACK_ID = "vopsAlertAckId";
++    static final String A_T_ACK = "vopsAlertTextAck";
++    static final String A_T_ACKED = "vopsAlertTextAcked";
++    static final String A_T_RETRY = "vopsAlertTextRetry";
++    static final String A_T_OPEN_APP = "vopsAlertTextOpenApp";
++
++    // What a notification is showing: as it arrived, «Ελήφθη» being sent, and
++    // the three outcomes. Only NEW makes a sound or lights the screen.
++    static final int STATE_NEW = 0;
++    static final int STATE_SENDING = 1;
++    static final int STATE_ACKED = 2;
++    // No connection — the button stays, to try again.
++    static final int STATE_RETRY = 3;
++    // The server said no, or tracking has stopped and there is no token to
++    // send it with — pressing again would not help; the app can.
++    static final int STATE_OPEN_APP = 4;
 +
 +    private static ExecutorService executor;
 +
@@ -143,17 +262,12 @@ index 0000000..e32481d
 +            }
 +
 +            JSONArray alerts = body.optJSONArray("alerts");
++            JSONObject texts = body.optJSONObject("texts");
 +            if (alerts != null) {
 +                for (int i = 0; i < alerts.length(); i++) {
 +                    JSONObject alert = alerts.optJSONObject(i);
 +                    if (alert == null) continue;
-+                    notifyAlert(
-+                        context,
-+                        alert.optInt("id", i),
-+                        alert.optString("title", ""),
-+                        alert.optString("message", ""),
-+                        alert.optBoolean("urgent", false)
-+                    );
++                    show(context, alertBundle(baseUrl, alert, texts, i), STATE_NEW);
 +                }
 +            }
 +
@@ -179,61 +293,206 @@ index 0000000..e32481d
 +        return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
 +    }
 +
-+    private static void notifyAlert(Context context, int id, String title, String message, boolean urgent) {
++    private static Bundle alertBundle(String baseUrl, JSONObject alert, JSONObject texts, int index) {
++        Bundle a = new Bundle();
++        a.putInt(A_ID, alert.optInt("id", index));
++        a.putLong(A_WHEN, System.currentTimeMillis());
++        a.putString(A_TITLE, alert.optString("title", ""));
++        a.putString(A_MESSAGE, alert.optString("message", ""));
++        a.putBoolean(A_URGENT, alert.optBoolean("urgent", false));
++        // Relative to the site by contract (mobile-alerts.php). Anything with a
++        // scheme or a host of its own is dropped rather than trusted, so a
++        // notification can only ever open this site.
++        String path = alert.optString("url", "");
++        if (!path.isEmpty() && !path.contains("://") && !path.startsWith("//")) {
++            a.putString(A_URL, baseUrl + "/" + (path.startsWith("/") ? path.substring(1) : path));
++        }
++        JSONObject ack = alert.optJSONObject("ack");
++        if (ack != null && texts != null && !texts.optString("ack", "").isEmpty()) {
++            a.putString(A_ACK_KIND, ack.optString("kind", ""));
++            a.putInt(A_ACK_ID, ack.optInt("id", 0));
++            a.putString(A_T_ACK, texts.optString("ack", ""));
++            a.putString(A_T_ACKED, texts.optString("acked", ""));
++            a.putString(A_T_RETRY, texts.optString("ack_retry", ""));
++            a.putString(A_T_OPEN_APP, texts.optString("ack_open_app", ""));
++        }
++        return a;
++    }
++
++    /**
++     * Draws one alert, or redraws it in a later state under the same id. The
++     * only place a notification's look is decided, so the one the «Ελήφθη»
++     * button leaves behind cannot drift from the one that arrived.
++     */
++    static void show(Context context, Bundle a, int state) {
 +        NotificationManager manager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
 +        if (manager == null) return;
 +
-+        ensureChannel(manager);
++        ensureChannels(manager);
++
++        boolean urgent = a.getBoolean(A_URGENT, false);
++        int notificationId = NOTIFICATION_ID_BASE + (a.getInt(A_ID, 0) % 1000);
++        String title = a.getString(A_TITLE, "");
++        String message = a.getString(A_MESSAGE, "");
++        String status = statusLine(a, state);
 +
 +        Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
-+            ? new Notification.Builder(context, CHANNEL_ID)
++            ? new Notification.Builder(context, urgent ? CHANNEL_ID : CHANNEL_UPDATES_ID)
 +            : new Notification.Builder(context);
 +
 +        builder
 +            .setContentTitle(title.isEmpty() ? context.getString(context.getApplicationInfo().labelRes) : title)
-+            .setContentText(message)
++            .setContentText(status == null ? message : status)
 +            // Orders carry real text, and a collapsed line truncates it to
 +            // uselessness on a lock screen.
-+            .setStyle(new Notification.BigTextStyle().bigText(message))
++            .setStyle(new Notification.BigTextStyle().bigText(status == null ? message : status + "\n\n" + message))
 +            .setAutoCancel(true)
-+            .setWhen(System.currentTimeMillis());
++            // Redrawn after «Ελήφθη» is pressed: that must not ring again.
++            .setOnlyAlertOnce(state != STATE_NEW)
++            // A group of its own. Android bundles an app's ungrouped
++            // notifications once there are two, and this app always has one
++            // already — the GPS service's. Seen on Android 15: the order sat
++            // inside a collapsed «ΕΠΙΔΡΑΣΙΣ · 2» on the lock screen, its
++            // «Ελήφθη» button two taps deep.
++            .setGroup("vopsAlert" + notificationId)
++            .setWhen(a.getLong(A_WHEN, System.currentTimeMillis()))
++            .setShowWhen(true);
 +
 +        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
 +            // Pre-O has no channels, so sound/vibration/priority live on the
 +            // notification itself.
 +            builder.setPriority(urgent ? Notification.PRIORITY_MAX : Notification.PRIORITY_DEFAULT);
-+            builder.setDefaults(Notification.DEFAULT_SOUND | Notification.DEFAULT_VIBRATE);
++            builder.setDefaults(urgent ? Notification.DEFAULT_SOUND | Notification.DEFAULT_VIBRATE : Notification.DEFAULT_SOUND);
 +        }
 +
++        int iconRes = 0;
 +        try {
 +            String name = BackgroundGeolocationService.getAppString(
 +                "capacitor_background_geolocation_notification_icon", "mipmap/ic_launcher", context);
 +            String[] parts = name.split("/");
-+            builder.setSmallIcon(BackgroundGeolocationService.getAppResourceIdentifier(parts[1], parts[0], context));
++            iconRes = BackgroundGeolocationService.getAppResourceIdentifier(parts[1], parts[0], context);
++            builder.setSmallIcon(iconRes);
 +        } catch (Exception e) {
 +            Logger.error("Could not set alert notification icon", e);
 +        }
 +
 +        // Tapping opens the app rather than the OS app-settings screen, which
-+        // is what happens if no content intent is set.
++        // is what happens if no content intent is set — and since v3.332.0 at
++        // the order itself, not wherever the app last was: after an hour in a
++        // pocket Android has often closed it, and it would start on the home
++        // page.
 +        Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
 +        if (launchIntent != null) {
 +            launchIntent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
++            String url = a.getString(A_URL);
++            if (url != null) {
++                launchIntent.putExtra(EXTRA_OPEN_URL, url);
++            }
 +            builder.setContentIntent(
 +                PendingIntent.getActivity(
-+                    context, id, launchIntent,
++                    context, notificationId, launchIntent,
 +                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
 +                )
 +            );
 +        }
 +
++        // «Ελήφθη», until it has been sent. A broadcast, not an activity:
++        // Android asks for the phone to be unlocked before starting an
++        // activity from the lock screen, and answering without unlocking is
++        // the point of the button.
++        if (a.getString(A_ACK_KIND) != null && (state == STATE_NEW || state == STATE_RETRY)) {
++            Intent tap = new Intent(context, AlertActionReceiver.class)
++                .setAction(AlertActionReceiver.ACTION_ACK)
++                .putExtras(a);
++            PendingIntent pending = PendingIntent.getBroadcast(
++                context, notificationId, tap,
++                PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
++            );
++            builder.addAction(
++                new Notification.Action.Builder(
++                    Icon.createWithResource(context, iconRes != 0 ? iconRes : android.R.drawable.checkbox_on_background),
++                    a.getString(A_T_ACK, ""),
++                    pending
++                ).build()
++            );
++        }
++
 +        // Unique id per alert so several orders stack instead of replacing
 +        // one another.
-+        manager.notify(NOTIFICATION_ID_BASE + (id % 1000), builder.build());
++        manager.notify(notificationId, builder.build());
 +
-+        if (urgent) {
++        if (state == STATE_NEW && urgent) {
 +            wakeScreen(context);
 +        }
++    }
++
++    private static String statusLine(Bundle a, int state) {
++        switch (state) {
++            case STATE_SENDING: return a.getString(A_T_ACK, "") + "…";
++            case STATE_ACKED: return a.getString(A_T_ACKED, "");
++            case STATE_RETRY: return a.getString(A_T_RETRY, "");
++            case STATE_OPEN_APP: return a.getString(A_T_OPEN_APP, "");
++            default: return null;
++        }
++    }
++
++    /**
++     * Sends «Ελήφθη» for the alert's order (mobile-order-ack.php) and returns
++     * the state to redraw the notification in. Blocking — AlertActionReceiver
++     * runs it off the main thread. Short timeouts: someone is looking at the
++     * notification, and "no connection, try again" is a better answer than a
++     * long wait.
++     */
++    static int acknowledge(Context context, Bundle a) {
++        String base = LocationStore.siteBase(context);
++        String token = LocationStore.getAuthToken(context);
++        // Tracking has stopped since the notification came, and stopping
++        // clears the token with everything else (LocationStore.clear()).
++        if (base == null || token == null || token.isEmpty()) {
++            return STATE_OPEN_APP;
++        }
++        String ref = a.getString(A_ACK_KIND, "") + ":" + a.getInt(A_ACK_ID, 0);
++        HttpURLConnection connection = null;
++        int state;
++        try {
++            byte[] body = ("kind=" + URLEncoder.encode(a.getString(A_ACK_KIND, ""), "UTF-8")
++                + "&id=" + a.getInt(A_ACK_ID, 0)).getBytes(StandardCharsets.UTF_8);
++            connection = (HttpURLConnection) new URL(base + "/mobile-order-ack.php").openConnection();
++            connection.setRequestMethod("POST");
++            connection.setConnectTimeout(5000);
++            connection.setReadTimeout(5000);
++            connection.setDoOutput(true);
++            connection.setRequestProperty("Accept", "application/json");
++            connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
++            connection.setRequestProperty("Authorization", "Bearer " + token);
++            try (OutputStream out = connection.getOutputStream()) {
++                out.write(body);
++            }
++            int code = connection.getResponseCode();
++            if (code == 401) {
++                state = STATE_OPEN_APP;
++            } else if (code != 200) {
++                state = STATE_RETRY;
++            } else {
++                StringBuilder sb = new StringBuilder();
++                try (BufferedReader reader = new BufferedReader(
++                    new InputStreamReader(connection.getInputStream(), StandardCharsets.UTF_8))) {
++                    String line;
++                    while ((line = reader.readLine()) != null) {
++                        sb.append(line);
++                    }
++                }
++                state = new JSONObject(sb.toString()).optBoolean("ok", false) ? STATE_ACKED : STATE_OPEN_APP;
++            }
++        } catch (Exception e) {
++            state = STATE_RETRY;
++        } finally {
++            if (connection != null) {
++                connection.disconnect();
++            }
++        }
++        DebugLog.log(context, "alert_ack", ref + " -> " + (state == STATE_ACKED ? "acked" : state == STATE_RETRY ? "retry" : "open_app"));
++        return state;
 +    }
 +
 +    /**
@@ -267,40 +526,64 @@ index 0000000..e32481d
 +        }
 +    }
 +
-+    private static void ensureChannel(NotificationManager manager) {
++    private static void ensureChannels(NotificationManager manager) {
 +        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
-+        if (manager.getNotificationChannel(CHANNEL_ID) != null) return;
 +
-+        NotificationChannel channel = new NotificationChannel(
-+            CHANNEL_ID,
-+            "Εντολές & Ειδοποιήσεις",
-+            // IMPORTANCE_HIGH is what makes it a heads-up notification with
-+            // sound - the plugin's own tracking channel is deliberately
-+            // silent, and reusing it would make every order silent too.
-+            NotificationManager.IMPORTANCE_HIGH
-+        );
-+        channel.setDescription("Εντολές και ειδοποιήσεις από το κέντρο επιχειρήσεων");
-+        channel.enableVibration(true);
-+        // An explicit pattern rather than the system default: a single short
-+        // buzz is easy to miss on a phone in a jacket pocket in the field,
-+        // which is the situation this whole feature exists for.
-+        channel.setVibrationPattern(new long[] { 0, 400, 200, 400, 200, 400 });
-+        channel.enableLights(true);
-+        // Without this the notification is hidden behind "sensitive content"
-+        // on a locked screen on some ROMs - i.e. exactly when it matters.
-+        channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
-+        channel.setBypassDnd(true);
-+        Uri sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
-+        if (sound != null) {
-+            channel.setSound(
-+                sound,
-+                new AudioAttributes.Builder()
-+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-+                    .build()
++        NotificationChannel existing = manager.getNotificationChannel(CHANNEL_ID);
++        if (existing != null) {
++            // Created as «Εντολές & Ειδοποιήσεις» before v3.332.0, when it
++            // carried everything. A channel's name and description are the
++            // two things an app may still change; its importance, sound and
++            // vibration stay exactly as they were.
++            if (!CHANNEL_NAME.equals(String.valueOf(existing.getName()))) {
++                existing.setName(CHANNEL_NAME);
++                existing.setDescription("Εντολές από το κέντρο επιχειρήσεων");
++                manager.createNotificationChannel(existing);
++            }
++        } else {
++            NotificationChannel channel = new NotificationChannel(
++                CHANNEL_ID,
++                CHANNEL_NAME,
++                // IMPORTANCE_HIGH is what makes it a heads-up notification with
++                // sound - the plugin's own tracking channel is deliberately
++                // silent, and reusing it would make every order silent too.
++                NotificationManager.IMPORTANCE_HIGH
 +            );
++            channel.setDescription("Εντολές από το κέντρο επιχειρήσεων");
++            channel.enableVibration(true);
++            // An explicit pattern rather than the system default: a single short
++            // buzz is easy to miss on a phone in a jacket pocket in the field,
++            // which is the situation this whole feature exists for.
++            channel.setVibrationPattern(new long[] { 0, 400, 200, 400, 200, 400 });
++            channel.enableLights(true);
++            // Without this the notification is hidden behind "sensitive content"
++            // on a locked screen on some ROMs - i.e. exactly when it matters.
++            channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
++            channel.setBypassDnd(true);
++            Uri sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
++            if (sound != null) {
++                channel.setSound(
++                    sound,
++                    new AudioAttributes.Builder()
++                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
++                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
++                        .build()
++                );
++            }
++            manager.createNotificationChannel(channel);
 +        }
-+        manager.createNotificationChannel(channel);
++
++        if (manager.getNotificationChannel(CHANNEL_UPDATES_ID) == null) {
++            // An ordinary notification: the phone's own sound, no heads-up,
++            // no screen wake, and Do Not Disturb applies.
++            NotificationChannel updates = new NotificationChannel(
++                CHANNEL_UPDATES_ID,
++                "Ενημερώσεις",
++                NotificationManager.IMPORTANCE_DEFAULT
++            );
++            updates.setDescription("Οι υπόλοιπες ειδοποιήσεις της εφαρμογής");
++            manager.createNotificationChannel(updates);
++        }
 +    }
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java

@@ -1587,18 +1587,7 @@ if (get('ajax') === '1') {
         // item to show — and a dispatch or a sector has no order id at all.
         // Only notifications addressed to the recipients carry these keys; a
         // bystander admin's FYI copy has none, so it stays a ticker line.
-        $popup = null;
-        if ($rawOrderId) {
-            $popup = ['kind' => 'order', 'id' => (int) $rawOrderId];
-        } elseif (!empty($bannerData['dispatchId'])) {
-            $popup = ['kind' => 'dispatch', 'id' => (int) $bannerData['dispatchId']];
-        } elseif (!empty($bannerData['sectorId'])) {
-            $popup = ['kind' => 'sector', 'id' => (int) $bannerData['sectorId']];
-        } elseif (!empty($bannerData['popupInfo'])) {
-            // A notice rather than an order: nothing to acknowledge server-side,
-            // just «Κατάλαβα» (route cancelled, route point skipped).
-            $popup = ['kind' => 'info', 'info' => (string) $bannerData['popupInfo'], 'id' => (int) ($bannerData['routeId'] ?? 0)];
-        }
+        $popup = notificationPopupRef($bannerData);
         $banners[] = [
             'id' => (int) $bannerRow['id'],
             'message' => $bannerRow['message'],
@@ -10613,6 +10602,8 @@ function opModelFromSector(sector) {
         stepTimes: sector.acknowledged_at ? {0: sector.acknowledged_at} : {},
         advanceStatus: sector.can_self_report ? sector.next_status : null,
         advanceLabel: sector.can_self_report ? sectorActionLabel(sector.status) : '',
+        // Arrives already "received" (see opReceivedAlready).
+        recheck: recheck,
         hint: '', speakText: '',
         target: nav ? {kind: 'polygon', pts: sector.geo, nav: nav} : null,
         card: 'mySectorsCard',
@@ -10828,6 +10819,7 @@ let opIndex = 0;
 let opShownKey = null;
 let opSynced = false;
 let opPending = [];          // banners whose order has not reached the page state yet
+let opRequested = null;      // the order a tapped phone notification asked for (opRequest)
 let opRenderedSig = null;
 let opMiniMap = null;
 let opHighlightLayer = null;
@@ -10882,21 +10874,80 @@ function orderPopupSync(entries) {
     }
     const open = models.filter(m => m.outstanding);
     opOutstanding = open.filter(m => !m.acked).concat(open.filter(m => m.acked)).map(m => m.key);
-    opArrival = opArrival.filter(key => opOutstanding.includes(key));
+    // Received somewhere else since the last sync — from the phone's lock
+    // screen above all, but also the «Οι Εντολές μου» card or another tab. As
+    // far as arriving goes that is the same as «Ελήφθη» pressed here, which
+    // takes an order out of the arrival queue (opAct). The one on screen turns
+    // to its steps rather than vanishing from under the volunteer's thumb.
+    const receivedElsewhere = key => {
+        const before = previous.get(key);
+        return !!before && !before.acked && !!opEntries.get(key) && opEntries.get(key).acked;
+    };
+    if (opMode === 'arrival' && opShownKey && opOutstanding.includes(opShownKey) && receivedElsewhere(opShownKey)) {
+        opMode = 'review';
+    }
+    opArrival = opArrival.filter(key => opOutstanding.includes(key) && !receivedElsewhere(key));
     opResolvePending();
     if (!opSynced) {
         opSynced = true;
         // After the first paint rather than during it: the tab layout, the map
         // and the cards this popup jumps to are still being put in place.
         setTimeout(opOpenMissedOnLoad, 700);
+    } else if (opRequested) {
+        opShowRequested();
     }
     orderPopupRender();
+}
+
+// One order's notification on the Android app was tapped. The app opens this
+// page with ?op=kind:id — or, when the page is already open on this mission,
+// calls window.vopsOpenOrder('kind:id') rather than reload it. That order is
+// shown whether or not it still waits for «Ελήφθη»: it may have just been
+// received from the lock screen, and then it is its steps, not its arrival,
+// that the volunteer came for. Taken off the address at once, so a reload does
+// not show it a second time.
+function opRequest(value) {
+    const m = /^(order|dispatch|sector):(\d+)$/.exec(String(value || ''));
+    opRequested = m ? {kind: m[1], id: Number(m[2]), since: Date.now()} : null;
+}
+(function () {
+    const params = new URLSearchParams(location.search);
+    if (!params.has('op')) return;
+    opRequest(params.get('op'));
+    params.delete('op');
+    const query = params.toString();
+    try { history.replaceState(history.state, '', location.pathname + (query ? '?' + query : '') + location.hash); } catch (e) {}
+})();
+window.vopsOpenOrder = function (value) {
+    opRequest(value);
+    if (opSynced && opRequested) opShowRequested();
+};
+function opShowRequested() {
+    const key = opKeyForRef(opRequested);
+    if (!key || !opEntries.get(key).outstanding) {
+        // The phone can be ahead of this page: an order sent while the screen
+        // was off reaches the page state only with the next poll.
+        if (opRequested && Date.now() - opRequested.since > OP_PENDING_MS) opRequested = null;
+        return false;
+    }
+    opRequested = null;
+    if (opEntries.get(key).acked) {
+        opMode = 'review';
+    } else {
+        opArrival = [key].concat(opArrival.filter(k => k !== key));
+        opMode = 'arrival';
+    }
+    opIndex = 0;
+    opShownKey = key;
+    orderPopupRender();
+    return true;
 }
 
 // A page opened after an order was sent — most often by tapping its push
 // notification — shows the ones not yet received, without the sound: the
 // phone already made its noise.
 function opOpenMissedOnLoad() {
+    if (opRequested && opShowRequested()) return;
     if (opMode !== 'closed') return;
     const later = opLaterKeys();
     const missed = opOutstanding.filter(key => !opEntries.get(key).acked && !later.includes(key));
@@ -10934,7 +10985,7 @@ function orderPopupTakeBanner(b) {
     const key = opKeyForRef(b.popup);
     if (key) {
         if (!opEntries.get(key).outstanding) return false;
-        opArrive(key, b);
+        if (!opReceivedAlready(opEntries.get(key))) opArrive(key, b);
         return true;
     }
     // Not in the page state yet. A Route Order is the known case: the route's
@@ -10943,12 +10994,23 @@ function orderPopupTakeBanner(b) {
     setTimeout(opResolvePending, OP_PENDING_MS + 500);
     return true;
 }
+// An order whose notification reaches this page only after it was received —
+// the page slept while the volunteer pressed «Ελήφθη» on the phone's lock
+// screen. Popping it up again, with the alert sound, would ask a second time
+// for what was already answered; it is in the strip. A sector sent back for a
+// recheck is the exception: it arrives already received, and is news.
+function opReceivedAlready(m) {
+    return m.acked && !m.recheck;
+}
 function opResolvePending() {
     if (!opPending.length) return;
     const now = Date.now();
     opPending = opPending.filter(p => {
         const key = opKeyForRef(p.banner.popup);
-        if (key && opEntries.get(key).outstanding) { opArrive(key, p.banner); return false; }
+        if (key && opEntries.get(key).outstanding) {
+            if (!opReceivedAlready(opEntries.get(key))) opArrive(key, p.banner);
+            return false;
+        }
         if (key || now - p.since >= OP_PENDING_MS) {
             showWarRoomBanner(p.banner.id, p.banner.message, p.banner.orderId, p.banner.alarmStyle);
             return false;
@@ -16818,8 +16880,11 @@ function showNativeUserStopped(on) {
         return;
     }
     if (!el.classList.contains('d-none')) return;
-    // Translated strings only — no user data.
+    // Translated strings only — no user data. The second line because the
+    // same service is what checks for orders while the screen is off
+    // (AlertPoller): stopping GPS silently stopped those alerts too.
     el.innerHTML = `<div class="text-danger fw-bold"><i class="bi bi-geo-alt-slash me-1"></i>${escapeHtml(t('myping.native_user_stopped'))}</div>`
+        + `<div class="small text-warning-emphasis mt-1"><i class="bi bi-bell-slash me-1"></i>${escapeHtml(t('myping.native_user_stopped_alerts'))}</div>`
         + `<button type="button" class="btn btn-sm btn-primary mt-1" id="myNativeGpsRestartBtn"><i class="bi bi-play-fill me-1"></i>${escapeHtml(t('myping.native_restart'))}</button>`;
     el.classList.remove('d-none');
     document.getElementById('myNativeGpsRestartBtn').addEventListener('click', () => {

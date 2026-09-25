@@ -11,6 +11,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.provider.Settings;
+import android.text.TextUtils;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.URLUtil;
@@ -20,6 +21,8 @@ import android.widget.Toast;
 import androidx.core.content.FileProvider;
 
 import java.io.File;
+
+import org.json.JSONObject;
 
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.WebViewListener;
@@ -70,6 +73,12 @@ public class MainActivity extends BridgeActivity {
                     @Override
                     public void onPageLoaded(WebView webView) {
                         ensureBridgeInjected(webView);
+                        firstPageLoaded = true;
+                        if (pendingOpenUrl != null) {
+                            String url = pendingOpenUrl;
+                            pendingOpenUrl = null;
+                            showInWebView(url);
+                        }
                     }
                 }
             );
@@ -77,6 +86,103 @@ public class MainActivity extends BridgeActivity {
         installDownloadHandler();
         installNativeBridge();
         installApkCompletionReceiver();
+
+        // Opened by tapping an order notification (see openFromNotification).
+        // Not on a re-creation: that intent was already handled the first time.
+        if (savedInstanceState == null) {
+            openFromNotification(getIntent());
+        }
+    }
+
+    // Set by the background-geolocation plugin's AlertPoller on every alert
+    // notification it raises; that class is in the plugin, so both spell it out.
+    private static final String EXTRA_OPEN_URL = "vopsOpenUrl";
+
+    // A notification tapped while the app's first page was still loading —
+    // the app had been closed, and Capacitor starts it at the site's home.
+    // Opened only once that page has finished rather than alongside it: two
+    // loads at once can both arrive without a session, and on the emulator
+    // the second was sent to the login page. One extra page, no race.
+    private boolean firstPageLoaded = false;
+    private String pendingOpenUrl = null;
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        openFromNotification(intent);
+    }
+
+    /**
+     * An order notification was tapped: open the page it names — the Action
+     * Room, at that order — rather than wherever the app last was. After an
+     * hour in a pocket Android has often closed the app, which then started on
+     * the home page and left the volunteer to go and find the order.
+     *
+     * Only a page of the site this app is built for. The URL comes from our
+     * own server, but this WebView carries window.VopsNative, so nothing is
+     * loaded into it on a notification's say-so alone.
+     *
+     * The Action Room already open on that mission is not reloaded — a
+     * half-typed message would be lost. The page is asked to show the order
+     * (war-room.php's window.vopsOpenOrder), and reloaded only if it cannot.
+     */
+    private void openFromNotification(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        final String target = intent.getStringExtra(EXTRA_OPEN_URL);
+        intent.removeExtra(EXTRA_OPEN_URL);
+        if (target == null || target.isEmpty()) {
+            return;
+        }
+        final WebView webView = getBridge().getWebView();
+        final String serverUrl = getBridge().getServerUrl();
+        if (webView == null || serverUrl == null) {
+            return;
+        }
+        if (!sameOrigin(Uri.parse(target), Uri.parse(serverUrl))) {
+            return;
+        }
+        if (!firstPageLoaded) {
+            pendingOpenUrl = target;
+            return;
+        }
+        showInWebView(target);
+    }
+
+    private void showInWebView(final String target) {
+        final WebView webView = getBridge().getWebView();
+        if (webView == null) {
+            return;
+        }
+        final Uri to = Uri.parse(target);
+        webView.post(() -> {
+            String current = webView.getUrl();
+            Uri here = current == null ? null : Uri.parse(current);
+            boolean samePage = here != null && sameOrigin(here, to)
+                && TextUtils.equals(here.getPath(), to.getPath())
+                && TextUtils.equals(here.getQueryParameter("id"), to.getQueryParameter("id"));
+            String op = to.getQueryParameter("op");
+            if (!samePage) {
+                webView.loadUrl(target);
+            } else if (op != null) {
+                webView.evaluateJavascript(
+                    "window.vopsOpenOrder ? (window.vopsOpenOrder(" + JSONObject.quote(op) + "), true) : false",
+                    value -> {
+                        if (!"true".equals(value)) {
+                            webView.loadUrl(target);
+                        }
+                    }
+                );
+            }
+        });
+    }
+
+    private static boolean sameOrigin(Uri a, Uri b) {
+        return a.getScheme() != null && a.getScheme().equalsIgnoreCase(b.getScheme())
+            && a.getHost() != null && a.getHost().equalsIgnoreCase(b.getHost())
+            && a.getPort() == b.getPort();
     }
 
     private BroadcastReceiver apkReceiver = null;

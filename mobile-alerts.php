@@ -25,6 +25,11 @@
  *  - Even with a cursor, only rows newer than ALERT_MAX_AGE_MINUTES are
  *    returned, so a phone that was off for hours comes back to whatever is
  *    still current instead of a burst of stale ones.
+ *
+ * v3.332.0: each alert also says where tapping it lands (`url`, relative, with
+ * ?op= naming the order) and, for an order still waiting for «Ελήφθη», which
+ * order a button on the notification confirms (`ack`, sent back to
+ * mobile-order-ack.php). Older apps ignore both.
  */
 require_once __DIR__ . '/bootstrap.php';
 
@@ -97,6 +102,66 @@ $rows = dbFetchAll(
     [$userId, $sinceId]
 );
 
+/**
+ * Where tapping the notification should land, relative to the site (the app
+ * resolves it against its own base and refuses anything that leaves it).
+ * notificationTargetUrl() has already checked that an absolute link is this
+ * installation's; only its path and query are kept.
+ */
+function mobileAlertPath(array $row): ?string {
+    $url = notificationTargetUrl($row);
+    if ($url === null) {
+        return null;
+    }
+    $parts = parse_url($url);
+    $path = $parts['path'] ?? '';
+    if (isset($parts['host']) || str_starts_with($path, '/')) {
+        $basePath = rtrim((string) parse_url(BASE_URL, PHP_URL_PATH), '/');
+        if ($basePath !== '' && str_starts_with($path, $basePath . '/')) {
+            $path = substr($path, strlen($basePath));
+        }
+    }
+    $path = ltrim(preg_replace('#^\./#', '', $path), '/');
+    if ($path === '') {
+        return null;
+    }
+    return $path . (isset($parts['query']) ? '?' . $parts['query'] : '');
+}
+
+/**
+ * The order an «Ελήφθη» button on this notification would confirm, or null
+ * when there should be no button: not an order of this person's, already
+ * received, or an order whose only step is doing it — a location request is
+ * answered by sending the location, and a tick from the lock screen would
+ * only look like an answer. A sector sent back for a recheck has nothing to
+ * receive either (the page's $needsAcknowledgeFirst, same rule).
+ */
+function mobileAlertAck(?array $ref, int $userId): ?array {
+    if (!$ref) {
+        return null;
+    }
+    if ($ref['kind'] === 'order') {
+        $row = dbFetchOne(
+            "SELECT o.order_type, r.acknowledged_at FROM mission_order_recipients r
+             JOIN mission_orders o ON o.id = r.order_id
+             WHERE r.order_id = ? AND r.user_id = ?",
+            [$ref['id'], $userId]
+        );
+        $offer = $row && !$row['acknowledged_at'] && $row['order_type'] !== 'location';
+    } elseif ($ref['kind'] === 'dispatch') {
+        $offer = !dbFetchValue(
+            "SELECT COUNT(*) FROM mission_dispatch_receipts WHERE dispatch_id = ? AND user_id = ?",
+            [$ref['id'], $userId]
+        );
+    } elseif ($ref['kind'] === 'sector') {
+        $row = dbFetchOne("SELECT status, acknowledged_at FROM mission_search_sectors WHERE id = ?", [$ref['id']]);
+        $offer = $row && $row['status'] === 'assigned' && !$row['acknowledged_at'];
+    } else {
+        $offer = false;
+    }
+    return $offer ? ['kind' => $ref['kind'], 'id' => $ref['id']] : null;
+}
+
 $alerts = [];
 $cursor = $sinceId;
 foreach ($rows as $row) {
@@ -105,13 +170,37 @@ foreach ($rows as $row) {
     // what marks a notification as an operational alert (orders, dispatch,
     // global messages) as opposed to routine account noise, so it doubles as
     // the "is this worth waking someone up for" test - same signal the page
-    // already uses, rather than a second, drifting definition.
+    // already uses, rather than a second, drifting definition. Since v3.332.0
+    // it also picks the app's channel: «Εντολές» (loud, through Do Not
+    // Disturb) or «Ενημερώσεις» (an ordinary notification).
     $data = $row['data'] ? json_decode($row['data'], true) : null;
-    $alerts[] = [
+    $ref = notificationPopupRef($data);
+    $path = mobileAlertPath($row);
+    // Tapping an order's notification opens that order (war-room.php's
+    // opRequest), not just the Action Room.
+    if ($path !== null && $ref && $ref['kind'] !== 'info' && preg_match('#^war-room\.php(\?|$)#', $path)) {
+        $path .= (str_contains($path, '?') ? '&' : '?') . 'op=' . $ref['kind'] . ':' . $ref['id'];
+    }
+    $alerts[] = array_filter([
         'id' => (int) $row['id'],
         'title' => (string) $row['title'],
         'message' => (string) $row['message'],
         'urgent' => is_array($data) && isset($data['bannerMission']),
+        'url' => $path,
+        'ack' => mobileAlertAck($ref, $userId),
+    ], fn($v) => $v !== null);
+}
+
+// The words the app puts on and after the «Ελήφθη» button, in this person's
+// language. The app keeps no strings of its own for alerts.
+$texts = null;
+if ($alerts) {
+    $lang = getUserLanguage($userId);
+    $texts = [
+        'ack' => t('bgtrack.alert_ack', [], $lang),
+        'acked' => t('bgtrack.alert_acked', [], $lang),
+        'ack_retry' => t('bgtrack.alert_ack_retry', [], $lang),
+        'ack_open_app' => t('bgtrack.alert_ack_open_app', [], $lang),
     ];
 }
 
@@ -119,5 +208,6 @@ echo json_encode(array_filter([
     'ok' => true,
     'cursor' => $cursor,
     'alerts' => $alerts,
+    'texts' => $texts,
     'tracking' => $tracking,
-], fn($v) => $v !== null));
+], fn($v) => $v !== null), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);

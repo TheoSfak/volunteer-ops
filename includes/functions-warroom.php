@@ -2802,8 +2802,8 @@ function notifyCommandStaff(int $missionId, ?int $responsibleUserId, int $actorI
 
 /**
  * Notify command staff that a volunteer sent their GPS location — mirrors
- * mission-dispatch.php's notifyDispatchReceive()/notifyDispatchArrival()
- * shape (own notification code, bannerMission for the loud scrolling
+ * notifyDispatchReceive() (below) and mission-dispatch.php's
+ * notifyDispatchArrival() shape (own notification code, bannerMission for the loud scrolling
  * banner + sound, getMissionCommandStaffIds() for recipients). Fires on
  * every ping regardless of whether it was requested via a War Room order —
  * request fulfillment is already tracked separately
@@ -2830,6 +2830,306 @@ function notifyVolunteerGpsPing(int $missionId, string $missionTitle, ?int $resp
             ]
         );
     }
+}
+
+// ── «Ελήφθη» — one implementation for the page and the phone ────────────────
+// A volunteer can confirm an order from the Action Room page (mission-order.php,
+// mission-dispatch.php, mission-sector.php) or, since v3.332.0, straight from
+// the Android app's notification without unlocking the phone
+// (mobile-order-ack.php). Both routes call the functions below, so a receipt
+// from the lock screen reaches exactly the people, with exactly the noise, a
+// receipt from the page does. Each is idempotent: pressing twice changes
+// nothing and tells no one.
+//
+// $via is null from the page. The app has no session, and logAudit() reads
+// the actor from the session, so the app's calls name the actor in the audit
+// row's data instead.
+
+/**
+ * Which of the recipient's own orders a notification announces, read from its
+ * data: ['kind' => order|dispatch|sector, 'id' => …], a notice
+ * (['kind' => 'info', …]), or null. Only the copies addressed to the recipients
+ * carry these keys; a bystander admin's FYI copy has none. The page's poll
+ * reads it to open the order as a popup, mobile-alerts.php to put «Ελήφθη» on
+ * the phone's notification — one reading, so the two never disagree.
+ */
+function notificationPopupRef($data): ?array {
+    if (!is_array($data)) {
+        return null;
+    }
+    if (!empty($data['orderId'])) {
+        return ['kind' => 'order', 'id' => (int) $data['orderId']];
+    }
+    if (!empty($data['dispatchId'])) {
+        return ['kind' => 'dispatch', 'id' => (int) $data['dispatchId']];
+    }
+    if (!empty($data['sectorId'])) {
+        return ['kind' => 'sector', 'id' => (int) $data['sectorId']];
+    }
+    if (!empty($data['popupInfo'])) {
+        // A notice rather than an order: nothing to acknowledge server-side,
+        // just «Κατάλαβα» (route cancelled, route point skipped).
+        return ['kind' => 'info', 'info' => (string) $data['popupInfo'], 'id' => (int) ($data['routeId'] ?? 0)];
+    }
+    return null;
+}
+
+function receiptAuditExtra(int $userId, ?string $via): array {
+    return $via === null ? [] : ['user_id' => $userId, 'via' => $via];
+}
+
+/**
+ * «Ελήφθη» on a mission order — any order_type, a Route Order included — by
+ * one of its recipients. Returns null on success, else the error to show.
+ */
+function receiveMissionOrder(int $orderId, int $userId, string $userName, ?string $via = null): ?string {
+    $recipient = dbFetchOne(
+        "SELECT r.id, r.acknowledged_at, o.order_type
+         FROM mission_order_recipients r
+         JOIN mission_orders o ON o.id = r.order_id
+         WHERE r.order_id = ? AND r.user_id = ?",
+        [$orderId, $userId]
+    );
+    if (!$recipient) {
+        return t('order.no_request_for_you');
+    }
+
+    if ($recipient['acknowledged_at']) {
+        return null;
+    }
+    dbExecute("UPDATE mission_order_recipients SET acknowledged_at = NOW() WHERE id = ?", [$recipient['id']]);
+    logAudit('acknowledge_mission_order', 'mission_order_recipients', $recipient['id'], null, ['order_id' => $orderId] + receiptAuditExtra($userId, $via));
+
+    // These used to fire a scrolling banner and an alert beep at every
+    // member of command staff, once per person who confirmed. A task sent
+    // to a seven-person team therefore produced seven marquees and seven
+    // beeps that between them said nothing except "somebody else has read
+    // it" — while burying, under themselves, the SOS row they shared the
+    // strip with.
+    //
+    // The notification itself is unchanged (bell, history, push): what is
+    // gone is the banner treatment, hence notifyCommandStaffQuiet(). The
+    // information those rows carried is now rendered properly by the
+    // acknowledgement panel (loadAckTrackerCardsForMission), which shows
+    // all recipients of an order at once with a box each — and so can also
+    // answer the question the banners never could: who has NOT confirmed.
+    //
+    // Photo/video/location acknowledgements were silent before this and
+    // stay silent; they are also deliberately absent from the panel (see
+    // ACK_TRACKER_ORDER_TYPES for why).
+    if ($recipient['order_type'] === 'route') {
+        $route = dbFetchOne(
+            "SELECT r.id AS route_id, r.mission_id, r.team_id, m.title AS mission_title, m.responsible_user_id, mt.codename, mt.team_number
+             FROM mission_routes r
+             JOIN missions m ON m.id = r.mission_id
+             LEFT JOIN mission_teams mt ON mt.id = r.team_id
+             WHERE r.order_id = ?",
+            [$orderId]
+        );
+        if ($route) {
+            $teamLbl = $route['team_id']
+                ? teamLabel($route['codename'], $route['team_number'])
+                : routeMixedTeamLabel((int) $route['route_id']);
+            notifyCommandStaffQuiet(
+                (int) $route['mission_id'], $route['mission_title'], $route['responsible_user_id'] ? (int) $route['responsible_user_id'] : null, $userId,
+                'mission_route_acknowledged', 'route.notify_acknowledged_title', [],
+                'route.notify_acknowledged_message', ['team' => $teamLbl, 'mission' => $route['mission_title']]
+            );
+        }
+    } elseif (in_array($recipient['order_type'], ['task', 'speak', 'message', 'live'], true)) {
+        $order = dbFetchOne(
+            "SELECT o.mission_id, m.title AS mission_title, m.responsible_user_id
+             FROM mission_orders o
+             JOIN missions m ON m.id = o.mission_id
+             WHERE o.id = ?",
+            [$orderId]
+        );
+        if ($order) {
+            if ($recipient['order_type'] === 'task') {
+                notifyCommandStaffQuiet(
+                    (int) $order['mission_id'], $order['mission_title'], $order['responsible_user_id'] ? (int) $order['responsible_user_id'] : null, $userId,
+                    'mission_task_acknowledged', 'order.task.notify_acknowledged_title', [],
+                    'order.task.notify_acknowledged_message', ['name' => $userName, 'mission' => $order['mission_title']]
+                );
+            } elseif ($recipient['order_type'] === 'speak') {
+                // A voice announcement is the one order that can fail
+                // silently on the recipient's side — a muted phone, a
+                // browser that has not been tapped yet, a helicopter
+                // overhead. The acknowledgement is therefore not a
+                // courtesy here, it is the only confirmation command gets
+                // that the words landed. That argument is why it still
+                // notifies at all; it is not an argument for a marquee,
+                // and the panel answers it better — an announcement's card
+                // shows at a glance which phones stayed silent.
+                notifyCommandStaffQuiet(
+                    (int) $order['mission_id'], $order['mission_title'], $order['responsible_user_id'] ? (int) $order['responsible_user_id'] : null, $userId,
+                    'mission_speak_acknowledged', 'order.speak.notify_acknowledged_title', [],
+                    'order.speak.notify_acknowledged_message', ['name' => $userName, 'mission' => $order['mission_title']]
+                );
+            } elseif ($recipient['order_type'] === 'live') {
+                notifyCommandStaffQuiet(
+                    (int) $order['mission_id'], $order['mission_title'], $order['responsible_user_id'] ? (int) $order['responsible_user_id'] : null, $userId,
+                    'mission_live_acknowledged', 'order.live.notify_acknowledged_title', [],
+                    'order.live.notify_acknowledged_message', ['name' => $userName, 'mission' => $order['mission_title']]
+                );
+            } else {
+                notifyCommandStaffQuiet(
+                    (int) $order['mission_id'], $order['mission_title'], $order['responsible_user_id'] ? (int) $order['responsible_user_id'] : null, $userId,
+                    'global_message_acknowledged', 'global_message.notify_acknowledged_title', [],
+                    'global_message.notify_acknowledged_message', ['name' => $userName, 'mission' => $order['mission_title']]
+                );
+            }
+        }
+    } elseif ($recipient['order_type'] === 'charge_phone') {
+        // Deliberately NOT notifyCommandStaffBanner() (that broadcasts to
+        // the whole command-staff roster, the right call for route/task/
+        // message above) — a battery alert is a one-to-one nudge, so only
+        // the specific admin who sent it should hear it got seen.
+        $order = dbFetchOne(
+            "SELECT o.mission_id, o.created_by, m.title AS mission_title
+             FROM mission_orders o
+             JOIN missions m ON m.id = o.mission_id
+             WHERE o.id = ?",
+            [$orderId]
+        );
+        if ($order && (int) $order['created_by'] !== $userId) {
+            $creatorId = (int) $order['created_by'];
+            $creatorLang = getUserLanguages([$creatorId])[$creatorId] ?? DEFAULT_LANGUAGE;
+            sendNotification(
+                $creatorId,
+                t('order.charge_phone.notify_acknowledged_title', [], $creatorLang),
+                t('order.charge_phone.notify_acknowledged_message', ['name' => $userName, 'mission' => $order['mission_title']], $creatorLang),
+                'success', 'mission_battery_alert_acknowledged',
+                [
+                    'url' => rtrim(BASE_URL, '/') . '/war-room.php?id=' . $order['mission_id'],
+                    'tag' => 'charge_phone-ack-' . $orderId,
+                    // No 'bannerMission': same rule as the four above. The
+                    // sender still gets the notification, and the battery
+                    // alert's own acknowledgement card shows the tick.
+                ]
+            );
+        }
+    }
+    return null;
+}
+
+/**
+ * Notify command staff that a team confirmed receipt ("Ελήφθη") of a dispatch
+ * point/area — the earlier stage of mission-dispatch.php's
+ * notifyDispatchArrival().
+ *
+ * No 'bannerMission' any more, and so no scrolling banner: this is a receipt,
+ * and receipts are now rendered by the acknowledgement panel
+ * (loadAckTrackerCardsForMission), which shows a dispatch's whole recipient
+ * list with a box each rather than one marquee per person.
+ *
+ * notifyDispatchArrival() deliberately keeps its banner. Arriving somewhere is
+ * a change in the state of the operation; confirming you read the order to go
+ * there is the closing half of something command already knows it sent.
+ */
+function notifyDispatchReceive(int $missionId, string $missionTitle, ?int $responsibleUserId, array $dispatch, ?string $teamLabel, string $receiverName, int $receiverId): void {
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $labelPart = $dispatch['label'] ? ' «' . $dispatch['label'] . '»' : '';
+
+    $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $receiverId);
+    $langByUserId = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        $kind = t($dispatch['type'] === 'point' ? 'dispatch.kind_of_point' : 'dispatch.kind_of_area', [], $lang);
+        $who = $teamLabel ? t('dispatch.team_label_prefix', ['team' => $teamLabel], $lang) : $receiverName;
+        $message = t('dispatch.receive_message', ['who' => $who, 'kind' => $kind, 'label_part' => $labelPart, 'mission' => $missionTitle], $lang);
+        sendNotification($recipientId, t('dispatch.receive_notify_title', [], $lang), $message, 'info', 'mission_dispatch_receive', [
+            'url' => $warRoomUrl,
+            'tag' => 'dispatch-receive-mission-' . $missionId,
+        ]);
+    }
+}
+
+/**
+ * «Ελήφθη» on a dispatch point/area. $mission is the open mission's row (id,
+ * title, responsible_user_id); the caller has already checked that the user is
+ * an approved participant. Returns null on success, else the error to show.
+ */
+function receiveMissionDispatch(array $mission, int $dispatchId, int $userId, string $userName, ?string $via = null): ?string {
+    $missionId = (int) $mission['id'];
+    $dispatch = dbFetchOne("SELECT id, team_id, label, type FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$dispatchId, $missionId]);
+    if (!$dispatch) {
+        return t('common.not_found');
+    }
+
+    $myTeamId = getUserTeamIdForMission($missionId, $userId);
+    if ($dispatch['team_id'] && (int) $dispatch['team_id'] !== $myTeamId) {
+        return t('dispatch.not_your_team');
+    }
+
+    $existing = dbFetchOne("SELECT id FROM mission_dispatch_receipts WHERE dispatch_id = ? AND user_id = ?", [$dispatchId, $userId]);
+    if ($existing) {
+        return null;
+    }
+    dbInsert(
+        "INSERT INTO mission_dispatch_receipts (dispatch_id, team_id, user_id, created_at) VALUES (?, ?, ?, NOW())",
+        [$dispatchId, $myTeamId, $userId]
+    );
+    logAudit('team_received_dispatch', 'mission_dispatch_points', $dispatchId, null, [
+        'mission_id' => $missionId, 'team_id' => $myTeamId, 'user_id' => $userId,
+    ] + receiptAuditExtra($userId, $via));
+
+    $teamLabel = null;
+    if ($myTeamId) {
+        $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$myTeamId]);
+        if ($teamRow) {
+            $teamLabel = teamLabel($teamRow['codename'], $teamRow['team_number']);
+        }
+    }
+    notifyDispatchReceive($missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $dispatch, $teamLabel, $userName, $userId);
+    return null;
+}
+
+/**
+ * «Ελήφθη» on a search sector. Command staff may confirm any sector (standing
+ * in for a team); anyone else only their own team's, and only as an approved
+ * participant. Returns null on success, else the error to show.
+ */
+function receiveMissionSector(array $mission, int $sectorId, int $userId, string $userName, bool $canManage, bool $isApprovedParticipant, ?string $via = null): ?string {
+    $missionId = (int) $mission['id'];
+    $sector = dbFetchOne("SELECT id, team_id, acknowledged_at, label FROM mission_search_sectors WHERE id = ? AND mission_id = ?", [$sectorId, $missionId]);
+    if (!$sector) {
+        return t('common.not_found');
+    }
+
+    if (!$canManage) {
+        if (!$isApprovedParticipant) {
+            return t('sector.no_manage_permission');
+        }
+        $myTeamId = getUserTeamIdForMission($missionId, $userId);
+        if (!$sector['team_id'] || (int) $sector['team_id'] !== $myTeamId) {
+            return t('sector.not_your_team');
+        }
+    }
+
+    // Idempotent, same shape as receiveMissionOrder() — a retry (flaky
+    // connection, double-tap) must not overwrite who/when first acknowledged.
+    if ($sector['acknowledged_at']) {
+        return null;
+    }
+    dbExecute("UPDATE mission_search_sectors SET acknowledged_at = NOW(), acknowledged_by = ? WHERE id = ?", [$userId, $sectorId]);
+    logAudit('acknowledge_mission_sector', 'mission_search_sectors', $sectorId, null, ['mission_id' => $missionId] + receiptAuditExtra($userId, $via));
+
+    // Sector "Ελήφθη" is the exact counterpart of a Route Order's own
+    // acknowledge (receiveMissionOrder()), and follows it here too: the
+    // notification stays, the scrolling banner is gone, and the signal now
+    // lands on the sector's acknowledgement card instead. Inside the
+    // idempotency guard, so a double-tap or retry can't re-alert.
+    // Admin-acknowledged (a manager standing in for a team) is included
+    // deliberately: the notify helper already excludes the actor, so the
+    // rest of the command staff still learns it happened.
+    notifyCommandStaffQuiet(
+        $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId,
+        'mission_sector_acknowledged', 'sector.acknowledged_notify_title', [],
+        'sector.acknowledged_notify_message',
+        ['name' => $userName, 'label' => $sector['label'], 'mission' => $mission['title']]
+    );
+    return null;
 }
 
 /**
