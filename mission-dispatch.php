@@ -239,6 +239,9 @@ if ($action === 'delete') {
     }
     dbExecute("DELETE FROM mission_dispatch_points WHERE id = ?", [$dispatchId]);
     logAudit('delete_mission_dispatch', 'mission_dispatch_points', $dispatchId, null, ['mission_id' => $missionId]);
+    // Deleting it is command's answer to a «Δεν μπορώ» on it; the rows stay
+    // for the record, closed.
+    resolveOrderDeclinesReassigned('dispatch', $dispatchId, (int) $userId);
     echo json_encode(['ok' => true]);
     exit;
 }

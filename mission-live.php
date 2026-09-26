@@ -103,6 +103,8 @@ if ($action === 'accept') {
                  WHERE order_id = ? AND user_id = ?",
                 [$stream['order_id'], $userId]
             );
+            // On air after all: a «Δεν μπορώ» on the request no longer stands.
+            resolveFulfilledOrderDeclines((int) $userId);
         }
         logAudit('accept_mission_live', 'mission_live_streams', (int) $stream['id'], null, ['mission_id' => $missionId]);
 

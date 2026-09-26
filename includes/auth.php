@@ -100,6 +100,10 @@ define('WAR_ROOM_ACTION_SCRIPTS', [
     // opened from the same tab by command.
     'mission-triage.php',
     'mission-triage-handover.php',
+    // mission-decline.php («Δεν μπορώ» on an order, v3.334.0) is pressed from
+    // the same phone, often after it sat locked, and partner-org guests get
+    // orders too.
+    'mission-decline.php',
 ]);
 
 function initSession() {

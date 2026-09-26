@@ -2654,6 +2654,25 @@ include __DIR__ . '/includes/header.php';
         box-shadow: 0 4px 14px rgba(0, 0, 0, .2);
     }
     .wr-op-toast[hidden] { display: none; }
+    /* «Δεν μπορώ» — the reason picker in the popup, and the notice a declined
+       order shows wherever it is listed. Red, but not SOS red on a red
+       background: this is an answer, not an alarm, and SOS stays the one
+       thing on this page that looks like one. */
+    .wr-op-cat-decline { --wr-op-bg: #f8d7da; --wr-op-fg: #842029; --wr-op-bd: #ea868f; }
+    .wr-op-reasons { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .6rem; }
+    .wr-op-reason {
+        border: 1.5px solid #ced4da; background: #fff; color: #212529; border-radius: 999px;
+        padding: .45rem .8rem; font-size: .88rem; min-height: 40px; line-height: 1.2;
+    }
+    .wr-op-reason.active { border-color: #dc3545; background: #dc3545; color: #fff; font-weight: 600; }
+    .wr-op-decline-sos { font-size: .8rem; color: #b02a37; margin-top: .35rem; font-weight: 600; }
+    .wr-decline-notice {
+        border-left: 3px solid var(--bs-danger, #dc3545); background: var(--bs-danger-bg-subtle, #f8d7da);
+        color: var(--bs-danger-text-emphasis, #842029); border-radius: 6px; padding: .4rem .55rem; margin-top: .25rem;
+    }
+    .wr-decline-badge { font-weight: 600; font-size: .85rem; }
+    .wr-decline-note { font-style: italic; font-size: .8rem; overflow-wrap: anywhere; }
+    .wr-decline-meta { font-size: .72rem; opacity: .85; }
     /* Marks the spot on the live map for a few seconds after "see it on the map". */
     .wr-op-pulse { width: 48px; height: 48px; border-radius: 50%; border: 3px solid #fd7e14; animation: wr-op-pulse 1.4s ease-out infinite; }
     @keyframes wr-op-pulse { 0% { transform: scale(.35); opacity: 1; } 100% { transform: scale(1.5); opacity: 0; } }
@@ -3049,6 +3068,14 @@ include __DIR__ . '/includes/header.php';
        gets to tick a confirmation on a volunteer's behalf. */
     .ack-card-person input { margin: 0; flex-shrink: 0; accent-color: #22c55e; pointer-events: none; }
     .ack-card-person.ack-done { color: #86efac; }
+    /* «Δεν μπορώ»: answered, and the answer was no. */
+    .ack-card-person.ack-declined { color: #fca5a5; }
+    .ack-card-x { width: 13px; flex-shrink: 0; text-align: center; font-weight: 700; color: #f87171; }
+    .ack-card.ack-card-declined { border-left-color: #f87171; }
+    .ack-card.ack-card-declined .ack-card-count { color: #fca5a5; }
+    .ack-card-decline-row { display: flex; flex-wrap: wrap; align-items: center; gap: .1rem .4rem; font-size: .72rem; padding: .1rem 0; color: #fca5a5; }
+    .ack-card-decline-row .ack-card-time { color: inherit; }
+    .ack-card-decline-why { flex-basis: 100%; padding-left: 1.3rem; color: #fecaca; overflow-wrap: anywhere; }
     .ack-card-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ack-card-team { font-size: .64rem; color: #64748b; flex-shrink: 0; }
     .ack-card-time { font-size: .64rem; color: #4ade80; flex-shrink: 0; }
@@ -7222,6 +7249,22 @@ function renderDispatches(items) {
                 return `${p.completed ? '✅' : (p.arrived ? '📍' : '🚶')} <strong>${escapeHtml(p.label)}</strong>: ${escapeHtml(steps.join(' · '))}`;
             }).join('<br>') + '</div>'
             : '';
+        // «Δεν μπορώ»: every team that said so, for whoever is deciding what
+        // to do about it — and for my own team, the notice and «Τελικά μπορώ»
+        // instead of the next step.
+        const otherDeclines = (item.declines || []).filter(dc =>
+            !(item.my_declined && dc.by_id === item.my_declined.by_id && dc.ts === item.my_declined.ts));
+        const declinesHtml = otherDeclines.length
+            ? '<div class="small text-danger mt-1">' + otherDeclines.map(dc =>
+                '✋ <strong>' + escapeHtml(dc.team ? t('decline.who_team', {team: dc.team, name: dc.by || ''}) : (dc.by || '')) + '</strong> · '
+                + escapeHtml(dc.at) + ': ' + escapeHtml(t('decline.reason.' + dc.reason)) + (dc.note ? escapeHtml(t('decline.note_part', {note: dc.note})) : '')
+            ).join('<br>') + '</div>'
+            : '';
+        if (item.my_declined && !item.my_completed) {
+            ackHtml = declineNoticeHtml('dispatch', item.id, item.my_declined, !!item.can_decline);
+        } else if (item.can_decline && !item.my_completed) {
+            ackHtml += declineOpenBtnHtml('dispatch:' + item.id);
+        }
         const directionsNav = dispatchNavPoint(item);
         const directionsHtml = '<br>' + navigationPairHtml(directionsNav.lat, directionsNav.lng, 'inline');
         // Live ETA — only ever present for a point sent to one specific team
@@ -7233,7 +7276,7 @@ function renderDispatches(items) {
               `${item.eta.source === 'straight_line' ? ' ' + escapeHtml(t('dispatch.eta_straight_line_suffix')) : ''}` +
               `${item.eta.is_stale ? ' ' + escapeHtml(t('dispatch.eta_stale_suffix')) : ''}</div>`
             : '';
-        const popupHtml = `<strong>${escapeHtml(item.team_label)}</strong>${item.label ? '<br>' + escapeHtml(item.label) : ''}` + etaHtml + (progressHtml || acksHtml) + receiveHtml + ackHtml + directionsHtml +
+        const popupHtml = `<strong>${escapeHtml(item.team_label)}</strong>${item.label ? '<br>' + escapeHtml(item.label) : ''}` + etaHtml + (progressHtml || acksHtml) + declinesHtml + receiveHtml + ackHtml + directionsHtml +
             (item.can_delete ? `<br><button type="button" class="btn btn-sm btn-outline-danger mt-1 dispatch-delete-btn" data-id="${item.id}">${t('common.delete')}</button>` : '');
         let layer = null;
         if (item.type === 'point') {
@@ -8727,13 +8770,16 @@ function sectorListRowHtml(item) {
         </select>
         ${item.status === 'not_started' && !item.buildings.length ? `<button type="button" class="btn btn-sm btn-outline-secondary mt-1 sector-split-btn" data-id="${item.id}"><i class="bi bi-scissors me-1"></i>${t('sector.split_btn')}</button>` : ''}
         <button type="button" class="btn btn-sm btn-outline-danger mt-1 sector-delete-btn" data-id="${item.id}">${t('common.delete')}</button>` : '';
+    // «Δεν μπορώ» from the assigned team, right above the team picker command
+    // uses to hand it to someone else.
+    const declinedHtml = item.declined ? declineNoticeHtml('sector', item.id, item.declined, !!item.can_decline) : '';
     return `<div class="border rounded p-2 mb-2 sector-list-row" data-id="${item.id}" style="cursor:pointer;">
         <div class="d-flex justify-content-between align-items-start">
             <strong>${escapeHtml(item.label)}</strong>
             <span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span>${sectorCoverageBadgeHtml(item)}
         </div>
         <div class="small text-muted">${escapeHtml(item.team_label)}</div>
-        ${buildingsSummary}${ackBtn}${advanceBtn}${manageHtml}
+        ${buildingsSummary}${item.declined ? '' : ackBtn + advanceBtn}${declinedHtml}${manageHtml}
     </div>`;
 }
 // Grouped by area (every sector belongs to exactly one) rather than one flat
@@ -9131,13 +9177,18 @@ function renderMySectors(items) {
         // sectors here, not enough of them to need a grouped view.
         const area = areas.find(a => a.id === item.area_id);
         const areaTag = area ? `<div class="small text-muted">${escapeHtml(area.label)}</div>` : '';
+        // Handed back with «Δεν μπορώ»: the notice and «Τελικά μπορώ» take
+        // the place of the steps until the team takes it back.
+        const stepsHtml = item.declined
+            ? declineNoticeHtml('sector', item.id, item.declined, !!item.can_decline)
+            : ackBtn + advanceBtn + (item.can_decline ? declineOpenBtnHtml('sector:' + item.id) : '');
         return `<div class="border rounded p-2 mb-2${item.status === 'needs_recheck' ? ' border-danger' : ''}">
             ${areaTag}
             <div class="d-flex justify-content-between align-items-center">
                 <strong>${escapeHtml(item.label)}</strong>
                 <span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span>
             </div>
-            ${buildingsHtml}${completePrompt}${polygonNavigationBtnHtml(item.geo, {block: true})}${ackBtn}${advanceBtn}
+            ${buildingsHtml}${completePrompt}${polygonNavigationBtnHtml(item.geo, {block: true})}${stepsHtml}
         </div>`;
     }).join('');
 
@@ -10455,6 +10506,78 @@ function myOrderRow(labelHtml, metaHtml, actionHtml) {
     </div>`;
 }
 
+// ── «Δεν μπορώ» (v3.334.0) ──────────────────────────────────────────────────
+// An order handed back to command with a reason (mission-decline.php). A
+// standing one reads the same wherever the order is shown — this card, the
+// route and sector cards, the dispatch pin, command's lists — and whoever could
+// take it back gets «Τελικά μπορώ» right there. Both buttons are wired once, by
+// the delegated listener below, because every one of those places rebuilds its
+// HTML on the poll.
+function declineNoticeHtml(kind, id, d, canWithdraw) {
+    const who = d.team ? t('decline.who_team', {team: d.team, name: d.by || ''}) : (d.by || '');
+    return `<div class="wr-decline-notice">
+        <div class="wr-decline-badge">${escapeHtml(t('decline.row_badge', {reason: t('decline.reason.' + d.reason)}))}</div>
+        ${d.note ? `<div class="wr-decline-note">«${escapeHtml(d.note)}»</div>` : ''}
+        <div class="wr-decline-meta">${escapeHtml(t('decline.row_by', {name: who, time: d.at}))} · ${escapeHtml(t('decline.row_hint'))}</div>
+        ${canWithdraw ? `<button type="button" class="btn btn-sm btn-outline-success w-100 mt-1 wr-withdraw-btn" data-kind="${kind}" data-id="${id}"><i class="bi bi-arrow-counterclockwise me-1"></i>${escapeHtml(t('decline.withdraw_btn'))}</button>` : ''}
+    </div>`;
+}
+// Deliberately small and quiet next to the order's own big button: the reason
+// picker it opens is the real confirmation, but a thumb aiming for «Ελήφθη»
+// should not land here.
+function declineOpenBtnHtml(key) {
+    return `<div class="text-end"><button type="button" class="btn btn-link btn-sm text-danger p-0 mt-1 wr-decline-open-btn" data-key="${escapeHtml(key)}"><i class="bi bi-x-octagon me-1"></i>${escapeHtml(t('decline.btn'))}</button></div>`;
+}
+document.addEventListener('click', e => {
+    const open = e.target.closest('.wr-decline-open-btn');
+    if (open) { opOpenDecline(open.dataset.key); return; }
+    const back = e.target.closest('.wr-withdraw-btn');
+    if (back && !back.disabled) postOrderDecline('withdraw', back.dataset.kind, back.dataset.id, null, back);
+});
+
+// Both answers go through here, from the popup, a card or a map popup. The
+// reply carries this person's four order lists freshly loaded, redrawn with the
+// same renderers the poll uses: a teammate may have answered for the team a
+// moment ago, and the server knows that, not this page.
+function postOrderDecline(action, kind, id, extra, btn) {
+    if (btn) btn.disabled = true;
+    const data = new URLSearchParams(Object.assign({
+        csrf_token: csrfToken, mission_id: '<?= $missionId ?>', action: action, kind: kind, id: String(id),
+    }, extra || {}));
+    return fetch('mission-decline.php', {method: 'POST', body: data}).then(response => {
+        if (!checkSessionAlive(response)) return null;
+        return response.json();
+    }).then(result => {
+        if (!result) return false;
+        if (!result.ok) {
+            if (btn) btn.disabled = false;
+            alert(result.error || t('common.failed'));
+            return false;
+        }
+        applyOrderLists(result);
+        opToast(t(action === 'decline' ? 'decline.sent_toast' : 'decline.withdrawn_toast'));
+        return true;
+    }).catch(() => {
+        if (btn) btn.disabled = false;
+        alert(t('common.network_error'));
+        return false;
+    });
+}
+function applyOrderLists(data) {
+    if (data.dispatches) renderDispatches(dispatches = data.dispatches);
+    if (data.routes) {
+        routes = data.routes;
+        renderMyRoutes(routes);
+        renderRoutesAdmin(routes); renderRouteLayer(routes);
+    }
+    if (data.sectors) {
+        sectors = data.sectors;
+        renderMySectors(sectors);
+        renderSectorLayer(sectors); renderSectorsList(sectors); renderAreaLayer(areas);
+    }
+    if (data.myTasks) renderMyTasks(myTasks = data.myTasks);
+}
+
 function myOrderEntriesFromOrders(items) {
     return (items || []).map(task => {
         const isTask = task.order_type === 'task';
@@ -10498,10 +10621,18 @@ function myOrderEntriesFromOrders(items) {
         // both reach this line carrying whatever the coordinator typed.
         const labelHtml = (isTask || isSpeak || task.order_type === 'message') ? escapeHtml(task.label) : task.label;
         const done = ackCompletes ? !!task.acknowledged_at : !!task.fulfilled_at;
+        // Handed back to command: not outstanding any more, which is what
+        // drops it from the tab badge and the popup's strip.
+        if (task.declined && !done) {
+            actionHtml = declineNoticeHtml('order', task.order_id, task.declined, !!task.can_decline);
+        } else if (task.can_decline && !done) {
+            actionHtml += declineOpenBtnHtml('order:' + task.order_id);
+        }
+        const outstanding = !done && !task.declined;
         return {
-            outstanding: !done,
+            outstanding: outstanding,
             html: myOrderRow(labelHtml, t('mytasks.sent_prefix', {time: task.sent_at}), actionHtml),
-            popup: opModelFromOrder(task, !done),
+            popup: opModelFromOrder(task, outstanding),
         };
     });
 }
@@ -10564,6 +10695,10 @@ function opModelFromOrder(task, outstanding) {
         speakText: type === 'speak' ? (typed || task.label) : '',
         target: null,
         card: cardByType[type] || 'myTasksCard',
+        // «Δεν μπορώ»: a personal order is this person's answer alone.
+        canDecline: !!task.can_decline && !task.declined,
+        declined: task.declined || null,
+        declineForTeam: false,
     };
 }
 
@@ -10582,7 +10717,11 @@ function opModelFromDispatch(d) {
         title: t(isPoint ? 'popup.type.dispatch_point' : 'popup.type.dispatch_area'),
         text: d.label || t(isPoint ? 'popup.text.dispatch_point' : 'popup.text.dispatch_area'),
         meta: t('popup.to_team', {team: d.team_label}),
-        acked: acked, outstanding: !d.my_completed,
+        acked: acked, outstanding: !d.my_completed && !d.my_declined,
+        // The team's answer, like its steps — unless this person has no team.
+        canDecline: !!d.can_decline && !d.my_declined,
+        declined: d.my_declined || null,
+        declineForTeam: opIHaveATeam(),
         steps: [t('popup.step.ack'), t('popup.step.depart'), t('popup.step.arrive'), t('popup.step.finish')],
         step: step,
         stepTimes: stepTimes,
@@ -10612,7 +10751,11 @@ function opModelFromRoute(route) {
         cat: 'move', icon: 'bi-signpost-split-fill', title: t('popup.type.route'),
         text: route.title || t('route.default_title'),
         meta: t('popup.route_points', {count: wps.length}),
-        acked: acked, outstanding: true,
+        acked: acked, outstanding: !route.declined,
+        // The whole route group's answer.
+        canDecline: !!route.can_decline && !route.declined,
+        declined: route.declined || null,
+        declineForTeam: true,
         steps: [t('popup.step.ack'), t('popup.step.waypoints', {done: doneCount, total: wps.length}), t('popup.step.route_end')],
         step: acked ? 1 : 0, stepTimes: {},
         hint: '', speakText: '',
@@ -10642,7 +10785,10 @@ function opModelFromSector(sector) {
         title: t(recheck ? 'popup.type.sector_recheck' : 'popup.type.sector'),
         text: sector.label + (area ? ' — ' + area.label : '') + (note ? '\n' + note : ''),
         meta: t('popup.to_team', {team: sector.team_label}),
-        acked: acked, outstanding: true,
+        acked: acked, outstanding: !sector.declined,
+        canDecline: !!sector.can_decline && !sector.declined,
+        declined: sector.declined || null,
+        declineForTeam: true,
         steps: [t('popup.step.ack'), t('popup.step.travel'), t('popup.step.search'), t('popup.step.complete')],
         step: !acked ? 0 : (searching ? 2 : 1),
         stepTimes: sector.acknowledged_at ? {0: sector.acknowledged_at} : {},
@@ -10699,9 +10845,18 @@ function myOrderEntriesFromDispatches(items) {
             // its own way to actually get there.
             const dNav = dispatchNavPoint(d);
             const directionsHtml = navigationPairHtml(dNav.lat, dNav.lng, 'block');
+            // «Δεν μπορώ» — my team's, like the steps above it.
+            if (d.my_declined && !d.my_completed) {
+                return {
+                    outstanding: false,
+                    html: myOrderRow(labelHtml, escapeHtml(d.team_label), declineNoticeHtml('dispatch', d.id, d.my_declined, !!d.can_decline)),
+                    popup: opModelFromDispatch(d),
+                };
+            }
+            const declineHtml = d.can_decline && !d.my_completed ? declineOpenBtnHtml('dispatch:' + d.id) : '';
             return {
                 outstanding: !d.my_completed,
-                html: myOrderRow(labelHtml, escapeHtml(d.team_label), receiptHtml + actionHtml + directionsHtml),
+                html: myOrderRow(labelHtml, escapeHtml(d.team_label), receiptHtml + actionHtml + directionsHtml + declineHtml),
                 popup: opModelFromDispatch(d),
             };
         });
@@ -10713,11 +10868,13 @@ function myOrderEntriesFromRoutes(items) {
         .map(route => {
             const done = route.waypoints.filter(wp => wp.completed_at || wp.skipped_at).length;
             const labelHtml = escapeHtml(t('mytasks.route_label') + ' — ' + (route.title || t('route.default_title')));
-            const actionHtml = !route.my_acknowledged_at
+            let actionHtml = !route.my_acknowledged_at
                 ? `<button type="button" class="btn btn-sm btn-warning w-100 my-route-ack-btn" data-id="${route.id}" data-order-id="${route.order_id}">${t('banner.ack_btn')}</button>`
                 : `<button type="button" class="btn btn-sm btn-outline-primary w-100 my-open-card-btn" data-card="myRouteCard">${t('mytasks.open_card_btn')}</button>`;
+            if (route.declined) actionHtml = declineNoticeHtml('route', route.id, route.declined, !!route.can_decline);
+            else if (route.can_decline) actionHtml += declineOpenBtnHtml('route:' + route.id);
             return {
-                outstanding: true,
+                outstanding: !route.declined,
                 html: myOrderRow(labelHtml, t('mytasks.route_progress', {done: done, total: route.waypoints.length}), actionHtml),
                 popup: opModelFromRoute(route),
             };
@@ -10735,11 +10892,14 @@ function myOrderEntriesFromSectors(items) {
             // a volunteer should not have to find their assignment on the map
             // before they can start moving toward it.
             return {
-                outstanding: true,
+                outstanding: !sector.declined,
                 html: myOrderRow(
                     escapeHtml(t('mytasks.sector_label', {label: sector.label})),
                     escapeHtml(sector.status_label),
-                    actionHtml + polygonNavigationBtnHtml(sector.geo, {block: true})
+                    sector.declined
+                        ? declineNoticeHtml('sector', sector.id, sector.declined, !!sector.can_decline)
+                        : actionHtml + polygonNavigationBtnHtml(sector.geo, {block: true})
+                            + (sector.can_decline ? declineOpenBtnHtml('sector:' + sector.id) : '')
                 ),
                 popup: opModelFromSector(sector),
             };
@@ -10876,6 +11036,12 @@ let opToastTimer = null;
 // Εντολές μου", so they live here until dismissed and are merged in on every
 // sync. Keyed 'info:<banner id>' or 'team:<team id>'.
 const opInfo = new Map();
+// This person's team as of the latest rosters (opCheckTeam), for the one
+// sentence in «Δεν μπορώ» that says whether they answer for a team.
+let opMyTeamId = null;
+function opIHaveATeam() { return opMyTeamId !== null; }
+// The «Δεν μπορώ» reason picker, when it is open: {key, reason, note}.
+let opDecline = null;
 // Orders put off with «Αργότερα», so a reload does not throw them back up.
 const OP_LATER_STORE = 'wrOpLater_<?= $missionId ?>';
 // The team this device last said «Κατάλαβα» to, so the team notice appears
@@ -10922,7 +11088,14 @@ function orderPopupSync(entries) {
         // no toast: "done" would be the wrong word for it.
         models.forEach(m => {
             const before = previous.get(m.key);
-            if (before && before.outstanding && !m.outstanding) opToast(t('popup.done_toast', {title: m.title}));
+            if (!before || !before.outstanding || m.outstanding) return;
+            // Handed back rather than done. Somebody else on the team said
+            // so — this person's own «Δεν μπορώ» has its own toast.
+            if (m.declined) {
+                if (Number(m.declined.by_id) !== WR_MY_USER_ID) opToast(t('decline.team_toast', {name: m.declined.by || '', title: m.title}));
+                return;
+            }
+            opToast(t('popup.done_toast', {title: m.title}));
         });
     }
     const open = models.filter(m => m.outstanding);
@@ -11140,6 +11313,7 @@ function opModelFromTeam(team) {
 // Returns the notice's key when it has just been added.
 function opCheckTeam(teamList) {
     const mine = (teamList || []).find(team => (team.members || []).some(m => Number(m.user_id) === WR_MY_USER_ID));
+    opMyTeamId = mine ? Number(mine.id) : null;
     const key = mine ? 'team:' + mine.id : null;
     for (const k of Array.from(opInfo.keys())) {
         if (k.startsWith('team:') && k !== key) opInfo.delete(k);
@@ -11187,6 +11361,19 @@ function opMinimize() {
     if (opMode === 'arrival') opRememberLater(opArrival.filter(key => opEntries.has(key) && !opEntries.get(key).acked));
     opMode = 'closed';
     opArrival = [];
+    opDecline = null;
+    orderPopupRender();
+}
+
+// «Δεν μπορώ» from «Οι Εντολές μου» or a card: the popup, on that order, with
+// the reason picker open — one picker, whichever surface it was asked from.
+function opOpenDecline(key) {
+    const m = opEntries.get(key);
+    if (!m || !m.outstanding || !m.canDecline) return;
+    opMode = 'review';
+    opShownKey = key;
+    opIndex = 0;
+    opDecline = {key: key, reason: null, note: ''};
     orderPopupRender();
 }
 
@@ -11200,9 +11387,15 @@ function orderPopupRender() {
     opShownKey = opMode === 'closed' ? null : (list[opIndex] || null);
     const m = opMode === 'closed' ? null : opEntries.get(list[opIndex]);
     const strip = opMode === 'closed' ? opStripModel() : null;
+    // The reason picker belongs to one order: paging away, the order leaving
+    // (a teammate answered for the team), or anything else taking its place
+    // closes it.
+    if (opDecline && (!m || m.key !== opDecline.key || !m.canDecline)) opDecline = null;
+    const declining = !!(m && opDecline);
     // Every poll re-syncs, and a rebuilt card loses its mini map and whatever
     // the thumb was about to press — so only redraw when something shown changed.
-    const sig = JSON.stringify([opMode, opIndex, list, m, strip]);
+    // The note being typed is not in it: typing must not rebuild the box.
+    const sig = JSON.stringify([opMode, opIndex, list, m, strip, declining ? 'decline:' + (opDecline.reason || '') : null]);
     if (sig === opRenderedSig) return;
     opRenderedSig = sig;
     if (opMiniMap) { opMiniMap.remove(); opMiniMap = null; }
@@ -11210,15 +11403,59 @@ function orderPopupRender() {
     if (m) {
         html = '<div class="wr-op-backdrop" data-op="min"></div>'
             + '<div class="wr-op-stage' + (opMode === 'review' ? ' wr-op-stage-review' : '') + '">'
-            + (opMode === 'arrival' ? opArrivalCardHtml(m, opIndex, list.length) : opReviewCardHtml(m, opIndex, list.length))
+            + (declining ? opDeclineCardHtml(m)
+                : (opMode === 'arrival' ? opArrivalCardHtml(m, opIndex, list.length) : opReviewCardHtml(m, opIndex, list.length)))
             + '</div>';
     } else if (strip) {
         html = opStripHtml(strip);
     }
     layer.innerHTML = html;
-    if (m && opMode === 'arrival' && m.target) opBuildMiniMap(m);
+    if (declining) {
+        // A rebuild (a reason picked, a poll) keeps what was typed.
+        const noteEl = document.getElementById('wrOpDeclineNote');
+        if (noteEl) noteEl.value = opDecline.note;
+        opDeclineSyncSend();
+    }
+    if (m && !declining && opMode === 'arrival' && m.target) opBuildMiniMap(m);
     orderPopupLayout();
 }
+
+// The reason picker: four reasons and «Άλλο», a note (required for «Άλλο»),
+// who the answer is for, and SOS for what is not a «Δεν μπορώ» at all.
+const DECLINE_REASONS = ['unsafe', 'no_access', 'busy', 'injury', 'other'];
+function opDeclineCardHtml(m) {
+    const reasons = DECLINE_REASONS.map(r =>
+        `<button type="button" class="wr-op-reason${opDecline.reason === r ? ' active' : ''}" data-op="decline-reason" data-reason="${r}" aria-pressed="${opDecline.reason === r ? 'true' : 'false'}">${escapeHtml(t('decline.reason.' + r))}</button>`
+    ).join('');
+    const placeholder = t(opDecline.reason === 'other' ? 'decline.note_placeholder_other' : 'decline.note_placeholder');
+    return `<div class="wr-op-card wr-op-cat-decline" role="dialog" aria-modal="true" aria-label="${escapeHtml(t('decline.btn'))}">
+        <div class="wr-op-head"><i class="bi bi-x-octagon-fill"></i><span>${escapeHtml(t('decline.btn'))}</span><span class="wr-op-spacer"></span>${opMinBtnHtml()}</div>
+        <div class="wr-op-body">
+            <div class="wr-op-meta mb-1"><i class="bi ${m.icon} me-1"></i>${escapeHtml(m.title)} — ${escapeHtml(String(m.text).split('\n')[0])}</div>
+            <div class="wr-op-text">${escapeHtml(t('decline.question'))}</div>
+            <div class="wr-op-reasons">${reasons}</div>
+            <textarea id="wrOpDeclineNote" class="form-control form-control-sm mt-2" rows="2" maxlength="500" placeholder="${escapeHtml(placeholder)}"></textarea>
+            <div class="wr-op-hint"><i class="bi bi-info-circle me-1"></i>${escapeHtml(t(m.declineForTeam ? 'decline.hint_team' : 'decline.hint_person'))}</div>
+            <div class="wr-op-decline-sos"><i class="bi bi-exclamation-triangle-fill me-1"></i>${escapeHtml(t('decline.emergency_hint'))}</div>
+            <div class="wr-op-actions mt-2">
+                <button type="button" class="btn btn-danger w-100 fw-semibold" data-op="decline-send"><i class="bi bi-send-fill me-1"></i>${escapeHtml(t('decline.send_btn'))}</button>
+                <button type="button" class="btn btn-outline-secondary w-100 mt-2" data-op="decline-back">${escapeHtml(t('decline.back_btn'))}</button>
+            </div>
+        </div>
+    </div>`;
+}
+// «Αποστολή» only once there is something to send: a reason, and for «Άλλο»
+// the words. Toggled in place, so typing never rebuilds the card.
+function opDeclineSyncSend() {
+    const send = document.querySelector('#orderPopupLayer [data-op="decline-send"]');
+    if (!send || !opDecline) return;
+    send.disabled = !opDecline.reason || (opDecline.reason === 'other' && !opDecline.note.trim());
+}
+document.getElementById('orderPopupRoot')?.addEventListener('input', e => {
+    if (e.target.id !== 'wrOpDeclineNote' || !opDecline) return;
+    opDecline.note = e.target.value;
+    opDeclineSyncSend();
+});
 
 // Whatever is pinned to the bottom of the screen — the phone tab bar, and a
 // bottom ticker on top of it — stays uncovered: the SOS button lives there.
@@ -11321,9 +11558,18 @@ function opArrivalCardHtml(m, i, n) {
                 ${opCompassBtnHtml(m)}
                 ${opNoticeCardBtnHtml(m)}
                 ${m.kind === 'arrive' ? '' : `<button type="button" class="btn btn-outline-secondary w-100 mt-2" data-op="min">${escapeHtml(t('popup.btn.later'))}</button>`}
+                ${opDeclineBtnHtml(m)}
             </div>
         </div>
     </div>`;
+}
+
+// Last and quietest on both designs, under the way out: the picker it opens
+// is the real confirmation.
+function opDeclineBtnHtml(m) {
+    return m.canDecline && m.outstanding
+        ? `<button type="button" class="btn btn-link btn-sm text-danger w-100 mt-1" data-op="decline"><i class="bi bi-x-octagon me-1"></i>${escapeHtml(t('decline.btn'))}</button>`
+        : '';
 }
 
 // Design Γ: the same order reopened from the strip, as steps.
@@ -11348,6 +11594,7 @@ function opReviewCardHtml(m, i, n) {
             <div class="wr-op-steps">${steps}</div>
             ${m.kind === 'arrive' ? '' : opCompassBtnHtml(m)}
             ${m.hint ? `<div class="wr-op-hint mt-0"><i class="bi bi-info-circle me-1"></i>${escapeHtml(m.hint)}</div>` : ''}
+            ${opDeclineBtnHtml(m)}
         </div>
     </div>`;
 }
@@ -11811,6 +12058,27 @@ function opAcknowledge(m, btn) {
 function opAct(op, m, btn) {
     if (op === 'replay') { speakAnnouncement(m.speakText); return; }
     if (op === 'dismiss') { opDismissNotice(m); return; }
+    // «Δεν μπορώ» — before the «Ελήφθη» below: saying you cannot do an order
+    // is not receiving it.
+    if (op === 'decline') { opDecline = {key: m.key, reason: null, note: ''}; orderPopupRender(); return; }
+    if (op === 'decline-back') { opDecline = null; orderPopupRender(); return; }
+    if (op === 'decline-reason') {
+        if (opDecline && btn) { opDecline.reason = btn.dataset.reason; orderPopupRender(); }
+        return;
+    }
+    if (op === 'decline-send') {
+        if (!opDecline || !opDecline.reason) return;
+        const sent = {reason: opDecline.reason, note: opDecline.note.trim()};
+        postOrderDecline('decline', m.kind, m.id, sent, btn).then(ok => {
+            if (!ok) return;
+            // Out of the way: the order has just left this person's list.
+            opDecline = null;
+            opArrival = opArrival.filter(key => key !== m.key);
+            if (opMode === 'review') opMode = 'closed';
+            orderPopupRender();
+        });
+        return;
+    }
     // Over the popup, which stays where it was underneath.
     if (op === 'compass') { arrowOpen(m); return; }
     if (op === 'arrived') { opConfirmArrival(m, btn); opToast(t('popup.arrived_toast')); return; }
@@ -12458,15 +12726,20 @@ function renderMyRoutes(allRoutes) {
         // uses for plain tasks, applied here so the admin gets a real-time
         // sound the moment the team confirms they got it (mission-order.php's
         // acknowledge action, route-order_type branch).
-        const waypointsHtml = (route.status === 'active' && !route.my_acknowledged_at)
+        // «Δεν μπορώ» stands in for the whole waypoint list until the group
+        // takes it back: a route they said they cannot walk offers no steps.
+        const waypointsHtml = (route.status === 'active' && route.declined)
+            ? declineNoticeHtml('route', route.id, route.declined, !!route.can_decline)
+            : (route.status === 'active' && !route.my_acknowledged_at)
             ? `<button type="button" class="btn btn-sm wr-touch-btn btn-warning w-100 route-ack-btn" data-id="${route.id}" data-order-id="${route.order_id}"><i class="bi bi-check2 me-1"></i>${t('banner.ack_btn')}</button>`
+                + (route.can_decline ? declineOpenBtnHtml('route:' + route.id) : '')
             : route.status === 'cancelled'
                 ? `<div class="small text-muted">${t('route.cancelled_reason_prefix')}${route.cancel_reason ? ' — ' + escapeHtml(route.cancel_reason) : ''}</div>`
                 : route.waypoints.map(wp => {
                     if (wp.completed_at || wp.skipped_at) return renderRouteWaypointClosed(wp);
                     if (wp.seq === currentSeq) return renderRouteWaypointCurrent(wp);
                     return renderRouteWaypointUpcoming(wp);
-                }).join('');
+                }).join('') + (route.can_decline ? declineOpenBtnHtml('route:' + route.id) : '');
         return `<div class="mb-3">
             <div class="d-flex justify-content-between align-items-center mb-1">
                 <strong class="small text-uppercase">${route.title ? escapeHtml(route.title) : t('route.default_title')}</strong>
@@ -18823,8 +19096,10 @@ let ackTrackerSeeded = false;
 // for the confirmation that just landed and never again on a later poll.
 const ackTickedBefore = new Map();
 
+// «Δεν μπορώ» is an answer: someone who handed the order back is not someone
+// still to chase.
 function ackCardIsPending(card) {
-    return card.people.some(p => !p.ack_ts);
+    return card.people.some(p => !p.ack_ts && !p.declined);
 }
 
 function ackTimeLabel(ts) {
@@ -18834,32 +19109,46 @@ function ackTimeLabel(ts) {
 }
 
 function ackCardHtml(card, inlineStyle) {
-    const acked = card.people.filter(p => p.ack_ts).length;
+    const acked = card.people.filter(p => p.ack_ts && !p.declined).length;
+    const declinedCount = card.people.filter(p => p.declined).length;
     const total = card.people.length;
-    const done = acked === total;
+    const done = acked + declinedCount === total;
     const before = ackTickedBefore.get(card.key) || new Set();
 
     const people = card.people.map((person, i) => {
         // Index-based identity, not name: two volunteers can share a name, and
         // the server returns this list in a stable ORDER BY either way.
         const personKey = card.key + '#' + i;
-        const isNew = !!person.ack_ts && !before.has(personKey);
-        const cls = 'ack-card-person' + (person.ack_ts ? ' ack-done' : '') + (isNew ? ' ack-just-in' : '');
+        const isNew = !!person.ack_ts && !person.declined && !before.has(personKey);
+        const cls = 'ack-card-person' + (person.declined ? ' ack-declined' : (person.ack_ts ? ' ack-done' : '')) + (isNew ? ' ack-just-in' : '');
         const team = person.team ? `<span class="ack-card-team">${escapeHtml(person.team)}</span>` : '';
-        const when = person.ack_ts
+        const when = person.ack_ts && !person.declined
             ? `<span class="ack-card-time">${escapeHtml(ackTimeLabel(person.ack_ts))}</span>`
             : '';
         // aria-label carries what the colour and the empty box say visually,
         // so the panel is readable to a screen reader without it.
-        const label = person.ack_ts
-            ? escapeHtml(person.name)
-            : escapeHtml(person.name) + ' — ' + escapeHtml(t('acktracker.pending_hint'));
+        const label = person.declined
+            ? escapeHtml(person.name) + ' — ' + escapeHtml(t('acktracker.declined_hint'))
+            : person.ack_ts
+                ? escapeHtml(person.name)
+                : escapeHtml(person.name) + ' — ' + escapeHtml(t('acktracker.pending_hint'));
+        // A ✗ rather than a box: they answered, and the answer was no.
+        const box = person.declined
+            ? `<span class="ack-card-x" role="img" aria-label="${label}">✗</span>`
+            : `<input type="checkbox" disabled ${person.ack_ts ? 'checked' : ''} aria-label="${label}">`;
         return `<li class="${cls}">
-                    <input type="checkbox" disabled ${person.ack_ts ? 'checked' : ''} aria-label="${label}">
+                    ${box}
                     <span class="ack-card-name" title="${escapeHtml(person.name)}">${escapeHtml(person.name)}</span>
                     ${team}${when}
                 </li>`;
     }).join('');
+    // Why, one line per «Δεν μπορώ» — a team's is one line, not one per member.
+    const declines = (card.declines || []).map(dc => `<li class="ack-card-decline-row">
+                    <span>✋</span>
+                    <span class="ack-card-name">${escapeHtml(dc.team ? t('decline.who_team', {team: dc.team, name: dc.by || ''}) : (dc.by || ''))}</span>
+                    <span class="ack-card-time">${escapeHtml(dc.at)}</span>
+                    <div class="ack-card-decline-why">${escapeHtml(t('decline.reason.' + dc.reason))}${dc.note ? escapeHtml(t('decline.note_part', {note: dc.note})) : ''}</div>
+                </li>`).join('');
 
     const detail = card.detail
         ? `<div class="ack-card-detail">${escapeHtml(card.detail)}</div>`
@@ -18878,11 +19167,14 @@ function ackCardHtml(card, inlineStyle) {
                     <span class="ack-card-time">${escapeHtml(steps)}</span>
                 </li>`;
     }).join('');
+    const declinedText = declinedCount
+        ? ' · ' + t(declinedCount === 1 ? 'acktracker.declined_one' : 'acktracker.declined_many', {n: declinedCount})
+        : '';
     const countText = done
-        ? t('acktracker.all_done')
-        : t('acktracker.count', {acked: acked, total: total});
+        ? (declinedCount ? t('acktracker.all_answered') + declinedText : t('acktracker.all_done'))
+        : t('acktracker.count', {acked: acked, total: total}) + declinedText;
 
-    return `<div class="ack-card${done ? ' ack-card-done' : ''}" data-ack-key="${escapeHtml(card.key)}"${inlineStyle ? ` style="${inlineStyle}"` : ''}>
+    return `<div class="ack-card${done ? ' ack-card-done' : ''}${declinedCount ? ' ack-card-declined' : ''}" data-ack-key="${escapeHtml(card.key)}"${inlineStyle ? ` style="${inlineStyle}"` : ''}>
                 <div class="ack-card-head" title="${escapeHtml(t('acktracker.drag_hint'))}">
                     <div class="ack-card-titles">
                         <div class="ack-card-kind">${escapeHtml(card.title)}</div>
@@ -18895,6 +19187,7 @@ function ackCardHtml(card, inlineStyle) {
                             title="${escapeHtml(t('acktracker.close_card'))}">&times;</button>
                 </div>
                 <ul class="ack-card-people">${people}</ul>
+                ${declines ? `<ul class="ack-card-progress ack-card-declines">${declines}</ul>` : ''}
                 ${progress ? `<ul class="ack-card-progress">${progress}</ul>` : ''}
             </div>`;
 }
@@ -18934,7 +19227,8 @@ function renderAckTracker(cards) {
     // position inside the list, restart the flash animation on every tick,
     // and — now — yank the card out from under a drag in progress.
     const sigOf = list2 => list2.map(c =>
-        c.key + ':' + c.people.map(p => p.ack_ts || 0).join(',') +
+        c.key + ':' + c.people.map(p => (p.ack_ts || 0) + (p.declined ? 'x' : '')).join(',') +
+        (c.declines || []).map(dc => dc.ts).join(';') +
         (ackPositions[c.key] ? '@' + ackPositions[c.key].x + ',' + ackPositions[c.key].y : '')
     ).join('|');
 
@@ -18986,16 +19280,19 @@ function renderAckTracker(cards) {
 function syncAckTrackerBar() {
     const open = Array.from(ackOpenCards.values());
     if (!open.length) return;
-    let acked = 0, total = 0;
+    let acked = 0, total = 0, declined = 0;
     open.forEach(card => {
         total += card.people.length;
-        acked += card.people.filter(p => p.ack_ts).length;
+        // Same split as each card's own count (ackCardHtml).
+        acked += card.people.filter(p => p.ack_ts && !p.declined).length;
+        declined += card.people.filter(p => p.declined).length;
     });
     const label = document.getElementById('ackTrackerBarLabel');
     if (!label) return;
-    label.textContent = open.length === 1
+    label.textContent = (open.length === 1
         ? t('acktracker.mobile_summary_one', {acked: acked, total: total})
-        : t('acktracker.mobile_summary', {cards: open.length, acked: acked, total: total});
+        : t('acktracker.mobile_summary', {cards: open.length, acked: acked, total: total}))
+        + (declined ? ' · ' + t(declined === 1 ? 'acktracker.declined_one' : 'acktracker.declined_many', {n: declined}) : '');
 }
 
 function dismissAckCard(key) {
@@ -21417,6 +21714,7 @@ function renderRoutesAdmin(allRoutes) {
                     <i class="bi bi-chevron-${isExpanded ? 'up' : 'down'}"></i>
                 </div>
             </div>
+            ${route.status === 'active' && route.declined ? `<div class="px-2 pb-2">${declineNoticeHtml('route', route.id, route.declined, !!route.can_decline)}</div>` : ''}
             ${isExpanded ? `<div class="border-top p-2">${renderRouteAdminWaypointsList(route)}</div>` : ''}
         </div>`;
     };

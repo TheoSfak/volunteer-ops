@@ -819,8 +819,9 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
     $myTeamId = getUserTeamIdForMission($missionId, $userId);
     $progressByDispatch = loadDispatchProgress($dispatchIds);
     $myScopeKey = dispatchProgressScopeKey($myTeamId, $userId);
+    $declines = loadActiveOrderDeclines($missionId);
 
-    return array_map(function ($row) use ($canManageWarRoom, $isApprovedParticipant, $userId, $myTeamId, $acksByDispatch, $receiptsByDispatch, $progressByDispatch, $myScopeKey) {
+    return array_map(function ($row) use ($canManageWarRoom, $isApprovedParticipant, $userId, $myTeamId, $acksByDispatch, $receiptsByDispatch, $progressByDispatch, $myScopeKey, $declines) {
         $dispatchId = (int) $row['id'];
         $teamId = $row['team_id'] ? (int) $row['team_id'] : null;
         $acks = $acksByDispatch[$dispatchId] ?? [];
@@ -854,7 +855,9 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             !empty($progress['t' . $teamId]['arrived'])
             || in_array($teamId, array_column($acks, 'team_id'), true)
         );
-        $eta = ($row['type'] === 'point' && $teamId !== null && !$targetTeamArrived)
+        // Nor for a team that said «Δεν μπορώ»: it is not on its way.
+        $targetTeamDeclined = $teamId !== null && isset($declines['dispatch:' . $dispatchId]['t' . $teamId]);
+        $eta = ($row['type'] === 'point' && $teamId !== null && !$targetTeamArrived && !$targetTeamDeclined)
             ? computeDispatchEta($dispatchId, $teamId, (float) $geo['lat'], (float) $geo['lng'])
             : null;
 
@@ -886,10 +889,15 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             'can_ack'      => $isApprovedParticipant && $eligible && !$teamArrived && !$mine['completed'],
             'my_completed' => $mine['completed'],
             'can_complete' => $isApprovedParticipant && $eligible && !$mine['completed'],
+            // «Δεν μπορώ» is my TEAM's answer too, like the three steps.
+            'my_declined'  => $declines['dispatch:' . $dispatchId][$myScopeKey] ?? null,
+            'can_decline'  => $isApprovedParticipant && $eligible && !$mine['completed'],
             // Every team's progress, for the coordinator's view of the pin.
             'progress'     => array_values(array_map(fn($p) => [
                 'label' => $p['label'], 'departed' => $p['departed'], 'arrived' => $p['arrived'], 'completed' => $p['completed'],
             ], $progress)),
+            // And every team that said it cannot, with why.
+            'declines'     => array_values($declines['dispatch:' . $dispatchId] ?? []),
         ];
     }, $rows);
 }
@@ -1052,8 +1060,9 @@ function loadMissionSectorsForUser(int $missionId, int $userId, bool $canManageW
     }
 
     $myTeamId = getUserTeamIdForMission($missionId, $userId);
+    $declines = loadActiveOrderDeclines($missionId);
 
-    return array_map(function ($row) use ($canManageWarRoom, $isApprovedParticipant, $myTeamId, $buildingsBySector, $floorsByBuilding, $logBySector) {
+    return array_map(function ($row) use ($canManageWarRoom, $isApprovedParticipant, $myTeamId, $buildingsBySector, $floorsByBuilding, $logBySector, $declines) {
         $sectorId = (int) $row['id'];
         $teamId = $row['team_id'] ? (int) $row['team_id'] : null;
         $isMyTeam = $teamId !== null && $teamId === $myTeamId;
@@ -1113,6 +1122,10 @@ function loadMissionSectorsForUser(int $missionId, int $userId, bool $canManageW
             'can_manage'             => $canManageWarRoom,
             'can_acknowledge'        => $isApprovedParticipant && $isMyTeam && $needsAcknowledgeFirst,
             'can_self_report'        => $isApprovedParticipant && $isMyTeam && $nextStatus !== null && !$needsAcknowledgeFirst,
+            // «Δεν μπορώ» from the team it is assigned to. Keyed by that team,
+            // so handing the sector to another team leaves them undeclined.
+            'declined'               => $teamId !== null ? ($declines['sector:' . $sectorId]['t' . $teamId] ?? null) : null,
+            'can_decline'            => $isApprovedParticipant && $isMyTeam && $row['status'] !== 'completed',
             'next_status'            => $nextStatus,
             'next_status_label'      => $nextStatus ? sectorStatusLabel($nextStatus) : null,
             'buildings'              => $buildings,
@@ -1310,12 +1323,16 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
         ];
     }
 
-    return array_map(function ($r) use ($waypointsByRoute, $membersByRoute, $ackByOrderId, $canManageWarRoom, $myTeamId, $userId) {
+    $declines = loadActiveOrderDeclines($missionId);
+
+    return array_map(function ($r) use ($waypointsByRoute, $membersByRoute, $ackByOrderId, $canManageWarRoom, $myTeamId, $userId, $declines) {
         $routeId = (int) $r['id'];
         $teamId = $r['team_id'] ? (int) $r['team_id'] : null;
         $orderId = $r['order_id'] ? (int) $r['order_id'] : null;
         [$teamColorBg, $teamColorFg] = teamBadgeColors($teamId ? $r['color'] : null);
         $members = $membersByRoute[$routeId] ?? [];
+        $isRouteMember = in_array($userId, array_column($members, 'id'), true);
+        $isOpen = !$r['cancelled_at'] && !$r['completed_at'];
         return [
             'id'                    => $routeId,
             'team_id'               => $teamId,
@@ -1347,7 +1364,10 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
             'is_my_team'            => $teamId !== null && $teamId === $myTeamId,
             // The real authorization/visibility signal for "is this route
             // mine to act on" — mission_route_members, not team membership.
-            'is_route_member'       => in_array($userId, array_column($members, 'id'), true),
+            'is_route_member'       => $isRouteMember,
+            // «Δεν μπορώ» — the whole route group's answer (scope 'all').
+            'declined'              => $declines['route:' . $routeId]['all'] ?? null,
+            'can_decline'           => $isRouteMember && $isOpen,
             'members'               => $members,
             'waypoints'             => $waypointsByRoute[$routeId] ?? [],
         ];
@@ -1889,8 +1909,9 @@ function loadMyTaskOrdersForUser(int $missionId, int $userId): array {
          ORDER BY o.created_at DESC",
         [$missionId, $userId]
     );
+    $declines = loadActiveOrderDeclines($missionId);
 
-    return array_map(function ($row) {
+    return array_map(function ($row) use ($declines, $userId) {
         // 'speak' and 'message' join 'task' here: all three store what the
         // coordinator actually typed, and for an announcement the text IS the
         // order — a row reading "Voice Announcement" would hide the one thing
@@ -1912,6 +1933,10 @@ function loadMyTaskOrdersForUser(int $missionId, int $userId): array {
             'sent_at'         => date('d/m H:i', strtotime($row['created_at'])),
             'acknowledged_at' => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
             'fulfilled_at'    => $row['fulfilled_at'] ? date('d/m H:i', strtotime($row['fulfilled_at'])) : null,
+            // «Δεν μπορώ» (orderDeclineTarget()): offered on the orders that
+            // ask for action, until they are done.
+            'can_decline'     => in_array($row['order_type'], ORDER_DECLINE_ORDER_TYPES, true) && !$row['fulfilled_at'],
+            'declined'        => $declines['order:' . (int) $row['order_id']]['u' . $userId] ?? null,
         ];
     }, $rows);
 }
@@ -1982,12 +2007,15 @@ const ACK_TRACKER_ORDER_TYPES = [
  */
 function loadAckTrackerCardsForMission(int $missionId): array {
     $cards = [];
+    // «Δεν μπορώ»: a person (or a team) who answered that way has answered, so
+    // their box shows ✗ rather than staying empty, and the card lists why.
+    $declines = loadActiveOrderDeclines($missionId);
 
     // ── Orders (incl. routes) ───────────────────────────────────────────────
     $placeholders = implode(',', array_fill(0, count(ACK_TRACKER_ORDER_TYPES), '?'));
     $orders = dbFetchAll(
         "SELECT o.id, o.order_type, o.task_text, UNIX_TIMESTAMP(o.created_at) AS ts,
-                cu.name AS by_name, rt.title AS route_title
+                cu.name AS by_name, rt.title AS route_title, rt.id AS route_id
          FROM mission_orders o
          JOIN users cu ON cu.id = o.created_by
          LEFT JOIN mission_routes rt ON rt.order_id = o.id
@@ -2013,12 +2041,25 @@ function loadAckTrackerCardsForMission(int $missionId): array {
              ORDER BY u.name ASC",
             $orderIds
         );
+        $routeIdByOrder = [];
+        foreach ($orders as $order) {
+            if ($order['route_id'] !== null) {
+                $routeIdByOrder[(int) $order['id']] = (int) $order['route_id'];
+            }
+        }
         $byOrder = [];
         foreach ($recipientRows as $row) {
-            $byOrder[(int) $row['order_id']][] = [
-                'name'   => $row['name'],
-                'team'   => $row['codename'] !== null ? teamLabel($row['codename'], $row['team_number']) : null,
-                'ack_ts' => $row['ack_ts'] !== null ? (int) $row['ack_ts'] : null,
+            $orderId = (int) $row['order_id'];
+            // A route is declined by its whole group (scope 'all'); any other
+            // order by the one person.
+            $declined = isset($routeIdByOrder[$orderId])
+                ? isset($declines['route:' . $routeIdByOrder[$orderId]]['all'])
+                : isset($declines['order:' . $orderId]['u' . (int) $row['user_id']]);
+            $byOrder[$orderId][] = [
+                'name'     => $row['name'],
+                'team'     => $row['codename'] !== null ? teamLabel($row['codename'], $row['team_number']) : null,
+                'ack_ts'   => $row['ack_ts'] !== null ? (int) $row['ack_ts'] : null,
+                'declined' => $declined,
             ];
         }
 
@@ -2046,6 +2087,7 @@ function loadAckTrackerCardsForMission(int $missionId): array {
                 'ts'      => (int) $order['ts'],
                 'by'      => $order['by_name'],
                 'people'  => $people,
+                'declines' => array_values($declines[$order['route_id'] !== null ? 'route:' . (int) $order['route_id'] : 'order:' . (int) $order['id']] ?? []),
             ];
         }
     }
@@ -2054,7 +2096,7 @@ function loadAckTrackerCardsForMission(int $missionId): array {
     // COALESCE on status_updated_at, not created_at: a sector is usually drawn
     // long before it is handed to a team, and the card is about the handover.
     $sectors = dbFetchAll(
-        "SELECT s.id, s.label, UNIX_TIMESTAMP(COALESCE(s.status_updated_at, s.created_at)) AS ts,
+        "SELECT s.id, s.label, s.team_id, UNIX_TIMESTAMP(COALESCE(s.status_updated_at, s.created_at)) AS ts,
                 UNIX_TIMESTAMP(s.acknowledged_at) AS ack_ts,
                 au.name AS ack_name, cu.name AS by_name, mt.codename, mt.team_number
          FROM mission_search_sectors s
@@ -2068,6 +2110,7 @@ function loadAckTrackerCardsForMission(int $missionId): array {
     );
     foreach ($sectors as $sector) {
         $team = teamLabel($sector['codename'], $sector['team_number']);
+        $sectorDecline = $declines['sector:' . (int) $sector['id']]['t' . (int) $sector['team_id']] ?? null;
         $cards[] = [
             'key'    => 'sector:' . (int) $sector['id'],
             'kind'   => 'sector',
@@ -2086,7 +2129,9 @@ function loadAckTrackerCardsForMission(int $missionId): array {
                     : $team,
                 'team'   => null,
                 'ack_ts' => $sector['ack_ts'] !== null ? (int) $sector['ack_ts'] : null,
+                'declined' => $sectorDecline !== null,
             ]],
+            'declines' => $sectorDecline !== null ? [$sectorDecline] : [],
         ];
     }
 
@@ -2154,10 +2199,13 @@ function loadAckTrackerCardsForMission(int $missionId): array {
                 if ($teamId !== null && (int) ($participant['team_id'] ?? 0) !== $teamId) {
                     continue;
                 }
+                $participantTeamId = $participant['team_id'] !== null ? (int) $participant['team_id'] : null;
                 $people[] = [
                     'name'   => $participant['name'],
                     'team'   => $participant['codename'] !== null ? teamLabel($participant['codename'], $participant['team_number']) : null,
                     'ack_ts' => $receiptTs[(int) $dispatch['id']][$participantId] ?? null,
+                    // The team's answer, so every member of it shows ✗.
+                    'declined' => isset($declines['dispatch:' . (int) $dispatch['id']][dispatchProgressScopeKey($participantTeamId, $participantId)]),
                 ];
             }
             if (!$people) {
@@ -2176,6 +2224,7 @@ function loadAckTrackerCardsForMission(int $missionId): array {
                 'progress' => array_values(array_map(fn($p) => [
                     'label' => $p['label'], 'departed' => $p['departed'], 'arrived' => $p['arrived'], 'completed' => $p['completed'],
                 ], $progressByDispatch[(int) $dispatch['id']] ?? [])),
+                'declines' => array_values($declines['dispatch:' . (int) $dispatch['id']] ?? []),
             ];
         }
     }
@@ -3198,6 +3247,8 @@ function advanceMissionDispatch(array $mission, int $dispatchId, int $userId, st
         [$dispatchId, $myTeamId ?: $userId]
     );
     $recorded = recordDispatchProgress($dispatchId, $myTeamId, $userId, $step);
+    // A team that said «Δεν μπορώ» and is now moving on it after all.
+    resolveOrderDeclineOnProgress('dispatch', $dispatchId, dispatchProgressScopeKey($myTeamId, $userId), $userId);
 
     if ($recorded) {
         $teamLabel = null;
@@ -3313,6 +3364,7 @@ function recordRouteWaypointArrival(array $mission, array $wp, int $userId, ?flo
     }
 
     $missionId = (int) $mission['id'];
+    resolveOrderDeclineOnProgress('route', (int) $wp['route_id'], 'all', $userId);
     logAudit('arrive_route_waypoint', 'mission_route_waypoints', $waypointId, null, ['mission_id' => $missionId, 'distance_m' => $distance] + receiptAuditExtra($userId, $via));
 
     $teamRow = $wp['team_id'] ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$wp['team_id']]) : null;
@@ -3371,6 +3423,406 @@ function receiveMissionSector(array $mission, int $sectorId, int $userId, string
         ['name' => $userName, 'label' => $sector['label'], 'mission' => $mission['title']]
     );
     return null;
+}
+
+// ── «Δεν μπορώ» — an order handed back to command (v3.334.0) ─────────────────
+// Until this, an order's steps only went forward. A volunteer facing a flooded
+// road, a locked building or a teammate who cannot walk any more had no way to
+// say so except a chat message, and meanwhile the order kept pulsing on their
+// screen and counting as unanswered at the command post.
+//
+// Settled with the user (2026-09-26):
+//   · Every order that asks for action: task, photo/video/location/live
+//     requests, dispatch point/area, route, sector. Not the information-only
+//     ones (announcement, message, battery, return to base), where «Ελήφθη» is
+//     the whole order.
+//   · It goes back to command. It leaves the volunteer's to-do, command gets a
+//     loud alert, and the order's acknowledgement card marks it ✗ with the
+//     reason. The volunteer can take it back with «Τελικά μπορώ». Command
+//     re-sends, reassigns or cancels with the tools it already has.
+//   · A team order is the team's. The first member to press answers for the
+//     team, the same rule as Ξεκινάω/Έφτασα (recordDispatchProgress()).
+//
+// A decline also ends by itself when the team moves the order on regardless —
+// they found a way — (resolveOrderDeclineOnProgress()), and when command hands
+// the sector to another team or sends it back for a recheck, which is a new
+// order that asks afresh (resolveOrderDeclinesReassigned()).
+//
+// The command-side notification codes are deliberately not registered in
+// notification_settings: an unregistered code cannot be switched off, and a
+// team saying it cannot do what it was sent to do is not something a
+// coordinator gets to mute.
+
+const ORDER_DECLINE_REASONS = ['unsafe', 'no_access', 'busy', 'injury', 'other'];
+const ORDER_DECLINE_ORDER_TYPES = ['task', 'photo', 'video', 'location', 'live'];
+const ORDER_DECLINE_NOTE_MAX = 500;
+
+/**
+ * What a «Δεν μπορώ» by $userId on ($kind, $id) is about, and whether they may
+ * press it — the same checks the order's own buttons make. Returns an array
+ * (scope_key, team_id, what_key, detail, teammates, receipt) or the error to
+ * show.
+ *
+ * scope_key says whose answer it is: 'u<user>' for a per-person order, the
+ * dispatch's own progress scope (dispatchProgressScopeKey()) for a dispatch,
+ * 't<team>' for a sector — so a sector handed to another team is not declined
+ * for them — and 'all' for a route, which is one group of people.
+ */
+function orderDeclineTarget(int $missionId, string $kind, int $id, int $userId, bool $isApprovedParticipant): array|string {
+    if ($kind === 'order') {
+        $row = dbFetchOne(
+            "SELECT o.order_type, o.task_text, r.team_id, r.fulfilled_at
+             FROM mission_order_recipients r
+             JOIN mission_orders o ON o.id = r.order_id
+             WHERE r.order_id = ? AND r.user_id = ? AND o.mission_id = ?",
+            [$id, $userId, $missionId]
+        );
+        if (!$row) {
+            return t('order.no_request_for_you');
+        }
+        if (!in_array($row['order_type'], ORDER_DECLINE_ORDER_TYPES, true)) {
+            return t('decline.not_supported');
+        }
+        if ($row['fulfilled_at']) {
+            return t('decline.already_done');
+        }
+        return [
+            'scope_key' => 'u' . $userId,
+            'team_id'   => $row['team_id'] ? (int) $row['team_id'] : null,
+            'what_key'  => 'order.' . $row['order_type'] . '.card_title',
+            'detail'    => $row['order_type'] === 'task' ? trim((string) $row['task_text']) : '',
+            'teammates' => [],
+        ];
+    }
+
+    if ($kind === 'dispatch') {
+        $dispatch = dbFetchOne("SELECT id, team_id, type, label FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$id, $missionId]);
+        if (!$dispatch) {
+            return t('common.not_found');
+        }
+        if (!$isApprovedParticipant) {
+            return t('common.no_access_action_room');
+        }
+        $myTeamId = getUserTeamIdForMission($missionId, $userId);
+        if ($dispatch['team_id'] && (int) $dispatch['team_id'] !== $myTeamId) {
+            return t('dispatch.not_your_team');
+        }
+        $scopeKey = dispatchProgressScopeKey($myTeamId, $userId);
+        if (dbFetchValue("SELECT completed_at FROM mission_dispatch_progress WHERE dispatch_id = ? AND scope_key = ?", [$id, $scopeKey])) {
+            return t('decline.already_done');
+        }
+        return [
+            'scope_key' => $scopeKey,
+            'team_id'   => $myTeamId,
+            'what_key'  => $dispatch['type'] === 'point' ? 'order.dispatch_point.card_title' : 'order.dispatch_area.card_title',
+            'detail'    => trim((string) $dispatch['label']),
+            'teammates' => $myTeamId ? actionRoomNotifyRecipientIds($missionId, $myTeamId, $userId) : [],
+        ];
+    }
+
+    if ($kind === 'route') {
+        $route = dbFetchOne(
+            "SELECT r.id, r.team_id, r.order_id, r.title, r.completed_at, r.cancelled_at,
+                    EXISTS (SELECT 1 FROM mission_route_members rm WHERE rm.route_id = r.id AND rm.user_id = ?) AS is_member
+             FROM mission_routes r WHERE r.id = ? AND r.mission_id = ?",
+            [$userId, $id, $missionId]
+        );
+        if (!$route) {
+            return t('common.not_found');
+        }
+        if (!$isApprovedParticipant || !$route['is_member']) {
+            return t('dispatch.not_your_team');
+        }
+        if ($route['completed_at'] || $route['cancelled_at']) {
+            return t('route.already_closed');
+        }
+        $memberIds = array_map('intval', array_column(dbFetchAll("SELECT user_id FROM mission_route_members WHERE route_id = ?", [$id]), 'user_id'));
+        return [
+            'scope_key' => 'all',
+            'team_id'   => $route['team_id'] ? (int) $route['team_id'] : null,
+            'what_key'  => 'order.route.card_title',
+            'detail'    => trim((string) $route['title']),
+            'teammates' => array_values(array_diff($memberIds, [$userId])),
+            'order_id'  => $route['order_id'] ? (int) $route['order_id'] : null,
+        ];
+    }
+
+    if ($kind === 'sector') {
+        $sector = dbFetchOne("SELECT id, team_id, label, status FROM mission_search_sectors WHERE id = ? AND mission_id = ?", [$id, $missionId]);
+        if (!$sector) {
+            return t('common.not_found');
+        }
+        if (!$isApprovedParticipant) {
+            return t('sector.no_manage_permission');
+        }
+        $myTeamId = getUserTeamIdForMission($missionId, $userId);
+        if (!$sector['team_id'] || (int) $sector['team_id'] !== $myTeamId) {
+            return t('sector.not_your_team');
+        }
+        if ($sector['status'] === 'completed') {
+            return t('decline.already_done');
+        }
+        return [
+            'scope_key' => 't' . $myTeamId,
+            'team_id'   => $myTeamId,
+            'what_key'  => 'order.sector.card_title',
+            'detail'    => trim((string) $sector['label']),
+            'teammates' => actionRoomNotifyRecipientIds($missionId, $myTeamId, $userId),
+        ];
+    }
+
+    return t('common.unknown_action');
+}
+
+/**
+ * «Δεν μπορώ» on an order, with a reason. Shared by mission-decline.php (the
+ * page); returns null on success — including when a teammate had already
+ * answered for the team, which is not an error to the second person — else
+ * the error to show.
+ */
+function declineMissionOrder(array $mission, string $kind, int $id, int $userId, string $userName, string $reason, ?string $note, bool $isApprovedParticipant): ?string {
+    if (!in_array($reason, ORDER_DECLINE_REASONS, true)) {
+        return t('decline.pick_reason');
+    }
+    $note = trim((string) $note);
+    $note = $note !== '' ? mb_substr($note, 0, ORDER_DECLINE_NOTE_MAX) : null;
+    if ($reason === 'other' && $note === null) {
+        return t('decline.other_needs_note');
+    }
+
+    $missionId = (int) $mission['id'];
+    $target = orderDeclineTarget($missionId, $kind, $id, $userId, $isApprovedParticipant);
+    if (is_string($target)) {
+        return $target;
+    }
+
+    // First press answers for the team: the unique key allows one standing
+    // decline per scope, so of two members pressing together exactly one row
+    // is written, and only that press tells anybody.
+    $inserted = dbExecute(
+        "INSERT IGNORE INTO mission_order_declines
+            (mission_id, target_kind, target_id, scope_key, team_id, reason, note, declined_by, declined_at, active)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), 1)",
+        [$missionId, $kind, $id, $target['scope_key'], $target['team_id'], $reason, $note, $userId]
+    );
+    forgetActiveOrderDeclines();
+    if ($inserted <= 0) {
+        return null;
+    }
+    logAudit('decline_mission_order', 'mission_order_declines', (int) db()->lastInsertId(), null, [
+        'mission_id' => $missionId, 'kind' => $kind, 'id' => $id, 'scope' => $target['scope_key'], 'reason' => $reason,
+    ]);
+
+    notifyOrderDecline($mission, $target, $userId, $userName, $reason, $note, false);
+    return null;
+}
+
+/**
+ * «Τελικά μπορώ»: the decline is taken back, by the person who made it or —
+ * for a team order — anyone on the team. It also counts as «Ελήφθη»: whoever
+ * says they will do it has received it. Returns null on success, else the
+ * error to show.
+ */
+function withdrawOrderDecline(array $mission, string $kind, int $id, int $userId, string $userName, bool $isApprovedParticipant): ?string {
+    $missionId = (int) $mission['id'];
+    $target = orderDeclineTarget($missionId, $kind, $id, $userId, $isApprovedParticipant);
+    if (is_string($target)) {
+        return $target;
+    }
+
+    $changed = dbExecute(
+        "UPDATE mission_order_declines SET active = NULL, resolved_at = NOW(), resolved_by = ?, resolution = 'withdrawn'
+         WHERE target_kind = ? AND target_id = ? AND scope_key = ? AND active = 1",
+        [$userId, $kind, $id, $target['scope_key']]
+    );
+    forgetActiveOrderDeclines();
+    if ($changed <= 0) {
+        return null;
+    }
+    logAudit('withdraw_mission_order_decline', 'mission_order_declines', null, null, [
+        'mission_id' => $missionId, 'kind' => $kind, 'id' => $id, 'scope' => $target['scope_key'],
+    ]);
+
+    // The receipt, quietly: the loud «Τελικά μπορώ» below already tells
+    // command staff, and a second "received" line would only be noise.
+    if ($kind === 'order') {
+        dbExecute("UPDATE mission_order_recipients SET acknowledged_at = COALESCE(acknowledged_at, NOW()) WHERE order_id = ? AND user_id = ?", [$id, $userId]);
+    } elseif ($kind === 'route' && !empty($target['order_id'])) {
+        dbExecute("UPDATE mission_order_recipients SET acknowledged_at = COALESCE(acknowledged_at, NOW()) WHERE order_id = ? AND user_id = ?", [$target['order_id'], $userId]);
+    } elseif ($kind === 'dispatch') {
+        dbExecute(
+            "INSERT IGNORE INTO mission_dispatch_receipts (dispatch_id, team_id, user_id, created_at) VALUES (?, ?, ?, NOW())",
+            [$id, $target['team_id'], $userId]
+        );
+    } elseif ($kind === 'sector') {
+        dbExecute("UPDATE mission_search_sectors SET acknowledged_at = NOW(), acknowledged_by = ? WHERE id = ? AND acknowledged_at IS NULL", [$userId, $id]);
+    }
+
+    notifyOrderDecline($mission, $target, $userId, $userName, null, null, true);
+    return null;
+}
+
+/**
+ * Tells command staff (loud: banner, sound, the app's urgent channel) and, for
+ * a team order, the rest of the team (quietly: bell and push, no banner — their
+ * open page shows it as a toast). $withdrawn picks «Δεν μπορώ» or «Τελικά
+ * μπορώ»; the two are equally loud at the command post, because a coordinator
+ * who has just reassigned the job needs to hear that the first team is going
+ * after all.
+ */
+function notifyOrderDecline(array $mission, array $target, int $actorId, string $actorName, ?string $reason, ?string $note, bool $withdrawn): void {
+    $missionId = (int) $mission['id'];
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $teamLbl = null;
+    if ($target['team_id']) {
+        $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$target['team_id']]);
+        $teamLbl = $teamRow ? teamLabel($teamRow['codename'], $teamRow['team_number']) : null;
+    }
+    $what = function (string $lang) use ($target): string {
+        $label = t($target['what_key'], [], $lang);
+        return $target['detail'] !== '' ? $label . ' «' . mb_substr($target['detail'], 0, 80) . '»' : $label;
+    };
+    $vars = function (string $lang) use ($target, $actorName, $teamLbl, $reason, $note, $what, $mission): array {
+        return [
+            'what'    => $what($lang),
+            'who'     => $teamLbl !== null ? t('decline.who_team', ['team' => $teamLbl, 'name' => $actorName], $lang) : $actorName,
+            'name'    => $actorName,
+            'reason'  => $reason !== null ? t('decline.reason.' . $reason, [], $lang) : '',
+            'note'    => $note !== null ? t('decline.note_part', ['note' => $note], $lang) : '',
+            'mission' => $mission['title'],
+        ];
+    };
+    $prefix = $withdrawn ? 'decline.withdrawn_' : 'decline.';
+
+    $staffIds = getMissionCommandStaffIds($missionId, $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $actorId);
+    $langs = getUserLanguages(array_merge($staffIds, $target['teammates']));
+    foreach ($staffIds as $recipientId) {
+        $lang = $langs[$recipientId] ?? DEFAULT_LANGUAGE;
+        sendNotification(
+            $recipientId,
+            t($prefix . 'notify_title', $vars($lang), $lang),
+            t($prefix . 'notify_message', $vars($lang), $lang),
+            $withdrawn ? 'success' : 'warning',
+            $withdrawn ? 'mission_order_decline_withdrawn' : 'mission_order_declined',
+            ['url' => $warRoomUrl, 'tag' => 'order-decline-mission-' . $missionId, 'bannerMission' => $missionId]
+        );
+    }
+    // A teammate's own «Οι Εντολές μου» changes under them: the order leaves
+    // it, or comes back. Command staff on the team already heard above.
+    foreach (array_diff($target['teammates'], $staffIds) as $recipientId) {
+        $lang = $langs[$recipientId] ?? DEFAULT_LANGUAGE;
+        sendNotification(
+            (int) $recipientId,
+            t($prefix . 'team_title', $vars($lang), $lang),
+            t($prefix . 'team_message', $vars($lang), $lang),
+            'info',
+            'mission_order_declined_team',
+            ['url' => $warRoomUrl, 'tag' => 'order-decline-team-mission-' . $missionId]
+        );
+    }
+}
+
+/**
+ * The team moved the order on after all — set off, arrived, finished, advanced
+ * the sector — so it evidently could. Ends the standing decline silently: the
+ * step's own notification already told command staff what happened.
+ */
+function resolveOrderDeclineOnProgress(string $kind, int $id, string $scopeKey, int $userId): void {
+    $changed = dbExecute(
+        "UPDATE mission_order_declines SET active = NULL, resolved_at = NOW(), resolved_by = ?, resolution = 'progress'
+         WHERE target_kind = ? AND target_id = ? AND scope_key = ? AND active = 1",
+        [$userId, $kind, $id, $scopeKey]
+    );
+    if ($changed > 0) {
+        forgetActiveOrderDeclines();
+    }
+}
+
+/**
+ * The per-person twin of the above, for the requests that fulfil themselves
+ * (a photo uploaded, a location sent, a stream started, a task completed): any
+ * standing decline of $userId's whose order is now fulfilled.
+ */
+function resolveFulfilledOrderDeclines(int $userId): void {
+    $changed = dbExecute(
+        "UPDATE mission_order_declines d
+         JOIN mission_order_recipients r ON r.order_id = d.target_id AND r.user_id = ?
+         SET d.active = NULL, d.resolved_at = NOW(), d.resolved_by = ?, d.resolution = 'progress'
+         WHERE d.target_kind = 'order' AND d.scope_key = ? AND d.active = 1 AND r.fulfilled_at IS NOT NULL",
+        [$userId, $userId, 'u' . $userId]
+    );
+    if ($changed > 0) {
+        forgetActiveOrderDeclines();
+    }
+}
+
+/**
+ * Command gave the order to someone else, or sent it back as a new order (a
+ * sector reassigned, or returned for «Επανέλεγχος»): every standing decline on
+ * it is answered.
+ */
+function resolveOrderDeclinesReassigned(string $kind, int $id, int $byUserId): void {
+    $changed = dbExecute(
+        "UPDATE mission_order_declines SET active = NULL, resolved_at = NOW(), resolved_by = ?, resolution = 'reassigned'
+         WHERE target_kind = ? AND target_id = ? AND active = 1",
+        [$byUserId, $kind, $id]
+    );
+    if ($changed > 0) {
+        forgetActiveOrderDeclines();
+    }
+}
+
+/**
+ * Every standing decline of a mission, keyed ['kind:id'][scope_key], in the
+ * shape the page reads (orderDeclineView()). One query per request, shared by
+ * every loader in the poll; the mutators above forget it.
+ */
+function loadActiveOrderDeclines(int $missionId, bool $forget = false): array {
+    static $cache = [];
+    if ($forget) {
+        $cache = [];
+        return [];
+    }
+    if (isset($cache[$missionId])) {
+        return $cache[$missionId];
+    }
+    $rows = dbFetchAll(
+        "SELECT d.target_kind, d.target_id, d.scope_key, d.team_id, d.reason, d.note, d.declined_by, d.declined_at,
+                UNIX_TIMESTAMP(d.declined_at) AS declined_ts, u.name AS by_name, mt.codename, mt.team_number
+         FROM mission_order_declines d
+         LEFT JOIN users u ON u.id = d.declined_by
+         LEFT JOIN mission_teams mt ON mt.id = d.team_id
+         WHERE d.mission_id = ? AND d.active = 1
+         ORDER BY d.declined_at, d.id",
+        [$missionId]
+    );
+    $out = [];
+    foreach ($rows as $row) {
+        $out[$row['target_kind'] . ':' . (int) $row['target_id']][$row['scope_key']] = orderDeclineView($row);
+    }
+    return $cache[$missionId] = $out;
+}
+
+function forgetActiveOrderDeclines(): void {
+    loadActiveOrderDeclines(0, true);
+}
+
+/** One standing decline as the page reads it. Reason is a code; the page translates it. */
+function orderDeclineView(array $row): array {
+    return [
+        'reason' => $row['reason'],
+        'note'   => $row['note'],
+        'by'     => $row['by_name'],
+        'by_id'  => $row['declined_by'] !== null ? (int) $row['declined_by'] : null,
+        'at'     => date('H:i', strtotime($row['declined_at'])),
+        'ts'     => (int) $row['declined_ts'],
+        'team'   => $row['codename'] !== null ? teamLabel($row['codename'], $row['team_number']) : null,
+    ];
+}
+
+/** The standing decline for one order and scope, or null. */
+function activeOrderDecline(int $missionId, string $kind, int $id, string $scopeKey): ?array {
+    return loadActiveOrderDeclines($missionId)[$kind . ':' . $id][$scopeKey] ?? null;
 }
 
 /**
@@ -3831,13 +4283,18 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
 
     // Auto-fulfill any outstanding War Room "send your location" orders for this user.
     try {
-        dbExecute(
+        $fulfilled = dbExecute(
             "UPDATE mission_order_recipients r
              JOIN mission_orders o ON o.id = r.order_id
              SET r.fulfilled_at = NOW()
              WHERE r.user_id = ? AND o.mission_id = ? AND o.order_type = 'location' AND r.fulfilled_at IS NULL",
             [$userId, $pr['mission_id']]
         );
+        // Sent after all, so a «Δεν μπορώ» on it no longer stands. Only when
+        // something was fulfilled: this runs on every ping.
+        if ($fulfilled > 0) {
+            resolveFulfilledOrderDeclines($userId);
+        }
     } catch (Exception $e) {
         // Non-critical — the ping itself already succeeded.
     }
@@ -3960,8 +4417,11 @@ function checkArrivalPrompts(int $missionId, int $userId, ?int $teamId, float $l
             AND NOT EXISTS (SELECT 1 FROM mission_arrival_prompts ap
                              WHERE ap.target_kind = 'dispatch' AND ap.target_id = d.id AND ap.user_id = ?)
             AND NOT EXISTS (SELECT 1 FROM mission_dispatch_acks a
-                             WHERE a.dispatch_id = d.id AND " . ($teamId ? "a.team_id = ?" : "a.user_id = ? AND a.team_id IS NULL") . ")",
-        [dispatchProgressScopeKey($teamId, $userId), $missionId, $teamId ?: 0, $userId, $teamId ?: $userId]
+                             WHERE a.dispatch_id = d.id AND " . ($teamId ? "a.team_id = ?" : "a.user_id = ? AND a.team_id IS NULL") . ")
+            -- A team that said «Δεν μπορώ» is not asked whether it got there.
+            AND NOT EXISTS (SELECT 1 FROM mission_order_declines od
+                             WHERE od.target_kind = 'dispatch' AND od.target_id = d.id AND od.scope_key = ? AND od.active = 1)",
+        [dispatchProgressScopeKey($teamId, $userId), $missionId, $teamId ?: 0, $userId, $teamId ?: $userId, dispatchProgressScopeKey($teamId, $userId)]
     );
     foreach ($dispatches as $d) {
         $geo = json_decode((string) $d['geo'], true);
@@ -3980,7 +4440,9 @@ function checkArrivalPrompts(int $missionId, int $userId, ?int $teamId, float $l
     $routes = dbFetchAll(
         "SELECT r.id, r.title FROM mission_routes r
            JOIN mission_route_members m ON m.route_id = r.id AND m.user_id = ?
-          WHERE r.mission_id = ? AND r.completed_at IS NULL AND r.cancelled_at IS NULL",
+          WHERE r.mission_id = ? AND r.completed_at IS NULL AND r.cancelled_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM mission_order_declines od
+                             WHERE od.target_kind = 'route' AND od.target_id = r.id AND od.active = 1)",
         [$userId, $missionId]
     );
     foreach ($routes as $route) {
@@ -8807,6 +9269,54 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
         }
         if ($row['fulfilled_at']) {
             $events[] = ['icon' => '✅', 'text' => h($row['actor_name']) . ' ολοκλήρωσε εντολή (' . h($teamLabel) . ')' . $extra, 'ts' => strtotime($row['fulfilled_at'])];
+        }
+    }
+
+    // «Δεν μπορώ» (v3.334.0), and «Τελικά μπορώ» when it was taken back. The
+    // other two ways a decline ends are already in this log as themselves —
+    // the team's own next step, or command reassigning/cancelling.
+    $declineScope = $scoped ? ' AND ' . missionActivityActorScopeSql('d.declined_by', 'd.team_id') : '';
+    $declineBinds = $scoped ? [0, $scopeToViewerId, $viewerTeamId] : [];
+    $declineRows = dbFetchAll(
+        "SELECT d.target_kind, d.reason, d.note, d.declined_at, d.resolved_at, d.resolution, d.team_id,
+                du.name AS declined_name, ru.name AS resolved_name, mt.codename, mt.team_number,
+                o.order_type, o.task_text, dp.type AS dispatch_type, dp.label AS dispatch_label,
+                rt.title AS route_title, ss.label AS sector_label
+         FROM mission_order_declines d
+         LEFT JOIN users du ON du.id = d.declined_by
+         LEFT JOIN users ru ON ru.id = d.resolved_by
+         LEFT JOIN mission_teams mt ON mt.id = d.team_id
+         LEFT JOIN mission_orders o ON d.target_kind = 'order' AND o.id = d.target_id
+         LEFT JOIN mission_dispatch_points dp ON d.target_kind = 'dispatch' AND dp.id = d.target_id
+         LEFT JOIN mission_routes rt ON d.target_kind = 'route' AND rt.id = d.target_id
+         LEFT JOIN mission_search_sectors ss ON d.target_kind = 'sector' AND ss.id = d.target_id
+         WHERE d.mission_id = ?" . $declineScope,
+        array_merge([$missionId], $declineBinds)
+    );
+    foreach ($declineRows as $row) {
+        [$whatKey, $subject] = match ($row['target_kind']) {
+            'order'    => ['order.' . $row['order_type'] . '.card_title', $row['order_type'] === 'task' ? (string) $row['task_text'] : ''],
+            'dispatch' => [$row['dispatch_type'] === 'point' ? 'order.dispatch_point.card_title' : 'order.dispatch_area.card_title', (string) $row['dispatch_label']],
+            'route'    => ['order.route.card_title', (string) $row['route_title']],
+            default    => ['order.sector.card_title', (string) $row['sector_label']],
+        };
+        $subject = trim($subject);
+        $what = t($whatKey, [], 'el') . ($subject !== '' ? ' «' . h(mb_substr($subject, 0, 80)) . '»' : '');
+        $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : null;
+        $note = trim((string) $row['note']);
+        $events[] = [
+            'icon' => '✋',
+            'text' => ($teamLabel ? 'Η ομάδα ' . h($teamLabel) . ' (' . h((string) $row['declined_name']) . ')' : h((string) $row['declined_name']))
+                . ' απάντησε «Δεν μπορώ» — ' . $what . ': ' . h(t('decline.reason.' . $row['reason'], [], 'el'))
+                . ($note !== '' ? ' — «' . h($note) . '»' : ''),
+            'ts'   => strtotime($row['declined_at']),
+        ];
+        if ($row['resolution'] === 'withdrawn' && $row['resolved_at']) {
+            $events[] = [
+                'icon' => '👍',
+                'text' => h((string) $row['resolved_name']) . ' απάντησε «Τελικά μπορώ» — ' . $what,
+                'ts'   => strtotime($row['resolved_at']),
+            ];
         }
     }
 

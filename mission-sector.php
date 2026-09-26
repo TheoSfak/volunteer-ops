@@ -250,6 +250,15 @@ if ($action === 'status') {
         'mission_id' => $missionId, 'from' => $sector['status'], 'to' => $targetStatus,
     ]);
 
+    // «Δεν μπορώ» on this sector: the team moving it on itself means they
+    // could after all; command sending it back for a recheck is a new order,
+    // which asks the team afresh.
+    if (!$canManageWarRoom) {
+        resolveOrderDeclineOnProgress('sector', $sectorId, 't' . (int) $sector['team_id'], (int) $userId);
+    } elseif ($targetStatus === 'needs_recheck') {
+        resolveOrderDeclinesReassigned('sector', $sectorId, (int) $userId);
+    }
+
     notifySectorStatusChanged(
         $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null,
         $sector, $targetStatus, $userId, $canManageWarRoom, $user['name'] ?? ''
@@ -602,6 +611,11 @@ if ($action === 'assign') {
     if ($newTeamId && $newTeamId !== $oldTeamId) {
         notifySectorAssigned($missionId, $mission['title'], $newTeamId, (int) $sectorId, $sector['label'], $userId);
     }
+    // The team that said «Δεν μπορώ» has been answered: the sector went to
+    // someone else (or to nobody).
+    if ($newTeamId !== $oldTeamId) {
+        resolveOrderDeclinesReassigned('sector', (int) $sectorId, (int) $userId);
+    }
 
     echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
@@ -616,6 +630,7 @@ if ($action === 'delete') {
     }
     dbExecute("DELETE FROM mission_search_sectors WHERE id = ?", [$sectorId]);
     logAudit('delete_mission_sector', 'mission_search_sectors', $sectorId, null, ['mission_id' => $missionId]);
+    resolveOrderDeclinesReassigned('sector', $sectorId, (int) $userId);
     echo json_encode(['ok' => true]);
     exit;
 }

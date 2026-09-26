@@ -91,6 +91,7 @@ const ASSISTANT_TARGETS = [
     'order'     => 'reportModal',
     'dispatch'  => 'dispatchCard',
     'sector'    => 'sectorsListCard',
+    'route'     => 'teamRoutesAdminCard',
     'voice'     => 'voiceMessagesCard',
     'breach'    => 'restrictedAreasCard',
     'silent'    => 'participantsCard',
@@ -376,11 +377,24 @@ function collectMissionAssistantRaw(int $missionId, int $userId, array $missionS
     // ── Orders nobody has confirmed ─────────────────────────────────────────
     // Grouped to one row per order: a task sent to a six-person team is one
     // thing the coordinator is waiting on, not six.
+    //
+    // «Δεν μπορώ» is an answer (v3.334.0): a recipient who handed the order
+    // back is not somebody the coordinator is still waiting on, and counting
+    // them here would ring the overdue alarm about an order the field already
+    // replied to. The decline has a row of its own below. A route is declined
+    // by its whole group, so every recipient of its order counts as answered.
     $raw['orders'] = dbFetchAll(
         "SELECT o.id, o.order_type, o.task_text, UNIX_TIMESTAMP(o.created_at) AS ts,
-                COUNT(*) AS total, SUM(r.acknowledged_at IS NOT NULL) AS acked
+                COUNT(*) AS total,
+                SUM(r.acknowledged_at IS NOT NULL OR EXISTS (
+                    SELECT 1 FROM mission_order_declines od
+                    WHERE od.active = 1
+                      AND ((od.target_kind = 'order' AND od.target_id = o.id AND od.scope_key = CONCAT('u', r.user_id))
+                        OR (od.target_kind = 'route' AND od.target_id = rt.id))
+                )) AS acked
          FROM mission_orders o
          JOIN mission_order_recipients r ON r.order_id = o.id
+         LEFT JOIN mission_routes rt ON rt.order_id = o.id
          WHERE o.mission_id = ? AND o.created_at <= ?
          GROUP BY o.id, o.order_type, o.task_text, o.created_at
          HAVING acked < total
@@ -400,12 +414,16 @@ function collectMissionAssistantRaw(int $missionId, int $userId, array $missionS
     // now, which is a three-way join per dispatch inside a query that runs on
     // the 5s poll — and the actionable fact is anyway "nobody on that team has
     // confirmed this", not "four of six". See this file's COST note.
+    //
+    // A team's «Δεν μπορώ» is an answer too, same as for orders above.
     $raw['dispatch'] = dbFetchAll(
         "SELECT d.id, d.label, d.type, UNIX_TIMESTAMP(d.created_at) AS ts, {$teamLabelExpr}
          FROM mission_dispatch_points d
          LEFT JOIN mission_teams mt ON mt.id = d.team_id
          LEFT JOIN mission_dispatch_receipts r ON r.dispatch_id = d.id
          WHERE d.mission_id = ? AND d.created_at <= ? AND r.id IS NULL
+           AND NOT EXISTS (SELECT 1 FROM mission_order_declines od
+                            WHERE od.target_kind = 'dispatch' AND od.target_id = d.id AND od.active = 1)
          ORDER BY d.created_at ASC",
         [$missionId, $orderCutoffSql]
     );
@@ -428,8 +446,36 @@ function collectMissionAssistantRaw(int $missionId, int $userId, array $missionS
          WHERE s.mission_id = ? AND s.status = 'assigned' AND s.acknowledged_at IS NULL
            AND s.team_id IS NOT NULL
            AND COALESCE(s.status_updated_at, s.created_at) <= ?
+           AND NOT EXISTS (SELECT 1 FROM mission_order_declines od
+                            WHERE od.target_kind = 'sector' AND od.target_id = s.id
+                              AND od.scope_key = CONCAT('t', s.team_id) AND od.active = 1)
          ORDER BY COALESCE(s.status_updated_at, s.created_at) ASC",
         [$missionId, $orderCutoffSql]
+    );
+
+    // ── «Δεν μπορώ» — orders handed back to command ────────────────────────
+    //
+    // Only those whose order is still there to act on: a dispatch deleted, a
+    // route cancelled or finished, a sector completed has been answered one
+    // way or another, and a line about it would be about nothing.
+    $raw['declines'] = dbFetchAll(
+        "SELECT d.target_kind, d.target_id, d.reason, d.note, UNIX_TIMESTAMP(d.declined_at) AS ts,
+                u.name AS who, {$teamLabelExpr},
+                o.order_type, o.task_text, dp.type AS dispatch_type, dp.label AS dispatch_label,
+                rt.title AS route_title, ss.label AS sector_label
+         FROM mission_order_declines d
+         LEFT JOIN users u ON u.id = d.declined_by
+         LEFT JOIN mission_teams mt ON mt.id = d.team_id
+         LEFT JOIN mission_orders o ON d.target_kind = 'order' AND o.id = d.target_id
+         LEFT JOIN mission_dispatch_points dp ON d.target_kind = 'dispatch' AND dp.id = d.target_id
+         LEFT JOIN mission_routes rt ON d.target_kind = 'route' AND rt.id = d.target_id
+              AND rt.completed_at IS NULL AND rt.cancelled_at IS NULL
+         LEFT JOIN mission_search_sectors ss ON d.target_kind = 'sector' AND ss.id = d.target_id
+              AND ss.status <> 'completed'
+         WHERE d.mission_id = ? AND d.active = 1
+           AND (o.id IS NOT NULL OR dp.id IS NOT NULL OR rt.id IS NOT NULL OR ss.id IS NOT NULL)
+         ORDER BY d.declined_at ASC",
+        [$missionId]
     );
 
     // ── Voice messages from the field nobody has confirmed hearing ──────────
@@ -872,6 +918,48 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
             'ts'     => (int) $row['ts'],
             'is_new' => false,
             'target' => ASSISTANT_TARGETS['sector'],
+        ];
+    }
+
+    // ── «Δεν μπορώ» — orders handed back ────────────────────────────────────
+    //
+    // The field answered, and the answer is now command's to act on: re-send,
+    // reassign, cancel. High, but NOT part of the overdue count — that alarm
+    // means "still waiting on the field", and this is the opposite.
+    //
+    // «Το είδα» clears it, like the advisories. That is a choice, not an
+    // oversight: a task or a photo request has no command-side "cancel", so a
+    // row that only went away when command acted would stay for the rest of
+    // the mission on an order command decided to let go. The decline already
+    // arrived as a loud alert, and the order's acknowledgement card keeps its
+    // red ✗ and the reason for as long as the card is open.
+    foreach ($raw['declines'] ?? [] as $row) {
+        if ($checkpointTs !== null && (int) $row['ts'] <= $checkpointTs) {
+            continue;
+        }
+        $kind = (string) $row['target_kind'];
+        [$whatKey, $subject] = match ($kind) {
+            'order'    => ['order.' . $row['order_type'] . '.card_title', $row['order_type'] === 'task' ? (string) $row['task_text'] : ''],
+            'dispatch' => [$row['dispatch_type'] === 'point' ? 'order.dispatch_point.card_title' : 'order.dispatch_area.card_title', (string) $row['dispatch_label']],
+            'route'    => ['order.route.card_title', (string) $row['route_title']],
+            default    => ['order.sector.card_title', (string) $row['sector_label']],
+        };
+        $subject = trim($subject);
+        $what = t($whatKey, [], $lang) . ($subject !== '' ? ' «' . mb_substr($subject, 0, 60, 'UTF-8') . '»' : '');
+        $who = ($row['codename'] !== null || $row['team_number'] !== null)
+            ? t('decline.who_team', ['team' => assistantTeamLabel($row, $lang), 'name' => (string) $row['who']], $lang)
+            : (string) $row['who'];
+        $note = trim((string) $row['note']);
+        $pending[] = [
+            'kind'   => 'declined',
+            'sev'    => 'high',
+            'icon'   => 'bi-x-octagon',
+            'title'  => t('assistant.declined', ['who' => $who, 'what' => $what], $lang),
+            'detail' => t('decline.reason.' . $row['reason'], [], $lang)
+                . ($note !== '' ? t('decline.note_part', ['note' => mb_substr($note, 0, 90, 'UTF-8')], $lang) : ''),
+            'ts'     => (int) $row['ts'],
+            'is_new' => $isNew($row['ts']),
+            'target' => ASSISTANT_TARGETS[$kind] ?? ASSISTANT_TARGETS['order'],
         ];
     }
 

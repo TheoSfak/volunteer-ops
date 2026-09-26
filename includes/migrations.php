@@ -7228,6 +7228,35 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 169,
+            'description' => "Add mission_order_declines: «Δεν μπορώ» on an order (v3.334.0) — a task/photo/video/location/live order (per person), or a dispatch, route or sector (per team), handed back to command with a reason. One row per declaration, kept after it is withdrawn or overtaken; `active` is 1 while it stands and NULL after, and because NULLs never collide in a unique key, (target, scope, active) allows exactly one standing decline per scope and any number of closed ones — which is also what makes «first member to press answers for the team» a single INSERT IGNORE.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_order_declines (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    target_kind ENUM('order','dispatch','route','sector') NOT NULL,
+                    target_id INT UNSIGNED NOT NULL,
+                    scope_key VARCHAR(20) NOT NULL COMMENT 'u<user> for a person, t<team> for a team, all for a whole route',
+                    team_id INT UNSIGNED NULL,
+                    reason ENUM('unsafe','no_access','busy','injury','other') NOT NULL,
+                    note VARCHAR(500) NULL,
+                    declined_by INT UNSIGNED NULL,
+                    declined_at DATETIME NOT NULL,
+                    active TINYINT(1) NULL DEFAULT 1 COMMENT '1 while it stands, NULL once resolved',
+                    resolved_at DATETIME NULL,
+                    resolved_by INT UNSIGNED NULL,
+                    resolution ENUM('withdrawn','progress','reassigned') NULL,
+                    UNIQUE KEY uk_order_decline_active (target_kind, target_id, scope_key, active),
+                    INDEX idx_order_decline_mission (mission_id, active),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE SET NULL,
+                    FOREIGN KEY (declined_by) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (resolved_by) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

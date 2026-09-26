@@ -62,6 +62,8 @@ if ($action === 'complete') {
             [$recipient['id']]
         );
         logAudit('complete_mission_order', 'mission_order_recipients', $recipient['id'], null, ['order_id' => $orderId]);
+        // Done after all, so a «Δεν μπορώ» on it no longer stands.
+        resolveFulfilledOrderDeclines((int) $userId);
 
         // "Ολοκληρώθηκε" on a task order is the report command staff is
         // actually waiting for — merely acknowledging it ("Ελήφθη") has

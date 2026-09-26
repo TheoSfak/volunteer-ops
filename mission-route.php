@@ -452,6 +452,8 @@ if ($action === 'cancel') {
 
     notifyRouteTeam($missionId, $routeId, $userId, 'mission_route_cancelled', 'route.notify_cancelled_title', [], 'route.notify_cancelled_message', ['mission' => $mission['title']]);
     logAudit('cancel_mission_route', 'mission_routes', $routeId, null, ['mission_id' => $missionId, 'reason' => $reason]);
+    // Cancelling is command's answer to a «Δεν μπορώ» on it.
+    resolveOrderDeclinesReassigned('route', $routeId, (int) $userId);
 
     echo json_encode(['ok' => true, 'routes' => loadRoutesForUser($missionId, $userId, $canManageWarRoom)]);
     exit;
@@ -664,6 +666,9 @@ if ($action === 'depart' || $action === 'arrive' || $action === 'complete') {
             maybeCompleteRoute((int) $wp['route_id'], $userId);
         }
     }
+
+    // A group that said «Δεν μπορώ» and is now walking the route after all.
+    resolveOrderDeclineOnProgress('route', (int) $wp['route_id'], 'all', (int) $userId);
 
     echo json_encode(['ok' => true, 'routes' => loadRoutesForUser($missionId, $userId, $canManageWarRoom)]);
     exit;

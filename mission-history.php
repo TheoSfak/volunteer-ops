@@ -369,6 +369,61 @@ foreach ($orderRows as $row) {
     }
 }
 
+// ── «Δεν μπορώ» (v3.334.0), and «Τελικά μπορώ» when it was taken back ─────────
+// Predicate 2: team_id is the team that answered (or, for a per-person order,
+// the answering volunteer's own team). Twin of the block in
+// loadMissionActivityEventsForReport().
+$declineRows = dbFetchAll(
+    "SELECT d.target_kind, d.reason, d.note, d.declined_at, d.resolved_at, d.resolution, d.team_id,
+            du.name AS declined_name, ru.name AS resolved_name, mt.codename, mt.team_number,
+            o.order_type, o.task_text, dp.type AS dispatch_type, dp.label AS dispatch_label,
+            rt.title AS route_title, ss.label AS sector_label
+     FROM mission_order_declines d
+     LEFT JOIN users du ON du.id = d.declined_by
+     LEFT JOIN users ru ON ru.id = d.resolved_by
+     LEFT JOIN mission_teams mt ON mt.id = d.team_id
+     LEFT JOIN mission_orders o ON d.target_kind = 'order' AND o.id = d.target_id
+     LEFT JOIN mission_dispatch_points dp ON d.target_kind = 'dispatch' AND dp.id = d.target_id
+     LEFT JOIN mission_routes rt ON d.target_kind = 'route' AND rt.id = d.target_id
+     LEFT JOIN mission_search_sectors ss ON d.target_kind = 'sector' AND ss.id = d.target_id
+     WHERE d.mission_id = ? AND " . missionActivityActorScopeSql('d.declined_by', 'd.team_id') . "
+     ORDER BY d.declined_at DESC LIMIT 200",
+    [$missionId, $isAdminParam, $userId, $viewerTeamId]
+);
+foreach ($declineRows as $row) {
+    [$whatKey, $subject] = match ($row['target_kind']) {
+        'order'    => ['order.' . $row['order_type'] . '.card_title', $row['order_type'] === 'task' ? (string) $row['task_text'] : ''],
+        'dispatch' => [$row['dispatch_type'] === 'point' ? 'order.dispatch_point.card_title' : 'order.dispatch_area.card_title', (string) $row['dispatch_label']],
+        'route'    => ['order.route.card_title', (string) $row['route_title']],
+        default    => ['order.sector.card_title', (string) $row['sector_label']],
+    };
+    $subject = trim($subject);
+    $what = t($whatKey, [], $viewerLang) . ($subject !== '' ? ' «' . h(mb_substr($subject, 0, 80)) . '»' : '');
+    $who = $row['team_id']
+        ? t('decline.who_team', ['team' => h(teamLabel($row['codename'], $row['team_number'])), 'name' => h((string) $row['declined_name'])], $viewerLang)
+        : h((string) $row['declined_name']);
+    $note = trim((string) $row['note']);
+    $events[] = [
+        'icon' => '✋',
+        'text' => t('history.order_declined', [
+            'who'    => $who,
+            'what'   => $what,
+            'reason' => t('decline.reason.' . $row['reason'], [], $viewerLang),
+            'note'   => $note !== '' ? t('decline.note_part', ['note' => h($note)], $viewerLang) : '',
+        ], $viewerLang),
+        'time' => date('d/m H:i', strtotime($row['declined_at'])),
+        'ts'   => strtotime($row['declined_at']),
+    ];
+    if ($row['resolution'] === 'withdrawn' && $row['resolved_at']) {
+        $events[] = [
+            'icon' => '👍',
+            'text' => t('history.order_decline_withdrawn', ['actor' => h((string) $row['resolved_name']), 'what' => $what], $viewerLang),
+            'time' => date('d/m H:i', strtotime($row['resolved_at'])),
+            'ts'   => strtotime($row['resolved_at']),
+        ];
+    }
+}
+
 // ── Route Order waypoints: depart / arrive / complete / skip ──────────────────
 // NOT predicate 2 (team_id) — a route may only involve a subset of its
 // nominal team (mission_route_members, see includes/migrations.php v109), so

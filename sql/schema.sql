@@ -3037,4 +3037,32 @@ CREATE TABLE IF NOT EXISTS `mission_arrival_prompts` (
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- =============================================
+-- «ΔΕΝ ΜΠΟΡΩ» ON AN ORDER — handed back to command with a reason, v3.334.0
+-- `active` is 1 while it stands and NULL after; NULLs never collide in a
+-- unique key, so one standing decline per scope and any number of closed ones.
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_order_declines` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `target_kind` ENUM('order','dispatch','route','sector') NOT NULL,
+    `target_id` INT UNSIGNED NOT NULL,
+    `scope_key` VARCHAR(20) NOT NULL COMMENT 'u<user> for a person, t<team> for a team, all for a whole route',
+    `team_id` INT UNSIGNED NULL,
+    `reason` ENUM('unsafe','no_access','busy','injury','other') NOT NULL,
+    `note` VARCHAR(500) NULL,
+    `declined_by` INT UNSIGNED NULL,
+    `declined_at` DATETIME NOT NULL,
+    `active` TINYINT(1) NULL DEFAULT 1 COMMENT '1 while it stands, NULL once resolved',
+    `resolved_at` DATETIME NULL,
+    `resolved_by` INT UNSIGNED NULL,
+    `resolution` ENUM('withdrawn','progress','reassigned') NULL,
+    UNIQUE KEY `uk_order_decline_active` (`target_kind`, `target_id`, `scope_key`, `active`),
+    INDEX `idx_order_decline_mission` (`mission_id`, `active`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`declined_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`resolved_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
