@@ -1981,6 +1981,19 @@ const ACK_TRACKER_ORDER_TYPES = [
 ];
 
 /**
+ * Order types whose card carries a second, per-person stage after «Ελήφθη»:
+ * the thing actually being done. A task is done when its recipient presses
+ * «Ολοκληρώθηκε»; the other four when the location, photo, video or stream
+ * lands (fulfilled_at, stamped by whatever received it).
+ *
+ * Every other tracked type has no such event — nothing can observe a sentence
+ * being heard or a phone being plugged in — so for those, as in «Οι Εντολές
+ * μου», the acknowledgement IS the completion. A route has stages of its own
+ * (its points) and does not use this.
+ */
+const ACK_TRACKER_FULFIL_TYPES = ['task', 'location', 'photo', 'video', 'live'];
+
+/**
  * Every order/sector/dispatch this mission is currently waiting on, each with
  * the full list of people it went to and whether each of them has confirmed.
  *
@@ -2004,6 +2017,15 @@ const ACK_TRACKER_ORDER_TYPES = [
  *   · mission_dispatch_points + mission_dispatch_receipts — receipts only.
  *     mission_dispatch_acks is arrival («Έφτασα»), a different event that
  *     keeps its banner.
+ *
+ * Every card also carries the order's stages after «Ελήφθη», so the same card
+ * follows the order to its end: a route's points one by one, a sector's
+ * Καθ' οδόν → Σε εξέλιξη → Ολοκληρώθηκε, a dispatch's per-team steps, and for
+ * a task or a request for data, who has actually done it. 'finished' says
+ * whether there is anything left to wait for — the page reopens a card after
+ * a refresh until it is, not merely until everyone has pressed «Ελήφθη».
+ * A «Δεν μπορώ» finishes its share: the order is back with command, which got
+ * its own loud alert and acts with the existing tools.
  */
 function loadAckTrackerCardsForMission(int $missionId): array {
     $cards = [];
@@ -2013,17 +2035,40 @@ function loadAckTrackerCardsForMission(int $missionId): array {
 
     // ── Orders (incl. routes) ───────────────────────────────────────────────
     $placeholders = implode(',', array_fill(0, count(ACK_TRACKER_ORDER_TYPES), '?'));
-    $orders = dbFetchAll(
-        "SELECT o.id, o.order_type, o.task_text, UNIX_TIMESTAMP(o.created_at) AS ts,
-                cu.name AS by_name, rt.title AS route_title, rt.id AS route_id
+    $orderSelect = "SELECT o.id, o.order_type, o.task_text, UNIX_TIMESTAMP(o.created_at) AS ts,
+                cu.name AS by_name, rt.title AS route_title, rt.id AS route_id,
+                UNIX_TIMESTAMP(rt.completed_at) AS route_completed_ts,
+                UNIX_TIMESTAMP(rt.cancelled_at) AS route_cancelled_ts
          FROM mission_orders o
          JOIN users cu ON cu.id = o.created_by
-         LEFT JOIN mission_routes rt ON rt.order_id = o.id
+         LEFT JOIN mission_routes rt ON rt.order_id = o.id";
+    $orders = dbFetchAll(
+        "{$orderSelect}
          WHERE o.mission_id = ? AND o.order_type IN ({$placeholders})
          ORDER BY o.created_at DESC, o.id DESC
          LIMIT " . ACK_TRACKER_MAX_PER_KIND,
         array_merge([$missionId], ACK_TRACKER_ORDER_TYPES)
     );
+    // A route still being walked stays in the payload however many orders
+    // have gone out since. A patrol runs for an hour; twelve location requests
+    // and messages go by in ten minutes, and a card that has fallen out of the
+    // payload stays on screen FROZEN at whatever point it had reached — the
+    // coordinator would be reading «Σημείο 1» while the team is at point 4.
+    // Still a newest-N cap, so the payload stays independent of now().
+    $openRoutes = dbFetchAll(
+        "{$orderSelect}
+         WHERE o.mission_id = ? AND o.order_type = 'route'
+           AND rt.id IS NOT NULL AND rt.completed_at IS NULL AND rt.cancelled_at IS NULL
+         ORDER BY o.created_at DESC, o.id DESC
+         LIMIT " . ACK_TRACKER_MAX_PER_KIND,
+        [$missionId]
+    );
+    $loadedOrderIds = array_flip(array_map(fn($o) => (int) $o['id'], $orders));
+    foreach ($openRoutes as $openRoute) {
+        if (!isset($loadedOrderIds[(int) $openRoute['id']])) {
+            $orders[] = $openRoute;
+        }
+    }
 
     if ($orders) {
         $orderIds = array_map(fn($o) => (int) $o['id'], $orders);
@@ -2033,7 +2078,8 @@ function loadAckTrackerCardsForMission(int $missionId): array {
         // Action Room has already had one connection-exhaustion incident.
         $recipientRows = dbFetchAll(
             "SELECT r.order_id, r.user_id, u.name, mt.codename, mt.team_number,
-                    UNIX_TIMESTAMP(r.acknowledged_at) AS ack_ts
+                    UNIX_TIMESTAMP(r.acknowledged_at) AS ack_ts,
+                    UNIX_TIMESTAMP(r.fulfilled_at) AS done_ts
              FROM mission_order_recipients r
              JOIN users u ON u.id = r.user_id
              LEFT JOIN mission_teams mt ON mt.id = r.team_id
@@ -2042,7 +2088,9 @@ function loadAckTrackerCardsForMission(int $missionId): array {
             $orderIds
         );
         $routeIdByOrder = [];
+        $orderTypeById = [];
         foreach ($orders as $order) {
+            $orderTypeById[(int) $order['id']] = $order['order_type'];
             if ($order['route_id'] !== null) {
                 $routeIdByOrder[(int) $order['id']] = (int) $order['route_id'];
             }
@@ -2059,8 +2107,45 @@ function loadAckTrackerCardsForMission(int $missionId): array {
                 'name'     => $row['name'],
                 'team'     => $row['codename'] !== null ? teamLabel($row['codename'], $row['team_number']) : null,
                 'ack_ts'   => $row['ack_ts'] !== null ? (int) $row['ack_ts'] : null,
+                // Only where it means "did it". A route stamps fulfilled_at on
+                // every recipient when the ROUTE closes, which its points
+                // already show; the ack-only types never stamp it at all.
+                'done_ts'  => $row['done_ts'] !== null && in_array($orderTypeById[$orderId] ?? '', ACK_TRACKER_FULFIL_TYPES, true)
+                    ? (int) $row['done_ts'] : null,
                 'declined' => $declined,
             ];
+        }
+
+        // Every point of every route on the list, in order, with how far the
+        // team has got at each. Progress is TEAM state (first member to report
+        // moves everyone), so it is one row per point, not a box per person.
+        $pointsByRoute = [];
+        if ($routeIdByOrder) {
+            $routeIds = array_values(array_unique($routeIdByOrder));
+            $routePlaceholders = implode(',', array_fill(0, count($routeIds), '?'));
+            $pointRows = dbFetchAll(
+                "SELECT w.route_id, w.seq, w.label,
+                        UNIX_TIMESTAMP(p.departed_at) AS departed, UNIX_TIMESTAMP(p.arrived_at) AS arrived,
+                        UNIX_TIMESTAMP(p.completed_at) AS completed, UNIX_TIMESTAMP(p.skipped_at) AS skipped
+                 FROM mission_route_waypoints w
+                 LEFT JOIN mission_route_progress p ON p.waypoint_id = w.id
+                 WHERE w.route_id IN ({$routePlaceholders})
+                 ORDER BY w.route_id, w.seq",
+                $routeIds
+            );
+            $asTs = fn($v) => $v !== null ? (int) $v : null;
+            foreach ($pointRows as $row) {
+                $pointsByRoute[(int) $row['route_id']][] = [
+                    'seq'       => (int) $row['seq'],
+                    'label'     => $row['label'] !== null && trim((string) $row['label']) !== ''
+                        ? $row['label']
+                        : t('route.waypoint_fallback_label', ['seq' => (int) $row['seq']]),
+                    'departed'  => $asTs($row['departed']),
+                    'arrived'   => $asTs($row['arrived']),
+                    'completed' => $asTs($row['completed']),
+                    'skipped'   => $asTs($row['skipped']),
+                ];
+            }
         }
 
         foreach ($orders as $order) {
@@ -2079,6 +2164,26 @@ function loadAckTrackerCardsForMission(int $missionId): array {
             $freeText = in_array($order['order_type'], ['task', 'speak', 'message'], true)
                 ? trim((string) $order['task_text'])
                 : ($order['order_type'] === 'route' ? trim((string) $order['route_title']) : '');
+
+            $route = null;
+            if ($order['route_id'] !== null) {
+                $routeCompleted = $order['route_completed_ts'] !== null ? (int) $order['route_completed_ts'] : null;
+                $routeCancelled = $order['route_cancelled_ts'] !== null ? (int) $order['route_cancelled_ts'] : null;
+                $route = [
+                    'points'    => $pointsByRoute[(int) $order['route_id']] ?? [],
+                    'completed' => $routeCompleted,
+                    'cancelled' => $routeCancelled,
+                ];
+                $finished = $routeCompleted !== null || $routeCancelled !== null
+                    || isset($declines['route:' . (int) $order['route_id']]['all']);
+            } elseif (in_array($order['order_type'], ACK_TRACKER_FULFIL_TYPES, true)) {
+                $finished = !array_filter($people, fn($p) => $p['done_ts'] === null && !$p['declined']);
+            } else {
+                // Acknowledging IS completing for these (and for a route order
+                // whose route row has since been deleted: nothing left to walk).
+                $finished = !array_filter($people, fn($p) => $p['ack_ts'] === null && !$p['declined']);
+            }
+
             $cards[] = [
                 'key'     => 'order:' . (int) $order['id'],
                 'kind'    => $order['order_type'],
@@ -2088,6 +2193,8 @@ function loadAckTrackerCardsForMission(int $missionId): array {
                 'by'      => $order['by_name'],
                 'people'  => $people,
                 'declines' => array_values($declines[$order['route_id'] !== null ? 'route:' . (int) $order['route_id'] : 'order:' . (int) $order['id']] ?? []),
+                'route'   => $route,
+                'finished' => $finished,
             ];
         }
     }
@@ -2096,7 +2203,7 @@ function loadAckTrackerCardsForMission(int $missionId): array {
     // COALESCE on status_updated_at, not created_at: a sector is usually drawn
     // long before it is handed to a team, and the card is about the handover.
     $sectors = dbFetchAll(
-        "SELECT s.id, s.label, s.team_id, UNIX_TIMESTAMP(COALESCE(s.status_updated_at, s.created_at)) AS ts,
+        "SELECT s.id, s.label, s.team_id, s.status, UNIX_TIMESTAMP(COALESCE(s.status_updated_at, s.created_at)) AS ts,
                 UNIX_TIMESTAMP(s.acknowledged_at) AS ack_ts,
                 au.name AS ack_name, cu.name AS by_name, mt.codename, mt.team_number
          FROM mission_search_sectors s
@@ -2108,9 +2215,48 @@ function loadAckTrackerCardsForMission(int $missionId): array {
          LIMIT " . ACK_TRACKER_MAX_PER_KIND,
         [$missionId]
     );
+    // When each sector last entered each status, from the append-only log.
+    // Latest, not first: a sector sent back for a recheck and walked again
+    // should show when it was walked THIS time.
+    $sectorLog = [];
+    if ($sectors) {
+        $sectorIds = array_map(fn($s) => (int) $s['id'], $sectors);
+        $sectorPlaceholders = implode(',', array_fill(0, count($sectorIds), '?'));
+        foreach (dbFetchAll(
+            "SELECT sector_id, to_status, UNIX_TIMESTAMP(MAX(created_at)) AS ts
+             FROM mission_sector_status_log
+             WHERE sector_id IN ({$sectorPlaceholders})
+             GROUP BY sector_id, to_status",
+            $sectorIds
+        ) as $row) {
+            $sectorLog[(int) $row['sector_id']][$row['to_status']] = (int) $row['ts'];
+        }
+    }
     foreach ($sectors as $sector) {
         $team = teamLabel($sector['codename'], $sector['team_number']);
         $sectorDecline = $declines['sector:' . (int) $sector['id']]['t' . (int) $sector['team_id']] ?? null;
+        $log = $sectorLog[(int) $sector['id']] ?? [];
+        $status = $sector['status'];
+        // A fresh assignment starts the sector's story over, so a step logged
+        // before the latest one belongs to an earlier hand-out. (A team change
+        // on a sector already under way writes no 'assigned' row — progress
+        // deliberately carries over, see mission-sector.php's assign.)
+        $since = $log['assigned'] ?? 0;
+        $ladder = ['en_route' => 1, 'in_progress' => 2, 'completed' => 3];
+        $currentRank = $ladder[$status] ?? ($status === 'needs_recheck' ? 3 : 0);
+        $steps = [];
+        foreach ($ladder as $step => $rank) {
+            $stepTs = $log[$step] ?? null;
+            // Nothing past where the sector stands now: after a recheck sends
+            // it back to «Σε εξέλιξη», the old «Ολοκληρώθηκε» is no longer true.
+            if ($stepTs === null || $stepTs < $since || $rank > $currentRank) {
+                continue;
+            }
+            $steps[] = ['status' => $step, 'ts' => $stepTs];
+        }
+        if ($status === 'needs_recheck' && isset($log['needs_recheck'])) {
+            $steps[] = ['status' => 'needs_recheck', 'ts' => $log['needs_recheck']];
+        }
         $cards[] = [
             'key'    => 'sector:' . (int) $sector['id'],
             'kind'   => 'sector',
@@ -2132,6 +2278,8 @@ function loadAckTrackerCardsForMission(int $missionId): array {
                 'declined' => $sectorDecline !== null,
             ]],
             'declines' => $sectorDecline !== null ? [$sectorDecline] : [],
+            'sector'   => ['status' => $status, 'steps' => $steps],
+            'finished' => $status === 'completed' || $sectorDecline !== null,
         ];
     }
 
@@ -2181,11 +2329,27 @@ function loadAckTrackerCardsForMission(int $missionId): array {
         // Ξεκινάω / Έφτασα / Ολοκληρώθηκε are one row per team, not a box per
         // person, so they go under the list rather than into it.
         $progressByDispatch = loadDispatchProgress($dispatchIds);
+        // A dispatch from before v3.325.0 ended at arrival and has no progress
+        // row to say so — only its mission_dispatch_acks. Without this every
+        // such dispatch would read as unfinished forever and reopen on every
+        // refresh (same legacy rule as loadMissionDispatchesForUser).
+        $arrivedScopes = [];
+        foreach (dbFetchAll(
+            "SELECT dispatch_id, team_id, user_id FROM mission_dispatch_acks WHERE dispatch_id IN ({$idPlaceholders})",
+            $dispatchIds
+        ) as $row) {
+            $arrivedScopes[(int) $row['dispatch_id']][dispatchProgressScopeKey(
+                $row['team_id'] !== null ? (int) $row['team_id'] : null, (int) $row['user_id']
+            )] = true;
+        }
 
         foreach ($dispatches as $dispatch) {
             $teamId = $dispatch['team_id'] !== null ? (int) $dispatch['team_id'] : null;
             $creatorId = (int) $dispatch['created_by'];
             $people = [];
+            // Finished when every team (or teamless volunteer) it went to has
+            // completed it, said «Δεν μπορώ», or arrived under the old rules.
+            $dispatchFinished = true;
             foreach ($participants as $participant) {
                 $participantId = (int) $participant['user_id'];
                 // The sender is excluded here because they were excluded from
@@ -2200,12 +2364,21 @@ function loadAckTrackerCardsForMission(int $missionId): array {
                     continue;
                 }
                 $participantTeamId = $participant['team_id'] !== null ? (int) $participant['team_id'] : null;
+                $scope = dispatchProgressScopeKey($participantTeamId, $participantId);
+                $scopeDeclined = isset($declines['dispatch:' . (int) $dispatch['id']][$scope]);
+                $scopeProgress = $progressByDispatch[(int) $dispatch['id']][$scope] ?? null;
+                $scopeDone = $scopeDeclined
+                    || ($scopeProgress !== null && $scopeProgress['completed'] !== null)
+                    || ($scopeProgress === null && isset($arrivedScopes[(int) $dispatch['id']][$scope]));
+                if (!$scopeDone) {
+                    $dispatchFinished = false;
+                }
                 $people[] = [
                     'name'   => $participant['name'],
                     'team'   => $participant['codename'] !== null ? teamLabel($participant['codename'], $participant['team_number']) : null,
                     'ack_ts' => $receiptTs[(int) $dispatch['id']][$participantId] ?? null,
                     // The team's answer, so every member of it shows ✗.
-                    'declined' => isset($declines['dispatch:' . (int) $dispatch['id']][dispatchProgressScopeKey($participantTeamId, $participantId)]),
+                    'declined' => $scopeDeclined,
                 ];
             }
             if (!$people) {
@@ -2225,6 +2398,7 @@ function loadAckTrackerCardsForMission(int $missionId): array {
                     'label' => $p['label'], 'departed' => $p['departed'], 'arrived' => $p['arrived'], 'completed' => $p['completed'],
                 ], $progressByDispatch[(int) $dispatch['id']] ?? [])),
                 'declines' => array_values($declines['dispatch:' . (int) $dispatch['id']] ?? []),
+                'finished' => $dispatchFinished,
             ];
         }
     }

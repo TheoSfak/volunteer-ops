@@ -3059,7 +3059,15 @@ include __DIR__ . '/includes/header.php';
     .ack-card-progress { list-style: none; margin: .3rem 0 0; padding: .25rem 0 0; border-top: 1px solid #1e3a5f; }
     .ack-card-progress-row { display: flex; align-items: center; gap: .4rem; font-size: .72rem; padding: .1rem 0; color: #fbbf24; }
     .ack-card-progress-row.ack-done { color: #86efac; }
+    /* Not reached yet: there, so the card shows how much is left, but quiet. */
+    .ack-card-progress-row.ack-todo { color: #64748b; }
+    .ack-card-progress-row.ack-skipped { color: #94a3b8; }
+    .ack-card-progress-row.ack-recheck { color: #fca5a5; }
     .ack-card-progress-row .ack-card-time { color: inherit; white-space: nowrap; }
+    /* Where the order has got to — «Σημείο 2 από 3», «Σε εξέλιξη». */
+    .ack-card-stage { font-size: .68rem; font-weight: 700; color: #93c5fd; margin-top: .1rem; }
+    .ack-card.ack-card-done .ack-card-stage { color: #4ade80; }
+    .ack-card-done-chip { font-size: .64rem; color: #86efac; flex-shrink: 0; white-space: nowrap; }
     .ack-card-person {
         display: flex; align-items: center; gap: .4rem;
         font-size: .74rem; padding: .12rem 0; color: #cbd5e1;
@@ -3083,13 +3091,15 @@ include __DIR__ . '/includes/header.php';
     /* The tick that just landed. Brief, and disabled under
        prefers-reduced-motion — this panel exists to be calmer than what it
        replaced, not to flash. */
-    .ack-card-person.ack-just-in { animation: ack-flash 1.1s ease-out 1; }
+    .ack-card-person.ack-just-in,
+    .ack-card-progress-row.ack-just-in { animation: ack-flash 1.1s ease-out 1; }
     @keyframes ack-flash {
         0%   { background: rgba(34,197,94,.34); }
         100% { background: transparent; }
     }
     @media (prefers-reduced-motion: reduce) {
-        .ack-card-person.ack-just-in { animation: none; }
+        .ack-card-person.ack-just-in,
+        .ack-card-progress-row.ack-just-in { animation: none; }
         .ack-tracker-chevron { transition: none; }
     }
 
@@ -19339,8 +19349,10 @@ function persistAckDismissed() {
 // behave the way a coordinator expects:
 //
 //   · first payload after load → seed this set silently, and open cards ONLY
-//     for orders still waiting on someone. Yesterday's fully-confirmed traffic
-//     does not come back to be closed by hand a second time.
+//     for orders that are not finished yet (the server's card.finished — a
+//     route still being walked, a task nobody has completed, a request whose
+//     photo has not landed). Yesterday's finished traffic does not come back
+//     to be closed by hand a second time.
 //   · every payload after that → a key not in the set is genuinely new, so it
 //     opens a card whatever its state. A brand-new order is always 0-of-N at
 //     birth, so "new" and "unconfirmed" agree here.
@@ -19355,11 +19367,17 @@ let ackTrackerSeeded = false;
 // Which people were already ticked last render, so the green flash fires once
 // for the confirmation that just landed and never again on a later poll.
 const ackTickedBefore = new Map();
+// Same idea for the stages after «Ελήφθη»: {key: Map(rowId → level)} as of the
+// last render. A row flashes when its level changes — the team reaching point
+// 2 — and a card this tab has not drawn before flashes nothing.
+const ackStagesBefore = new Map();
 
-// «Δεν μπορώ» is an answer: someone who handed the order back is not someone
-// still to chase.
-function ackCardIsPending(card) {
-    return card.people.some(p => !p.ack_ts && !p.declined);
+// Whether a card still has anything to wait for. The server decides, per kind
+// (loadAckTrackerCardsForMission): «Ελήφθη» from everyone is not the end of a
+// route, a sector, a task or a request for a photo. «Δεν μπορώ» counts as an
+// answer — that order is back with command.
+function ackCardIsUnfinished(card) {
+    return !card.finished;
 }
 
 function ackTimeLabel(ts) {
@@ -19368,12 +19386,113 @@ function ackTimeLabel(ts) {
     return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
 }
 
+// Per-person "done" for the order types that have one (ACK_TRACKER_FULFIL_TYPES).
+const ACK_DONE_KIND = {task: 'completed', location: 'sent', photo: 'sent', video: 'sent', live: 'live'};
+const ACK_DONE_ICON = {task: '✅', location: '📍', photo: '📷', video: '🎥', live: '🔴'};
+const ACK_SECTOR_STEPS = ['en_route', 'in_progress', 'completed'];
+const ACK_SECTOR_ICON = {en_route: '🚶', in_progress: '🔍', completed: '✅', needs_recheck: '↩️'};
+
+// The stages after «Ελήφθη», as rows under the people: every point of a route,
+// the three steps of a sector, one line per team for a dispatch. Rows not yet
+// reached are drawn too (○), so the card shows how much is left, not only how
+// much is done. `level` is what the flash compares.
+function ackStageRows(card) {
+    if (card.route) {
+        return card.route.points.map(p => {
+            // One time per row — the latest thing that happened there. The
+            // icon already says which; the full history is in the tooltip,
+            // because three times side by side squeeze the point's name out
+            // of a 296px card.
+            const history = [
+                p.departed ? t('dispatch.progress_departed', {time: ackTimeLabel(p.departed)}) : '',
+                p.arrived ? t('dispatch.progress_arrived', {time: ackTimeLabel(p.arrived)}) : '',
+                p.completed ? t('dispatch.progress_completed', {time: ackTimeLabel(p.completed)}) : '',
+                p.skipped ? t('acktracker.stage_skipped', {time: ackTimeLabel(p.skipped)}) : '',
+            ].filter(Boolean);
+            const level = p.skipped ? 'skipped' : p.completed ? 'completed' : p.arrived ? 'arrived' : p.departed ? 'departed' : '';
+            const icon = {skipped: '⏭', completed: '✅', arrived: '📍', departed: '🚶', '': '○'}[level];
+            return {
+                id: 'p' + p.seq, level, icon,
+                label: p.seq + '. ' + p.label,
+                time: history.length ? history[history.length - 1] : '',
+                title: history.join(' · '),
+                cls: level === 'completed' ? 'ack-done' : level === 'skipped' ? 'ack-skipped' : level === '' ? 'ack-todo' : '',
+            };
+        });
+    }
+    if (card.sector) {
+        const reached = {};
+        card.sector.steps.forEach(s => { reached[s.status] = s.ts; });
+        const furthest = ACK_SECTOR_STEPS.reduce((max, st, i) => (reached[st] ? i : max), -1);
+        const rows = [];
+        ACK_SECTOR_STEPS.forEach((st, i) => {
+            // A step jumped over (command marking a sector done straight from
+            // «Ανατέθηκε») is left out rather than shown as still to come.
+            if (!reached[st] && i < furthest) return;
+            rows.push({
+                id: st, level: reached[st] ? 'reached' : '', icon: reached[st] ? ACK_SECTOR_ICON[st] : '○',
+                label: t('sector.status.' + st), time: ackTimeLabel(reached[st]), title: '',
+                cls: !reached[st] ? 'ack-todo' : (st === 'completed' ? 'ack-done' : ''),
+            });
+        });
+        if (reached.needs_recheck) {
+            rows.push({
+                id: 'needs_recheck', level: 'reached', icon: ACK_SECTOR_ICON.needs_recheck,
+                label: t('sector.status.needs_recheck'), time: ackTimeLabel(reached.needs_recheck), title: '', cls: 'ack-recheck',
+            });
+        }
+        return rows;
+    }
+    // A dispatch's Ξεκινάω / Έφτασα / Ολοκληρώθηκε: one line per team under
+    // the per-person «Ελήφθη» boxes, since one member moves the whole team.
+    return (card.progress || []).map(p => {
+        const level = p.completed ? 'completed' : p.arrived ? 'arrived' : p.departed ? 'departed' : '';
+        return {
+            id: 'd' + p.label, level,
+            icon: p.completed ? '✅' : (p.arrived ? '📍' : '🚶'),
+            label: p.label,
+            time: [
+                p.departed ? t('dispatch.progress_departed', {time: p.departed}) : '',
+                p.arrived ? t('dispatch.progress_arrived', {time: p.arrived}) : '',
+                p.completed ? t('dispatch.progress_completed', {time: p.completed}) : '',
+            ].filter(Boolean).join(' · '),
+            title: '',
+            cls: p.completed ? 'ack-done' : '',
+        };
+    });
+}
+
+// One line saying where the order has got to, under the «Ελήφθη» count.
+function ackStageSummary(card) {
+    if (card.route) {
+        if (card.route.cancelled) return t('acktracker.stage_route_cancelled', {time: ackTimeLabel(card.route.cancelled)});
+        if (card.route.completed) return t('acktracker.stage_route_completed', {time: ackTimeLabel(card.route.completed)});
+        const points = card.route.points;
+        const current = points.findIndex(p => !p.completed && !p.skipped);
+        return current >= 0 ? t('acktracker.stage_route_point', {n: current + 1, total: points.length}) : '';
+    }
+    if (card.sector) {
+        return (card.sector.status === 'completed' ? '✅ ' : '') + t('sector.status.' + card.sector.status);
+    }
+    const doneKind = ACK_DONE_KIND[card.kind];
+    if (doneKind) {
+        const done = card.people.filter(p => p.done_ts).length;
+        return t('acktracker.done_count.' + doneKind, {done: done, total: card.people.length});
+    }
+    if (card.kind === 'dispatch' && card.finished) return t('acktracker.stage_finished');
+    return '';
+}
+
 function ackCardHtml(card, inlineStyle) {
     const acked = card.people.filter(p => p.ack_ts && !p.declined).length;
     const declinedCount = card.people.filter(p => p.declined).length;
     const total = card.people.length;
-    const done = acked + declinedCount === total;
+    const allAnswered = acked + declinedCount === total;
+    // Green only when there is nothing left to wait for, which for a route
+    // is its last point, not everyone having pressed «Ελήφθη».
+    const done = !!card.finished;
     const before = ackTickedBefore.get(card.key) || new Set();
+    const doneKind = ACK_DONE_KIND[card.kind];
 
     const people = card.people.map((person, i) => {
         // Index-based identity, not name: two volunteers can share a name, and
@@ -19384,6 +19503,13 @@ function ackCardHtml(card, inlineStyle) {
         const team = person.team ? `<span class="ack-card-team">${escapeHtml(person.team)}</span>` : '';
         const when = person.ack_ts && !person.declined
             ? `<span class="ack-card-time">${escapeHtml(ackTimeLabel(person.ack_ts))}</span>`
+            : '';
+        // The second stage, per person: the task done, the photo/location/
+        // video received, the stream started. Its own chip rather than a
+        // second box — it can land without «Ελήφθη» (a location request is
+        // answered by any ping), and the two must not be read as one.
+        const doneChip = doneKind && person.done_ts
+            ? `<span class="ack-card-done-chip" title="${escapeHtml(t('acktracker.done_hint.' + doneKind, {time: ackTimeLabel(person.done_ts)}))}">${ACK_DONE_ICON[card.kind]} ${escapeHtml(ackTimeLabel(person.done_ts))}</span>`
             : '';
         // aria-label carries what the colour and the empty box say visually,
         // so the panel is readable to a screen reader without it.
@@ -19399,7 +19525,7 @@ function ackCardHtml(card, inlineStyle) {
         return `<li class="${cls}">
                     ${box}
                     <span class="ack-card-name" title="${escapeHtml(person.name)}">${escapeHtml(person.name)}</span>
-                    ${team}${when}
+                    ${team}${when}${doneChip}
                 </li>`;
     }).join('');
     // Why, one line per «Δεν μπορώ» — a team's is one line, not one per member.
@@ -19413,26 +19539,22 @@ function ackCardHtml(card, inlineStyle) {
     const detail = card.detail
         ? `<div class="ack-card-detail">${escapeHtml(card.detail)}</div>`
         : '';
-    // A dispatch's Ξεκινάω / Έφτασα / Ολοκληρώθηκε: one line per team under
-    // the per-person «Ελήφθη» boxes, since one member moves the whole team.
-    const progress = (card.progress || []).map(p => {
-        const steps = [
-            p.departed ? t('dispatch.progress_departed', {time: p.departed}) : '',
-            p.arrived ? t('dispatch.progress_arrived', {time: p.arrived}) : '',
-            p.completed ? t('dispatch.progress_completed', {time: p.completed}) : '',
-        ].filter(Boolean).join(' · ');
-        return `<li class="ack-card-progress-row${p.completed ? ' ack-done' : ''}">
-                    <span>${p.completed ? '✅' : (p.arrived ? '📍' : '🚶')}</span>
-                    <span class="ack-card-name">${escapeHtml(p.label)}</span>
-                    <span class="ack-card-time">${escapeHtml(steps)}</span>
+    const stagesBefore = ackStagesBefore.get(card.key);
+    const progress = ackStageRows(card).map(row => {
+        const isNew = !!stagesBefore && !!row.level && stagesBefore.get(row.id) !== row.level;
+        return `<li class="ack-card-progress-row${row.cls ? ' ' + row.cls : ''}${isNew ? ' ack-just-in' : ''}"${row.title ? ` title="${escapeHtml(row.title)}"` : ''}>
+                    <span>${row.icon}</span>
+                    <span class="ack-card-name">${escapeHtml(row.label)}</span>
+                    <span class="ack-card-time">${escapeHtml(row.time)}</span>
                 </li>`;
     }).join('');
     const declinedText = declinedCount
         ? ' · ' + t(declinedCount === 1 ? 'acktracker.declined_one' : 'acktracker.declined_many', {n: declinedCount})
         : '';
-    const countText = done
+    const countText = allAnswered
         ? (declinedCount ? t('acktracker.all_answered') + declinedText : t('acktracker.all_done'))
         : t('acktracker.count', {acked: acked, total: total}) + declinedText;
+    const stageText = ackStageSummary(card);
 
     return `<div class="ack-card${done ? ' ack-card-done' : ''}${declinedCount ? ' ack-card-declined' : ''}" data-ack-key="${escapeHtml(card.key)}"${inlineStyle ? ` style="${inlineStyle}"` : ''}>
                 <div class="ack-card-head" title="${escapeHtml(t('acktracker.drag_hint'))}">
@@ -19441,6 +19563,7 @@ function ackCardHtml(card, inlineStyle) {
                         ${detail}
                         <div class="ack-card-meta">${escapeHtml(ackTimeLabel(card.ts))} · ${escapeHtml(t('acktracker.sent_by', {name: card.by || ''}))}</div>
                         <div class="ack-card-count">${escapeHtml(countText)}</div>
+                        ${stageText ? `<div class="ack-card-stage">${escapeHtml(stageText)}</div>` : ''}
                     </div>
                     <button type="button" class="ack-tracker-close ack-card-close"
                             aria-label="${escapeHtml(t('acktracker.close_card'))}"
@@ -19463,9 +19586,9 @@ function renderAckTracker(cards) {
         const isNewToThisTab = !ackSeenKeys.has(card.key);
         ackSeenKeys.add(card.key);
         if (ackDismissed.has(card.key)) return;
-        // On the very first payload only pending cards open; after that any
+        // On the very first payload only unfinished cards open; after that any
         // key this tab has not seen before is a freshly issued order.
-        if (!ackTrackerSeeded && !ackCardIsPending(card)) return;
+        if (!ackTrackerSeeded && !ackCardIsUnfinished(card)) return;
         if (!isNewToThisTab && !ackOpenCards.has(card.key)) return;
         ackOpenCards.set(card.key, card);
     });
@@ -19486,9 +19609,14 @@ function renderAckTracker(cards) {
     // 5 seconds, and rebuilding identical HTML would throw away the scroll
     // position inside the list, restart the flash animation on every tick,
     // and — now — yank the card out from under a drag in progress.
+    //
+    // The WHOLE card, not a list of fields. It used to be the «Ελήφθη» and
+    // «Δεν μπορώ» timestamps only, and a dispatch's Ξεκινάω/Έφτασα steps —
+    // added to the card later — were not on that list: a team's arrival did
+    // not redraw it until somebody somewhere pressed «Ελήφθη». Anything the
+    // server sends is something the card shows.
     const sigOf = list2 => list2.map(c =>
-        c.key + ':' + c.people.map(p => (p.ack_ts || 0) + (p.declined ? 'x' : '')).join(',') +
-        (c.declines || []).map(dc => dc.ts).join(';') +
+        JSON.stringify(c) +
         (ackPositions[c.key] ? '@' + ackPositions[c.key].x + ',' + ackPositions[c.key].y : '')
     ).join('|');
 
@@ -19525,10 +19653,12 @@ function renderAckTracker(cards) {
     // Recorded AFTER the render, so the row that flashed this time is quiet
     // the next time around.
     ackTickedBefore.clear();
+    ackStagesBefore.clear();
     open.forEach(card => {
         const ticked = new Set();
         card.people.forEach((person, i) => { if (person.ack_ts) ticked.add(card.key + '#' + i); });
         ackTickedBefore.set(card.key, ticked);
+        ackStagesBefore.set(card.key, new Map(ackStageRows(card).map(row => [row.id, row.level])));
     });
 
     if (open.length) syncAckTrackerBar();

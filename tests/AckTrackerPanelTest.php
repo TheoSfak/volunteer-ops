@@ -106,6 +106,32 @@ final class AckTrackerPanelTest extends TestCase
         return $orderId;
     }
 
+    /**
+     * A Route Order to the fixture team with $points waypoints, built the way
+     * mission-route.php builds one: an order of type 'route', its recipients,
+     * the route row pointing back at the order, and one progress row per point.
+     *
+     * @return array{0:int,1:int,2:int[]} [orderId, routeId, waypointIds]
+     */
+    private function sendRoute(int $points): array
+    {
+        $orderId = $this->sendOrder('route', null);
+        $routeId = (int) dbInsert(
+            "INSERT INTO mission_routes (mission_id, team_id, order_id, title, created_by) VALUES (?, ?, ?, ?, ?)",
+            [$this->missionId, $this->teamId, $orderId, 'Περίπολος', $this->adminId]
+        );
+        $waypointIds = [];
+        for ($seq = 1; $seq <= $points; $seq++) {
+            $waypointId = (int) dbInsert(
+                "INSERT INTO mission_route_waypoints (route_id, seq, lat, lng, label) VALUES (?, ?, ?, ?, ?)",
+                [$routeId, $seq, 35.3 + $seq / 100, 24.8, $seq === 2 ? null : 'Σ' . $seq]
+            );
+            dbInsert("INSERT INTO mission_route_progress (waypoint_id, route_id, team_id) VALUES (?, ?, ?)", [$waypointId, $routeId, $this->teamId]);
+            $waypointIds[] = $waypointId;
+        }
+        return [$orderId, $routeId, $waypointIds];
+    }
+
     private function cardFor(array $cards, string $key): ?array
     {
         foreach ($cards as $card) {
@@ -350,6 +376,199 @@ final class AckTrackerPanelTest extends TestCase
             array_search('order:' . $older, $keys, true),
             array_search('order:' . $newer, $keys, true)
         );
+    }
+
+    /**
+     * The stages after «Ελήφθη»: a route card carries every point, in order,
+     * with how far the team has got at each — and «Ελήφθη» from everyone does
+     * not finish it; its last point does.
+     */
+    public function testRouteCardFollowsEveryPointAndFinishesOnlyAtTheEnd(): void
+    {
+        [$orderId, $routeId, $waypointIds] = $this->sendRoute(3);
+        dbExecute("UPDATE mission_order_recipients SET acknowledged_at = NOW() WHERE order_id = ?", [$orderId]);
+        dbExecute(
+            "UPDATE mission_route_progress SET departed_at = '2026-09-26 10:00:00', arrived_at = '2026-09-26 10:10:00', completed_at = '2026-09-26 10:20:00' WHERE waypoint_id = ?",
+            [$waypointIds[0]]
+        );
+        dbExecute("UPDATE mission_route_progress SET departed_at = '2026-09-26 10:20:00' WHERE waypoint_id = ?", [$waypointIds[1]]);
+
+        $cards = loadAckTrackerCardsForMission($this->missionId);
+        $this->assertSame(
+            1,
+            count(array_keys(array_column($cards, 'key'), 'order:' . $orderId, true)),
+            'A new open route is both among the newest orders and an open route; it is one card.'
+        );
+        $card = $this->cardFor($cards, 'order:' . $orderId);
+        $this->assertNotNull($card['route']);
+        $points = $card['route']['points'];
+        $this->assertSame([1, 2, 3], array_column($points, 'seq'), 'Every point, in route order — the ones not reached yet too.');
+        $this->assertSame('Σ1', $points[0]['label']);
+        $this->assertSame(t('route.waypoint_fallback_label', ['seq' => 2]), $points[1]['label'], 'An unnamed point still has a name to show.');
+        $this->assertNotNull($points[0]['completed']);
+        $this->assertNotNull($points[1]['departed']);
+        $this->assertNull($points[1]['arrived']);
+        $this->assertNull($points[2]['departed']);
+        $this->assertFalse($card['finished'], 'Everyone pressed «Ελήφθη», but the team is on its way to point 2 of 3.');
+        foreach ($card['people'] as $person) {
+            $this->assertNull($person['done_ts'], 'A route\'s progress is its points, not a per-person chip.');
+        }
+
+        dbExecute("UPDATE mission_routes SET completed_at = NOW() WHERE id = ?", [$routeId]);
+        $card = $this->cardFor(loadAckTrackerCardsForMission($this->missionId), 'order:' . $orderId);
+        $this->assertTrue($card['finished']);
+        $this->assertNotNull($card['route']['completed']);
+    }
+
+    /**
+     * A patrol runs for an hour; twelve other orders go out in ten minutes.
+     * A card that falls out of the payload freezes on screen at whatever point
+     * it had reached, so an open route must stay in it.
+     */
+    public function testOpenRouteStaysInThePayloadPastTheNewestOrdersCap(): void
+    {
+        [$orderId, $routeId] = $this->sendRoute(2);
+        dbExecute("UPDATE mission_orders SET created_at = ? WHERE id = ?", [date('Y-m-d H:i:s', time() - 3600), $orderId]);
+        for ($i = 0; $i < ACK_TRACKER_MAX_PER_KIND + 2; $i++) {
+            $this->sendOrder('location', null);
+        }
+
+        $keys = array_column(loadAckTrackerCardsForMission($this->missionId), 'key');
+        $this->assertSame(
+            1,
+            count(array_keys($keys, 'order:' . $orderId, true)),
+            'An open route is still reported after more than ' . ACK_TRACKER_MAX_PER_KIND . ' newer orders — once.'
+        );
+
+        dbExecute("UPDATE mission_routes SET completed_at = NOW() WHERE id = ?", [$routeId]);
+        $this->assertNull(
+            $this->cardFor(loadAckTrackerCardsForMission($this->missionId), 'order:' . $orderId),
+            'Once finished it goes back to being just one more old order.'
+        );
+    }
+
+    /**
+     * A task is finished when it is done, not when it is received; a request
+     * for data when the data lands. Each person's "done" is its own field.
+     */
+    public function testTaskAndDataRequestsFinishOnDoneNotOnReceipt(): void
+    {
+        foreach (['task', 'photo'] as $type) {
+            $orderId = $this->sendOrder($type, $type === 'task' ? 'Έλεγχος' : null);
+            dbExecute("UPDATE mission_order_recipients SET acknowledged_at = NOW() WHERE order_id = ?", [$orderId]);
+
+            $card = $this->cardFor(loadAckTrackerCardsForMission($this->missionId), 'order:' . $orderId);
+            $this->assertFalse($card['finished'], "A {$type} everyone has received but nobody has done is not finished.");
+
+            dbExecute("UPDATE mission_order_recipients SET fulfilled_at = NOW() WHERE order_id = ? AND user_id <> ?", [$orderId, $this->volunteerIds[2]]);
+            $card = $this->cardFor(loadAckTrackerCardsForMission($this->missionId), 'order:' . $orderId);
+            $this->assertNotNull($card['people'][0]['done_ts']);
+            $this->assertNull($card['people'][2]['done_ts']);
+            $this->assertFalse($card['finished'], 'Two of three is not finished.');
+
+            dbExecute("UPDATE mission_order_recipients SET fulfilled_at = NOW() WHERE order_id = ?", [$orderId]);
+            $this->assertTrue($this->cardFor(loadAckTrackerCardsForMission($this->missionId), 'order:' . $orderId)['finished']);
+        }
+    }
+
+    /** For a broadcast, acknowledging IS completing — same rule as «Οι Εντολές μου». */
+    public function testBroadcastFinishesOnReceipt(): void
+    {
+        $orderId = $this->sendOrder('message', 'Ενημέρωση');
+        $this->assertFalse($this->cardFor(loadAckTrackerCardsForMission($this->missionId), 'order:' . $orderId)['finished']);
+
+        dbExecute("UPDATE mission_order_recipients SET acknowledged_at = NOW() WHERE order_id = ?", [$orderId]);
+        $card = $this->cardFor(loadAckTrackerCardsForMission($this->missionId), 'order:' . $orderId);
+        $this->assertTrue($card['finished']);
+        $this->assertNull($card['people'][0]['done_ts'], 'A broadcast has no second stage to show.');
+    }
+
+    /**
+     * A sector's steps come from its status log. After a recheck sends it back
+     * to «Σε εξέλιξη», the old «Ολοκληρώθηκε» is no longer true and must go.
+     */
+    public function testSectorStepsFollowTheStatusLog(): void
+    {
+        $areaId = (int) dbInsert(
+            "INSERT INTO mission_search_areas (mission_id, label, geo, created_by) VALUES (?, ?, ?, ?)",
+            [$this->missionId, 'Ζώνη 3', json_encode([[35.3, 24.8], [35.4, 24.8], [35.4, 24.9]]), $this->adminId]
+        );
+        $sectorId = (int) dbInsert(
+            "INSERT INTO mission_search_sectors (mission_id, area_id, team_id, label, geo, status, status_updated_at, created_by)
+             VALUES (?, ?, ?, ?, ?, 'in_progress', NOW(), ?)",
+            [$this->missionId, $areaId, $this->teamId, 'Τ-3', json_encode([[35.3, 24.8], [35.4, 24.8], [35.4, 24.9]]), $this->adminId]
+        );
+        $log = function (string $from, string $to, string $at) use ($sectorId) {
+            dbInsert(
+                "INSERT INTO mission_sector_status_log (sector_id, from_status, to_status, team_id, user_id, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                [$sectorId, $from, $to, $this->teamId, $this->volunteerIds[0], $at]
+            );
+        };
+        $log('not_started', 'assigned', '2026-09-26 09:00:00');
+        $log('assigned', 'en_route', '2026-09-26 09:10:00');
+        $log('en_route', 'in_progress', '2026-09-26 09:30:00');
+        $log('in_progress', 'completed', '2026-09-26 10:00:00');
+        $log('completed', 'needs_recheck', '2026-09-26 10:05:00');
+        $log('needs_recheck', 'in_progress', '2026-09-26 10:15:00');
+
+        $card = $this->cardFor(loadAckTrackerCardsForMission($this->missionId), 'sector:' . $sectorId);
+        $this->assertSame('in_progress', $card['sector']['status']);
+        $this->assertSame(['en_route', 'in_progress'], array_column($card['sector']['steps'], 'status'));
+        $this->assertSame(
+            // Asked of MySQL, whose session time zone is the one UNIX_TIMESTAMP() used.
+            (int) dbFetchValue("SELECT UNIX_TIMESTAMP('2026-09-26 10:15:00')"),
+            $card['sector']['steps'][1]['ts'],
+            'The latest time it entered the step: this walk, not the one before the recheck.'
+        );
+        $this->assertFalse($card['finished']);
+
+        dbExecute("UPDATE mission_search_sectors SET status = 'completed' WHERE id = ?", [$sectorId]);
+        $log('in_progress', 'completed', '2026-09-26 10:40:00');
+        $card = $this->cardFor(loadAckTrackerCardsForMission($this->missionId), 'sector:' . $sectorId);
+        $this->assertSame(['en_route', 'in_progress', 'completed'], array_column($card['sector']['steps'], 'status'));
+        $this->assertTrue($card['finished']);
+    }
+
+    /**
+     * A dispatch finishes when its team completes it. One from before v3.325.0
+     * ended at arrival and has only its mission_dispatch_acks to show for it —
+     * it must count as finished, or every one of them reopens on every refresh.
+     */
+    public function testDispatchFinishesOnCompletionOrOnALegacyArrival(): void
+    {
+        $insertDispatch = fn(string $label) => (int) dbInsert(
+            "INSERT INTO mission_dispatch_points (mission_id, team_id, type, geo, label, created_by) VALUES (?, ?, 'point', ?, ?, ?)",
+            [$this->missionId, $this->teamId, json_encode([35.33, 24.85]), $label, $this->adminId]
+        );
+        $current = $insertDispatch('Νέα');
+        $legacy = $insertDispatch('Παλιά');
+
+        $cards = loadAckTrackerCardsForMission($this->missionId);
+        $this->assertFalse($this->cardFor($cards, 'dispatch:' . $current)['finished']);
+        $this->assertFalse($this->cardFor($cards, 'dispatch:' . $legacy)['finished']);
+
+        dbInsert(
+            "INSERT INTO mission_dispatch_progress (dispatch_id, team_id, scope_key, departed_at, arrived_at) VALUES (?, ?, ?, NOW(), NOW())",
+            [$current, $this->teamId, 't' . $this->teamId]
+        );
+        dbInsert(
+            "INSERT INTO mission_dispatch_acks (dispatch_id, team_id, user_id) VALUES (?, ?, ?)",
+            [$current, $this->teamId, $this->volunteerIds[0]]
+        );
+        dbInsert(
+            "INSERT INTO mission_dispatch_acks (dispatch_id, team_id, user_id) VALUES (?, ?, ?)",
+            [$legacy, $this->teamId, $this->volunteerIds[0]]
+        );
+
+        $cards = loadAckTrackerCardsForMission($this->missionId);
+        $this->assertFalse(
+            $this->cardFor($cards, 'dispatch:' . $current)['finished'],
+            'Arrived under the current rules is not the end — «Ολοκληρώθηκε» still follows.'
+        );
+        $this->assertTrue($this->cardFor($cards, 'dispatch:' . $legacy)['finished'], 'A legacy arrival was the end of the old dispatch.');
+
+        dbExecute("UPDATE mission_dispatch_progress SET completed_at = NOW() WHERE dispatch_id = ?", [$current]);
+        $this->assertTrue($this->cardFor(loadAckTrackerCardsForMission($this->missionId), 'dispatch:' . $current)['finished']);
     }
 
     /**
