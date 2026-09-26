@@ -2598,6 +2598,27 @@ include __DIR__ . '/includes/header.php';
     .wr-op-mini-chip { position: absolute; bottom: 6px; z-index: 500; background: #fff; color: #212529; border-radius: 6px; padding: 2px 7px; font-size: .75rem; box-shadow: 0 1px 4px rgba(0, 0, 0, .25); text-decoration: none; }
     .wr-op-mini-dist { left: 6px; }
     .wr-op-mini-nav { right: 6px; color: #0a58ca; font-weight: 600; }
+    /* Top-right: at phone width the pair and the distance/ETA chip do not fit on one line. */
+    .wr-op-mini-navs { position: absolute; right: 6px; top: 6px; z-index: 500; display: flex; gap: 4px; }
+    .wr-op-mini-navs .wr-op-mini-chip { position: static; }
+    /* «Πυξίδα» — the arrow screen. Dark and big: glanced at while walking, in sun. */
+    .wr-arrow { position: fixed; inset: 0; z-index: 2100; background: #111418; color: #fff; display: flex; flex-direction: column; padding: max(12px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); }
+    .wr-arrow[hidden] { display: none; }
+    body.wr-arrow-open { overflow: hidden; }
+    .wr-arrow-top { display: flex; align-items: center; gap: .6rem; min-width: 0; }
+    .wr-arrow-close { flex-shrink: 0; border: 0; background: rgba(255, 255, 255, .14); color: #fff; width: 44px; height: 44px; border-radius: 50%; font-size: 1.2rem; }
+    .wr-arrow-title { font-weight: 600; font-size: 1.05rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .wr-arrow-dial { position: relative; width: min(72vw, 44vh); aspect-ratio: 1; margin: auto auto 1rem; }
+    .wr-arrow-ring { position: absolute; inset: 0; border: 2px solid rgba(255, 255, 255, .22); border-radius: 50%; transition: transform .25s linear; }
+    .wr-arrow-north { position: absolute; top: 0; left: 50%; transform: translate(-50%, -50%); background: #111418; padding: 0 .35em; color: #ff6b6b; font-weight: 700; }
+    .wr-arrow-svg { position: absolute; inset: 12%; width: 76%; height: 76%; fill: #ffc107; transition: transform .25s linear, opacity .3s; }
+    .wr-arrow-here .wr-arrow-svg { fill: #20c997; }
+    .wr-arrow-dist { text-align: center; font-size: clamp(2.2rem, 11vw, 3.6rem); font-weight: 700; line-height: 1.1; }
+    .wr-arrow-dist.wr-arrow-wait { font-size: 1.4rem; font-weight: 600; color: #ced4da; }
+    .wr-arrow-sub { text-align: center; color: #adb5bd; font-size: .9rem; min-height: 1.4em; margin-top: .3rem; }
+    .wr-arrow-actions { margin-top: auto; padding-top: 1rem; display: flex; gap: .5rem; }
+    .wr-arrow-actions > * { flex: 1; min-height: 52px; display: inline-flex; align-items: center; justify-content: center; }
+    .wr-arrow-actions > [hidden] { display: none; }
     .wr-op-actions .btn { min-height: 44px; }
     .wr-op-steps { margin-top: .75rem; }
     .wr-op-step { display: flex; gap: .6rem; position: relative; padding-bottom: .65rem; }
@@ -7201,8 +7222,8 @@ function renderDispatches(items) {
                 return `${p.completed ? '✅' : (p.arrived ? '📍' : '🚶')} <strong>${escapeHtml(p.label)}</strong>: ${escapeHtml(steps.join(' · '))}`;
             }).join('<br>') + '</div>'
             : '';
-        const directionsUrl = dispatchDirectionsUrl(item);
-        const directionsHtml = `<br><a href="${directionsUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-success mt-1"><i class="bi bi-signpost-2-fill me-1"></i>${t('dispatch.directions_btn')}</a>`;
+        const directionsNav = dispatchNavPoint(item);
+        const directionsHtml = '<br>' + navigationPairHtml(directionsNav.lat, directionsNav.lng, 'inline');
         // Live ETA — only ever present for a point sent to one specific team
         // (see computeDispatchEta()'s own scoping); null means either that
         // doesn't apply here, or the team hasn't sent a single GPS ping yet,
@@ -7241,8 +7262,34 @@ function renderDispatches(items) {
 // location permission). A polygon has no single point, so route to its
 // centroid instead. Shared by the map popup and by "Οι Εντολές μου", so the
 // two can never disagree about where "there" is.
-function navigationUrl(lat, lng) {
-    return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
+//
+// By car or on foot (v3.333.0): it was always driving, and volunteers drive to
+// a trailhead and walk the rest — directions on foot are the ones that know
+// the path. Every place that offers directions offers both
+// (navigationPairHtml()).
+function navigationUrl(lat, lng, mode) {
+    return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=${mode === 'walking' ? 'walking' : 'driving'}`;
+}
+
+// The two links, 🚗 and 🚶, in the shape each place needs: 'block' (a
+// full-width pair on a card), 'inline' (map popups), 'icon' (a route point's
+// header) or 'chip' (over the order popup's mini map). '' for a target with no
+// coordinates rather than a dead link.
+function navigationPairHtml(lat, lng, style) {
+    if (lat === null || lat === undefined || lng === null || lng === undefined) return '';
+    const modes = [['driving', 'bi-car-front-fill', t('nav.drive')], ['walking', 'bi-person-walking', t('nav.walk')]];
+    const link = (mode, cls, withLabel) =>
+        `<a href="${navigationUrl(lat, lng, mode[0])}" target="_blank" rel="noopener" class="${cls}" title="${escapeHtml(mode[2])}" aria-label="${escapeHtml(mode[2])}"><i class="bi ${mode[1]}${withLabel ? ' me-1' : ''}"></i>${withLabel ? escapeHtml(mode[2]) : ''}</a>`;
+    switch (style) {
+        case 'block':
+            return `<div class="btn-group w-100 mt-1" role="group">${modes.map(m => link(m, 'btn btn-sm btn-outline-success', true)).join('')}</div>`;
+        case 'icon':
+            return `<span class="d-inline-flex gap-1">${modes.map(m => link(m, 'btn btn-sm btn-outline-success py-0 px-1', false)).join('')}</span>`;
+        case 'chip':
+            return `<span class="wr-op-mini-navs">${modes.map(m => link(m, 'wr-op-mini-chip wr-op-mini-nav', true)).join('')}</span>`;
+        default:
+            return `<span class="d-inline-flex flex-wrap gap-1 mt-1">${modes.map(m => link(m, 'btn btn-sm btn-outline-primary', true)).join('')}</span>`;
+    }
 }
 
 // The one point a whole shape is navigated to. polygonNavPoint()
@@ -7255,19 +7302,16 @@ function navigationUrl(lat, lng) {
 // and wrong for every shape traced around a gorge, a bay or a headland: the
 // middle of a horseshoe is not in the horseshoe, and a team routed there is on
 // the wrong side of a ridge from all the ground they were given.
-function polygonNavigationUrl(geo) {
-    const mid = (typeof polygonNavPoint === 'function') ? polygonNavPoint(geo) : null;
-    return mid ? navigationUrl(mid.lat, mid.lng) : null;
+function polygonNavTarget(geo) {
+    return (typeof polygonNavPoint === 'function') ? polygonNavPoint(geo) : null;
 }
 
 // Every «Πλοήγηση» button on this page, so they cannot drift apart in label,
 // icon or behaviour. Returns '' for a target with no coordinates rather than a
-// dead button — an incident logged without GPS is a real case.
+// dead button — an incident logged without GPS is a real case. Since v3.333.0
+// the by-car / on-foot pair (navigationPairHtml()).
 function navigationBtnHtml(lat, lng, opts) {
-    if (lat === null || lat === undefined || lng === null || lng === undefined) return '';
-    const o = opts || {};
-    const cls = o.block ? 'btn btn-sm btn-outline-success w-100 mt-1' : 'btn btn-sm btn-outline-primary mt-1';
-    return `<a href="${navigationUrl(lat, lng)}" target="_blank" rel="noopener" class="${cls}"><i class="bi bi-signpost-2-fill me-1"></i>${t('map.navigate_btn')}</a>`;
+    return navigationPairHtml(lat, lng, (opts && opts.block) ? 'block' : 'inline');
 }
 
 // Same, for a shape. Kept separate so a caller cannot accidentally pass a
@@ -7277,9 +7321,10 @@ function polygonNavigationBtnHtml(geo, opts) {
     return mid ? navigationBtnHtml(mid.lat, mid.lng, opts) : '';
 }
 
-function dispatchDirectionsUrl(item) {
-    if (item.type === 'point') return navigationUrl(item.geo.lat, item.geo.lng);
-    return polygonNavigationUrl(item.geo) || navigationUrl(item.geo[0][0], item.geo[0][1]);
+// Where a dispatch is navigated to: the point, or an area's middle.
+function dispatchNavPoint(item) {
+    if (item.type === 'point') return {lat: Number(item.geo.lat), lng: Number(item.geo.lng)};
+    return polygonNavTarget(item.geo) || {lat: Number(item.geo[0][0]), lng: Number(item.geo[0][1])};
 }
 // "Ελήφθη" (receive) and "Άφιξη" (ack) for a dispatch point/area, from either
 // of the two places that now offer them: the map popup and the orders card.
@@ -8461,12 +8506,11 @@ function addSectorBuildingMarker(b, item) {
     });
     const canActOnBuildings = item.can_self_report || item.can_manage;
     const delBuildingBtn = item.can_manage ? `<button type="button" class="btn btn-sm btn-outline-danger mt-1 sector-building-delete-btn" data-id="${b.id}">${t('common.delete')}</button>` : '';
-    // Same navUrl pattern + map.navigate_btn label as a volunteer's own GPS
-    // pin popup (renderPinMarker above) — no origin means Google Maps routes
+    // Same by-car / on-foot pair as a volunteer's own GPS pin popup
+    // (renderPinMarker above) — no origin means Google Maps routes
     // from the device's current location, so this works without ever asking
     // this page for geolocation permission.
-    const navUrl = navigationUrl(b.lat, b.lng);
-    const navBtn = `<br><a href="${navUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-1">${t('map.navigate_btn')}</a>`;
+    const navBtn = '<br>' + navigationPairHtml(b.lat, b.lng, 'inline');
     const bPopupHtml = `<strong>${escapeHtml(b.label)}</strong>${sectorFloorChecklistHtml(b, canActOnBuildings)}${navBtn}${delBuildingBtn}`;
     const bLayer = L.marker([b.lat, b.lng], {icon}).addTo(sectorBuildingLayer).bindPopup(bPopupHtml);
     bLayer.buildingId = b.id;
@@ -9441,7 +9485,6 @@ function buildPinMarker(pin, interactive = true) {
     const trackingLine = pin.via === 'browser'
         ? `<br><span class="small text-muted"><i class="bi bi-window me-1"></i>${t('map.tracked_by_browser')}</span>`
         : '';
-    const navUrl = navigationUrl(pin.lat, pin.lng);
     // Always rendered for an admin regardless of battery level, so there's
     // something to notice/hover even on a healthy pin — deliberately NOT
     // the native disabled attribute, which would swallow the click
@@ -9455,7 +9498,7 @@ function buildPinMarker(pin, interactive = true) {
     const chargeAlertBtn = (CAN_MANAGE_WAR_ROOM && interactive)
         ? ` <button type="button" class="btn btn-sm ${chargeAlertActive ? 'btn-outline-warning' : 'btn-outline-secondary'} pin-charge-alert-btn" style="${chargeAlertActive ? '' : 'opacity:.55;'}" data-user-id="${pin.user_id}" data-active="${chargeAlertActive}"${chargeAlertTitle}>${t('map.charge_alert_btn')}</button>`
         : '';
-    const navLine = `<br><a href="${navUrl}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-primary mt-1">${t('map.navigate_btn')}</a>${chargeAlertBtn}`;
+    const navLine = '<br>' + navigationPairHtml(pin.lat, pin.lng, 'inline') + chargeAlertBtn;
     // zIndexOffset keeps a live position dot on top of any other pin type
     // (POI, dispatch, incident) that happens to land on the exact same spot
     // — Leaflet's default z-index is purely latitude-based, so two markers
@@ -10563,6 +10606,9 @@ function opModelFromRoute(route) {
     const nextWp = wps.find(wp => !wp.completed_at && !wp.skipped_at) || wps[0];
     return {
         key: 'route:' + route.id, kind: 'route', id: route.id, orderId: route.order_id, type: 'route',
+        // For «Έφτασα» on the arrow screen (arrowArriveOp()).
+        nextWaypointId: nextWp ? nextWp.id : null,
+        nextWaypointOpen: !!(nextWp && route.is_route_member && !nextWp.arrived_at && !nextWp.completed_at && !nextWp.skipped_at),
         cat: 'move', icon: 'bi-signpost-split-fill', title: t('popup.type.route'),
         text: route.title || t('route.default_title'),
         meta: t('popup.route_points', {count: wps.length}),
@@ -10651,7 +10697,8 @@ function myOrderEntriesFromDispatches(items) {
             // The complaint this fixes was a volunteer having to find a pin on
             // the map before they could act on it at all, so the row carries
             // its own way to actually get there.
-            const directionsHtml = `<a href="${dispatchDirectionsUrl(d)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success w-100 mt-1"><i class="bi bi-signpost-2-fill me-1"></i>${t('dispatch.directions_btn')}</a>`;
+            const dNav = dispatchNavPoint(d);
+            const directionsHtml = navigationPairHtml(dNav.lat, dNav.lng, 'block');
             return {
                 outstanding: !d.my_completed,
                 html: myOrderRow(labelHtml, escapeHtml(d.team_label), receiptHtml + actionHtml + directionsHtml),
@@ -10860,6 +10907,12 @@ function opRememberLater(keys) {
 }
 
 function orderPopupSync(entries) {
+    opInfo.forEach((m, key) => {
+        if (m.kind !== 'arrive') return;
+        const where = opArriveTarget(m.target_kind, m.id);
+        if (!where.open) opInfo.delete(key);
+        else if (where.target) m.target = where.target;
+    });
     const models = entries.map(entry => entry.popup).filter(Boolean).concat(Array.from(opInfo.values()));
     const previous = opEntries;
     opEntries = new Map(models.map(m => [m.key, m]));
@@ -10907,7 +10960,7 @@ function orderPopupSync(entries) {
 // that the volunteer came for. Taken off the address at once, so a reload does
 // not show it a second time.
 function opRequest(value) {
-    const m = /^(order|dispatch|sector):(\d+)$/.exec(String(value || ''));
+    const m = /^(order|dispatch|sector|route):(\d+)$/.exec(String(value || ''));
     opRequested = m ? {kind: m[1], id: Number(m[2]), since: Date.now()} : null;
 }
 (function () {
@@ -10978,6 +11031,17 @@ function orderPopupTakeBanner(b) {
     if (b.popup.kind === 'info') {
         const key = 'info:' + b.id;
         opInfo.set(key, opModelFromNotice(key, b));
+        refreshMyOrdersCard();
+        opArrive(key, b);
+        return true;
+    }
+    if (b.popup.kind === 'arrive') {
+        const key = 'arrive:' + b.popup.target + ':' + b.popup.id;
+        const m = opModelFromArrive(key, b);
+        // Already there — pressed on the phone, or by a teammate — before this
+        // page saw the question: nothing left to ask, and no ticker line.
+        if (!m.outstanding) return true;
+        opInfo.set(key, m);
         refreshMyOrdersCard();
         opArrive(key, b);
         return true;
@@ -11215,7 +11279,11 @@ function opReplayBtnHtml() {
 }
 function opDirectionsHtml(m) {
     const nav = m.target && m.target.nav;
-    return nav ? `<a href="${navigationUrl(nav.lat, nav.lng)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success w-100 mt-1"><i class="bi bi-signpost-2-fill me-1"></i>${escapeHtml(t('dispatch.directions_btn'))}</a>` : '';
+    return nav ? navigationPairHtml(nav.lat, nav.lng, 'block') : '';
+}
+// «Πυξίδα» — the arrow screen (arrowOpen()), for anything with a place.
+function opCompassBtnHtml(m) {
+    return m.target && m.target.nav ? opBtn('compass', 'bi-compass', t('arrow.open_btn'), 'btn-outline-primary') : '';
 }
 
 // The one button of the first step: [data-op, icon, label]. Every one of them
@@ -11224,6 +11292,7 @@ function opDirectionsHtml(m) {
 function opGoAction(m) {
     const mapLess = !map || !m.target;
     if (m.kind === 'info' || m.kind === 'team') return ['dismiss', 'bi-check2', t('popup.btn.got_it')];
+    if (m.kind === 'arrive') return ['arrived', 'bi-geo-alt-fill', t('popup.btn.arrived')];
     switch (m.type) {
         case 'photo': return ['camera', 'bi-camera-fill', t('popup.btn.open_camera')];
         case 'video': return ['video', 'bi-camera-reels-fill', t('popup.btn.open_video')];
@@ -11249,8 +11318,9 @@ function opArrivalCardHtml(m, i, n) {
             <div class="wr-op-actions mt-2">
                 <button type="button" class="btn btn-primary w-100 fw-semibold" data-op="${op}"><i class="bi ${icon} me-1"></i>${escapeHtml(label)}</button>
                 ${m.type === 'speak' ? opReplayBtnHtml() : ''}
+                ${opCompassBtnHtml(m)}
                 ${opNoticeCardBtnHtml(m)}
-                <button type="button" class="btn btn-outline-secondary w-100 mt-2" data-op="min">${escapeHtml(t('popup.btn.later'))}</button>
+                ${m.kind === 'arrive' ? '' : `<button type="button" class="btn btn-outline-secondary w-100 mt-2" data-op="min">${escapeHtml(t('popup.btn.later'))}</button>`}
             </div>
         </div>
     </div>`;
@@ -11276,6 +11346,7 @@ function opReviewCardHtml(m, i, n) {
             <div class="wr-op-meta">${escapeHtml(m.meta)}</div>
             ${m.type === 'speak' ? opReplayBtnHtml() : ''}
             <div class="wr-op-steps">${steps}</div>
+            ${m.kind === 'arrive' ? '' : opCompassBtnHtml(m)}
             ${m.hint ? `<div class="wr-op-hint mt-0"><i class="bi bi-info-circle me-1"></i>${escapeHtml(m.hint)}</div>` : ''}
         </div>
     </div>`;
@@ -11284,6 +11355,8 @@ function opReviewCardHtml(m, i, n) {
 // A notice's way to the thing it is about («Δες την ομάδα», «Δες τη
 // διαδρομή»), under its «Κατάλαβα».
 function opNoticeCardBtnHtml(m) {
+    // An arrival question's other answer: not yet — it is not asked again.
+    if (m.kind === 'arrive') return opBtn('dismiss', 'bi-x-lg', t('popup.btn.not_yet'), 'btn-outline-secondary');
     return (m.kind === 'info' || m.kind === 'team') && m.card
         ? opBtn('card', 'bi-box-arrow-up-right', m.cardLabel, 'btn-outline-primary')
         : '';
@@ -11292,7 +11365,7 @@ function opNoticeCardBtnHtml(m) {
 function opStepActionsHtml(m, k, state) {
     if (state === 'current' && k === 0) {
         const [op, icon, label] = opGoAction(m);
-        return opBtn(op, icon, label) + opNoticeCardBtnHtml(m);
+        return opBtn(op, icon, label) + (m.kind === 'arrive' ? opCompassBtnHtml(m) : '') + opNoticeCardBtnHtml(m);
     }
     if (state === 'current') {
         switch (m.type) {
@@ -11361,7 +11434,7 @@ function opMiniHtml(m) {
     return `<div class="wr-op-mini" data-op="${opGoAction(m)[0]}" role="button" aria-label="${escapeHtml(opGoAction(m)[2])}">
         <div id="wrOpMiniMap" style="position:absolute;inset:0;"></div>
         ${dist ? `<span class="wr-op-mini-chip wr-op-mini-dist">${escapeHtml(dist)}</span>` : ''}
-        ${nav ? `<a class="wr-op-mini-chip wr-op-mini-nav" href="${navigationUrl(nav.lat, nav.lng)}" target="_blank" rel="noopener"><i class="bi bi-signpost-2-fill me-1"></i>${escapeHtml(t('popup.btn.directions'))}</a>` : ''}
+        ${nav ? navigationPairHtml(nav.lat, nav.lng, 'chip') : ''}
     </div>`;
 }
 function opBuildMiniMap(m) {
@@ -11398,6 +11471,257 @@ function opBuildMiniMap(m) {
     if (!bounds.isValid()) return;
     if (bounds.getNorthEast().equals(bounds.getSouthWest())) opMiniMap.setView(bounds.getCenter(), 16);
     else opMiniMap.fitBounds(bounds, {padding: [20, 20], maxZoom: 17});
+}
+
+// ── «Πυξίδα» — the arrow screen (v3.333.0) ──────────────────────────────────
+// For the last stretch on foot, where a road map has nothing to say: one big
+// arrow to the order's target that turns with the phone, and the distance
+// counting down. Opened from the order popup of anything that has a place.
+//
+// It needs two things the page cannot always have, and says which it is
+// using rather than guessing. A heading: the phone's compass when it gives an
+// absolute one (compassHeadingFromOrientation(), war-room-utils.js), else the
+// direction of travel from GPS while walking, else none — then north is up and
+// the arrow is a bearing on a map. And a position: from its own high-accuracy
+// GPS watch while the screen is open. The screen stays on meanwhile.
+//
+// «Έφτασα» appears on it inside the radius the server asks «Έφτασες;» in
+// (checkArrivalPrompts()), for an order whose next step is arriving.
+const ARROW_ARRIVE_RADIUS_M = <?= (int) ARRIVAL_PROMPT_RADIUS_M ?>;
+let arrowState = null;
+
+function arrowScreenAngle() {
+    return (screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (Number(window.orientation) || 0);
+}
+
+function arrowElement() {
+    let el = document.getElementById('wrArrow');
+    if (el) return el;
+    el = document.createElement('div');
+    el.id = 'wrArrow';
+    el.className = 'wr-arrow';
+    el.hidden = true;
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    // Translated strings only — no user data; the title is set as text below.
+    el.innerHTML = `<div class="wr-arrow-top">
+            <button type="button" class="wr-arrow-close" data-arrow="close" aria-label="${escapeHtml(t('arrow.close'))}"><i class="bi bi-x-lg"></i></button>
+            <div class="wr-arrow-title"></div>
+        </div>
+        <div class="wr-arrow-dial">
+            <div class="wr-arrow-ring"><span class="wr-arrow-north">${escapeHtml(t('compass.n'))}</span></div>
+            <svg class="wr-arrow-svg" viewBox="0 0 100 100" aria-hidden="true"><path d="M50 4 L80 86 L50 68 L20 86 Z"/></svg>
+        </div>
+        <div class="wr-arrow-dist" aria-live="polite"></div>
+        <div class="wr-arrow-sub"></div>
+        <div class="wr-arrow-actions">
+            <a class="btn btn-light btn-lg" data-arrow="walk" target="_blank" rel="noopener"><i class="bi bi-person-walking me-1"></i>${escapeHtml(t('arrow.walk_btn'))}</a>
+            <button type="button" class="btn btn-success btn-lg" data-arrow="arrive" hidden><i class="bi bi-geo-alt-fill me-1"></i>${escapeHtml(t('popup.btn.arrived'))}</button>
+        </div>`;
+    document.body.appendChild(el);
+    el.addEventListener('click', e => {
+        const btn = e.target.closest('[data-arrow]');
+        if (!btn) return;
+        if (btn.dataset.arrow === 'close') arrowClose();
+        if (btn.dataset.arrow === 'arrive') arrowArrive(btn);
+    });
+    return el;
+}
+
+function arrowOpen(m) {
+    if (!m || !m.target || !m.target.nav) return;
+    arrowClose();
+    const el = arrowElement();
+    arrowState = {
+        key: m.key, heading: null, source: null, rotation: null, ringRotation: null,
+        fix: null, watchId: null, wakeLock: null, lastCompassAt: 0, onOrient: null, onKey: null, timer: null,
+    };
+    el.querySelector('[data-arrow="walk"]').href = navigationUrl(m.target.nav.lat, m.target.nav.lng, 'walking');
+    el.hidden = false;
+    document.body.classList.add('wr-arrow-open');
+
+    arrowState.onOrient = e => {
+        const heading = compassHeadingFromOrientation(e, arrowScreenAngle());
+        if (heading === null || !arrowState) return;
+        arrowState.heading = smoothHeading(arrowState.source === 'compass' ? arrowState.heading : null, heading, 0.25);
+        arrowState.source = 'compass';
+        arrowState.lastCompassAt = Date.now();
+        arrowRender();
+    };
+    window.addEventListener('deviceorientationabsolute', arrowState.onOrient);
+    window.addEventListener('deviceorientation', arrowState.onOrient);
+    // iOS asks before handing out the compass, and only inside a tap — this
+    // runs from the popup button's click handler. Listening does not wait for
+    // the answer: Chrome has the same function now and can answer "denied"
+    // while still delivering the events, and an answer that really is no
+    // simply means none arrive and the fallback below takes over.
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission().catch(() => {});
+    }
+
+    if (navigator.geolocation) {
+        arrowState.watchId = navigator.geolocation.watchPosition(pos => {
+            if (!arrowState) return;
+            arrowState.fix = pos;
+            // No compass: the way somebody is walking is the next best heading.
+            // GPS course only means something while actually moving.
+            const c = pos.coords;
+            if (Date.now() - arrowState.lastCompassAt > 3000 && typeof c.heading === 'number' && !isNaN(c.heading) && (c.speed || 0) >= 0.7) {
+                arrowState.heading = c.heading;
+                arrowState.source = 'course';
+            }
+            arrowRender();
+        }, () => {}, {enableHighAccuracy: true, maximumAge: 0, timeout: 20000});
+    }
+    if (navigator.wakeLock && navigator.wakeLock.request) {
+        navigator.wakeLock.request('screen')
+            .then(lock => { if (arrowState) arrowState.wakeLock = lock; else lock.release().catch(() => {}); })
+            .catch(() => {});
+    }
+    arrowState.onKey = e => { if (e.key === 'Escape') arrowClose(); };
+    document.addEventListener('keydown', arrowState.onKey);
+    // A compass that goes quiet hands back to the fallback instead of
+    // freezing the arrow on its last reading; the distance ages too.
+    arrowState.timer = setInterval(() => {
+        if (!arrowState) return;
+        if (arrowState.source === 'compass' && Date.now() - arrowState.lastCompassAt > 3000) {
+            arrowState.source = null;
+            arrowState.heading = null;
+        }
+        arrowRender();
+    }, 1000);
+    arrowRender();
+}
+
+function arrowClose() {
+    const el = document.getElementById('wrArrow');
+    if (el) el.hidden = true;
+    document.body.classList.remove('wr-arrow-open');
+    if (!arrowState) return;
+    if (arrowState.onOrient) {
+        window.removeEventListener('deviceorientationabsolute', arrowState.onOrient);
+        window.removeEventListener('deviceorientation', arrowState.onOrient);
+    }
+    if (arrowState.watchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(arrowState.watchId);
+    if (arrowState.wakeLock) arrowState.wakeLock.release().catch(() => {});
+    if (arrowState.onKey) document.removeEventListener('keydown', arrowState.onKey);
+    clearInterval(arrowState.timer);
+    arrowState = null;
+}
+
+// What «Έφτασα» would do for this order, or null when arriving is not its next
+// step or not this person's to report.
+function arrowArriveOp(m) {
+    if (!m) return null;
+    if (m.kind === 'arrive') return 'arrived';
+    if (m.kind === 'dispatch' && m.canArrive) return 'arrive';
+    if (m.kind === 'route' && m.nextWaypointId && m.nextWaypointOpen) return 'route_arrive';
+    return null;
+}
+
+function arrowRender() {
+    const el = document.getElementById('wrArrow');
+    if (!el || !arrowState) return;
+    const m = opEntries.get(arrowState.key);
+    // Finished or withdrawn while open: nothing left to point at.
+    if (!m || !m.target || !m.target.nav) { arrowClose(); return; }
+    const nav = m.target.nav;
+    el.querySelector('.wr-arrow-title').textContent = (m.kind === 'arrive' && m.meta) ? m.meta : m.text;
+    const pos = arrowState.fix || latestAutoPosition;
+    const fresh = pos && pos.coords && Date.now() - pos.timestamp < 2 * 60000;
+    const svg = el.querySelector('.wr-arrow-svg');
+    const ring = el.querySelector('.wr-arrow-ring');
+    const arriveBtn = el.querySelector('[data-arrow="arrive"]');
+    el.querySelector('.wr-arrow-dist').classList.toggle('wr-arrow-wait', !fresh);
+    if (!fresh) {
+        el.querySelector('.wr-arrow-dist').textContent = t('arrow.no_fix');
+        el.querySelector('.wr-arrow-sub').textContent = '';
+        svg.style.opacity = '.25';
+        arriveBtn.hidden = true;
+        return;
+    }
+    const me = {lat: pos.coords.latitude, lng: pos.coords.longitude};
+    const metres = L.latLng(me.lat, me.lng).distanceTo(L.latLng(nav.lat, nav.lng));
+    const here = metres <= ARROW_ARRIVE_RADIUS_M;
+    const toTarget = bearing(me, nav);
+    const heading = arrowState.heading;
+    // With a heading the arrow is relative to where the phone points; without
+    // one it is a bearing, and the ring's «Β» stays at the top to say so.
+    arrowState.rotation = unwrapRotation(arrowState.rotation, heading === null ? toTarget : (toTarget - heading + 360) % 360);
+    arrowState.ringRotation = unwrapRotation(arrowState.ringRotation, heading === null ? 0 : (360 - heading) % 360);
+    svg.style.opacity = '1';
+    svg.style.transform = `rotate(${arrowState.rotation}deg)`;
+    ring.style.transform = `rotate(${arrowState.ringRotation}deg)`;
+    el.classList.toggle('wr-arrow-here', here);
+    el.querySelector('.wr-arrow-dist').textContent = here ? t('arrow.here') : formatDistanceMeters(metres);
+    const acc = typeof pos.coords.accuracy === 'number' ? Math.round(pos.coords.accuracy) : null;
+    const source = arrowState.source === 'compass' ? t('arrow.src_compass')
+        : (arrowState.source === 'course' ? t('arrow.src_course') : t('arrow.src_north'));
+    el.querySelector('.wr-arrow-sub').textContent = [acc !== null ? t('arrow.gps_accuracy', {m: acc}) : '', source].filter(Boolean).join(' · ');
+    arriveBtn.hidden = !(here && arrowArriveOp(m));
+}
+
+function arrowArrive(btn) {
+    const m = arrowState && opEntries.get(arrowState.key);
+    const op = arrowArriveOp(m);
+    if (!op) return;
+    btn.disabled = true;
+    if (op === 'route_arrive') routeArrive(m.nextWaypointId, false);
+    else opAct(op, m, btn);
+    opToast(t('popup.arrived_toast'));
+    arrowClose();
+}
+
+// ── «Έφτασες;» in the popup ──
+// The server asks when a fix puts this person at the place their team was sent
+// (checkArrivalPrompts()); the notification arrives here as a popup, and on the
+// Android app as a notification with an «Έφτασα» button. It lives in opInfo
+// like any notice, but unlike them it goes by itself: the moment the team is
+// there — pressed here, on the phone, or by a teammate — there is nothing left
+// to ask (opArriveTarget().open, re-read on every sync).
+function opArriveTarget(target, id) {
+    if (target === 'waypoint') {
+        for (const route of (routes || [])) {
+            const wp = (route.waypoints || []).find(w => String(w.id) === String(id));
+            if (!wp) continue;
+            const open = !!route.is_route_member && !wp.arrived_at && !wp.completed_at && !wp.skipped_at;
+            const nav = {lat: Number(wp.lat), lng: Number(wp.lng)};
+            return {
+                open: open,
+                label: (wp.label || t('route.waypoint_fallback_label', {seq: wp.seq})) + ' — ' + (route.title || t('route.default_title')),
+                target: {kind: 'point', lat: nav.lat, lng: nav.lng, nav: nav},
+            };
+        }
+        return {open: false};
+    }
+    const d = (dispatches || []).find(x => String(x.id) === String(id));
+    if (!d) return {open: false};
+    const nav = dispatchNavPoint(d);
+    return {
+        open: !!d.can_ack,
+        label: d.label || t(d.type === 'point' ? 'popup.text.dispatch_point' : 'popup.text.dispatch_area'),
+        target: d.type === 'point'
+            ? {kind: 'point', lat: nav.lat, lng: nav.lng, nav: nav}
+            : {kind: 'polygon', pts: d.geo, nav: nav},
+    };
+}
+function opModelFromArrive(key, b) {
+    const where = opArriveTarget(b.popup.target, b.popup.id);
+    return {
+        key: key, kind: 'arrive', target_kind: b.popup.target, id: b.popup.id, type: 'arrive',
+        cat: 'move', icon: 'bi-geo-alt-fill', title: t('popup.type.arrive'),
+        text: b.message, meta: where.label || '',
+        // Nothing to receive: it is a question, and the answer is «Έφτασα».
+        acked: true, outstanding: !!where.open,
+        steps: [t('popup.step.arrive_confirm')], step: 0, stepTimes: {},
+        hint: '', speakText: '', target: where.target || null, card: null,
+    };
+}
+function opConfirmArrival(m, btn) {
+    if (m.target_kind === 'waypoint') routeArrive(m.id, false);
+    else postDispatchAction('ack', m.id, btn);
+    opInfo.delete(m.key);
+    refreshMyOrdersCard();
 }
 
 function opToast(text) {
@@ -11487,6 +11811,9 @@ function opAcknowledge(m, btn) {
 function opAct(op, m, btn) {
     if (op === 'replay') { speakAnnouncement(m.speakText); return; }
     if (op === 'dismiss') { opDismissNotice(m); return; }
+    // Over the popup, which stays where it was underneath.
+    if (op === 'compass') { arrowOpen(m); return; }
+    if (op === 'arrived') { opConfirmArrival(m, btn); opToast(t('popup.arrived_toast')); return; }
     // The team steps record the receipt themselves, server-side.
     const ack = (!m.acked && !['complete', 'arrive', 'depart', 'dcomplete'].includes(op)) ? opAcknowledge(m, btn) : null;
     switch (op) {
@@ -11993,10 +12320,6 @@ function triggerWaypointUpload(waypointId, mediaType, statusEl) {
     input.click();
 }
 
-function routeWaypointDirectionsUrl(wp) {
-    return navigationUrl(wp.lat, wp.lng);
-}
-
 function routeDwellCountdownHtml(wp) {
     if (!wp.arrived_at || wp.dwell_minutes === null) return '';
     const deadlineMs = Date.parse(wp.arrived_at) + wp.dwell_minutes * 60000;
@@ -12047,7 +12370,7 @@ function renderRouteWaypointCurrent(wp) {
     return `<div class="border rounded p-2 mb-2 border-primary">
         <div class="d-flex justify-content-between align-items-start">
             <strong class="small">${wp.seq}. ${label}</strong>
-            <a href="${routeWaypointDirectionsUrl(wp)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success py-0 px-1" title="${t('dispatch.directions_btn')}"><i class="bi bi-signpost-2-fill"></i></a>
+            ${navigationPairHtml(wp.lat, wp.lng, 'icon')}
         </div>
         ${wp.instructions ? `<div class="small mt-1">${escapeHtml(wp.instructions)}</div>` : ''}
         ${statusLine}
@@ -12095,7 +12418,7 @@ function renderRouteWaypointUpcoming(wp) {
         <div class="d-flex justify-content-between align-items-center">
             <span class="small"><i class="bi bi-lock-fill me-1"></i>${wp.seq}. ${label}</span>
             <div class="d-flex gap-1">
-                <a href="${routeWaypointDirectionsUrl(wp)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success py-0 px-1" title="${t('dispatch.directions_btn')}"><i class="bi bi-signpost-2-fill"></i></a>
+                ${navigationPairHtml(wp.lat, wp.lng, 'icon')}
                 <button type="button" class="btn btn-sm btn-outline-secondary py-0 route-jump-btn" data-id="${wp.id}">${t('route.jump_btn')}</button>
             </div>
         </div>
@@ -20932,7 +21255,7 @@ function renderRouteLayer(allRoutes) {
                 popupHtml = `<strong>${escapeHtml(route.team_label || '')} — ${wp.seq}. ${label}</strong>` +
                     (wp.instructions ? `<br><span class="small">${escapeHtml(wp.instructions)}</span>` : '') +
                     (statusText ? `<br><span class="small text-muted">${statusText}</span>` : '') +
-                    `<br><a href="${routeWaypointDirectionsUrl(wp)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success mt-1"><i class="bi bi-signpost-2-fill me-1"></i>${t('dispatch.directions_btn')}</a>`;
+                    '<br>' + navigationPairHtml(wp.lat, wp.lng, 'inline');
             }
             const marker = L.marker([wp.lat, wp.lng], {icon}).addTo(routeLayer).bindPopup(popupHtml, {minWidth: 220});
             marker.waypointId = wp.id;
@@ -21022,7 +21345,7 @@ function renderRouteAdminWaypointsList(route) {
             <div class="d-flex justify-content-between align-items-center">
                 <div class="small">${wp.seq}. ${label}${wp.out_of_sequence ? ' ⚠️' : ''}<br>${routeAdminWaypointStatusHtml(wp)}</div>
                 <div class="d-flex gap-1">
-                    <a href="${routeWaypointDirectionsUrl(wp)}" target="_blank" rel="noopener" class="btn btn-sm btn-outline-success py-0 px-1" title="${t('dispatch.directions_btn')}"><i class="bi bi-signpost-2-fill"></i></a>
+                    ${navigationPairHtml(wp.lat, wp.lng, 'icon')}
                     ${route.status === 'active' ? `<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 route-edit-btn" data-id="${wp.id}" title="${t('common.edit')}"><i class="bi bi-pencil"></i></button>` : ''}
                     ${isOpen ? `<button type="button" class="btn btn-sm btn-outline-warning py-0 px-1 route-skip-btn" data-id="${wp.id}" title="${t('route.skip_btn')}"><i class="bi bi-skip-forward-fill"></i></button>` : ''}
                 </div>

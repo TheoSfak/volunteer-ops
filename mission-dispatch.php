@@ -10,66 +10,6 @@ requireLogin();
 
 header('Content-Type: application/json');
 
-/**
- * Notify command staff (system/department admins, this mission's shift leaders,
- * and its responsible user) that a team reported arrival at a dispatch point/area.
- * Mirrors the admin/shift-leader recipient resolution in mission-chat.php's
- * notifyMissionTeamChat() for the non-admin-sender branch.
- */
-function notifyDispatchArrival(int $missionId, string $missionTitle, ?int $responsibleUserId, array $dispatch, ?string $teamLabel, string $ackerName, int $ackerId): void {
-    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-    $labelPart = $dispatch['label'] ? ' «' . $dispatch['label'] . '»' : '';
-
-    $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $ackerId);
-
-    $langByUserId = getUserLanguages($recipientIds);
-    foreach ($recipientIds as $recipientId) {
-        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
-        $kind = t($dispatch['type'] === 'point' ? 'dispatch.kind_at_point' : 'dispatch.kind_at_area', [], $lang);
-        $who = $teamLabel ? t('dispatch.team_label_prefix', ['team' => $teamLabel], $lang) : $ackerName;
-        $message = t('dispatch.arrival_message', ['who' => $who, 'kind' => $kind, 'label_part' => $labelPart, 'mission' => $missionTitle], $lang);
-        sendNotification($recipientId, t('dispatch.arrival_notify_title', [], $lang), $message, 'success', 'mission_dispatch_ack', [
-            'url' => $warRoomUrl,
-            'tag' => 'dispatch-ack-mission-' . $missionId,
-            'bannerMission' => $missionId,
-        ]);
-    }
-}
-
-/**
- * «Ξεκινάω» and «Ολοκληρώθηκε» — the two team steps either side of arrival
- * (see recordDispatchProgress()). Same recipients and wording shape as the two
- * functions above, and the same split between them: departing is quiet like a
- * receipt (no 'bannerMission', so no ticker and no sound), while completing is
- * a change in the state of the operation and gets the banner, like arrival.
- */
-function notifyDispatchStep(string $step, int $missionId, string $missionTitle, ?int $responsibleUserId, array $dispatch, ?string $teamLabel, string $actorName, int $actorId): void {
-    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-    $labelPart = $dispatch['label'] ? ' «' . $dispatch['label'] . '»' : '';
-    $loud = $step === 'complete';
-
-    $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $actorId);
-    $langByUserId = getUserLanguages($recipientIds);
-    foreach ($recipientIds as $recipientId) {
-        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
-        $kind = t($dispatch['type'] === 'point' ? 'dispatch.kind_for_point' : 'dispatch.kind_for_area', [], $lang);
-        $who = $teamLabel ? t('dispatch.team_label_prefix', ['team' => $teamLabel], $lang) : $actorName;
-        $message = t('dispatch.' . $step . '_message', ['who' => $who, 'kind' => $kind, 'label_part' => $labelPart, 'mission' => $missionTitle], $lang);
-        $pushData = [
-            'url' => $warRoomUrl,
-            'tag' => 'dispatch-' . $step . '-mission-' . $missionId,
-        ];
-        if ($loud) {
-            $pushData['bannerMission'] = $missionId;
-        }
-        // The codes of the two neighbouring events, so the existing
-        // notification settings govern these too: departing is announced like
-        // a receipt, completing like an arrival.
-        sendNotification($recipientId, t('dispatch.' . $step . '_notify_title', [], $lang), $message,
-            $loud ? 'success' : 'info', $loud ? 'mission_dispatch_ack' : 'mission_dispatch_receive', $pushData);
-    }
-}
-
 $userId = getCurrentUserId();
 $user = getCurrentUser();
 
@@ -140,73 +80,13 @@ if (in_array($action, ['depart', 'ack', 'complete'], true)) {
         exit;
     }
 
-    $dispatchId = (int) post('id');
-    $dispatch = dbFetchOne("SELECT id, team_id, label, type FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$dispatchId, $missionId]);
-    if (!$dispatch) {
-        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
-        exit;
-    }
-
-    $myTeamId = getUserTeamIdForMission($missionId, $userId);
-
-    if ($dispatch['team_id'] && (int) $dispatch['team_id'] !== $myTeamId) {
-        echo json_encode(['ok' => false, 'error' => t('dispatch.not_your_team')]);
-        exit;
-    }
-
-    // Whoever moves the team on has, by doing so, received the order. Quietly:
-    // the step's own notification below already tells command staff.
-    dbExecute(
-        "INSERT IGNORE INTO mission_dispatch_receipts (dispatch_id, team_id, user_id, created_at) VALUES (?, ?, ?, NOW())",
-        [$dispatchId, $myTeamId, $userId]
-    );
-
+    // Shared with mobile-order-ack.php: «Έφτασα» pressed on the phone's
+    // «Έφτασες;» notification.
     $step = ['depart' => 'depart', 'ack' => 'arrive', 'complete' => 'complete'][$action];
-    // A team from before v3.325.0 may already have arrived as far as
-    // mission_dispatch_acks is concerned, with no progress row to say so.
-    $legacyArrived = (bool) dbFetchValue(
-        $myTeamId
-            ? "SELECT COUNT(*) FROM mission_dispatch_acks WHERE dispatch_id = ? AND team_id = ?"
-            : "SELECT COUNT(*) FROM mission_dispatch_acks WHERE dispatch_id = ? AND user_id = ? AND team_id IS NULL",
-        [$dispatchId, $myTeamId ?: $userId]
-    );
-    $recorded = recordDispatchProgress($dispatchId, $myTeamId, $userId, $step);
-
-    if ($recorded) {
-        $teamLabel = null;
-        if ($myTeamId) {
-            $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$myTeamId]);
-            if ($teamRow) {
-                $teamLabel = teamLabel($teamRow['codename'], $teamRow['team_number']);
-            }
-        }
-        $responsibleUserId = $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null;
-
-        // Arrival keeps its per-person row, whether pressed or backfilled by
-        // «Ολοκληρώθηκε»: the activity log, the response report and the
-        // assistant all read arrival from there.
-        if (in_array('arrive', $recorded, true) && !$legacyArrived) {
-            dbExecute(
-                "INSERT IGNORE INTO mission_dispatch_acks (dispatch_id, team_id, user_id, created_at) VALUES (?, ?, ?, NOW())",
-                [$dispatchId, $myTeamId, $userId]
-            );
-        }
-
-        $auditAction = ['depart' => 'team_departed_dispatch', 'arrive' => 'team_arrived_dispatch', 'complete' => 'team_completed_dispatch'][$step];
-        logAudit($auditAction, 'mission_dispatch_points', $dispatchId, null, [
-            'mission_id' => $missionId, 'team_id' => $myTeamId, 'user_id' => $userId,
-        ]);
-
-        // Only the step that was pressed is announced. A backfilled one is not
-        // news: «Ολοκληρώθηκε» from a team that never pressed «Έφτασα» says
-        // "done", not "arrived" and then "done".
-        if (in_array($step, $recorded, true) && !($step === 'arrive' && $legacyArrived)) {
-            if ($step === 'arrive') {
-                notifyDispatchArrival($missionId, $mission['title'], $responsibleUserId, $dispatch, $teamLabel, $user['name'], $userId);
-            } else {
-                notifyDispatchStep($step, $missionId, $mission['title'], $responsibleUserId, $dispatch, $teamLabel, $user['name'], $userId);
-            }
-        }
+    $error = advanceMissionDispatch($mission, (int) post('id'), (int) $userId, $user['name'], $step);
+    if ($error !== null) {
+        echo json_encode(['ok' => false, 'error' => $error]);
+        exit;
     }
 
     $dispatches = loadMissionDispatchesForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant);

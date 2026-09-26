@@ -66,29 +66,6 @@ function notifyRouteTeam(int $missionId, int $routeId, int $excludeUserId, strin
 }
 
 /**
- * A waypoint plus enough of its parent route/progress to authorize and act
- * on it in one query. Returns null if the waypoint doesn't belong to $missionId.
- * is_route_member reflects mission_route_members for $userId — the sole
- * authorization boundary for depart/arrive/complete/skip, independent of
- * current mission_team_members roster (see migration v109).
- */
-function loadWaypointForAction(int $waypointId, int $missionId, int $userId): ?array {
-    $row = dbFetchOne(
-        "SELECT w.id, w.route_id, w.seq, w.lat, w.lng, w.label,
-                w.require_photo, w.require_video, w.require_note,
-                r.mission_id, r.team_id, r.completed_at AS route_completed_at, r.cancelled_at AS route_cancelled_at,
-                p.departed_at, p.arrived_at, p.completed_at, p.skipped_at, p.out_of_sequence, p.note,
-                EXISTS (SELECT 1 FROM mission_route_members rm WHERE rm.route_id = r.id AND rm.user_id = ?) AS is_route_member
-         FROM mission_route_waypoints w
-         JOIN mission_routes r ON r.id = w.route_id
-         LEFT JOIN mission_route_progress p ON p.waypoint_id = w.id
-         WHERE w.id = ? AND r.mission_id = ?",
-        [$userId, $waypointId, $missionId]
-    );
-    return $row ?: null;
-}
-
-/**
  * Whichever of require_photo/require_video/require_note the admin set for
  * this waypoint but which "complete" would otherwise leave unfulfilled —
  * checked against what's already on record (an earlier upload, an earlier
@@ -115,18 +92,6 @@ function missingRouteDeliverables(array $wp, ?string $submittedNote): array {
         }
     }
     return $missing;
-}
-
-/** The lowest seq in $routeId that isn't closed yet (completed or skipped), or null if none. */
-function currentWaypointSeq(int $routeId): ?int {
-    $seq = dbFetchValue(
-        "SELECT w.seq FROM mission_route_waypoints w
-         LEFT JOIN mission_route_progress p ON p.waypoint_id = w.id
-         WHERE w.route_id = ? AND p.completed_at IS NULL AND p.skipped_at IS NULL
-         ORDER BY w.seq ASC LIMIT 1",
-        [$routeId]
-    );
-    return ($seq !== false && $seq !== null) ? (int) $seq : null;
 }
 
 // resolveEventTimestamp() — the offline-queue replay clock — now lives in
@@ -639,42 +604,10 @@ if ($action === 'depart' || $action === 'arrive' || $action === 'complete') {
             $latRaw = post('lat'); $lngRaw = post('lng'); $accRaw = post('accuracy');
             $lat = ($latRaw !== '' && is_numeric($latRaw)) ? (float) $latRaw : null;
             $lng = ($lngRaw !== '' && is_numeric($lngRaw)) ? (float) $lngRaw : null;
-            // Out-of-range GPS (same bounds as ping-location.php) is treated
-            // as "no fix", not a reason to fail the arrival itself — the
-            // action this endpoint exists for is a real-world event that
-            // must still record even if the browser handed back garbage
-            // coordinates.
-            if ($lat !== null && ($lat < -90 || $lat > 90)) { $lat = null; }
-            if ($lng !== null && ($lng < -180 || $lng > 180)) { $lng = null; }
-            if ($lat === 0.0 && $lng === 0.0) { $lat = null; $lng = null; }
             $acc = ($accRaw !== '' && is_numeric($accRaw)) ? (float) $accRaw : null;
-            $distance = ($lat !== null && $lng !== null) ? (int) round(gpsDistanceMeters((float) $wp['lat'], (float) $wp['lng'], $lat, $lng)) : null;
-
-            // AND arrived_at IS NULL closes a real race: the check above reads
-            // a snapshot taken before this UPDATE runs, so two team members
-            // tapping "arrive" within the same instant both pass it. Without
-            // this guard the later UPDATE silently overwrites the earlier
-            // one's GPS/who-arrived data and command staff gets a duplicate
-            // arrival notification. rowCount() tells us which request (if
-            // either) actually won the race — only that one logs/notifies.
-            $rows = dbExecute(
-                "UPDATE mission_route_progress
-                 SET arrived_at = ?, arrived_by = ?, arrived_lat = ?, arrived_lng = ?, arrived_accuracy_m = ?, arrived_distance_m = ?,
-                     departed_at = COALESCE(departed_at, ?), departed_by = COALESCE(departed_by, ?), out_of_sequence = ?, reported_at = ?
-                 WHERE waypoint_id = ? AND arrived_at IS NULL",
-                [$eventTs, $userId, $lat, $lng, $acc, $distance, $eventTs, $userId, $outOfSequence, $reportedAtTs, $waypointId]
-            );
-
-            if ($rows > 0) {
-                logAudit('arrive_route_waypoint', 'mission_route_waypoints', $waypointId, null, ['mission_id' => $missionId, 'distance_m' => $distance]);
-
-                [$teamLbl, $label] = $waypointNames();
-                notifyCommandStaffBanner(
-                    $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId,
-                    'mission_route_arrival', 'route.notify_arrival_title', [],
-                    'route.notify_arrival_message', ['team' => $teamLbl, 'label' => $label, 'mission' => $mission['title']]
-                );
-            }
+            // Shared with mobile-order-ack.php: «Έφτασα» pressed on the
+            // phone's «Έφτασες;» notification.
+            recordRouteWaypointArrival($mission, $wp, (int) $userId, $lat, $lng, $acc, $eventTs, $reportedAtTs, $outOfSequence);
         }
     } else { // complete
         $note = trim((string) post('note'));

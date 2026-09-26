@@ -69,10 +69,10 @@ index 0000000..b0b19e5
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
 new file mode 100644
-index 0000000..e53aa75
+index 0000000..36efd0a
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
-@@ -0,0 +1,576 @@
+@@ -0,0 +1,580 @@
 +package com.capgo.capacitor_background_geolocation;
 +
 +import android.app.Notification;
@@ -231,7 +231,10 @@ index 0000000..e53aa75
 +            // VolunteerOps (v3.330.0): the shift this service tracks, so the
 +            // reply can also say whether to keep tracking it — see
 +            // BackgroundGeolocationService.applyTrackingInstruction().
-+            String url = baseUrl + "/mobile-alerts.php?since_id=" + cursor + (shiftId > 0 ? "&shift_id=" + shiftId : "");
++            // vops=2: this app labels an alert's button per alert (v3.333.0,
++            // the «Έφτασα» of an arrival question). An older app sends nothing
++            // and the server offers it only «Ελήφθη».
++            String url = baseUrl + "/mobile-alerts.php?since_id=" + cursor + (shiftId > 0 ? "&shift_id=" + shiftId : "") + "&vops=2";
 +
 +            connection = (HttpURLConnection) new URL(url).openConnection();
 +            connection.setRequestMethod("GET");
@@ -315,8 +318,9 @@ index 0000000..e53aa75
 +        if (ack != null && texts != null && !texts.optString("ack", "").isEmpty()) {
 +            a.putString(A_ACK_KIND, ack.optString("kind", ""));
 +            a.putInt(A_ACK_ID, ack.optInt("id", 0));
-+            a.putString(A_T_ACK, texts.optString("ack", ""));
-+            a.putString(A_T_ACKED, texts.optString("acked", ""));
++            // An alert may carry its own words: «Έφτασα» rather than «Ελήφθη».
++            a.putString(A_T_ACK, ack.optString("label", texts.optString("ack", "")));
++            a.putString(A_T_ACKED, ack.optString("acked", texts.optString("acked", "")));
 +            a.putString(A_T_RETRY, texts.optString("ack_retry", ""));
 +            a.putString(A_T_OPEN_APP, texts.optString("ack_open_app", ""));
 +        }

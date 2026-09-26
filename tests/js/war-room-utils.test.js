@@ -64,6 +64,9 @@ const {
     speechPieceTimeoutMs,
     polygonBoundsSizeMeters,
     formatBoundsSize,
+    compassHeadingFromOrientation,
+    smoothHeading,
+    unwrapRotation,
 } = require('../../assets/js/war-room-utils.js');
 
 // Local-only Haversine, not exported by war-room-utils.js — this file has no
@@ -1167,4 +1170,43 @@ test('the watchdog waits longer than the words could possibly take', () => {
     // Even an empty string gets a floor rather than firing immediately.
     assert.ok(speechPieceTimeoutMs('') >= 4000);
     assert.ok(speechPieceTimeoutMs(null) >= 4000);
+});
+
+// ── The arrow screen («Πυξίδα», v3.333.0) ──────────────────────────────────
+
+test('an absolute orientation reading is a compass: alpha counter-clockwise from north', () => {
+    assert.equal(compassHeadingFromOrientation({absolute: true, alpha: 0}, 0), 0);
+    assert.equal(compassHeadingFromOrientation({absolute: true, alpha: 90}, 0), 270, 'turned 90° left means facing west');
+    assert.equal(compassHeadingFromOrientation({absolute: true, alpha: 270}, 0), 90);
+});
+
+test('iOS gives the heading directly, clockwise', () => {
+    assert.equal(compassHeadingFromOrientation({webkitCompassHeading: 45, alpha: 999}, 0), 45);
+});
+
+test('a relative orientation reading is not a compass', () => {
+    // alpha measured from wherever the page loaded: pointing an arrow with it
+    // would send somebody the wrong way with total confidence.
+    assert.equal(compassHeadingFromOrientation({absolute: false, alpha: 30}, 0), null);
+    assert.equal(compassHeadingFromOrientation({alpha: null, absolute: true}, 0), null);
+    assert.equal(compassHeadingFromOrientation(null, 0), null);
+});
+
+test('a phone held sideways adds the screen angle', () => {
+    assert.equal(compassHeadingFromOrientation({absolute: true, alpha: 0}, 90), 90);
+    assert.equal(compassHeadingFromOrientation({webkitCompassHeading: 350}, 90), 80);
+});
+
+test('smoothing moves the short way round', () => {
+    assert.equal(smoothHeading(null, 120, 0.2), 120, 'the first reading is taken as is');
+    assert.ok(Math.abs(smoothHeading(350, 10, 0.5) - 0) < 1e-9, '350° -> 10° half way is 0°, not 180°');
+    assert.ok(Math.abs(smoothHeading(10, 350, 0.5) - 0) < 1e-9);
+    assert.ok(Math.abs(smoothHeading(100, 200, 0.25) - 125) < 1e-9);
+});
+
+test('the arrow keeps turning the short way instead of spinning back through 0', () => {
+    assert.equal(unwrapRotation(null, 30), 30);
+    assert.equal(unwrapRotation(355, 5), 365);
+    assert.equal(unwrapRotation(365, 350), 350);
+    assert.equal(unwrapRotation(720, 10), 730);
 });

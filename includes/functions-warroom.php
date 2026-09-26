@@ -2848,14 +2848,24 @@ function notifyVolunteerGpsPing(int $missionId, string $missionTitle, ?int $resp
 /**
  * Which of the recipient's own orders a notification announces, read from its
  * data: ['kind' => order|dispatch|sector, 'id' => …], a notice
- * (['kind' => 'info', …]), or null. Only the copies addressed to the recipients
- * carry these keys; a bystander admin's FYI copy has none. The page's poll
+ * (['kind' => 'info', …]), an arrival question (['kind' => 'arrive', …]), or
+ * null. Only the copies addressed to the recipients carry these keys; a
+ * bystander admin's FYI copy has none. The page's poll
  * reads it to open the order as a popup, mobile-alerts.php to put «Ελήφθη» on
  * the phone's notification — one reading, so the two never disagree.
  */
 function notificationPopupRef($data): ?array {
     if (!is_array($data)) {
         return null;
+    }
+    // «Έφτασες;» (checkArrivalPrompts()): a question about an order, not the
+    // order itself — the popup asks it, and the phone's notification carries
+    // «Έφτασα».
+    if (!empty($data['arriveDispatchId'])) {
+        return ['kind' => 'arrive', 'target' => 'dispatch', 'id' => (int) $data['arriveDispatchId']];
+    }
+    if (!empty($data['arriveWaypointId'])) {
+        return ['kind' => 'arrive', 'target' => 'waypoint', 'id' => (int) $data['arriveWaypointId'], 'routeId' => (int) ($data['arriveRouteId'] ?? 0)];
     }
     if (!empty($data['orderId'])) {
         return ['kind' => 'order', 'id' => (int) $data['orderId']];
@@ -3083,6 +3093,237 @@ function receiveMissionDispatch(array $mission, int $dispatchId, int $userId, st
     }
     notifyDispatchReceive($missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $dispatch, $teamLabel, $userName, $userId);
     return null;
+}
+
+/**
+ * Notify command staff (system/department admins, this mission's shift leaders,
+ * and its responsible user) that a team reported arrival at a dispatch point/area.
+ * Mirrors the admin/shift-leader recipient resolution in mission-chat.php's
+ * notifyMissionTeamChat() for the non-admin-sender branch.
+ */
+function notifyDispatchArrival(int $missionId, string $missionTitle, ?int $responsibleUserId, array $dispatch, ?string $teamLabel, string $ackerName, int $ackerId): void {
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $labelPart = $dispatch['label'] ? ' «' . $dispatch['label'] . '»' : '';
+
+    $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $ackerId);
+
+    $langByUserId = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        $kind = t($dispatch['type'] === 'point' ? 'dispatch.kind_at_point' : 'dispatch.kind_at_area', [], $lang);
+        $who = $teamLabel ? t('dispatch.team_label_prefix', ['team' => $teamLabel], $lang) : $ackerName;
+        $message = t('dispatch.arrival_message', ['who' => $who, 'kind' => $kind, 'label_part' => $labelPart, 'mission' => $missionTitle], $lang);
+        sendNotification($recipientId, t('dispatch.arrival_notify_title', [], $lang), $message, 'success', 'mission_dispatch_ack', [
+            'url' => $warRoomUrl,
+            'tag' => 'dispatch-ack-mission-' . $missionId,
+            'bannerMission' => $missionId,
+        ]);
+    }
+}
+
+/**
+ * «Ξεκινάω» and «Ολοκληρώθηκε» — the two team steps either side of arrival
+ * (see recordDispatchProgress()). Same recipients and wording shape as the two
+ * functions above, and the same split between them: departing is quiet like a
+ * receipt (no 'bannerMission', so no ticker and no sound), while completing is
+ * a change in the state of the operation and gets the banner, like arrival.
+ * Moved here with notifyDispatchArrival() from mission-dispatch.php (v3.333.0).
+ */
+function notifyDispatchStep(string $step, int $missionId, string $missionTitle, ?int $responsibleUserId, array $dispatch, ?string $teamLabel, string $actorName, int $actorId): void {
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $labelPart = $dispatch['label'] ? ' «' . $dispatch['label'] . '»' : '';
+    $loud = $step === 'complete';
+
+    $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $actorId);
+    $langByUserId = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        $kind = t($dispatch['type'] === 'point' ? 'dispatch.kind_for_point' : 'dispatch.kind_for_area', [], $lang);
+        $who = $teamLabel ? t('dispatch.team_label_prefix', ['team' => $teamLabel], $lang) : $actorName;
+        $message = t('dispatch.' . $step . '_message', ['who' => $who, 'kind' => $kind, 'label_part' => $labelPart, 'mission' => $missionTitle], $lang);
+        $pushData = [
+            'url' => $warRoomUrl,
+            'tag' => 'dispatch-' . $step . '-mission-' . $missionId,
+        ];
+        if ($loud) {
+            $pushData['bannerMission'] = $missionId;
+        }
+        // The codes of the two neighbouring events, so the existing
+        // notification settings govern these too: departing is announced like
+        // a receipt, completing like an arrival.
+        sendNotification($recipientId, t('dispatch.' . $step . '_notify_title', [], $lang), $message,
+            $loud ? 'success' : 'info', $loud ? 'mission_dispatch_ack' : 'mission_dispatch_receive', $pushData);
+    }
+}
+
+/**
+ * «Ξεκινάω» (depart), «Έφτασα» (arrive) and «Ολοκληρώθηκε» (complete) on a
+ * dispatch point/area. All three are TEAM steps: the first member to press
+ * moves the whole team on, and only that first press notifies anyone — before
+ * v3.325.0 arrival was per person, and every member of a four-person team
+ * pressing it meant four arrival alarms at the command post.
+ *
+ * Shared by mission-dispatch.php and, for «Έφτασα» pressed on the phone's
+ * «Έφτασες;» notification, mobile-order-ack.php (v3.333.0). $mission is the
+ * open mission's row (id, title, responsible_user_id); the caller has checked
+ * that the user is an approved participant. Returns null on success, else the
+ * error to show.
+ */
+function advanceMissionDispatch(array $mission, int $dispatchId, int $userId, string $userName, string $step, ?string $via = null): ?string {
+    $missionId = (int) $mission['id'];
+    $dispatch = dbFetchOne("SELECT id, team_id, label, type FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$dispatchId, $missionId]);
+    if (!$dispatch) {
+        return t('common.not_found');
+    }
+
+    $myTeamId = getUserTeamIdForMission($missionId, $userId);
+
+    if ($dispatch['team_id'] && (int) $dispatch['team_id'] !== $myTeamId) {
+        return t('dispatch.not_your_team');
+    }
+
+    // Whoever moves the team on has, by doing so, received the order. Quietly:
+    // the step's own notification below already tells command staff.
+    dbExecute(
+        "INSERT IGNORE INTO mission_dispatch_receipts (dispatch_id, team_id, user_id, created_at) VALUES (?, ?, ?, NOW())",
+        [$dispatchId, $myTeamId, $userId]
+    );
+
+    // A team from before v3.325.0 may already have arrived as far as
+    // mission_dispatch_acks is concerned, with no progress row to say so.
+    $legacyArrived = (bool) dbFetchValue(
+        $myTeamId
+            ? "SELECT COUNT(*) FROM mission_dispatch_acks WHERE dispatch_id = ? AND team_id = ?"
+            : "SELECT COUNT(*) FROM mission_dispatch_acks WHERE dispatch_id = ? AND user_id = ? AND team_id IS NULL",
+        [$dispatchId, $myTeamId ?: $userId]
+    );
+    $recorded = recordDispatchProgress($dispatchId, $myTeamId, $userId, $step);
+
+    if ($recorded) {
+        $teamLabel = null;
+        if ($myTeamId) {
+            $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$myTeamId]);
+            if ($teamRow) {
+                $teamLabel = teamLabel($teamRow['codename'], $teamRow['team_number']);
+            }
+        }
+        $responsibleUserId = $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null;
+
+        // Arrival keeps its per-person row, whether pressed or backfilled by
+        // «Ολοκληρώθηκε»: the activity log, the response report and the
+        // assistant all read arrival from there.
+        if (in_array('arrive', $recorded, true) && !$legacyArrived) {
+            dbExecute(
+                "INSERT IGNORE INTO mission_dispatch_acks (dispatch_id, team_id, user_id, created_at) VALUES (?, ?, ?, NOW())",
+                [$dispatchId, $myTeamId, $userId]
+            );
+        }
+
+        $auditAction = ['depart' => 'team_departed_dispatch', 'arrive' => 'team_arrived_dispatch', 'complete' => 'team_completed_dispatch'][$step];
+        logAudit($auditAction, 'mission_dispatch_points', $dispatchId, null, [
+            'mission_id' => $missionId, 'team_id' => $myTeamId, 'user_id' => $userId,
+        ] + receiptAuditExtra($userId, $via));
+
+        // Only the step that was pressed is announced. A backfilled one is not
+        // news: «Ολοκληρώθηκε» from a team that never pressed «Έφτασα» says
+        // "done", not "arrived" and then "done".
+        if (in_array($step, $recorded, true) && !($step === 'arrive' && $legacyArrived)) {
+            if ($step === 'arrive') {
+                notifyDispatchArrival($missionId, $mission['title'], $responsibleUserId, $dispatch, $teamLabel, $userName, $userId);
+            } else {
+                notifyDispatchStep($step, $missionId, $mission['title'], $responsibleUserId, $dispatch, $teamLabel, $userName, $userId);
+            }
+        }
+    }
+    return null;
+}
+
+// loadWaypointForAction() and currentWaypointSeq() moved here from
+// mission-route.php (v3.333.0), for mobile-order-ack.php and the arrival prompt.
+/**
+ * A waypoint plus enough of its parent route/progress to authorize and act
+ * on it in one query. Returns null if the waypoint doesn't belong to $missionId.
+ * is_route_member reflects mission_route_members for $userId — the sole
+ * authorization boundary for depart/arrive/complete/skip, independent of
+ * current mission_team_members roster (see migration v109).
+ */
+function loadWaypointForAction(int $waypointId, int $missionId, int $userId): ?array {
+    $row = dbFetchOne(
+        "SELECT w.id, w.route_id, w.seq, w.lat, w.lng, w.label,
+                w.require_photo, w.require_video, w.require_note,
+                r.mission_id, r.team_id, r.completed_at AS route_completed_at, r.cancelled_at AS route_cancelled_at,
+                p.departed_at, p.arrived_at, p.completed_at, p.skipped_at, p.out_of_sequence, p.note,
+                EXISTS (SELECT 1 FROM mission_route_members rm WHERE rm.route_id = r.id AND rm.user_id = ?) AS is_route_member
+         FROM mission_route_waypoints w
+         JOIN mission_routes r ON r.id = w.route_id
+         LEFT JOIN mission_route_progress p ON p.waypoint_id = w.id
+         WHERE w.id = ? AND r.mission_id = ?",
+        [$userId, $waypointId, $missionId]
+    );
+    return $row ?: null;
+}
+
+/** The lowest seq in $routeId that isn't closed yet (completed or skipped), or null if none. */
+function currentWaypointSeq(int $routeId): ?int {
+    $seq = dbFetchValue(
+        "SELECT w.seq FROM mission_route_waypoints w
+         LEFT JOIN mission_route_progress p ON p.waypoint_id = w.id
+         WHERE w.route_id = ? AND p.completed_at IS NULL AND p.skipped_at IS NULL
+         ORDER BY w.seq ASC LIMIT 1",
+        [$routeId]
+    );
+    return ($seq !== false && $seq !== null) ? (int) $seq : null;
+}
+
+/**
+ * «Έφτασα» at a route point: records the arrival for the whole team, with the
+ * position it was reported from and how far that was from the point. Shared
+ * by mission-route.php and, for «Έφτασα» pressed on the phone's «Έφτασες;»
+ * notification, mobile-order-ack.php (v3.333.0). $wp is a
+ * loadWaypointForAction() row the caller has authorised (route member, route
+ * open, point not closed). Returns whether THIS call recorded the arrival.
+ */
+function recordRouteWaypointArrival(array $mission, array $wp, int $userId, ?float $lat, ?float $lng, ?float $acc, string $eventTs, string $reportedAtTs, int $outOfSequence, ?string $via = null): bool {
+    // Out-of-range GPS (same bounds as ping-location.php) is treated as "no
+    // fix", not a reason to fail the arrival itself — the action this exists
+    // for is a real-world event that must still record even if the browser
+    // handed back garbage coordinates.
+    if ($lat !== null && ($lat < -90 || $lat > 90)) { $lat = null; }
+    if ($lng !== null && ($lng < -180 || $lng > 180)) { $lng = null; }
+    if ($lat === 0.0 && $lng === 0.0) { $lat = null; $lng = null; }
+    $distance = ($lat !== null && $lng !== null) ? (int) round(gpsDistanceMeters((float) $wp['lat'], (float) $wp['lng'], $lat, $lng)) : null;
+    $waypointId = (int) $wp['id'];
+
+    // AND arrived_at IS NULL closes a real race: the caller's check reads a
+    // snapshot taken before this UPDATE runs, so two team members tapping
+    // "arrive" within the same instant both pass it. Without this guard the
+    // later UPDATE silently overwrites the earlier one's GPS/who-arrived data
+    // and command staff gets a duplicate arrival notification. rowCount()
+    // tells us which request (if either) actually won the race — only that
+    // one logs/notifies.
+    $rows = dbExecute(
+        "UPDATE mission_route_progress
+         SET arrived_at = ?, arrived_by = ?, arrived_lat = ?, arrived_lng = ?, arrived_accuracy_m = ?, arrived_distance_m = ?,
+             departed_at = COALESCE(departed_at, ?), departed_by = COALESCE(departed_by, ?), out_of_sequence = ?, reported_at = ?
+         WHERE waypoint_id = ? AND arrived_at IS NULL",
+        [$eventTs, $userId, $lat, $lng, $acc, $distance, $eventTs, $userId, $outOfSequence, $reportedAtTs, $waypointId]
+    );
+    if ($rows <= 0) {
+        return false;
+    }
+
+    $missionId = (int) $mission['id'];
+    logAudit('arrive_route_waypoint', 'mission_route_waypoints', $waypointId, null, ['mission_id' => $missionId, 'distance_m' => $distance] + receiptAuditExtra($userId, $via));
+
+    $teamRow = $wp['team_id'] ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$wp['team_id']]) : null;
+    $teamLbl = $teamRow ? teamLabel($teamRow['codename'], $teamRow['team_number']) : routeMixedTeamLabel((int) $wp['route_id']);
+    $label = ($wp['label'] !== null && $wp['label'] !== '') ? $wp['label'] : t('route.waypoint_fallback_label', ['seq' => $wp['seq']]);
+    notifyCommandStaffBanner(
+        $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId,
+        'mission_route_arrival', 'route.notify_arrival_title', [],
+        'route.notify_arrival_message', ['team' => $teamLbl, 'label' => $label, 'mission' => $mission['title']]
+    );
+    return true;
 }
 
 /**
@@ -3551,12 +3792,27 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     // same "non-critical" treatment as the order-auto-fulfill block below: a
     // hiccup here (malformed geo on some row, a transient lock timeout) must
     // never fail the ping itself, which already succeeded above.
+    $pingTeamId = getUserTeamIdForMission((int) $pr['mission_id'], $userId);
     try {
         checkRestrictedAreaBreach(
-            (int) $pr['mission_id'], $userId, getUserTeamIdForMission((int) $pr['mission_id'], $userId),
+            (int) $pr['mission_id'], $userId, $pingTeamId,
             (int) $pr['id'], $lat, $lng, $source, $accuracy
         );
     } catch (Exception $e) {
+        // Non-critical — the ping itself already succeeded.
+    }
+
+    // «Έφτασες;» — a fix at the place this person's team was sent to asks them
+    // to confirm it (checkArrivalPrompts()). From the smoothed estimate, the
+    // position the command post sees, and with the same best-effort treatment
+    // as the geofence above.
+    try {
+        checkArrivalPrompts(
+            (int) $pr['mission_id'], $userId, $pingTeamId,
+            (float) $estimate['lat'], (float) $estimate['lng'],
+            $estimate['acc'] !== null ? (float) $estimate['acc'] : null, $fixAgeSeconds
+        );
+    } catch (Throwable $e) {
         // Non-critical — the ping itself already succeeded.
     }
 
@@ -3659,6 +3915,179 @@ function checkRestrictedAreaBreach(int $missionId, int $userId, ?int $teamId, in
     foreach ($newBreaches as $breach) {
         notifyRestrictedAreaBreach($missionId, $userId, $teamId, $breach['area_label']);
     }
+}
+
+/** How close a fix must be to a point to count as "there" for «Έφτασες;». */
+const ARRIVAL_PROMPT_RADIUS_M = 30;
+/** A fix vaguer than this cannot say which side of that radius someone is on. */
+const ARRIVAL_PROMPT_MAX_ACCURACY_M = 50;
+/** Older than this (the app's outage buffer replaying) is history, not a position. */
+const ARRIVAL_PROMPT_MAX_FIX_AGE_S = 120;
+
+/**
+ * «Έφτασες;» (v3.333.0). Called from recordVolunteerPing() on every fix, like
+ * checkRestrictedAreaBreach() above: when the fix puts this person at the place
+ * their team was sent — within ARRIVAL_PROMPT_RADIUS_M of a dispatch point,
+ * inside a dispatch area, or within the radius of the next point of a route
+ * they are on — they are asked, once, whether they have arrived. On the
+ * Android app that is a notification with an «Έφτασα» button
+ * (mobile-alerts.php / mobile-order-ack.php), on an open page a popup.
+ *
+ * Nothing is ever recorded on anyone's behalf: arrival is a team step the
+ * command post reads as a statement, and a GPS fix is not one. This only asks.
+ *
+ * Asked once per person per target — mission_arrival_prompts' unique key, and
+ * INSERT IGNORE decides who asks, so two fixes landing together cannot both
+ * notify. Not asked when the team has already arrived, or on a fix too vague
+ * or too old to place someone within 30 m.
+ */
+function checkArrivalPrompts(int $missionId, int $userId, ?int $teamId, float $lat, float $lng, ?float $accuracy, int $fixAgeSeconds): void {
+    if ($accuracy === null || $accuracy > ARRIVAL_PROMPT_MAX_ACCURACY_M || $fixAgeSeconds > ARRIVAL_PROMPT_MAX_FIX_AGE_S) {
+        return;
+    }
+    $hits = [];
+
+    // Dispatches for this person's team (or for everyone) the team has not
+    // arrived at. The same two sources of "arrived" advanceMissionDispatch()
+    // honours: the progress row, and a pre-v3.325.0 acks row.
+    $dispatches = dbFetchAll(
+        "SELECT d.id, d.type, d.geo, d.label
+           FROM mission_dispatch_points d
+           LEFT JOIN mission_dispatch_progress p ON p.dispatch_id = d.id AND p.scope_key = ?
+          WHERE d.mission_id = ?
+            AND (d.team_id IS NULL OR d.team_id = ?)
+            AND p.arrived_at IS NULL AND p.completed_at IS NULL
+            AND NOT EXISTS (SELECT 1 FROM mission_arrival_prompts ap
+                             WHERE ap.target_kind = 'dispatch' AND ap.target_id = d.id AND ap.user_id = ?)
+            AND NOT EXISTS (SELECT 1 FROM mission_dispatch_acks a
+                             WHERE a.dispatch_id = d.id AND " . ($teamId ? "a.team_id = ?" : "a.user_id = ? AND a.team_id IS NULL") . ")",
+        [dispatchProgressScopeKey($teamId, $userId), $missionId, $teamId ?: 0, $userId, $teamId ?: $userId]
+    );
+    foreach ($dispatches as $d) {
+        $geo = json_decode((string) $d['geo'], true);
+        if ($d['type'] === 'point') {
+            if (!isset($geo['lat'], $geo['lng'])) continue;
+            $distance = gpsDistanceMeters($lat, $lng, (float) $geo['lat'], (float) $geo['lng']);
+            if ($distance > ARRIVAL_PROMPT_RADIUS_M) continue;
+            $hits[] = ['kind' => 'dispatch', 'id' => (int) $d['id'], 'distance' => (int) round($distance), 'area' => false, 'label' => $d['label']];
+        } elseif (is_array($geo) && count($geo) >= 3 && pointInPolygon($lat, $lng, $geo)) {
+            $hits[] = ['kind' => 'dispatch', 'id' => (int) $d['id'], 'distance' => null, 'area' => true, 'label' => $d['label']];
+        }
+    }
+
+    // The next point of each open route this person is on — the point the
+    // route is waiting for, not any point that happens to be near.
+    $routes = dbFetchAll(
+        "SELECT r.id, r.title FROM mission_routes r
+           JOIN mission_route_members m ON m.route_id = r.id AND m.user_id = ?
+          WHERE r.mission_id = ? AND r.completed_at IS NULL AND r.cancelled_at IS NULL",
+        [$userId, $missionId]
+    );
+    foreach ($routes as $route) {
+        $seq = currentWaypointSeq((int) $route['id']);
+        if ($seq === null) continue;
+        $wp = dbFetchOne(
+            "SELECT w.id, w.seq, w.lat, w.lng, w.label, p.arrived_at
+               FROM mission_route_waypoints w
+               LEFT JOIN mission_route_progress p ON p.waypoint_id = w.id
+              WHERE w.route_id = ? AND w.seq = ?",
+            [$route['id'], $seq]
+        );
+        if (!$wp || $wp['arrived_at']) continue;
+        $distance = gpsDistanceMeters($lat, $lng, (float) $wp['lat'], (float) $wp['lng']);
+        if ($distance > ARRIVAL_PROMPT_RADIUS_M) continue;
+        $hits[] = [
+            'kind' => 'waypoint', 'id' => (int) $wp['id'], 'distance' => (int) round($distance),
+            'routeId' => (int) $route['id'], 'seq' => (int) $wp['seq'],
+            'label' => $wp['label'], 'routeTitle' => $route['title'],
+        ];
+    }
+
+    foreach ($hits as $hit) {
+        $asked = dbExecute(
+            "INSERT IGNORE INTO mission_arrival_prompts (mission_id, user_id, target_kind, target_id, lat, lng, accuracy_m, distance_m)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [$missionId, $userId, $hit['kind'], $hit['id'], $lat, $lng, $accuracy, $hit['distance']]
+        );
+        if ($asked > 0) {
+            notifyArrivalPrompt($missionId, $userId, $hit);
+        }
+    }
+}
+
+/**
+ * Whether an arrival question still has anything to ask: the team has not
+ * arrived at that dispatch, or at that route point, and the route is still
+ * running. $ref is a notificationPopupRef() of kind 'arrive'.
+ */
+function arrivalPromptStillOpen(array $ref, int $userId): bool {
+    if ($ref['target'] === 'waypoint') {
+        $row = dbFetchOne(
+            "SELECT p.arrived_at, p.completed_at, p.skipped_at, r.completed_at AS route_completed_at, r.cancelled_at AS route_cancelled_at
+               FROM mission_route_waypoints w
+               JOIN mission_routes r ON r.id = w.route_id
+               LEFT JOIN mission_route_progress p ON p.waypoint_id = w.id
+              WHERE w.id = ?",
+            [$ref['id']]
+        );
+        return $row && !$row['arrived_at'] && !$row['completed_at'] && !$row['skipped_at']
+            && !$row['route_completed_at'] && !$row['route_cancelled_at'];
+    }
+    $missionId = (int) dbFetchValue("SELECT mission_id FROM mission_dispatch_points WHERE id = ?", [$ref['id']]);
+    if (!$missionId) {
+        return false;
+    }
+    $teamId = getUserTeamIdForMission($missionId, $userId);
+    $progress = dbFetchOne(
+        "SELECT arrived_at, completed_at FROM mission_dispatch_progress WHERE dispatch_id = ? AND scope_key = ?",
+        [$ref['id'], dispatchProgressScopeKey($teamId, $userId)]
+    );
+    if ($progress && ($progress['arrived_at'] || $progress['completed_at'])) {
+        return false;
+    }
+    return !dbFetchValue(
+        $teamId
+            ? "SELECT COUNT(*) FROM mission_dispatch_acks WHERE dispatch_id = ? AND team_id = ?"
+            : "SELECT COUNT(*) FROM mission_dispatch_acks WHERE dispatch_id = ? AND user_id = ? AND team_id IS NULL",
+        [$ref['id'], $teamId ?: $userId]
+    );
+}
+
+/**
+ * The «Έφτασες;» notification itself, to the one person it is about. Carries
+ * bannerMission, so it is an order-class alert everywhere: the page opens it
+ * as a popup and the Android app rings it on the «Εντολές» channel, with the
+ * alarm-strength buzz — somebody who has just arrived has the phone in a
+ * pocket. arriveDispatchId / arriveWaypointId is what notificationPopupRef()
+ * reads.
+ */
+function notifyArrivalPrompt(int $missionId, int $userId, array $hit): void {
+    $lang = getUserLanguage($userId);
+    $label = trim((string) ($hit['label'] ?? ''));
+    if ($hit['kind'] === 'waypoint') {
+        $message = t('arrival.prompt_waypoint', [
+            'm' => $hit['distance'], 'seq' => $hit['seq'],
+            'route' => trim((string) ($hit['routeTitle'] ?? '')) ?: t('route.default_title', [], $lang),
+        ], $lang);
+    } elseif ($hit['area']) {
+        $message = $label !== '' ? t('arrival.prompt_area', ['label' => $label], $lang) : t('arrival.prompt_area_nolabel', [], $lang);
+    } else {
+        $message = $label !== ''
+            ? t('arrival.prompt_point', ['m' => $hit['distance'], 'label' => $label], $lang)
+            : t('arrival.prompt_point_nolabel', ['m' => $hit['distance']], $lang);
+    }
+    $pushData = [
+        'url' => rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId,
+        'tag' => 'arrival-' . $hit['kind'] . '-' . $hit['id'],
+        'bannerMission' => $missionId,
+    ];
+    if ($hit['kind'] === 'waypoint') {
+        $pushData['arriveWaypointId'] = $hit['id'];
+        $pushData['arriveRouteId'] = $hit['routeId'];
+    } else {
+        $pushData['arriveDispatchId'] = $hit['id'];
+    }
+    sendNotification($userId, t('arrival.prompt_title', [], $lang), $message, 'info', '', $pushData);
 }
 
 /**

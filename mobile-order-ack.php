@@ -16,7 +16,8 @@
  * calling them — an open mission, an approved participant — since the phone
  * does not come through those endpoints.
  *
- * AJAX POST only: kind (order|dispatch|sector), id.
+ * AJAX POST only: kind (order|dispatch|sector — «Ελήφθη»; dispatch_arrive|
+ * waypoint_arrive — «Έφτασα» on an arrival question, v3.333.0), id.
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -57,6 +58,47 @@ $userId = (int) $user['id'];
 // Named in the audit row, which cannot take the actor from a session here.
 const MOBILE_ACK_VIA = 'app_notification';
 
+/**
+ * «Έφτασα» at a route point, pressed on the «Έφτασες;» notification. The same
+ * gates as mission-route.php's arrive (a member of this route, the route still
+ * running, the point not closed). The position reported is the fix that asked
+ * the question, kept in mission_arrival_prompts — the phone sends none.
+ * Answering a question about a point is its own confirmation, so an
+ * out-of-order point is recorded as such rather than refused.
+ */
+function arriveFromPrompt(array $mission, int $waypointId, int $userId): ?string {
+    $wp = loadWaypointForAction($waypointId, (int) $mission['id'], $userId);
+    if (!$wp) {
+        return t('common.not_found');
+    }
+    if ($wp['route_cancelled_at'] || $wp['route_completed_at']) {
+        return t('route.already_closed');
+    }
+    if (!$wp['is_route_member']) {
+        return t('dispatch.not_your_team');
+    }
+    if ($wp['completed_at'] || $wp['skipped_at']) {
+        return t('route.waypoint_already_closed');
+    }
+    if ($wp['arrived_at']) {
+        return null;
+    }
+    $asked = dbFetchOne(
+        "SELECT lat, lng, accuracy_m FROM mission_arrival_prompts WHERE target_kind = 'waypoint' AND target_id = ? AND user_id = ?",
+        [$waypointId, $userId]
+    );
+    $currentSeq = currentWaypointSeq((int) $wp['route_id']);
+    $outOfSequence = (($currentSeq !== null && (int) $wp['seq'] > $currentSeq) || $wp['out_of_sequence']) ? 1 : 0;
+    $now = date('Y-m-d H:i:s');
+    recordRouteWaypointArrival(
+        $mission, $wp, $userId,
+        $asked ? (float) $asked['lat'] : null, $asked ? (float) $asked['lng'] : null,
+        ($asked && $asked['accuracy_m'] !== null) ? (float) $asked['accuracy_m'] : null,
+        $now, $now, $outOfSequence, MOBILE_ACK_VIA
+    );
+    return null;
+}
+
 $kind = (string) post('kind');
 $id = (int) post('id');
 
@@ -64,13 +106,14 @@ if ($kind === 'order') {
     // mission-order.php checks nothing beyond "is this order addressed to
     // you", and neither does this.
     $error = receiveMissionOrder($id, $userId, (string) $user['name'], MOBILE_ACK_VIA);
-} elseif ($kind === 'dispatch' || $kind === 'sector') {
-    $missionId = (int) dbFetchValue(
-        $kind === 'dispatch'
-            ? "SELECT mission_id FROM mission_dispatch_points WHERE id = ?"
-            : "SELECT mission_id FROM mission_search_sectors WHERE id = ?",
-        [$id]
-    );
+} elseif (in_array($kind, ['dispatch', 'sector', 'dispatch_arrive', 'waypoint_arrive'], true)) {
+    $missionSql = [
+        'dispatch' => "SELECT mission_id FROM mission_dispatch_points WHERE id = ?",
+        'dispatch_arrive' => "SELECT mission_id FROM mission_dispatch_points WHERE id = ?",
+        'sector' => "SELECT mission_id FROM mission_search_sectors WHERE id = ?",
+        'waypoint_arrive' => "SELECT r.mission_id FROM mission_route_waypoints w JOIN mission_routes r ON r.id = w.route_id WHERE w.id = ?",
+    ][$kind];
+    $missionId = (int) dbFetchValue($missionSql, [$id]);
     $mission = $missionId ? dbFetchOne(
         "SELECT id, title, status, show_in_ops, responsible_user_id FROM missions WHERE id = ? AND deleted_at IS NULL",
         [$missionId]
@@ -87,6 +130,11 @@ if ($kind === 'order') {
         $error = t('common.no_access_action_room');
     } elseif ($kind === 'dispatch') {
         $error = receiveMissionDispatch($mission, $id, $userId, (string) $user['name'], MOBILE_ACK_VIA);
+    } elseif ($kind === 'dispatch_arrive') {
+        // «Έφτασα» on the «Έφτασες;» notification (checkArrivalPrompts()).
+        $error = advanceMissionDispatch($mission, $id, $userId, (string) $user['name'], 'arrive', MOBILE_ACK_VIA);
+    } elseif ($kind === 'waypoint_arrive') {
+        $error = arriveFromPrompt($mission, $id, $userId);
     } else {
         // Never as command staff standing in for a team: whether this person
         // may do that is a session permission (canManageActionRoom()), and a

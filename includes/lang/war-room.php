@@ -900,7 +900,6 @@ return [
         'dispatch.complete_notify_title' => '🏁 Ολοκλήρωση εντολής',
         'popup.step.depart' => 'Αναχώρηση',
         'popup.step.finish' => 'Ολοκλήρωση',
-        'dispatch.directions_btn' => 'Οδηγίες',
         // Live ETA (dispatch popup)
         'dispatch.eta_minutes' => '🚗 ETA ~{n} λεπτά',
         'dispatch.eta_lt_1min' => '🚗 ETA <1 λεπτό',
@@ -923,7 +922,6 @@ return [
         'map.accuracy_label' => 'Ακρίβεια',
         'map.accuracy_poor_hint' => '— χαμηλή ακρίβεια, πιθανόν χωρίς GPS',
         'map.tracked_by_browser' => 'Παρακολούθηση από καρτέλα browser — σταματά αν κλειδώσει η οθόνη',
-        'map.navigate_btn' => '🧭 Πλοήγηση',
         // Fatigue / max-continuous-shift flag — shared by the map pin popup,
         // Nearby Teams, Team Distances (fatigue.pin_line) and the roster row
         // + live-poll patch (fatigue.badge_label), same "one key reused
@@ -1009,7 +1007,24 @@ return [
         'popup.btn.open_live' => 'Άνοιξε τη μετάδοση',
         'popup.btn.take_me' => 'Πήγαινέ με εκεί',
         'popup.btn.later' => 'Αργότερα',
-        'popup.btn.directions' => 'Οδηγίες',
+        // Directions by car and on foot (navigationPairHtml()), v3.333.0.
+        'nav.drive' => 'Με όχημα',
+        'nav.walk' => 'Με τα πόδια',
+        // «Έφτασες;» in the popup, and the arrow screen («Πυξίδα»).
+        'popup.type.arrive' => 'Έφτασες;',
+        'popup.btn.arrived' => 'Έφτασα',
+        'popup.btn.not_yet' => 'Όχι ακόμα',
+        'popup.step.arrive_confirm' => 'Επιβεβαίωση άφιξης',
+        'popup.arrived_toast' => '✓ Στάλθηκε «Έφτασα»',
+        'arrow.open_btn' => 'Πυξίδα',
+        'arrow.close' => 'Κλείσιμο',
+        'arrow.walk_btn' => 'Με τα πόδια',
+        'arrow.no_fix' => 'Περιμένω στίγμα GPS…',
+        'arrow.here' => 'Είσαι εδώ',
+        'arrow.gps_accuracy' => 'GPS ±{m} μ.',
+        'arrow.src_compass' => 'πυξίδα κινητού',
+        'arrow.src_course' => 'κατεύθυνση από την κίνησή σου',
+        'arrow.src_north' => 'χωρίς πυξίδα: ο Βορράς είναι πάνω',
         'popup.minimize' => 'Ελαχιστοποίηση',
         'popup.prev' => 'Προηγούμενη εντολή',
         'popup.next' => 'Επόμενη εντολή',
@@ -1292,6 +1307,16 @@ return [
         'bgtrack.alert_acked' => '✓ Στάλθηκε «Ελήφθη». Πάτα εδώ για να δεις την εντολή.',
         'bgtrack.alert_ack_retry' => 'Δεν στάλθηκε, δεν υπάρχει σύνδεση. Δοκίμασε ξανά.',
         'bgtrack.alert_ack_open_app' => 'Δεν στάλθηκε από εδώ. Πάτα για να ανοίξεις την εφαρμογή.',
+        'bgtrack.arrive_ack' => 'Έφτασα',
+        'bgtrack.arrive_acked' => '✓ Στάλθηκε «Έφτασα». Πάτα εδώ για να δεις την εντολή.',
+        // «Έφτασες;» — asked when a GPS fix puts someone at the place their team
+        // was sent (checkArrivalPrompts()). {m} is metres.
+        'arrival.prompt_title' => '📍 Έφτασες;',
+        'arrival.prompt_point' => 'Είσαι {m} μ. από το σημείο «{label}».',
+        'arrival.prompt_point_nolabel' => 'Είσαι {m} μ. από το σημείο που σου στάλθηκε.',
+        'arrival.prompt_area' => 'Είσαι μέσα στην περιοχή «{label}».',
+        'arrival.prompt_area_nolabel' => 'Είσαι μέσα στην περιοχή που σου στάλθηκε.',
+        'arrival.prompt_waypoint' => 'Είσαι {m} μ. από το σημείο {seq} της πορείας «{route}».',
 
         // mission-chat.php
         'chat.no_room_access' => 'Δεν έχετε πρόσβαση σε αυτό το chat.',
@@ -2939,7 +2964,6 @@ return [
         'dispatch.complete_notify_title' => '🏁 Order completed',
         'popup.step.depart' => 'Setting off',
         'popup.step.finish' => 'Completion',
-        'dispatch.directions_btn' => 'Directions',
         // Live ETA (dispatch popup)
         'dispatch.eta_minutes' => '🚗 ETA ~{n} min',
         'dispatch.eta_lt_1min' => '🚗 ETA <1 min',
@@ -2962,7 +2986,6 @@ return [
         'map.accuracy_label' => 'Accuracy',
         'map.accuracy_poor_hint' => '— low accuracy, probably no GPS',
         'map.tracked_by_browser' => 'Tracked from a browser tab — stops when the screen locks',
-        'map.navigate_btn' => '🧭 Navigate',
         // Fatigue / max-continuous-shift flag — see the el block for the
         // sharing convention (fatigue.pin_line/fatigue.badge_label reused
         // across every render spot, same as map.pin_low_battery).
@@ -3045,7 +3068,22 @@ return [
         'popup.btn.open_live' => 'Open the live stream',
         'popup.btn.take_me' => 'Take me there',
         'popup.btn.later' => 'Later',
-        'popup.btn.directions' => 'Directions',
+        'nav.drive' => 'Drive',
+        'nav.walk' => 'Walk',
+        'popup.type.arrive' => 'Have you arrived?',
+        'popup.btn.arrived' => "I'm here",
+        'popup.btn.not_yet' => 'Not yet',
+        'popup.step.arrive_confirm' => 'Confirm arrival',
+        'popup.arrived_toast' => "✓ «I'm here» sent",
+        'arrow.open_btn' => 'Compass',
+        'arrow.close' => 'Close',
+        'arrow.walk_btn' => 'Walking directions',
+        'arrow.no_fix' => 'Waiting for a GPS fix…',
+        'arrow.here' => 'You are here',
+        'arrow.gps_accuracy' => 'GPS ±{m} m',
+        'arrow.src_compass' => 'phone compass',
+        'arrow.src_course' => 'direction from your movement',
+        'arrow.src_north' => 'no compass: north is up',
         'popup.minimize' => 'Minimise',
         'popup.prev' => 'Previous order',
         'popup.next' => 'Next order',
@@ -3317,6 +3355,14 @@ return [
         'bgtrack.alert_acked' => '✓ «Received» sent. Tap here to see the order.',
         'bgtrack.alert_ack_retry' => 'Not sent: no connection. Try again.',
         'bgtrack.alert_ack_open_app' => 'Could not be sent from here. Tap to open the app.',
+        'bgtrack.arrive_ack' => 'I\'m here',
+        'bgtrack.arrive_acked' => '✓ «I\'m here» sent. Tap here to see the order.',
+        'arrival.prompt_title' => '📍 Have you arrived?',
+        'arrival.prompt_point' => 'You are {m} m from the point «{label}».',
+        'arrival.prompt_point_nolabel' => 'You are {m} m from the point you were sent to.',
+        'arrival.prompt_area' => 'You are inside the area «{label}».',
+        'arrival.prompt_area_nolabel' => 'You are inside the area you were sent to.',
+        'arrival.prompt_waypoint' => 'You are {m} m from point {seq} of the route «{route}».',
 
         'chat.no_room_access' => 'You do not have access to this chat.',
         'chat.empty_message' => 'The message cannot be empty.',

@@ -7205,6 +7205,29 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 168,
+            'description' => "Add mission_arrival_prompts: one row per person per target (a dispatch point/area, or a route point) they were asked «Έφτασες;» about, because a GPS fix put them there (v3.333.0). The unique key is what makes it ask once; the fix that triggered it is kept, and is the position an «Έφτασα» pressed on the phone's notification reports.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_arrival_prompts (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    user_id INT UNSIGNED NOT NULL,
+                    target_kind ENUM('dispatch','waypoint') NOT NULL,
+                    target_id INT UNSIGNED NOT NULL,
+                    lat DECIMAL(10,7) NOT NULL,
+                    lng DECIMAL(10,7) NOT NULL,
+                    accuracy_m DECIMAL(8,2) NULL,
+                    distance_m INT UNSIGNED NULL,
+                    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_arrival_prompt (target_kind, target_id, user_id),
+                    INDEX idx_arrival_prompt_mission (mission_id),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

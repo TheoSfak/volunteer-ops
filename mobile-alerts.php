@@ -135,10 +135,25 @@ function mobileAlertPath(array $row): ?string {
  * answered by sending the location, and a tick from the lock screen would
  * only look like an answer. A sector sent back for a recheck has nothing to
  * receive either (the page's $needsAcknowledgeFirst, same rule).
+ *
+ * v3.333.0: an arrival question («Έφτασες;») gets «Έφτασα» instead, while the
+ * team has not arrived — but only for an app that can label its button per
+ * alert ($appLevel >= 2). An older app would put «Ελήφθη» on it.
  */
-function mobileAlertAck(?array $ref, int $userId): ?array {
+function mobileAlertAck(?array $ref, int $userId, string $lang, int $appLevel): ?array {
     if (!$ref) {
         return null;
+    }
+    if ($ref['kind'] === 'arrive') {
+        if ($appLevel < 2 || !arrivalPromptStillOpen($ref, $userId)) {
+            return null;
+        }
+        return [
+            'kind' => $ref['target'] === 'waypoint' ? 'waypoint_arrive' : 'dispatch_arrive',
+            'id' => $ref['id'],
+            'label' => t('bgtrack.arrive_ack', [], $lang),
+            'acked' => t('bgtrack.arrive_acked', [], $lang),
+        ];
     }
     if ($ref['kind'] === 'order') {
         $row = dbFetchOne(
@@ -162,6 +177,30 @@ function mobileAlertAck(?array $ref, int $userId): ?array {
     return $offer ? ['kind' => $ref['kind'], 'id' => $ref['id']] : null;
 }
 
+/**
+ * The ?op= that opens what a notification is about (war-room.php's opRequest):
+ * the order itself, or for an arrival question the dispatch or route it asks
+ * about. Null for a notice, which has nothing to open.
+ */
+function mobileAlertOp(?array $ref): ?string {
+    if (!$ref || $ref['kind'] === 'info') {
+        return null;
+    }
+    if ($ref['kind'] === 'arrive') {
+        if ($ref['target'] === 'waypoint') {
+            return !empty($ref['routeId']) ? 'route:' . (int) $ref['routeId'] : null;
+        }
+        return 'dispatch:' . (int) $ref['id'];
+    }
+    return $ref['kind'] . ':' . (int) $ref['id'];
+}
+
+// What the app understands beyond v3.332.0: 2 = a button labelled per alert
+// (the «Έφτασα» of an arrival question). Sent by the app itself; an older
+// app sends nothing and gets exactly what it got before.
+$appLevel = (int) ($_GET['vops'] ?? 0);
+$lang = getUserLanguage($userId);
+
 $alerts = [];
 $cursor = $sinceId;
 foreach ($rows as $row) {
@@ -179,8 +218,9 @@ foreach ($rows as $row) {
     $path = mobileAlertPath($row);
     // Tapping an order's notification opens that order (war-room.php's
     // opRequest), not just the Action Room.
-    if ($path !== null && $ref && $ref['kind'] !== 'info' && preg_match('#^war-room\.php(\?|$)#', $path)) {
-        $path .= (str_contains($path, '?') ? '&' : '?') . 'op=' . $ref['kind'] . ':' . $ref['id'];
+    $op = mobileAlertOp($ref);
+    if ($path !== null && $op !== null && preg_match('#^war-room\.php(\?|$)#', $path)) {
+        $path .= (str_contains($path, '?') ? '&' : '?') . 'op=' . $op;
     }
     $alerts[] = array_filter([
         'id' => (int) $row['id'],
@@ -188,7 +228,7 @@ foreach ($rows as $row) {
         'message' => (string) $row['message'],
         'urgent' => is_array($data) && isset($data['bannerMission']),
         'url' => $path,
-        'ack' => mobileAlertAck($ref, $userId),
+        'ack' => mobileAlertAck($ref, $userId, $lang, $appLevel),
     ], fn($v) => $v !== null);
 }
 
@@ -196,7 +236,6 @@ foreach ($rows as $row) {
 // language. The app keeps no strings of its own for alerts.
 $texts = null;
 if ($alerts) {
-    $lang = getUserLanguage($userId);
     $texts = [
         'ack' => t('bgtrack.alert_ack', [], $lang),
         'acked' => t('bgtrack.alert_acked', [], $lang),

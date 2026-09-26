@@ -712,6 +712,43 @@ function bearingToCompassAbbr(deg) {
     return t(keys[Math.round(deg / 45) % 8]);
 }
 
+// Which way the top of the phone points, degrees clockwise from north, from a
+// DeviceOrientationEvent — or null when the event cannot say. iOS gives it
+// directly (webkitCompassHeading). Elsewhere only an ABSOLUTE event is a
+// compass: its alpha is the turn from north, counter-clockwise, so the heading
+// is 360 - alpha; a relative event measures from wherever the page happened to
+// load. screenAngle (screen.orientation.angle) turns it for a phone held
+// sideways. Used by the Action Room's arrow screen («Πυξίδα»).
+function compassHeadingFromOrientation(e, screenAngle) {
+    if (!e) return null;
+    const turn = Number(screenAngle) || 0;
+    if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)) {
+        return ((e.webkitCompassHeading + turn) % 360 + 360) % 360;
+    }
+    if (e.absolute === true && typeof e.alpha === 'number' && !isNaN(e.alpha)) {
+        return ((360 - e.alpha + turn) % 360 + 360) % 360;
+    }
+    return null;
+}
+
+// A heading moved a fraction of the way towards the next reading, the short
+// way round: raw compass readings jitter by several degrees, and 350° -> 10°
+// is a 20° step, not a 340° one.
+function smoothHeading(previous, next, factor) {
+    if (previous === null || previous === undefined) return next;
+    const diff = ((next - previous) % 360 + 540) % 360 - 180;
+    return ((previous + diff * factor) % 360 + 360) % 360;
+}
+
+// The CSS rotation that shows `angle` next, continuing from `previous` rather
+// than jumping back through 0: rotate(355deg) -> rotate(5deg) would spin the
+// arrow the long way round; this returns 365.
+function unwrapRotation(previous, angle) {
+    if (previous === null || previous === undefined) return angle;
+    const diff = ((angle - previous) % 360 + 540) % 360 - 180;
+    return previous + diff;
+}
+
 function missingRouteDeliverablesClientSide(wp, noteValue) {
     const missing = [];
     if (wp.require_photo && !wp.photo) missing.push(t('route.deliverable_photo'));
@@ -1116,6 +1153,9 @@ if (typeof module !== 'undefined' && module.exports) {
         areaTierForGroup,
         areaUnitPreference,
         bearingToCompassAbbr,
+        compassHeadingFromOrientation,
+        smoothHeading,
+        unwrapRotation,
         missingRouteDeliverablesClientSide,
         shouldSkipVideoCompression,
         videoTooLongToReencode,
