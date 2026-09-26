@@ -361,6 +361,11 @@ final class AckTrackerPanelTest extends TestCase
         $names = array_column($card['people'], 'name');
         $this->assertContains('Ε Χωρίς Ομάδα', $names);
         $this->assertCount(4, $names, 'Three team members plus the unteamed participant — and still not the sender.');
+        $this->assertSame(
+            ['ΑΛΦΑ 1', 'Ε Χωρίς Ομάδα'],
+            array_column($card['progress'], 'label'),
+            'A step row per team it went to, a volunteer with no team being their own — sorted, so rows do not swap between polls.'
+        );
     }
 
     /** Newest first, across all three sources, so the just-issued order is on top. */
@@ -546,6 +551,14 @@ final class AckTrackerPanelTest extends TestCase
         $cards = loadAckTrackerCardsForMission($this->missionId);
         $this->assertFalse($this->cardFor($cards, 'dispatch:' . $current)['finished']);
         $this->assertFalse($this->cardFor($cards, 'dispatch:' . $legacy)['finished']);
+        // The team's step row exists before it has moved at all, or the card
+        // shows nothing after «Ελήφθη» and nobody can see steps are to come.
+        $progress = $this->cardFor($cards, 'dispatch:' . $current)['progress'];
+        $this->assertCount(1, $progress, 'One row for the one team it went to, not one per member.');
+        $this->assertSame('ΑΛΦΑ 1', $progress[0]['label']);
+        $this->assertNull($progress[0]['departed']);
+        $this->assertNull($progress[0]['arrived']);
+        $this->assertNull($progress[0]['completed']);
 
         dbInsert(
             "INSERT INTO mission_dispatch_progress (dispatch_id, team_id, scope_key, departed_at, arrived_at) VALUES (?, ?, ?, NOW(), NOW())",
@@ -566,6 +579,12 @@ final class AckTrackerPanelTest extends TestCase
             'Arrived under the current rules is not the end — «Ολοκληρώθηκε» still follows.'
         );
         $this->assertTrue($this->cardFor($cards, 'dispatch:' . $legacy)['finished'], 'A legacy arrival was the end of the old dispatch.');
+        $legacyRow = $this->cardFor($cards, 'dispatch:' . $legacy)['progress'][0];
+        $this->assertNotNull($legacyRow['arrived'], 'The legacy arrival shows, with its time.');
+        $this->assertTrue($legacyRow['legacy'], 'Flagged, so the page does not promise an «Ολοκληρώθηκε» that never comes.');
+        $currentRow = $this->cardFor($cards, 'dispatch:' . $current)['progress'][0];
+        $this->assertNotNull($currentRow['arrived']);
+        $this->assertFalse($currentRow['legacy'], 'A current arrival has a progress row: not legacy, completion still to come.');
 
         dbExecute("UPDATE mission_dispatch_progress SET completed_at = NOW() WHERE dispatch_id = ?", [$current]);
         $this->assertTrue($this->cardFor(loadAckTrackerCardsForMission($this->missionId), 'dispatch:' . $current)['finished']);

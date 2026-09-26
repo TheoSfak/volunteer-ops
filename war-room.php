@@ -19443,21 +19443,41 @@ function ackStageRows(card) {
         }
         return rows;
     }
-    // A dispatch's Ξεκινάω / Έφτασα / Ολοκληρώθηκε: one line per team under
-    // the per-person «Ελήφθη» boxes, since one member moves the whole team.
-    return (card.progress || []).map(p => {
+    // A dispatch's Ξεκινάω / Έφτασα / Ολοκληρώθηκε are the team's (one member
+    // moves the whole team), so they go under the per-person «Ελήφθη» boxes.
+    // The server sends a row for every team it went to, moved or not.
+    const progress = card.progress || [];
+    if (progress.length === 1) {
+        // One team: its three steps, each on its own line like a sector's,
+        // in the same words the volunteer's own step list uses.
+        const p = progress[0];
+        const steps = [['departed', 'popup.step.depart', '🚶'], ['arrived', 'popup.step.arrive', '📍'], ['completed', 'popup.step.finish', '✅']];
+        const furthest = steps.reduce((max, s, i) => (p[s[0]] ? i : max), -1);
+        return steps
+            // A step jumped over is left out rather than shown as still to
+            // come; before v3.325.0 arrival was the end, so nothing follows it.
+            .filter(([key], i) => p[key] || (i > furthest && !p.legacy))
+            .map(([key, label, icon]) => ({
+                id: 'd' + key, level: p[key] ? 'reached' : '', icon: p[key] ? icon : '○',
+                label: t(label), time: p[key] || '', title: '',
+                cls: !p[key] ? 'ack-todo' : (key === 'completed' || p.legacy ? 'ack-done' : ''),
+            }));
+    }
+    // Several teams: one line each, with where that team has got to.
+    return progress.map(p => {
         const level = p.completed ? 'completed' : p.arrived ? 'arrived' : p.departed ? 'departed' : '';
+        const done = !!p.completed || (!!p.arrived && !!p.legacy);
         return {
             id: 'd' + p.label, level,
-            icon: p.completed ? '✅' : (p.arrived ? '📍' : '🚶'),
+            icon: p.completed ? '✅' : (p.arrived ? '📍' : (p.departed ? '🚶' : '○')),
             label: p.label,
-            time: [
+            time: level === '' ? t('acktracker.not_started') : [
                 p.departed ? t('dispatch.progress_departed', {time: p.departed}) : '',
                 p.arrived ? t('dispatch.progress_arrived', {time: p.arrived}) : '',
                 p.completed ? t('dispatch.progress_completed', {time: p.completed}) : '',
             ].filter(Boolean).join(' · '),
             title: '',
-            cls: p.completed ? 'ack-done' : '',
+            cls: done ? 'ack-done' : (level === '' ? 'ack-todo' : ''),
         };
     });
 }

@@ -2333,14 +2333,16 @@ function loadAckTrackerCardsForMission(int $missionId): array {
         // row to say so — only its mission_dispatch_acks. Without this every
         // such dispatch would read as unfinished forever and reopen on every
         // refresh (same legacy rule as loadMissionDispatchesForUser).
+        // Keyed to the scope's FIRST arrival, which is the time the card shows.
         $arrivedScopes = [];
         foreach (dbFetchAll(
-            "SELECT dispatch_id, team_id, user_id FROM mission_dispatch_acks WHERE dispatch_id IN ({$idPlaceholders})",
+            "SELECT dispatch_id, team_id, user_id, created_at FROM mission_dispatch_acks
+             WHERE dispatch_id IN ({$idPlaceholders}) ORDER BY created_at, id",
             $dispatchIds
         ) as $row) {
             $arrivedScopes[(int) $row['dispatch_id']][dispatchProgressScopeKey(
                 $row['team_id'] !== null ? (int) $row['team_id'] : null, (int) $row['user_id']
-            )] = true;
+            )] ??= date('H:i', strtotime($row['created_at']));
         }
 
         foreach ($dispatches as $dispatch) {
@@ -2350,6 +2352,13 @@ function loadAckTrackerCardsForMission(int $missionId): array {
             // Finished when every team (or teamless volunteer) it went to has
             // completed it, said «Δεν μπορώ», or arrived under the old rules.
             $dispatchFinished = true;
+            // One step row per team it went to — including a team that has not
+            // moved yet. Built from the recipients, not from the progress rows:
+            // a progress row only exists once somebody presses «Ξεκινάω», so
+            // building from those left the card showing nothing after
+            // «Ελήφθη» and gave the coordinator no sign that three more steps
+            // were still to come.
+            $scopeRows = [];
             foreach ($participants as $participant) {
                 $participantId = (int) $participant['user_id'];
                 // The sender is excluded here because they were excluded from
@@ -2373,6 +2382,20 @@ function loadAckTrackerCardsForMission(int $missionId): array {
                 if (!$scopeDone) {
                     $dispatchFinished = false;
                 }
+                if (!isset($scopeRows[$scope])) {
+                    $legacyArrival = $scopeProgress === null ? ($arrivedScopes[(int) $dispatch['id']][$scope] ?? null) : null;
+                    $scopeRows[$scope] = [
+                        'label'     => $participant['codename'] !== null
+                            ? teamLabel($participant['codename'], $participant['team_number'])
+                            : $participant['name'],
+                        'departed'  => $scopeProgress['departed'] ?? null,
+                        'arrived'   => $scopeProgress['arrived'] ?? $legacyArrival,
+                        'completed' => $scopeProgress['completed'] ?? null,
+                        // Before v3.325.0 arrival WAS the end: no «Ολοκληρώθηκε»
+                        // step to wait for.
+                        'legacy'    => $legacyArrival !== null,
+                    ];
+                }
                 $people[] = [
                     'name'   => $participant['name'],
                     'team'   => $participant['codename'] !== null ? teamLabel($participant['codename'], $participant['team_number']) : null,
@@ -2384,6 +2407,8 @@ function loadAckTrackerCardsForMission(int $missionId): array {
             if (!$people) {
                 continue;
             }
+            // Team order by name, so rows do not swap places between polls.
+            uasort($scopeRows, fn($a, $b) => strcmp($a['label'], $b['label']));
             $cards[] = [
                 'key'    => 'dispatch:' . (int) $dispatch['id'],
                 'kind'   => 'dispatch',
@@ -2394,9 +2419,7 @@ function loadAckTrackerCardsForMission(int $missionId): array {
                 'ts'     => (int) $dispatch['ts'],
                 'by'     => $dispatch['by_name'],
                 'people' => $people,
-                'progress' => array_values(array_map(fn($p) => [
-                    'label' => $p['label'], 'departed' => $p['departed'], 'arrived' => $p['arrived'], 'completed' => $p['completed'],
-                ], $progressByDispatch[(int) $dispatch['id']] ?? [])),
+                'progress' => array_values($scopeRows),
                 'declines' => array_values($declines['dispatch:' . (int) $dispatch['id']] ?? []),
                 'finished' => $dispatchFinished,
             ];
