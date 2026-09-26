@@ -25,7 +25,7 @@
 //
 // Bumping costs a one-off refetch of CDN assets and static images. It does NOT
 // touch the map tile cache below, which is deliberately kept out of this.
-const CACHE_VERSION = 'vo-v3.334.0';
+const CACHE_VERSION = 'vo-v3.334.1';
 const STATIC_CACHE = CACHE_VERSION + '-static';
 const RUNTIME_CACHE = CACHE_VERSION + '-runtime';
 
@@ -152,7 +152,18 @@ self.addEventListener('fetch', event => {
     }
 
     // PHP pages contain authenticated/private content. Never cache them.
+    //
+    // The offline page is for OPENING a page with no signal — it carries the
+    // saved field snapshot. It used to be handed to every failed .php request,
+    // including the background fetches a page makes to its own endpoints: the
+    // Action Room's 5s poll, a ping, an SOS. Those got an HTML page with a 200
+    // where they expected JSON or a network error, and read it as a lost login
+    // — so a few seconds without signal put up "your session expired, log in
+    // again", which nothing afterwards ever took down. Background requests now
+    // go straight to the network, untouched, and fail as the network failure
+    // they are, which every caller already handles.
     if (url.pathname.endsWith('.php') || url.pathname.endsWith('/')) {
+        if (request.mode !== 'navigate') return;
         event.respondWith(
             fetch(request)
                 .catch(() => caches.match('./offline.html'))

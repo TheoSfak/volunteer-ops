@@ -3749,7 +3749,7 @@ include __DIR__ . '/includes/header.php';
      .catch(() => {}) while the map kept showing pins frozen minutes ago with
      nothing on screen saying so — on an ops console that is worse than an
      obvious error. -->
-<div id="pollStaleBanner" class="alert alert-warning d-flex align-items-center gap-2 py-2 px-3 mb-3 d-none" role="status" aria-live="polite"></div>
+<div id="pollStaleBanner" class="alert alert-warning d-flex flex-wrap align-items-center gap-2 py-2 px-3 mb-3 d-none" role="status" aria-live="polite"></div>
 
 <?php if ($volunteerTabs): ?>
 <!-- Volunteer tabbed layout. Starts empty, exactly like #wrZoneMain above:
@@ -12144,7 +12144,7 @@ document.addEventListener('keydown', e => {
 
 function postRouteAction(action, id, extra) {
     const data = new URLSearchParams(Object.assign({csrf_token: csrfToken, mission_id: '<?= $missionId ?>', action, id: String(id)}, extra || {}));
-    return fetch('mission-route.php', {method: 'POST', body: data}).then(response => {
+    return fetchWithTimeout('mission-route.php', {method: 'POST', body: data}, FIELD_POST_TIMEOUT_MS).then(response => {
         if (!checkSessionAlive(response)) return null;
         return response.json();
     }).then(result => {
@@ -12343,7 +12343,10 @@ function flushQueue() {
     queueFlushInFlight = true;
     const item = queue[0];
     let progressed = false;
+    let networkFailed = false;
+    const flushStartedAt = Date.now();
     sendQueuedItem(item).then(result => {
+        networkFailed = !!(result && result.networkError);
         // Two retryable outcomes, both of which must LEAVE the item queued:
         //   networkError → still no signal
         //   null         → checkSessionAlive() saw a redirect to login, i.e.
@@ -12371,6 +12374,13 @@ function flushQueue() {
         // session) would re-fire every 500ms forever instead of waiting for
         // the 15s timer / the next `online` event.
         if (progressed && loadQueue().length) setTimeout(flushQueue, 500);
+        // One exception, still bounded: this attempt died on the network, but
+        // a poll has got through since it was sent — it was stuck in an outage
+        // that is now over (an attempt into a dead connection takes the full
+        // FIELD_POST_TIMEOUT_MS to give up). Try again now rather than at the
+        // next tick. Needs a fresh poll success each time, so it can never
+        // fire faster than the 5s poll.
+        else if (networkFailed && lastPollOkAt > flushStartedAt && loadQueue().length) setTimeout(flushQueue, 500);
     });
 }
 window.addEventListener('online', flushQueue);
@@ -13074,7 +13084,7 @@ function triageCatLabel(cat) { return t('triage.cat.' + cat); }
 
 function postTriage(params) {
     const body = new URLSearchParams(Object.assign({csrf_token: csrfToken, mission_id: TRIAGE_MISSION_ID}, params));
-    return fetch('mission-triage.php', {method: 'POST', body}).then(response => {
+    return fetchWithTimeout('mission-triage.php', {method: 'POST', body}, FIELD_POST_TIMEOUT_MS).then(response => {
         if (!checkSessionAlive(response)) return null;
         return response.json();
     }).catch(() => ({ok: false, error: t('common.network_error'), networkError: true}));
@@ -16840,7 +16850,52 @@ function clearServerBusy() {
     serverBusyBar.remove();
     serverBusyBar = null;
 }
+// A request sent into a dead connection does not fail — it waits. On the
+// 26/09/2026 outage (5G showing full bars and carrying nothing for ~2.5
+// minutes) the manual ping sat on «Εντοπισμός…» with no answer and no error
+// until the app was killed, and every field write that is meant to fall back
+// to the offline queue on a network error would have done the same: fetch()
+// only rejects once the OS gives up on the TCP connection, minutes later.
+// Bounding the wait turns "hung" into the network error those paths already
+// handle. 20s is past the slowest the server has been measured answering
+// under load (a 17s poll with 20 tabs open), so a slow server does not read
+// as a dead one; a write that did land after all is caught by the same
+// server-side replay guards the offline queue already relies on.
+const FIELD_POST_TIMEOUT_MS = 20000;
+function fetchWithTimeout(url, options, timeoutMs) {
+    const abort = new AbortController();
+    const killer = setTimeout(() => abort.abort(), timeoutMs);
+    return fetch(url, Object.assign({}, options, {signal: abort.signal}))
+        .finally(() => clearTimeout(killer));
+}
+
+// Whether the Android app's background service is recording positions right
+// now: running, and not paused by command. The no-connection texts promise
+// "the app is keeping your positions" only while this is true. Every APK that
+// answers vopsTrackingState (1.1.15 / 1.0.16 on) also has the outage buffer
+// (1.1.14 / 1.0.15 on), so running does mean kept and sent later. Declared up
+// here, ahead of everything that reads it, because a `let` read before its
+// line has run throws.
+let nativeTrackingLive = false;
+async function refreshNativeTrackingLive() {
+    if (!bgPluginReady()) { nativeTrackingLive = false; return false; }
+    const state = await nativePluginCall('vopsTrackingState');
+    nativeTrackingLive = !!(state && state.running && !state.paused);
+    return nativeTrackingLive;
+}
+
+// The offline page is what a service worker from before v3.334.1 hands to ANY
+// failed .php request, this page's own background calls included. It is proof
+// the network failed, not the session. Only reachable while an old worker
+// still controls the page — the new one serves it to page loads alone.
+function isOfflineFallback(response) {
+    return /\/offline\.html(\?|$)/.test((response && response.url) || '');
+}
+
 function checkSessionAlive(response) {
+    // Saying "your session expired, log in again" to someone with no signal
+    // was the worst possible advice — see isOfflineFallback().
+    if (isOfflineFallback(response)) return false;
     // 503 is this app's own "database refused another connection" answer. Check
     // it before the content-type test below, which would otherwise classify the
     // HTML error page as an expired session.
@@ -16882,6 +16937,18 @@ function getBatteryLevelPct() {
     }
 }
 
+// Inside the app the background service goes on recording through an outage
+// and sends everything once the network is back — worth saying, because the
+// person reading this is wondering whether command can still see them.
+function showPingNoConnection(statusEl) {
+    const base = t('myping.no_connection');
+    statusEl.textContent = base;
+    statusEl.className = 'small mb-2 text-danger';
+    refreshNativeTrackingLive().then(live => {
+        if (live && statusEl.textContent === base) statusEl.textContent = base + ' ' + t('myping.native_keeps');
+    });
+}
+
 document.querySelectorAll('.send-ping').forEach(button => button.addEventListener('click', () => {
     const status = document.getElementById('pingStatus-' + button.dataset.prId);
     if (!navigator.geolocation) { status.textContent = t('myping.gps_unsupported'); return; }
@@ -16902,16 +16969,33 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
             sendGeolocationErrorToCommandPost(error);
             return;
         }
-        batteryPromise.then(batteryLevel => {
+        // Capped: the battery level is a nicety, and it is the one other wait
+        // between the fix and the send.
+        Promise.race([batteryPromise, new Promise(resolve => setTimeout(() => resolve(null), 2000))]).then(batteryLevel => {
             const data = new URLSearchParams({csrf_token: csrfToken, shift_id: button.dataset.shiftId, lat: fix.lat, lng: fix.lng, accuracy: fix.acc ?? '', battery_level: batteryLevel ?? '', fix_age_ms: Math.max(0, Date.now() - fix.ts), speed: fix.speed ?? ''});
-            fetch('ping-location.php', {method:'POST', body:data}).then(response => {
+            // Its own word, not «Εντοπισμός…» left standing: on the 26/09
+            // outage the fix was long taken and it was the request that hung,
+            // but the only thing on screen spoke of locating, so it read as a
+            // GPS fault.
+            status.textContent = t('myping.sending');
+            fetchWithTimeout('ping-location.php', {method:'POST', body:data}, FIELD_POST_TIMEOUT_MS).then(response => {
                 if (!checkSessionAlive(response)) { status.textContent = t('myping.ping_send_failed'); status.className = 'small mb-2 text-danger'; return null; }
                 return response.json();
             }).then(result => {
                 if (!result) return;
                 status.textContent = result.ok ? t('myping.ping_sent_prefix', {time: result.ts}) : result.error;
                 status.className = 'small mb-2 ' + (result.ok ? 'text-success' : 'text-danger');
-            }).catch(() => { status.textContent = t('myping.ping_send_failed'); status.className = 'small mb-2 text-danger'; }).finally(() => button.disabled = false);
+            }).catch(e => {
+                // A reply that was not JSON is the server's fault; anything
+                // else (no route, or no answer inside the limit) is the
+                // connection's, and says so.
+                if (e && e.name === 'SyntaxError') {
+                    status.textContent = t('myping.ping_send_failed');
+                    status.className = 'small mb-2 text-danger';
+                } else {
+                    showPingNoConnection(status);
+                }
+            }).finally(() => button.disabled = false);
         });
     });
 }));
@@ -17198,7 +17282,11 @@ function sendAutoPing(position) {
             // gates refuse a ping by replying ok:false, and until this was
             // wired up a volunteer whose every fix was being refused saw a
             // page that looked exactly like one that was working.
-            fetch('ping-location.php', {method: 'POST', body: data})
+            // Bounded like every field write: through a dead connection each
+            // cadence would otherwise leave one more request hanging, and a
+            // browser allows only a handful per site before it queues the rest
+            // — the poll and the manual ping included — behind them.
+            fetchWithTimeout('ping-location.php', {method: 'POST', body: data}, FIELD_POST_TIMEOUT_MS)
                 .then(response => checkSessionAlive(response) ? response.json() : null)
                 .then(result => { if (result && !result.ok) showMyPingRefused(result.error); })
                 .catch(() => {});
@@ -17492,6 +17580,9 @@ function showNativeUserStopped(on) {
 }
 async function nativeStoppedByUser(shiftId) {
     const state = await nativePluginCall('vopsTrackingState');
+    // Same answer refreshNativeTrackingLive() asks for; this runs on every
+    // 30s recheck, which keeps the no-connection banner's claim current.
+    nativeTrackingLive = !!(state && state.running && !state.paused);
     return !!(state && !state.running && String(state.userStoppedShift) === String(shiftId));
 }
 
@@ -17740,12 +17831,14 @@ window.addEventListener('pageshow', () => {
 const FIELD_STATUS_LABEL_KEYS = {on_way: 'status.self_on_way', on_site: 'status.self_on_site', needs_help: 'status.self_sos'};
 
 // Same contract as postRouteAction(): resolves to the server's JSON, to
-// {networkError:true} when the server is unreachable, or to null when
+// {networkError:true} when the server is unreachable or silent past
+// FIELD_POST_TIMEOUT_MS (an SOS into a dead connection used to wait minutes
+// before it was even queued), or to null when
 // checkSessionAlive() spotted a redirect to login. The queue below relies on
 // being able to tell those three apart.
 function postFieldStatus(prId, status, extra) {
     const params = Object.assign({csrf_token: csrfToken, pr_id: prId, status: status}, extra || {});
-    return fetch('volunteer-status.php', {method: 'POST', body: new URLSearchParams(params)}).then(response => {
+    return fetchWithTimeout('volunteer-status.php', {method: 'POST', body: new URLSearchParams(params)}, FIELD_POST_TIMEOUT_MS).then(response => {
         if (!checkSessionAlive(response)) return null;
         return response.json();
     }).catch(() => ({ok: false, error: t('common.network_error'), networkError: true}));
@@ -17832,6 +17925,15 @@ function setFieldStatus(btn, prId, status) {
 // past that the page says out loud how old what you're looking at actually is.
 let lastPollOkAt = Date.now();
 const POLL_STALE_MS = 20000;
+// The last poll that did not reach the server, and how: 'network' (nothing
+// got through at all) or 'timeout' (sent, and no answer inside POLL_ABORT_MS —
+// what the 26/09/2026 outage looked like). Cleared by the next one that gets
+// through. Only failures of the connection itself land here, never a reply
+// the page could not use, so "no connection" is said only when true.
+let lastPollFailure = null;
+function pollIsOffline() {
+    return !!(lastPollFailure && lastPollFailure.at > lastPollOkAt);
+}
 
 // Told people what was wrong and left them with nothing to do about it — the
 // one thing everybody tried anyway was to reload, so the banner now carries
@@ -17850,12 +17952,19 @@ function renderPollStaleness() {
     }
     if (!pollStaleBuilt) {
         pollStaleBuilt = true;
-        el.innerHTML = '<i class="bi bi-exclamation-triangle-fill"></i>'
-            + '<div class="flex-grow-1"><strong id="pollStaleTitle"></strong>'
-            + `<div class="small">${escapeHtml(t('poll.stale_help'))}</div></div>`
+        // The text and the buttons are two blocks that wrap: side by side on
+        // a wide screen, buttons underneath on a phone. As one row the
+        // buttons kept their width and the text got the rest — 129px on a
+        // 360px phone, a box half a screen tall (seen on the emulator).
+        el.innerHTML = '<div class="d-flex gap-2 flex-grow-1" style="flex-basis:16rem;min-width:0">'
+            + '<i class="bi bi-exclamation-triangle-fill flex-shrink-0"></i>'
+            + '<div><strong id="pollStaleTitle"></strong>'
+            + '<div class="small" id="pollStaleHelp"></div>'
+            + '<div class="small fw-semibold" id="pollStaleLastTry"></div></div></div>'
+            + '<div class="d-flex gap-2 ms-auto">'
             + '<button type="button" id="pollStaleRetry" class="btn btn-sm btn-light border flex-shrink-0">'
             + '<i class="bi bi-arrow-clockwise me-1"></i><span id="pollStaleRetryLabel"></span></button>'
-            + '<button type="button" id="pollStaleReload" class="btn btn-sm btn-light border flex-shrink-0 d-none"></button>';
+            + '<button type="button" id="pollStaleReload" class="btn btn-sm btn-light border flex-shrink-0 d-none"></button></div>';
         document.getElementById('pollStaleRetryLabel').textContent = t('poll.stale_retry');
         document.getElementById('pollStaleRetry').onclick = retryPollNow;
         const reloadBtn = document.getElementById('pollStaleReload');
@@ -17863,17 +17972,38 @@ function renderPollStaleness() {
         reloadBtn.onclick = () => location.reload();
     }
     const mins = Math.floor(ageMs / 60000);
-    const age = mins >= 1 ? t('poll.stale_minutes', {n: mins}) : t('poll.stale_seconds', {n: Math.round(ageMs / 1000)});
+    const age = mins > 1 ? t('poll.stale_minutes', {n: mins})
+        : mins === 1 ? t('poll.stale_minute_one')
+        : t('poll.stale_seconds', {n: Math.round(ageMs / 1000)});
     // Escalates once it's been long enough that the picture could have
     // changed materially — a 25-second gap is a hiccup, three minutes is not.
     const severe = ageMs > 180000;
-    el.className = 'alert d-flex align-items-center gap-2 py-2 px-3 mb-3 ' + (severe ? 'alert-danger' : 'alert-warning');
-    document.getElementById('pollStaleTitle').textContent = t('poll.stale_title', {age});
+    el.className = 'alert d-flex flex-wrap align-items-center gap-2 py-2 px-3 mb-3 ' + (severe ? 'alert-danger' : 'alert-warning');
+    // "Not refreshing" alone left the volunteer on the 26/09 outage guessing
+    // whether the fault was the app, the GPS or the network. When the poll
+    // itself could not reach the server, the banner says exactly that, that it
+    // is still trying on its own, and — inside the app, while it is true —
+    // that the phone is keeping their positions for command.
+    const offline = pollIsOffline();
+    document.getElementById('pollStaleTitle').textContent = t(offline ? 'poll.offline_title' : 'poll.stale_title', {age});
+    document.getElementById('pollStaleHelp').textContent = offline
+        ? t('poll.offline_help') + (nativeTrackingLive ? ' ' + t('myping.native_keeps') : '')
+        : t('poll.stale_help');
+    // A time on every attempt, so a press of «Ανανέωση» visibly does something
+    // even when the answer is still no.
+    document.getElementById('pollStaleLastTry').textContent = offline
+        ? t('poll.last_try', {
+            time: new Date(lastPollFailure.at).toLocaleTimeString(jsLocale, {hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false}),
+            result: t(lastPollFailure.kind === 'timeout' ? 'poll.try_no_answer' : 'poll.try_no_connection')
+        })
+        : '';
     // Only offered once retrying in place has plainly not been enough. A
     // reload is never destructive here — the offline queue lives in
     // localStorage — but it does cost the map's current pan/zoom, which is
-    // not a trade worth making for a 25-second hiccup.
-    document.getElementById('pollStaleReload').classList.toggle('d-none', !severe);
+    // not a trade worth making for a 25-second hiccup. Not offered at all
+    // while there is no connection: a reload cannot bring the network back,
+    // and it swaps this page for the offline one.
+    document.getElementById('pollStaleReload').classList.toggle('d-none', !severe || offline);
 }
 
 // The banner's button. Retries in place rather than reloading: it is faster,
@@ -17887,24 +18017,31 @@ function retryPollNow() {
     const label = document.getElementById('pollStaleRetryLabel');
     if (btn) btn.disabled = true;
     if (label) label.textContent = t('poll.stale_retrying');
-    // Free the overlap guard first. A request hung behind a dead connection
-    // is the usual reason this banner is up, and while it is still in flight
-    // pollWarRoomData() returns immediately — so without this abort the press
-    // would visibly do nothing until POLL_ABORT_MS eventually fires.
+    const attempt = restartPoll();
+    // Staff-only panel, so it genuinely may not exist on this page.
+    if (typeof loadActivity === 'function' && document.getElementById('activityList')) loadActivity();
+    // Held until THIS attempt is decided, not for a fixed 2.5s. The timer put
+    // the button back while the request was still out, so on the 26/09 outage
+    // press after press ended with the same banner and nothing to show for
+    // it. Decided means the banner is gone (it got through) or its "last
+    // attempt" line carries a new time (it did not) — pollWarRoomData()
+    // always settles, within POLL_ABORT_MS at worst.
+    attempt.finally(() => {
+        if (btn) btn.disabled = false;
+        if (label) label.textContent = t('poll.stale_retry');
+        renderPollStaleness();
+    });
+}
+
+// Cuts the poll in flight loose and starts a fresh one. Frees the overlap
+// guard first: a request hung behind a dead connection is the usual reason to
+// be here, and while it is out pollWarRoomData() returns immediately — so
+// without the abort this would do nothing until POLL_ABORT_MS fired.
+function restartPoll() {
     if (pollAbortCurrent) { try { pollAbortCurrent.abort(); } catch (e) {} }
     pollAbortCurrent = null;
     pollInFlight = false;
-    pollWarRoomData();
-    // Staff-only panel, so it genuinely may not exist on this page.
-    if (typeof loadActivity === 'function' && document.getElementById('activityList')) loadActivity();
-    // Restored on a timer rather than off the poll's own promise: the retry
-    // deliberately does not await anything, and the button has to become
-    // pressable again whether the attempt succeeded (banner already gone) or
-    // failed (banner still up, and they will want another go).
-    setTimeout(() => {
-        if (btn) btn.disabled = false;
-        if (label) label.textContent = t('poll.stale_retry');
-    }, 2500);
+    return pollWarRoomData();
 }
 // Its own timer, not just the poll's: when the poll is failing its .then()
 // never runs, so without this the "4 minutes ago" would freeze at whatever it
@@ -19525,18 +19662,38 @@ let lastPayloadHash = '';
 // is precisely the situation in which that button gets pressed, and without
 // this the press would do nothing at all for up to POLL_ABORT_MS.
 let pollAbortCurrent = null;
+// When the poll in flight was sent — see the visibilitychange listener below.
+let pollStartedAt = 0;
+// Returns a promise that always settles (never rejects), so the banner's
+// button can wait for its own attempt; a call swallowed by the overlap guard
+// settles at once.
 function pollWarRoomData() {
-    if (pollInFlight) return;
+    if (pollInFlight) return Promise.resolve();
     pollInFlight = true;
+    pollStartedAt = Date.now();
     const pollAbort = new AbortController();
     pollAbortCurrent = pollAbort;
     const pollKiller = setTimeout(() => pollAbort.abort(), POLL_ABORT_MS);
-    fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId + '&payload_hash=' + encodeURIComponent(lastPayloadHash), {signal: pollAbort.signal}).then(response => {
+    // Whether the server replied at all. A failure after that point (an
+    // unusable reply, a render that threw) is not the connection's, and must
+    // not make the banner say there is no connection.
+    let answered = false;
+    return fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId + '&payload_hash=' + encodeURIComponent(lastPayloadHash), {signal: pollAbort.signal}).then(response => {
+        // An old service worker's offline page is a failed connection
+        // wearing a 200 — counted as one.
+        if (isOfflineFallback(response)) throw new TypeError('offline fallback');
+        answered = true;
         if (!checkSessionAlive(response)) return null;
         return response.json();
     }).then(data => {
         if (!data) return;
+        const wasOffline = pollIsOffline();
         lastPollOkAt = Date.now();
+        lastPollFailure = null;
+        // The first poll through after an outage is the best evidence there
+        // is that the connection is back: send whatever the offline queue is
+        // holding now — an SOS among it — instead of at its next 15s tick.
+        if (wasOffline) flushQueue();
         // A poll got through, so whatever the database was refusing a moment
         // ago it is answering now — take the overload banner down by itself.
         clearServerBusy();
@@ -19693,9 +19850,17 @@ function pollWarRoomData() {
         // the next poll is answered in full rather than telling a half-drawn
         // tab that nothing changed.
         lastPayloadHash = data.payloadHash || '';
-    }).catch(() => { renderPollStaleness(); }).finally(() => {
+    }).catch(e => {
+        // Only the poll still in charge speaks for the connection: one that
+        // restartPoll() cut loose to make way for a fresh one says nothing
+        // about it.
+        if (!answered && pollAbortCurrent === pollAbort) {
+            lastPollFailure = {at: Date.now(), kind: e && e.name === 'AbortError' ? 'timeout' : 'network'};
+        }
+        renderPollStaleness();
+    }).finally(() => {
         clearTimeout(pollKiller);
-        // Guarded on identity, not unconditional: retryPollNow() aborts this
+        // Guarded on identity, not unconditional: restartPoll() aborts this
         // request and starts a fresh one synchronously, so by the time this
         // settles the flag may already belong to the newer poll. Clearing it
         // blindly would reopen the overlap guard while that one is still in
@@ -19717,11 +19882,24 @@ setInterval(() => { if (!document.hidden) pollWarRoomData(); }, 5000);
 // back to this tab" from ever showing stale data on the way back in.
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
-    pollWarRoomData();
+    // A poll still out from before the screen went dark is not waited for.
+    // It may be sitting on a connection that died while the phone slept, and
+    // its own POLL_ABORT_MS timer was frozen along with the page — so it could
+    // hold the overlap guard for another half minute after the screen comes
+    // back, with the stale banner up and every retry swallowed.
+    if (pollInFlight && Date.now() - pollStartedAt > POLL_RESUME_STALE_MS) restartPoll();
+    else pollWarRoomData();
     // Chat's own pollRoom() lives inside its IIFE further down (not in scope
     // here) and handles its own visibilitychange listener there instead.
     if (typeof loadActivity === 'function') loadActivity();
 });
+// Older than a healthy poll ever takes, younger than POLL_ABORT_MS.
+const POLL_RESUME_STALE_MS = 10000;
+// The device says it has a network again: find out now, not whenever the
+// hung request's own timer gets round to it. Only fires where the device
+// actually lost its network — a 5G link carrying nothing, as on 26/09,
+// never raises it, which is why the banner's own retry loop does not rely on it.
+window.addEventListener('online', () => { if (!document.hidden) restartPoll(); });
 
 document.querySelectorAll('.team-form').forEach(form => {
     const leaderSelect = form.querySelector(form.dataset.leaderSelect);
