@@ -2654,6 +2654,7 @@ include __DIR__ . '/includes/header.php';
         box-shadow: 0 4px 14px rgba(0, 0, 0, .2);
     }
     .wr-op-toast[hidden] { display: none; }
+    .wr-op-toast.is-warn { background: #fff3cd; color: #664d03; border: 1px solid #ffc107; width: max-content; }
     /* «Δεν μπορώ» — the reason picker in the popup, and the notice a declined
        order shows wherever it is listed. Red, but not SOS red on a red
        background: this is an answer, not an alarm, and SOS stays the one
@@ -6028,6 +6029,104 @@ function t(key, vars = {}) {
 }
 const jsLocale = <?= json_encode($__viewerLang === 'en' ? 'en-US' : 'el-GR') ?>;
 
+// ── No request on this page waits forever ───────────────────────────────────
+// A request sent into a dead connection does not fail, it waits — until the
+// OS gives up on the TCP connection, minutes later. On the 26/09/2026 5G
+// outage that was buttons that seemed to do nothing and a ping stuck on
+// «Εντοπισμός…». v3.334.1 bounded the field writes one by one; every other
+// same-origin fetch() on this page is bounded here, once, rather than at each
+// of the ~70 call sites, most of which only handle a reply — and anything
+// added later is covered without anyone having to remember.
+//
+// A caller that passes its own signal keeps its own bound: the 5s poll and
+// the chat/activity polls (POLL_ABORT_MS), fetchWithTimeout()'s 20s for the
+// writes the offline queue relies on. Other origins (LiveKit, CDNs) are left
+// alone. The bound runs until the reply starts, so a large download is never
+// cut off half way.
+//   writes   30s — past the slowest the server has been measured answering
+//                  (a 17s poll with 20 tabs open), and the poll's own limit;
+//   reads    60s — waiting costs nothing and a read can simply be repeated;
+//   uploads  1 min + 1s per 32 KB — sized for a weak mobile uplink, so a big
+//                  video is not cut off while it is still going through;
+//   the assistant 2 min — it waits on an outside AI provider.
+// On expiry the request rejects exactly like a network failure, which every
+// call site with a .catch() already handles.
+const WR_WRITE_TIMEOUT_MS = 30000;
+const WR_READ_TIMEOUT_MS = 60000;
+const WR_ASSISTANT_TIMEOUT_MS = 120000;
+function wrUploadTimeoutMs(bytes) { return 60000 + Math.ceil(bytes / 32); }
+(function boundSameOriginFetch() {
+    const nativeFetch = window.fetch.bind(window);
+    const uploadBytes = body => {
+        if (body instanceof Blob) return body.size;
+        if (!(body instanceof FormData)) return 0;
+        let bytes = 0;
+        for (const value of body.values()) if (value instanceof Blob) bytes += value.size;
+        return bytes;
+    };
+    window.fetch = function (input, init) {
+        init = init || {};
+        let url = null;
+        // Only a plain URL can be bounded here: a Request carries its own
+        // signal, which cannot be replaced from outside.
+        if (typeof input === 'string' || input instanceof URL) {
+            try { url = new URL(input, location.href); } catch (e) { url = null; }
+        }
+        if (!url || url.origin !== location.origin || init.signal) return nativeFetch(input, init);
+        const method = String(init.method || 'GET').toUpperCase();
+        const bytes = uploadBytes(init.body);
+        const limit = bytes > 0 ? wrUploadTimeoutMs(bytes)
+            : /\/mission-assistant\.php$/.test(url.pathname) ? WR_ASSISTANT_TIMEOUT_MS
+            : method === 'GET' ? WR_READ_TIMEOUT_MS
+            : WR_WRITE_TIMEOUT_MS;
+        const abort = new AbortController();
+        let timedOut = false;
+        const killer = setTimeout(() => { timedOut = true; abort.abort(); }, limit);
+        return nativeFetch(input, Object.assign({}, init, {signal: abort.signal})).then(response => {
+            clearTimeout(killer);
+            return response;
+        }, e => {
+            clearTimeout(killer);
+            // Marked, so the page can tell "the connection failed" apart from
+            // a bug: a fetch() rejection is only ever the network or this
+            // bound, since callers with their own signal never get here.
+            const err = timedOut ? Object.assign(new Error('No answer within ' + limit + 'ms'), {name: 'TimeoutError'}) : e;
+            try { err.wrConnection = true; err.wrWrite = method !== 'GET'; } catch (x) {}
+            throw err;
+        });
+    };
+})();
+
+// The connection failed under an action. Throttled to one line, because an
+// outage fails several things at once and repeating it helps nobody. Phrased
+// as "not confirmed", not "not done": a write that got no answer may well
+// have landed, so pressing again blind could do it twice.
+let lastUnconfirmedNoticeAt = 0;
+function notifyActionUnconfirmed() {
+    if (Date.now() - lastUnconfirmedNoticeAt < 8000) return;
+    lastUnconfirmedNoticeAt = Date.now();
+    opToast(t('net.action_unconfirmed'), {ms: 7000, warn: true});
+}
+// A button whose request has no failure path of its own used to show nothing
+// at all when the connection failed. Those failures surface here instead —
+// only writes, i.e. something somebody pressed; a background read that fails
+// is the stale-data banner's business.
+window.addEventListener('unhandledrejection', event => {
+    const e = event.reason;
+    if (!e || !e.wrConnection) return;
+    event.preventDefault();
+    if (e.wrWrite) notifyActionUnconfirmed();
+});
+// For the buttons that disable themselves while they wait: give the button
+// back and say why. Without it a failed request left them grey for good. A
+// reply the page could not read is the server's failure, not the
+// connection's, and is not reported as "no connection".
+function actionRequestFailed(btn, e) {
+    if (btn) btn.disabled = false;
+    if (e && !e.wrConnection) { alert(t('common.send_failed')); return; }
+    notifyActionUnconfirmed();
+}
+
 <?php if (vitalsEnabled() && !empty($myAssignments) && $iTakePartInActionRoom): ?>
 // Heart-rate sensor. Started here rather than on DOMContentLoaded because
 // this script block already runs after the card's markup — and because a
@@ -7386,7 +7485,7 @@ function postDispatchAction(action, id, btnEl) {
             if (btnEl) btnEl.disabled = false;
         }
         return result;
-    }).catch(() => { if (btnEl) btnEl.disabled = false; });
+    }).catch(e => actionRequestFailed(btnEl, e));
 }
 // Jump to the card that really drives a route or a sector. On the volunteer
 // tab layout every card these point at already sits on the same "Εγώ" pane,
@@ -7535,7 +7634,7 @@ function sectorAdminSetStatus(id, status, selectEl) {
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors, result.areas); }
         else { alert(result.error || t('common.send_failed')); if (selectEl) selectEl.disabled = false; }
-    });
+    }).catch(e => actionRequestFailed(selectEl, e));
 }
 // Only client-side entry point to the `assign` action — sectors created by
 // the divide tool start unassigned on purpose (team choice is per-wedge,
@@ -7547,7 +7646,7 @@ function sectorAdminSetTeam(id, teamId, selectEl) {
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors, result.areas); }
         else { alert(result.error || t('common.send_failed')); if (selectEl) selectEl.disabled = false; }
-    });
+    }).catch(e => actionRequestFailed(selectEl, e));
 }
 function sectorDelete(id) {
     if (!confirm(t('sector.delete_confirm'))) return;
@@ -8519,7 +8618,7 @@ function renderRestrictedAreaBreachesList(items) {
                 restrictedAreaBreachHistory = result.breaches;
                 renderRestrictedAreaBreachesList(restrictedAreaBreachHistory);
             } else { btn.disabled = false; alert(result.error || t('common.failed')); }
-        }).catch(() => { btn.disabled = false; });
+        }).catch(e => actionRequestFailed(btn, e));
     }));
     list.querySelectorAll('.restricted-area-resolve-btn').forEach(btn => btn.addEventListener('click', () => {
         btn.disabled = true;
@@ -8534,7 +8633,7 @@ function renderRestrictedAreaBreachesList(items) {
                 restrictedAreaBreaches = restrictedAreaBreachHistory.filter(b => !b.resolved_at);
                 updateRestrictedAreaAlarmState(restrictedAreaBreaches);
             } else { btn.disabled = false; alert(result.error || t('common.failed')); }
-        }).catch(() => { btn.disabled = false; });
+        }).catch(e => actionRequestFailed(btn, e));
     }));
 }
 
@@ -9081,7 +9180,7 @@ function sectorAcknowledge(id, btnEl) {
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors, result.areas); }
         else { alert(result.error || t('common.send_failed')); if (btnEl) btnEl.disabled = false; }
-    });
+    }).catch(e => actionRequestFailed(btnEl, e));
 }
 function sectorSelfAdvance(id, status, btnEl) {
     if (btnEl) btnEl.disabled = true;
@@ -9095,7 +9194,7 @@ function sectorSelfAdvance(id, status, btnEl) {
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors, result.areas); }
         else { alert(result.error || t('common.send_failed')); if (btnEl) btnEl.disabled = false; }
-    });
+    }).catch(e => actionRequestFailed(btnEl, e));
 }
 function sectorFloorToggle(floorId, action, btnEl) {
     if (btnEl) btnEl.disabled = true;
@@ -9103,7 +9202,7 @@ function sectorFloorToggle(floorId, action, btnEl) {
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors, result.areas); }
         else { alert(result.error || t('common.send_failed')); if (btnEl) btnEl.disabled = false; }
-    });
+    }).catch(e => actionRequestFailed(btnEl, e));
 }
 // Keyed by the sector's CURRENT status (the action that would move it
 // forward), not the target — 'assigned' and 'needs_recheck' both advance
@@ -9628,7 +9727,7 @@ sharedMarkerCluster.on('popupopen', event => {
             fetch('mission-battery-alert.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
                 if (result.ok) { map.closePopup(); }
                 else { alert(result.error || t('common.send_failed')); chargeBtn.disabled = false; }
-            }).catch(() => { chargeBtn.disabled = false; });
+            }).catch(e => actionRequestFailed(chargeBtn, e));
         });
     }
 });
@@ -10998,7 +11097,7 @@ function postMyTaskAction(action, orderId, btn) {
             }
             renderMyTasks(myTasks);
         } else { if (btn) btn.disabled = false; alert(result.error || t('common.failed')); }
-    }).catch(() => { if (btn) btn.disabled = false; });
+    }).catch(e => actionRequestFailed(btn, e));
 }
 
 // ── Order popup ─────────────────────────────────────────────────────────────
@@ -11971,13 +12070,16 @@ function opConfirmArrival(m, btn) {
     refreshMyOrdersCard();
 }
 
-function opToast(text) {
+// opts.warn: a failure, not a confirmation — amber instead of green, and long
+// enough (opts.ms) to be read in full.
+function opToast(text, opts) {
     const el = document.getElementById('orderPopupToast');
     if (!el) return;
     el.textContent = text;
+    el.classList.toggle('is-warn', !!(opts && opts.warn));
     el.hidden = false;
     clearTimeout(opToastTimer);
-    opToastTimer = setTimeout(() => { el.hidden = true; }, 3200);
+    opToastTimer = setTimeout(() => { el.hidden = true; }, (opts && opts.ms) || 3200);
 }
 
 // ── Where the buttons take you ──
@@ -12471,7 +12573,7 @@ function routeAcknowledge(routeId, orderId, btn) {
             renderMyRoutes(routes);
             renderRouteLayer(routes);
         } else { btn.disabled = false; alert(result.error || t('common.failed')); }
-    }).catch(() => { btn.disabled = false; });
+    }).catch(e => actionRequestFailed(btn, e));
 }
 
 function routeDepart(waypointId, confirmed) {
@@ -12944,7 +13046,7 @@ function renderShortageReports(items) {
                 if (item) item.acknowledged_at = item.acknowledged_at || t('common.now');
                 renderShortageReports(shortageReports);
             } else { btn.disabled = false; alert(result.error || t('common.failed')); }
-        }).catch(() => { btn.disabled = false; });
+        }).catch(e => actionRequestFailed(btn, e));
     }));
     function submitShortageOutcome(btn, action) {
         btn.disabled = true;
@@ -12955,7 +13057,7 @@ function renderShortageReports(items) {
                 shortageReports = shortageReports.filter(x => String(x.id) !== btn.dataset.reportId);
                 renderShortageReports(shortageReports);
             } else { btn.disabled = false; alert(result.error || t('common.failed')); }
-        }).catch(() => { btn.disabled = false; });
+        }).catch(e => actionRequestFailed(btn, e));
     }
     list.querySelectorAll('.shortage-resolve-btn').forEach(btn => btn.addEventListener('click', () => submitShortageOutcome(btn, 'resolve')));
     list.querySelectorAll('.shortage-not-resolved-btn').forEach(btn => btn.addEventListener('click', () => submitShortageOutcome(btn, 'not_resolved')));
@@ -13018,7 +13120,7 @@ function renderMissionIncidents(items) {
                 if (item) item.acknowledged_at = item.acknowledged_at || t('common.now');
                 renderMissionIncidents(missionIncidents);
             } else { btn.disabled = false; alert(result.error || t('common.failed')); }
-        }).catch(() => { btn.disabled = false; });
+        }).catch(e => actionRequestFailed(btn, e));
     }));
     list.querySelectorAll('.incident-resolve-btn').forEach(btn => btn.addEventListener('click', () => {
         const sel = list.querySelector(`.incident-outcome-select[data-incident-id="${btn.dataset.incidentId}"]`);
@@ -13032,7 +13134,7 @@ function renderMissionIncidents(items) {
                 missionIncidents = missionIncidents.filter(x => String(x.id) !== btn.dataset.incidentId);
                 renderMissionIncidents(missionIncidents);
             } else { btn.disabled = false; alert(result.error || t('common.failed')); }
-        }).catch(() => { btn.disabled = false; });
+        }).catch(e => actionRequestFailed(btn, e));
     }));
 }
 
@@ -13952,7 +14054,7 @@ function renderPointsOfInterest(items) {
                 poiRenderedSig = null;
                 renderPointsOfInterest(pointsOfInterest);
             } else { btn.disabled = false; alert(result.error || t('common.failed')); }
-        }).catch(() => { btn.disabled = false; });
+        }).catch(e => actionRequestFailed(btn, e));
     }));
 }
 
@@ -14457,7 +14559,7 @@ function renderSosAlerts(items) {
                 renderSosAlerts(sosAlerts);
                 updateSosAlarmState(sosAlerts);
             } else { btn.disabled = false; alert(result.error || t('common.failed')); }
-        }).catch(() => { btn.disabled = false; });
+        }).catch(e => actionRequestFailed(btn, e));
     }));
     list.querySelectorAll('.sos-resolve-btn').forEach(btn => btn.addEventListener('click', () => {
         btn.disabled = true;
@@ -14468,7 +14570,7 @@ function renderSosAlerts(items) {
                 renderSosAlerts(sosAlerts);
                 updateSosAlarmState(sosAlerts);
             } else { btn.disabled = false; alert(result.error || t('common.failed')); }
-        }).catch(() => { btn.disabled = false; });
+        }).catch(e => actionRequestFailed(btn, e));
     }));
 }
 
@@ -14498,23 +14600,44 @@ function hideMediaProgressModal() {
 // fetch(url,{method:'POST',body:formData}).then(r=>r.json())'s own
 // resolve/reject shape so it drops into the existing .then()/.catch()
 // chains at each upload call site unchanged.
+//
+// Bounded by STALL, not by total time: a video on a weak uplink can take many
+// minutes and still be going through, so only an upload that stops moving is
+// given up on — no bytes for UPLOAD_STALL_MS, or, once every byte is sent, no
+// reply for UPLOAD_REPLY_MS (the server is resizing it). Before this, a dead
+// connection left the progress modal at the same percentage for good.
+const UPLOAD_STALL_MS = 45000;
+const UPLOAD_REPLY_MS = 60000;
 function postFormDataWithProgress(url, formData, onProgress) {
     return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
+        let stallTimer = null;
+        const watch = ms => {
+            clearTimeout(stallTimer);
+            stallTimer = setTimeout(() => {
+                xhr.abort();
+                reject(Object.assign(new Error('Upload stopped moving'), {name: 'TimeoutError', wrConnection: true, wrWrite: true}));
+            }, ms);
+        };
         xhr.open('POST', url);
-        if (onProgress) {
-            xhr.upload.addEventListener('progress', e => {
-                if (e.lengthComputable) onProgress(Math.round(e.loaded / e.total * 100));
-            });
-        }
+        xhr.upload.addEventListener('progress', e => {
+            watch(UPLOAD_STALL_MS);
+            if (onProgress && e.lengthComputable) onProgress(Math.round(e.loaded / e.total * 100));
+        });
+        xhr.upload.addEventListener('load', () => watch(UPLOAD_REPLY_MS));
         xhr.addEventListener('load', () => {
+            clearTimeout(stallTimer);
             try {
                 resolve(JSON.parse(xhr.responseText));
             } catch (e) {
                 reject(e);
             }
         });
-        xhr.addEventListener('error', () => reject(new Error('network error')));
+        xhr.addEventListener('error', () => {
+            clearTimeout(stallTimer);
+            reject(Object.assign(new Error('network error'), {wrConnection: true, wrWrite: true}));
+        });
+        watch(UPLOAD_STALL_MS);
         xhr.send(formData);
     });
 }
@@ -15352,7 +15475,7 @@ function renderVoiceMessages(items) {
                 renderVoiceMessages(voiceMessages);
                 updateVoiceAlarmState(voiceMessages);
             } else { btn.disabled = false; alert(result.error || t('common.failed')); }
-        }).catch(() => { btn.disabled = false; });
+        }).catch(e => actionRequestFailed(btn, e));
     }));
 }
 
@@ -16295,7 +16418,7 @@ function showWarRoomBanner(id, text, orderId, alarmStyle) {
             fetch('mission-order.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
                 if (result.ok) { ackBtn.textContent = t('banner.acked_label'); }
                 else { ackBtn.disabled = false; alert(result.error || t('common.failed')); }
-            }).catch(() => { ackBtn.disabled = false; });
+            }).catch(e => actionRequestFailed(ackBtn, e));
         };
     }
     row.querySelector('.war-room-banner-close').addEventListener('click', () => hideWarRoomBannerRow(id));
@@ -22526,7 +22649,7 @@ document.addEventListener('click', function (e) {
             btn.disabled = false;
             alert(result.error || t('common.failed'));
         }
-    }).catch(() => { btn.disabled = false; });
+    }).catch(e => actionRequestFailed(btn, e));
 });
 
 // Full screen on a live tile. Delegated for the same reason the stop button
