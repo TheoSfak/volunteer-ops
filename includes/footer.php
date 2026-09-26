@@ -336,7 +336,7 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
 <script>VoPush.init('<?= h($__vapidKey) ?>', '<?= rtrim(BASE_URL, '/') ?>');</script>
 <?php endif; ?>
 <!-- Online/Offline Indicator -->
-<div id="vo-offline-bar" style="display:none;position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc3545;color:#fff;text-align:center;padding:8px 12px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.2);transition:transform .3s ease;">
+<div id="vo-offline-bar" style="display:none;position:fixed;top:var(--app-clock-h, 0px);left:0;right:0;z-index:99999;background:#dc3545;color:#fff;text-align:center;padding:8px 12px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.2);transition:transform .3s ease;">
     <i class="bi bi-wifi-off"></i> <span id="vo-offline-bar-text">Εκτός σύνδεσης — Μπορείτε μόνο να βλέπετε σελίδες που έχουν ήδη φορτωθεί</span>
 </div>
 <script>
@@ -384,7 +384,7 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
 
 <style>
 #vo-badge-overlay {
-    position: fixed; inset: 0; z-index: 99999;
+    position: fixed; inset: 0; top: var(--app-clock-h, 0px); z-index: 99999;
     display: flex; align-items: center; justify-content: center;
     background: rgba(10, 10, 30, 0.82);
     backdrop-filter: blur(6px);

@@ -764,7 +764,7 @@ include __DIR__ . '/includes/header.php';
 
     <!-- ── Right: map (always visible) ── -->
     <div class="col-lg-5">
-        <div class="card sticky-top" style="top:80px;">
+        <div class="card sticky-top" style="top:calc(80px + var(--app-clock-h, 0px));">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0"><i class="bi bi-map me-1"></i>Χάρτης Αποστολών</h5>
                 <?php if (empty($mapPins) && empty($volunteerPins)): ?>

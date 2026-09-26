@@ -2282,7 +2282,11 @@ include __DIR__ . '/includes/header.php';
     .wr-card-flash { animation: wrCardFlash 1.6s ease-in-out 1; }
     @media (prefers-reduced-motion: reduce) { .wr-card-flash { animation: none; outline: 3px solid rgba(13,110,253,.55); } }
     #warRoomMap { height: 520px; border-radius: 12px; }
-    #mapCard.map-fullscreen-active { position: fixed; inset: 0; z-index: 1040; border-radius: 0; }
+    /* padding-top: the Athens clock strip is moved in here while fullscreen
+       (native fullscreen paints nothing outside this card — see
+       setMapFullscreen) and sits in that band, so the card's own header and
+       the map start below it instead of under it. */
+    #mapCard.map-fullscreen-active { position: fixed; inset: 0; z-index: 1040; border-radius: 0; padding-top: var(--app-clock-h, 0px); }
     #mapCard.map-fullscreen-active #warRoomMap { height: 100%; border-radius: 0; }
     /* Fullscreen reads the same data-ticker-pos (Settings'
        war_room_ticker_position) the ordinary ticker reads, so "top" means the
@@ -2524,7 +2528,7 @@ include __DIR__ . '/includes/header.php';
        fullscreen honours the same choice instead of overriding it. */
     .war-room-banner { display: none; flex-direction: column; background: #000; position: fixed; left: var(--sidebar-width, 260px); right: 0; z-index: 1900; max-height: 40vh; overflow-y: auto; }
     @media (max-width: 991.98px) { .war-room-banner { left: 0; } }
-    .war-room-banner[data-ticker-pos="top"] { top: 0; border-bottom: 2px solid #dc2626; }
+    .war-room-banner[data-ticker-pos="top"] { top: var(--app-clock-h, 0px); border-bottom: 2px solid #dc2626; }
     .war-room-banner[data-ticker-pos="bottom"] { bottom: 0; border-top: 2px solid #dc2626; }
     /* Clears the volunteer mobile tab bar (.wr-tabbar, fixed bottom, ~78px
        incl. safe-area — same figure body.wr-tabs-ready already hardcodes
@@ -2563,7 +2567,7 @@ include __DIR__ . '/includes/header.php';
        cancelled with a transform, and a transform on a fixed element moves it
        with all its absolute children, where fixed children would each need
        their own. Clicks pass through the root; only its contents take them. */
-    .wr-op-root { position: fixed; inset: 0; z-index: 1905; pointer-events: none; }
+    .wr-op-root { position: fixed; inset: 0; top: var(--app-clock-h, 0px); z-index: 1905; pointer-events: none; }
     .wr-op-backdrop { position: absolute; left: 0; right: 0; top: 0; bottom: var(--wr-op-bottom, 0px); background: rgba(15, 23, 42, .45); pointer-events: auto; }
     .wr-op-stage {
         position: absolute; left: 0; right: 0; top: env(safe-area-inset-top, 0px); bottom: var(--wr-op-bottom, 0px);
@@ -2602,7 +2606,7 @@ include __DIR__ . '/includes/header.php';
     .wr-op-mini-navs { position: absolute; right: 6px; top: 6px; z-index: 500; display: flex; gap: 4px; }
     .wr-op-mini-navs .wr-op-mini-chip { position: static; }
     /* «Πυξίδα» — the arrow screen. Dark and big: glanced at while walking, in sun. */
-    .wr-arrow { position: fixed; inset: 0; z-index: 2100; background: #111418; color: #fff; display: flex; flex-direction: column; padding: max(12px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); }
+    .wr-arrow { position: fixed; inset: 0; top: var(--app-clock-h, 0px); z-index: 2100; background: #111418; color: #fff; display: flex; flex-direction: column; padding: max(12px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom)); }
     .wr-arrow[hidden] { display: none; }
     body.wr-arrow-open { overflow: hidden; }
     .wr-arrow-top { display: flex; align-items: center; gap: .6rem; min-width: 0; }
@@ -2767,7 +2771,7 @@ include __DIR__ . '/includes/header.php';
     @media (prefers-reduced-motion: reduce) {
         .wr-hr-critical .wr-hr-heart, .wr-hr-low .wr-hr-heart { animation: none; }
     }
-    #sosOverlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; display: none; }
+    #sosOverlay { position: fixed; inset: 0; top: var(--app-clock-h, 0px); pointer-events: none; z-index: 2000; display: none; }
     /* Unacknowledged = maximum drama: full dark-red scrim + rotating beacon +
        scrolling "who's in danger" text, same full-takeover idea as the
        end-of-mission overlay but red and (deliberately) not on a timer — it
@@ -2818,7 +2822,7 @@ include __DIR__ . '/includes/header.php';
        position, own z-index) — only shown while sos-active, toggled in
        updateSosAlarmState() alongside the mute button. */
     #sosOverlayCloseBtn {
-        position: fixed; top: 16px; right: 16px; z-index: 2001;
+        position: fixed; top: calc(var(--app-clock-h, 0px) + 16px); right: 16px; z-index: 2001;
         width: 44px; height: 44px; border-radius: 50%; border: 2px solid rgba(255,255,255,.5);
         background: rgba(255,255,255,.12); color: #fff; font-size: 1.6rem; line-height: 1;
         cursor: pointer;
@@ -2831,7 +2835,7 @@ include __DIR__ . '/includes/header.php';
        read as visually distinct from SOS at a glance, with the message
        scrolling front-and-center instead of tucked in a corner/banner.
        Auto-clears on a timer instead of staying until acked. */
-    #returnToBaseOverlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; display: none; }
+    #returnToBaseOverlay { position: fixed; inset: 0; top: var(--app-clock-h, 0px); pointer-events: none; z-index: 2000; display: none; }
     #returnToBaseOverlay.rtb-active { display: flex; align-items: center; justify-content: center; background: rgba(2,20,10,.93); animation: rtbPulseGreen 1s ease-in-out infinite; }
     /* Restricted-area breach — a THIRD independent full-screen overlay (own
        element, own class, never touches sosAlerts/sosOverlay or
@@ -2847,7 +2851,7 @@ include __DIR__ . '/includes/header.php';
        updateRestrictedAreaAlarmState() — calms the instant the volunteer's
        own next trustworthy ping shows them outside the zone, independent of
        whether admin ever acknowledges). */
-    #restrictedAreaOverlay { position: fixed; inset: 0; pointer-events: none; z-index: 2000; display: none; }
+    #restrictedAreaOverlay { position: fixed; inset: 0; top: var(--app-clock-h, 0px); pointer-events: none; z-index: 2000; display: none; }
     #restrictedAreaOverlay.ra-active { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; background: rgba(20,2,2,.93); animation: sosPulseCorners 1s ease-in-out infinite; }
     #restrictedAreaOverlay.ra-calm { display: block; animation: none; box-shadow: inset 0 0 120px 40px rgba(220,38,38,.35); }
     #raMuteBtn {
@@ -2859,7 +2863,7 @@ include __DIR__ . '/includes/header.php';
     #raMuteBtn.sos-mute-offer { background: #fff; color: #dc2626; }
     #raMuteBtn.sos-mute-active { background: #dc2626; color: #fff; }
     #restrictedAreaOverlayCloseBtn {
-        position: fixed; top: 16px; right: 16px; z-index: 2001;
+        position: fixed; top: calc(var(--app-clock-h, 0px) + 16px); right: 16px; z-index: 2001;
         width: 44px; height: 44px; border-radius: 50%; border: 2px solid rgba(255,255,255,.5);
         background: rgba(255,255,255,.12); color: #fff; font-size: 1.6rem; line-height: 1;
         cursor: pointer;
@@ -3374,7 +3378,7 @@ include __DIR__ . '/includes/header.php';
     .triage-due { color: #b45309; font-weight: 600; }
     /* The flow: one question per screen, over everything except the SOS /
        zone alarms (2000+), which must still be able to take the screen. */
-    .triage-flow { position: fixed; inset: 0; z-index: 1990; background: #fff; display: flex; flex-direction: column; overflow-y: auto; }
+    .triage-flow { position: fixed; inset: 0; top: var(--app-clock-h, 0px); z-index: 1990; background: #fff; display: flex; flex-direction: column; overflow-y: auto; }
     .triage-flow-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; background: #fdecea; color: #b71c1c; font-size: .9rem; }
     .triage-flow-body { flex: 1; display: flex; flex-direction: column; padding: 18px 16px 16px; max-width: 560px; width: 100%; margin: 0 auto; }
     .triage-question { font-size: 1.7rem; font-weight: 700; line-height: 1.3; margin: 18px 0 8px; }
@@ -3391,7 +3395,7 @@ include __DIR__ . '/includes/header.php';
     .triage-result .panel { background: rgba(255,255,255,.95); color: #111; border-radius: 12px; padding: 12px; width: 100%; max-width: 480px; margin-top: 14px; text-align: left; }
     .triage-card-input { font-family: SFMono-Regular, Consolas, monospace; font-size: 1.5rem; text-align: center; letter-spacing: .08em; text-transform: uppercase; }
     .triage-card-input::placeholder { text-transform: none; letter-spacing: normal; }
-    .triage-scanner { position: fixed; inset: 0; z-index: 1995; background: #000; display: flex; align-items: center; justify-content: center; }
+    .triage-scanner { position: fixed; inset: 0; top: var(--app-clock-h, 0px); z-index: 1995; background: #000; display: flex; align-items: center; justify-content: center; }
     .triage-scanner video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
     .triage-scanner-frame { position: relative; width: 80vw; max-width: 520px; height: 42vw; max-height: 280px; border: 4px solid rgba(255,255,255,.9); border-radius: 14px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.45); }
     .triage-scanner-status { position: absolute; top: 18px; left: 0; right: 0; text-align: center; color: #fff; font-size: 1.1rem; font-weight: 600; text-shadow: 0 1px 3px #000; }
@@ -16275,9 +16279,12 @@ function syncTickerSpacing() {
     const bannerShown = !!(bannerEl && bannerEl.style.display === 'flex');
     const bannerH = bannerShown ? bannerEl.offsetHeight : 0;
     const navH = document.querySelector('.top-navbar')?.offsetHeight || 0;
-    const topOccupied = relocated
+    // The Athens clock strip (header.php) sits above all of it, fullscreen
+    // included — setMapFullscreen carries it into the map.
+    const clockH = document.getElementById('appClock')?.offsetHeight || 0;
+    const topOccupied = clockH + (relocated
         ? (wrTickerPos === 'top' ? bannerH : 0)
-        : (wrTickerPos === 'top' ? Math.max(navH, bannerH) : navH);
+        : (wrTickerPos === 'top' ? Math.max(navH, bannerH) : navH));
     document.documentElement.style.setProperty('--wr-acktracker-top', (topOccupied + 12) + 'px');
     document.documentElement.style.setProperty('--wr-ticker-bottom-h', (wrTickerPos === 'bottom' ? bannerH : 0) + 'px');
     // Read by the phone-width rules, which dock the panel to the same bottom
@@ -16331,7 +16338,7 @@ function syncMapFullscreenOffset() {
     const x = active ? mapCardEl.scrollLeft : 0;
     const y = active ? mapCardEl.scrollTop : 0;
     const value = (x || y) ? `translate(${x}px, ${y}px)` : '';
-    ['ackTracker', 'ackTrackerFloat', 'orderPopupRoot'].forEach(id => {
+    ['ackTracker', 'ackTrackerFloat', 'orderPopupRoot', 'appClock'].forEach(id => {
         const el = document.getElementById(id);
         if (el && el.style.transform !== value) el.style.transform = value;
     });
@@ -16577,8 +16584,9 @@ function hideWarRoomBannerRow(id) {
     //
     // Both nodes: the docked stack and the layer holding dragged-out cards.
     // The order popup rides along for the same reason: an order that arrives
-    // while a volunteer has the map fullscreen must still be seen.
-    const ackNodes = ['ackTracker', 'ackTrackerFloat', 'orderPopupRoot']
+    // while a volunteer has the map fullscreen must still be seen. So does the
+    // Athens clock strip; the card's padding-top leaves its band free.
+    const ackNodes = ['ackTracker', 'ackTrackerFloat', 'orderPopupRoot', 'appClock']
         .map(id => document.getElementById(id))
         .filter(Boolean)
         .map(el => ({el: el, parent: el.parentNode, next: el.nextSibling}));
@@ -16974,7 +16982,7 @@ let serverBusyBar = null;
 function showServerBusy() {
     if (serverBusyBar) return;
     serverBusyBar = document.createElement('div');
-    serverBusyBar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99998;background:#b45309;color:#fff;padding:12px 16px;text-align:center;font-weight:600;box-shadow:0 2px 8px #0006;';
+    serverBusyBar.style.cssText = 'position:fixed;top:var(--app-clock-h, 0px);left:0;right:0;z-index:99998;background:#b45309;color:#fff;padding:12px 16px;text-align:center;font-weight:600;box-shadow:0 2px 8px #0006;';
     serverBusyBar.textContent = t('wr.server_busy_warning');
     document.body.prepend(serverBusyBar);
 }
@@ -17041,7 +17049,7 @@ function checkSessionAlive(response) {
         if (!sessionExpiredWarningShown) {
             sessionExpiredWarningShown = true;
             const bar = document.createElement('div');
-            bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#dc2626;color:#fff;padding:14px 16px;text-align:center;font-weight:700;box-shadow:0 2px 8px #0006;';
+            bar.style.cssText = 'position:fixed;top:var(--app-clock-h, 0px);left:0;right:0;z-index:99999;background:#dc2626;color:#fff;padding:14px 16px;text-align:center;font-weight:700;box-shadow:0 2px 8px #0006;';
             bar.innerHTML = '<span>' + t('wr.session_expired_warning') + '</span>';
             const reloadBtn = document.createElement('button');
             reloadBtn.type = 'button';
@@ -19321,6 +19329,12 @@ try {
     const stored = JSON.parse(localStorage.getItem(ACK_POS_KEY) || '{}');
     if (stored && typeof stored === 'object' && !Array.isArray(stored)) ackPositions = stored;
 } catch (e) { /* blocked storage — every card simply starts docked */ }
+// A card parked before the Athens clock strip existed may sit where the strip
+// now is; the same floor clampAckPos() applies to every drag.
+(function () {
+    const minY = (document.getElementById('appClock')?.offsetHeight || 0) + 4;
+    Object.values(ackPositions).forEach(p => { if (p && typeof p.y === 'number' && p.y < minY) p.y = minY; });
+})();
 
 function persistAckPositions() {
     try { localStorage.setItem(ACK_POS_KEY, JSON.stringify(ackPositions)); } catch (e) {}
@@ -19331,9 +19345,11 @@ function persistAckPositions() {
 // at the right-hand edge of a desktop is off-screen entirely on the phone the
 // same coordinator picks up next, and an invisible card cannot be dragged back.
 function clampAckPos(x, y, w, h) {
+    // Never up under the Athens clock strip.
+    const minY = (document.getElementById('appClock')?.offsetHeight || 0) + 4;
     const maxX = Math.max(4, window.innerWidth - w - 4);
-    const maxY = Math.max(4, window.innerHeight - h - 4);
-    return {x: Math.round(Math.min(Math.max(4, x), maxX)), y: Math.round(Math.min(Math.max(4, y), maxY))};
+    const maxY = Math.max(minY, window.innerHeight - h - 4);
+    return {x: Math.round(Math.min(Math.max(4, x), maxX)), y: Math.round(Math.min(Math.max(minY, y), maxY))};
 }
 
 function persistAckDismissed() {

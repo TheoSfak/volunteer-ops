@@ -2125,6 +2125,7 @@ document.getElementById('saveCustomizationBtn')?.addEventListener('click', funct
     const alert = document.createElement('div');
     alert.className = 'alert alert-success alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3';
     alert.style.zIndex = '9999';
+    alert.style.top = 'var(--app-clock-h, 0px)';
     alert.innerHTML = '<i class="bi bi-check-circle me-2"></i>Οι προτιμήσεις αποθηκεύτηκαν! <button type="button" class="btn-close" data-bs-dismiss="alert"></button>';
     document.body.appendChild(alert);
     setTimeout(() => alert.remove(), 3000);

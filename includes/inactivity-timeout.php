@@ -127,7 +127,7 @@ if (function_exists('isLoggedIn') && isLoggedIn()):
         if (!banner) {
             banner = document.createElement('div');
             banner.id = 'inactivityWarning';
-            banner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:9999;background:#dc3545;color:#fff;text-align:center;padding:10px 16px;font-size:14px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.3);';
+            banner.style.cssText = 'position:fixed;top:var(--app-clock-h, 0px);left:0;right:0;z-index:9999;background:#dc3545;color:#fff;text-align:center;padding:10px 16px;font-size:14px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.3);';
             banner.innerHTML = '⚠️ Θα αποσυνδεθείτε σε 1 λεπτό λόγω αδράνειας. Κουνήστε το ποντίκι ή πατήστε ένα πλήκτρο.';
             document.body.appendChild(banner);
         }

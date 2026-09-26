@@ -104,6 +104,11 @@ if (isLoggedIn()) {
     <style>
         :root {
             --sidebar-width: 260px;
+            /* Height of the Athens clock strip pinned to the top of every
+               page (#appClock below). Everything else that is fixed or sticky
+               to the top of the viewport starts this far down instead of at 0,
+               so the clock never covers anything and nothing covers it. */
+            --app-clock-h: 22px;
             --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             --sidebar-gradient: linear-gradient(180deg, #1e3c72 0%, #2a5298 50%, #1e3c72 100%);
             --accent-color: #667eea;
@@ -127,10 +132,10 @@ if (isLoggedIn()) {
         /* Animated Gradient Sidebar */
         .sidebar {
             position: fixed;
-            top: 0;
+            top: var(--app-clock-h);
             left: 0;
             width: var(--sidebar-width);
-            height: 100vh;
+            height: calc(100vh - var(--app-clock-h));
             background: var(--sidebar-gradient);
             padding-top: 0;
             z-index: 1000;
@@ -376,7 +381,7 @@ if (isLoggedIn()) {
         .sidebar-sec .nav-link.active i { color: #fff; }
         .main-content {
             margin-left: var(--sidebar-width);
-            min-height: 100vh;
+            min-height: calc(100vh - var(--app-clock-h));
             display: flex;
             flex-direction: column;
         }
@@ -394,7 +399,7 @@ if (isLoggedIn()) {
             padding: 1rem 1.5rem;
             border-bottom: 1px solid rgba(255,255,255,0.3);
             position: sticky;
-            top: 0;
+            top: var(--app-clock-h);
             z-index: 1020;
         }
         
@@ -1341,15 +1346,111 @@ if (isLoggedIn()) {
         @media (prefers-reduced-motion: reduce) {
             .vitals-zone-critical { animation: none; }
         }
+
+        /* Athens clock strip. Its own band across the full width, above the
+           sidebar and the navbar, rather than a chip inside the navbar: the
+           Action Room's top ticker covers the navbar outright and its
+           fullscreen map covers everything, and the clock has to survive
+           both. The top of the viewport simply starts var(--app-clock-h)
+           lower for everything else (the spacer below, the sidebar, the
+           sticky navbar, modals, and the Action Room's fixed layers), so the
+           highest z-index on the page never sits on top of anything.
+           Inter with tabular figures: the seconds tick without the digits
+           shifting sideways. */
+        .app-clock {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: var(--app-clock-h);
+            z-index: 100000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: .4em;
+            padding: 0 8px;
+            background: #042c53;
+            color: #b5d4f4;
+            font-size: 12px;
+            line-height: 1;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+            overflow: hidden;
+            user-select: none;
+        }
+        .app-clock-time { color: #fff; font-weight: 700; font-size: 13px; letter-spacing: .02em; }
+        .app-clock-short { display: none; }
+        .app-clock-spacer { height: var(--app-clock-h); }
+        @media (max-width: 575.98px) {
+            .app-clock-long { display: none; }
+            .app-clock-short { display: inline; }
+        }
+        /* Bootstrap pins .modal to top:0 of the viewport; a fullscreen modal
+           (the Action Room has seven) would otherwise start under the clock. */
+        .modal { top: var(--app-clock-h); height: calc(100% - var(--app-clock-h)); }
+        @media print {
+            :root { --app-clock-h: 0px; }
+            .app-clock, .app-clock-spacer { display: none; }
+        }
     </style>
 </head>
 <body>
+<div id="appClock" class="app-clock" role="timer" aria-live="off" aria-label="<?= h(t('clock.athens_time')) ?>">
+    <span class="app-clock-long" data-clock="date"></span>
+    <span class="app-clock-long" aria-hidden="true">·</span>
+    <span class="app-clock-time" data-clock="time"><?= date('H:i:s') ?></span>
+    <span aria-hidden="true">·</span>
+    <span class="app-clock-long"><?= h(t('clock.athens_time')) ?> (<span data-clock="offset">GMT+<?= intdiv((int) date('Z'), 3600) ?></span>)</span>
+    <span class="app-clock-short"><?= h(t('clock.athens_short')) ?></span>
+</div>
+<div class="app-clock-spacer" aria-hidden="true"></div>
+<script>
+(function () {
+    var el = document.getElementById('appClock');
+    if (!el || !window.Intl) return;
+    // The server's clock, not the device's: a phone set a few minutes out
+    // must not show the wrong time next to an order. Applied only past 3 s,
+    // so a correctly set device is not made to lag by however long this
+    // page took to arrive.
+    var skew = <?= (int) round(microtime(true) * 1000) ?> - Date.now();
+    if (Math.abs(skew) < 3000) skew = 0;
+    var tz = 'Europe/Athens', locale = <?= json_encode(($currentUser['language'] ?? DEFAULT_LANGUAGE) === 'en' ? 'en-GB' : 'el-GR') ?>;
+    var fmtTime, fmtDate, fmtParts;
+    try {
+        fmtTime = new Intl.DateTimeFormat(locale, {timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'});
+        fmtDate = new Intl.DateTimeFormat(locale, {timeZone: tz, weekday: 'short', day: 'numeric', month: 'short'});
+        fmtParts = new Intl.DateTimeFormat('en-US', {timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', hourCycle: 'h23'});
+    } catch (e) { return; }
+    var timeEl = el.querySelector('[data-clock="time"]');
+    var dateEl = el.querySelector('[data-clock="date"]');
+    var offEl = el.querySelector('[data-clock="offset"]');
+    // GMT+3 in summer, GMT+2 in winter: read off the date itself rather than
+    // hardcoded, so the October and March changeovers need nobody.
+    function offsetLabel(d) {
+        var p = {};
+        fmtParts.formatToParts(d).forEach(function (x) { p[x.type] = +x.value; });
+        var asUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+        var mins = Math.round((asUtc - Math.floor(d.getTime() / 1000) * 1000) / 60000);
+        var h = Math.floor(Math.abs(mins) / 60), m = Math.abs(mins) % 60;
+        return 'GMT' + (mins < 0 ? '-' : '+') + h + (m ? ':' + (m < 10 ? '0' : '') + m : '');
+    }
+    function tick() {
+        var d = new Date(Date.now() + skew);
+        timeEl.textContent = fmtTime.format(d);
+        dateEl.textContent = fmtDate.format(d);
+        offEl.textContent = offsetLabel(d);
+        // Lands just after each whole second, so the seconds never skip.
+        setTimeout(tick, 1000 - ((Date.now() + skew) % 1000) + 20);
+    }
+    tick();
+})();
+</script>
 <?php if (isPreviewMode()):
     $__pr = getPreviewRole();
     $__prName  = $__pr ? h($__pr['name'])  : 'Άγνωστος Ρόλος';
     $__prColor = $__pr ? h($__pr['color']) : '#6c757d';
 ?>
-<div id="previewBanner" style="position:fixed;top:0;left:0;right:0;z-index:10000;background:#fff3cd;border-bottom:2px solid #ffc107;padding:8px 20px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 6px rgba(0,0,0,.1);">
+<div id="previewBanner" style="position:fixed;top:var(--app-clock-h);left:0;right:0;z-index:10000;background:#fff3cd;border-bottom:2px solid #ffc107;padding:8px 20px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 6px rgba(0,0,0,.1);">
     <div class="d-flex align-items-center gap-2 flex-wrap">
         <i class="bi bi-eye-fill text-warning fs-5"></i>
         <strong>Προεπισκόπηση Ρόλου:</strong>
@@ -1371,7 +1472,7 @@ if (isLoggedIn()) {
     var sidebar=document.querySelector('.sidebar');
     if(sidebar)sidebar.style.marginTop=h+'px';
     var topnav=document.querySelector('.top-navbar');
-    if(topnav){topnav.style.position='sticky';topnav.style.top='0';}
+    if(topnav){topnav.style.position='sticky';topnav.style.top='var(--app-clock-h)';}
 })();
 </script>
 <?php unset($__pr,$__prName,$__prColor); endif; ?>

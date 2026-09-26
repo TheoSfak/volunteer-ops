@@ -388,7 +388,7 @@ include __DIR__ . '/includes/header.php';
 
     <!-- Right: Create/Edit form -->
     <div class="col-lg-4">
-        <div class="card sticky-top" style="top: 80px;">
+        <div class="card sticky-top" style="top: calc(80px + var(--app-clock-h, 0px));">
             <div class="card-header bg-primary text-white">
                 <h5 class="mb-0">
                     <i class="bi bi-<?= $editItem ? 'pencil' : 'plus-lg' ?> me-1"></i>
