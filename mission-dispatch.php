@@ -237,11 +237,15 @@ if ($action === 'delete') {
         echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
         exit;
     }
+    // Before the DELETE: afterwards nothing says who it went to.
+    $withdrawn = withdrawnDispatchLines($missionId, [$dispatchId], (int) $userId);
     dbExecute("DELETE FROM mission_dispatch_points WHERE id = ?", [$dispatchId]);
     logAudit('delete_mission_dispatch', 'mission_dispatch_points', $dispatchId, null, ['mission_id' => $missionId]);
     // Deleting it is command's answer to a «Δεν μπορώ» on it; the rows stay
     // for the record, closed.
     resolveOrderDeclinesReassigned('dispatch', $dispatchId, (int) $userId);
+    // Whoever was still on their way is told it no longer stands.
+    notifyOrdersWithdrawn($missionId, $mission['title'], $withdrawn, 'mission_dispatch_point');
     echo json_encode(['ok' => true]);
     exit;
 }
@@ -264,9 +268,12 @@ if ($action === 'clear_ring_generated') {
     $scope = $ringIndex !== null ? ' = ?' : ' IS NOT NULL';
     $args = $ringIndex !== null ? [$missionId, $ringIndex] : [$missionId];
 
-    $count = (int) dbFetchValue("SELECT COUNT(*) FROM mission_dispatch_points WHERE mission_id = ? AND ring_index$scope", $args);
+    $ids = array_map('intval', array_column(dbFetchAll("SELECT id FROM mission_dispatch_points WHERE mission_id = ? AND ring_index$scope", $args), 'id'));
+    $count = count($ids);
+    $withdrawn = withdrawnDispatchLines($missionId, $ids, (int) $userId);
     dbExecute("DELETE FROM mission_dispatch_points WHERE mission_id = ? AND ring_index$scope", $args);
     logAudit('clear_ring_generated_mission_dispatch', 'mission_dispatch_points', null, null, ['mission_id' => $missionId, 'ring_index' => $ringIndex, 'count' => $count]);
+    notifyOrdersWithdrawn($missionId, $mission['title'], $withdrawn, 'mission_dispatch_point');
     echo json_encode(['ok' => true, 'dispatches' => loadMissionDispatchesForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant)]);
     exit;
 }

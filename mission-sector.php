@@ -132,6 +132,15 @@ function nextSectorGridNumber(int $missionId, string $prefix): int {
     return $highest + 1;
 }
 
+/**
+ * Ids of the sectors a bulk delete below is about to take with it, read first
+ * so their teams can be told (withdrawnSectorLines). $where is always one of
+ * this file's fixed fragments, never request input.
+ */
+function sectorIdsWhere(string $where, array $params): array {
+    return array_map('intval', array_column(dbFetchAll("SELECT id FROM mission_search_sectors WHERE $where", $params), 'id'));
+}
+
 $userId = getCurrentUserId();
 $user = getCurrentUser();
 
@@ -573,6 +582,10 @@ if ($action === 'assign') {
     }
 
     $oldTeamId = $sector['team_id'] ? (int) $sector['team_id'] : null;
+    // The team losing it, read while it is still theirs.
+    $withdrawn = ($oldTeamId && $newTeamId !== $oldTeamId)
+        ? withdrawnSectorLines($missionId, [$sectorId], (int) $userId, true)
+        : [];
     dbExecute("UPDATE mission_search_sectors SET team_id = ? WHERE id = ?", [$newTeamId, $sectorId]);
     logAudit('assign_mission_sector', 'mission_search_sectors', $sectorId, null, [
         'mission_id' => $missionId, 'old_team_id' => $oldTeamId, 'new_team_id' => $newTeamId,
@@ -616,6 +629,7 @@ if ($action === 'assign') {
     if ($newTeamId !== $oldTeamId) {
         resolveOrderDeclinesReassigned('sector', (int) $sectorId, (int) $userId);
     }
+    notifyOrdersWithdrawn($missionId, $mission['title'], $withdrawn, 'mission_sector_assigned');
 
     echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
@@ -628,9 +642,13 @@ if ($action === 'delete') {
         echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
         exit;
     }
+    // Before the DELETE: afterwards nothing says whose it was. Same in every
+    // delete path below.
+    $withdrawn = withdrawnSectorLines($missionId, [$sectorId], (int) $userId);
     dbExecute("DELETE FROM mission_search_sectors WHERE id = ?", [$sectorId]);
     logAudit('delete_mission_sector', 'mission_search_sectors', $sectorId, null, ['mission_id' => $missionId]);
     resolveOrderDeclinesReassigned('sector', $sectorId, (int) $userId);
+    notifyOrdersWithdrawn($missionId, $mission['title'], $withdrawn, 'mission_sector_assigned');
     echo json_encode(['ok' => true]);
     exit;
 }
@@ -645,8 +663,10 @@ if ($action === 'delete_area') {
     // Cascades to this area's sectors, and transitively their buildings/
     // floors — no payload reload (same convention as the plain sector
     // `delete` above); the client filters both local arrays by area_id.
+    $withdrawn = withdrawnSectorLines($missionId, sectorIdsWhere("area_id = ?", [$areaId]), (int) $userId);
     dbExecute("DELETE FROM mission_search_areas WHERE id = ?", [$areaId]);
     logAudit('delete_mission_search_area', 'mission_search_areas', $areaId, null, ['mission_id' => $missionId]);
+    notifyOrdersWithdrawn($missionId, $mission['title'], $withdrawn, 'mission_sector_assigned');
     echo json_encode(['ok' => true]);
     exit;
 }
@@ -661,9 +681,12 @@ if ($action === 'clear_area_sectors') {
     // Cascades buildings/floors same as every other sector delete path here —
     // no payload reload (matches `delete`/`delete_area`'s own convention),
     // the client filters its local sectors array by area_id.
-    $count = (int) dbFetchValue("SELECT COUNT(*) FROM mission_search_sectors WHERE area_id = ?", [$areaId]);
+    $sectorIds = sectorIdsWhere("area_id = ?", [$areaId]);
+    $count = count($sectorIds);
+    $withdrawn = withdrawnSectorLines($missionId, $sectorIds, (int) $userId);
     dbExecute("DELETE FROM mission_search_sectors WHERE area_id = ?", [$areaId]);
     logAudit('clear_mission_search_area_sectors', 'mission_search_areas', $areaId, null, ['mission_id' => $missionId, 'count' => $count]);
+    notifyOrdersWithdrawn($missionId, $mission['title'], $withdrawn, 'mission_sector_assigned');
     echo json_encode(['ok' => true]);
     exit;
 }
@@ -672,14 +695,14 @@ if ($action === 'clear_all_areas') {
     // Bulk wipe — no single record to point at, same null-record_id audit
     // shape as mission-annotation.php's own clear_all action.
     $areaCount = (int) dbFetchValue("SELECT COUNT(*) FROM mission_search_areas WHERE mission_id = ?", [$missionId]);
-    $sectorCount = (int) dbFetchValue(
-        "SELECT COUNT(*) FROM mission_search_sectors s JOIN mission_search_areas a ON a.id = s.area_id WHERE a.mission_id = ?",
-        [$missionId]
-    );
+    $sectorIds = sectorIdsWhere("area_id IN (SELECT id FROM mission_search_areas WHERE mission_id = ?)", [$missionId]);
+    $sectorCount = count($sectorIds);
+    $withdrawn = withdrawnSectorLines($missionId, $sectorIds, (int) $userId);
     dbExecute("DELETE FROM mission_search_areas WHERE mission_id = ?", [$missionId]);
     logAudit('clear_all_mission_search_areas', 'mission_search_areas', null, null, [
         'mission_id' => $missionId, 'area_count' => $areaCount, 'sector_count' => $sectorCount,
     ]);
+    notifyOrdersWithdrawn($missionId, $mission['title'], $withdrawn, 'mission_sector_assigned');
     echo json_encode(['ok' => true]);
     exit;
 }
@@ -706,14 +729,14 @@ if ($action === 'clear_ring_generated') {
     $args = $ringIndex !== null ? [$missionId, $ringIndex] : [$missionId];
 
     $areaCount = (int) dbFetchValue("SELECT COUNT(*) FROM mission_search_areas WHERE mission_id = ? AND ring_index$scope", $args);
-    $sectorCount = (int) dbFetchValue(
-        "SELECT COUNT(*) FROM mission_search_sectors s JOIN mission_search_areas a ON a.id = s.area_id WHERE a.mission_id = ? AND a.ring_index$scope",
-        $args
-    );
+    $sectorIds = sectorIdsWhere("area_id IN (SELECT id FROM mission_search_areas WHERE mission_id = ? AND ring_index$scope)", $args);
+    $sectorCount = count($sectorIds);
+    $withdrawn = withdrawnSectorLines($missionId, $sectorIds, (int) $userId);
     dbExecute("DELETE FROM mission_search_areas WHERE mission_id = ? AND ring_index$scope", $args);
     logAudit('clear_ring_generated_mission_search_areas', 'mission_search_areas', null, null, [
         'mission_id' => $missionId, 'ring_index' => $ringIndex, 'area_count' => $areaCount, 'sector_count' => $sectorCount,
     ]);
+    notifyOrdersWithdrawn($missionId, $mission['title'], $withdrawn, 'mission_sector_assigned');
     echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
 }

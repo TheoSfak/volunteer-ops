@@ -12602,9 +12602,22 @@ function opArrive(key, b) {
     orderPopupRender();
 }
 
-// A route cancelled or a route point skipped by someone else. The text is the
-// notification's own, already in this person's language.
+// A route cancelled or a route point skipped by someone else, or a dispatch or
+// sector command has taken back. The text is the notification's own, already
+// in this person's language.
 function opModelFromNotice(key, b) {
+    if (b.popup.info === 'mission_order_withdrawn') {
+        // The order itself has already left this page — deleted, or no longer
+        // this team's — so there is nothing to show beyond the words.
+        return {
+            key: key, kind: 'info', id: 0, type: 'order_withdrawn',
+            cat: 'task', icon: 'bi-sign-stop-fill',
+            title: t('popup.type.order_withdrawn'),
+            text: b.message, meta: '',
+            acked: false, outstanding: true, steps: [t('popup.step.seen')], step: 0, stepTimes: {},
+            hint: '', speakText: '', target: null, card: null, cardLabel: '',
+        };
+    }
     const cancelled = b.popup.info === 'mission_route_cancelled';
     const route = (routes || []).find(r => String(r.id) === String(b.popup.id));
     return {

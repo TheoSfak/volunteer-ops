@@ -3148,6 +3148,143 @@ function notifyVolunteerGpsPing(int $missionId, string $missionTitle, ?int $resp
     }
 }
 
+// ── Orders taken back by command ─────────────────────────────────────────────
+// A dispatched point or area, or a search sector, deleted from the map — or a
+// sector taken off its team — used to simply vanish from the volunteer's
+// screen: no word, no sound. Someone already walking to that point had no way
+// to know it no longer stood, and with the phone in a pocket they would not
+// even see it disappear. They now get a notice («Κατάλαβα» in the order popup,
+// and a push on the phone), the same way a cancelled route already did.
+//
+// The two collectors below run BEFORE the change, because afterwards nothing
+// is left to say who the order went to. Each returns what every person is
+// losing, [userId => [[langKey, vars], …]], and notifyOrdersWithdrawn() turns
+// that into one notification per person — a bulk clear of a whole ring is one
+// message listing its orders, not one message per sector.
+//
+// Only people whose part is still under way. A team that has completed it or
+// said «Δεν μπορώ» has nothing to stop, and command clearing finished work off
+// the map must not reach them as news.
+
+/** What each person loses when these dispatch points/areas are deleted. */
+function withdrawnDispatchLines(int $missionId, array $dispatchIds, int $actorId): array {
+    $dispatchIds = array_values(array_unique(array_map('intval', $dispatchIds)));
+    if (!$dispatchIds) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($dispatchIds), '?'));
+    $rows = dbFetchAll(
+        "SELECT id, team_id, type, label, created_by FROM mission_dispatch_points
+         WHERE mission_id = ? AND id IN ($placeholders) ORDER BY created_at, id",
+        array_merge([$missionId], $dispatchIds)
+    );
+    if (!$rows) {
+        return [];
+    }
+    $progress = loadDispatchProgress($dispatchIds);
+    $declines = loadActiveOrderDeclines($missionId);
+    // Before v3.325.0 arrival was the end of a dispatch, recorded only here.
+    $legacyArrived = [];
+    foreach (dbFetchAll("SELECT dispatch_id, team_id, user_id FROM mission_dispatch_acks WHERE dispatch_id IN ($placeholders)", $dispatchIds) as $row) {
+        $legacyArrived[(int) $row['dispatch_id']][dispatchProgressScopeKey($row['team_id'] !== null ? (int) $row['team_id'] : null, (int) $row['user_id'])] = true;
+    }
+    // A dispatch to every team moves each team on its own, so each person's
+    // part is their own team's.
+    $teamOf = [];
+    foreach (dbFetchAll("SELECT user_id, team_id FROM mission_team_members WHERE mission_id = ?", [$missionId]) as $row) {
+        $teamOf[(int) $row['user_id']] = (int) $row['team_id'];
+    }
+
+    $lines = [];
+    foreach ($rows as $dispatch) {
+        $id = (int) $dispatch['id'];
+        $teamId = $dispatch['team_id'] !== null ? (int) $dispatch['team_id'] : null;
+        $label = trim((string) $dispatch['label']);
+        $key = 'order.withdrawn.dispatch_' . ($dispatch['type'] === 'point' ? 'point' : 'area') . ($label === '' ? '_nolabel' : '');
+        // Exactly the people the dispatch alerted when it was created
+        // (mission-dispatch.php excludes its sender), minus whoever is
+        // deleting it now.
+        foreach (actionRoomNotifyRecipientIds($missionId, $teamId, (int) $dispatch['created_by']) as $recipientId) {
+            if ($recipientId === $actorId) {
+                continue;
+            }
+            $scope = dispatchProgressScopeKey($teamId ?? ($teamOf[$recipientId] ?? null), $recipientId);
+            $step = $progress[$id][$scope] ?? null;
+            $over = ($step !== null && $step['completed'] !== null)
+                || isset($declines['dispatch:' . $id][$scope])
+                || ($step === null && isset($legacyArrived[$id][$scope]));
+            if (!$over) {
+                $lines[$recipientId][] = [$key, ['label' => $label]];
+            }
+        }
+    }
+    return $lines;
+}
+
+/**
+ * What each person loses when these sectors are deleted ($unassigned false) or
+ * taken off their team ($unassigned true — cleared, or given to another team).
+ */
+function withdrawnSectorLines(int $missionId, array $sectorIds, int $actorId, bool $unassigned = false): array {
+    $sectorIds = array_values(array_unique(array_map('intval', $sectorIds)));
+    if (!$sectorIds) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($sectorIds), '?'));
+    $rows = dbFetchAll(
+        "SELECT id, team_id, status, label FROM mission_search_sectors
+         WHERE mission_id = ? AND id IN ($placeholders) AND team_id IS NOT NULL ORDER BY created_at, id",
+        array_merge([$missionId], $sectorIds)
+    );
+    $declines = loadActiveOrderDeclines($missionId);
+    $lines = [];
+    foreach ($rows as $sector) {
+        $teamId = (int) $sector['team_id'];
+        // not_started: nobody was ever sent. completed: nothing left to stop.
+        if (in_array($sector['status'], ['not_started', 'completed'], true)
+            || isset($declines['sector:' . (int) $sector['id']]['t' . $teamId])) {
+            continue;
+        }
+        foreach (actionRoomNotifyRecipientIds($missionId, $teamId, $actorId) as $recipientId) {
+            $lines[$recipientId][] = [$unassigned ? 'order.withdrawn.sector_unassigned' : 'order.withdrawn.sector', ['label' => (string) $sector['label']]];
+        }
+    }
+    return $lines;
+}
+
+/**
+ * One notice per person for everything the collectors above say they lost. $code is
+ * the notification code of the ORDER being withdrawn (mission_dispatch_point,
+ * mission_sector_assigned), so someone who muted those alerts is not woken by
+ * their cancellations either — and no new code to register.
+ */
+function notifyOrdersWithdrawn(int $missionId, string $missionTitle, array $linesByUser, string $code): void {
+    if (!$linesByUser) {
+        return;
+    }
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $langByUserId = getUserLanguages(array_keys($linesByUser));
+    foreach ($linesByUser as $userId => $lines) {
+        $lang = $langByUserId[$userId] ?? DEFAULT_LANGUAGE;
+        $shown = array_map(fn($line) => t($line[0], $line[1], $lang), array_slice($lines, 0, 5));
+        $what = implode(', ', $shown)
+            . (count($lines) > 5 ? ' ' . t('order.withdrawn_more', ['n' => count($lines) - 5], $lang) : '');
+        sendNotification(
+            (int) $userId,
+            t('order.withdrawn_title', [], $lang),
+            t(count($lines) === 1 ? 'order.withdrawn_message_one' : 'order.withdrawn_message_many', ['what' => $what, 'mission' => $missionTitle], $lang),
+            'warning', $code, [
+                'url' => $warRoomUrl,
+                'tag' => 'order-withdrawn-mission-' . $missionId,
+                'bannerMission' => $missionId,
+                // A notice in the order popup («Κατάλαβα»), not a ticker
+                // line — see notificationPopupRef().
+                'popupInfo' => 'mission_order_withdrawn',
+            ]
+        );
+    }
+}
+
 // ── «Ελήφθη» — one implementation for the page and the phone ────────────────
 // A volunteer can confirm an order from the Action Room page (mission-order.php,
 // mission-dispatch.php, mission-sector.php) or, since v3.332.0, straight from
@@ -3194,7 +3331,8 @@ function notificationPopupRef($data): ?array {
     }
     if (!empty($data['popupInfo'])) {
         // A notice rather than an order: nothing to acknowledge server-side,
-        // just «Κατάλαβα» (route cancelled, route point skipped).
+        // just «Κατάλαβα» (route cancelled, route point skipped, a dispatch or
+        // sector taken back — notifyOrdersWithdrawn()).
         return ['kind' => 'info', 'info' => (string) $data['popupInfo'], 'id' => (int) ($data['routeId'] ?? 0)];
     }
     return null;
