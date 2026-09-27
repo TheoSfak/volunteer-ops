@@ -2,8 +2,15 @@
 /**
  * VolunteerOps - Action Room «Απόσταση από εδώ / Έως εδώ»
  *
- * The live map's measuring tool: two points in, the route between them on
- * foot and by car out, each with its shape for drawing. POST only, AJAX.
+ * The live map's measuring tool. POST only, AJAX. Three actions:
+ *
+ *   route     - two points in, the route between them on foot and by car out,
+ *               each with its shape for drawing.
+ *   nearest   - «Ποια ομάδα είναι πιο κοντά εδώ»: up to three starting points
+ *               (the page picks the nearest teams from the positions it is
+ *               already showing) to one destination, all routed at once.
+ *   elevation - the height of the ground at up to 100 points, for a point's
+ *               altitude and for the climb along a measured line.
  *
  * Open to everyone who can open the Action Room itself, not just command: a
  * volunteer standing at a trailhead has exactly the same question. The straight
@@ -11,27 +18,38 @@
  * is chosen, so a slow or absent router costs nothing but the routed figures.
  *
  * WHAT LEAVES THIS BUILDING is the same as for every other routed distance
- * (includes/route-distance.php): two coordinate pairs and nothing else. And
- * nothing is kept: a measurement is one person's question, not part of the
- * operation's record, so it is neither stored nor audited.
+ * (includes/route-distance.php): coordinate pairs and nothing else. And nothing
+ * is kept: a measurement is one person's question, not part of the operation's
+ * record, so it is neither stored nor audited.
  */
 
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/route-distance.php';
+require_once __DIR__ . '/includes/elevation.php';
 requireLogin();
 
 header('Content-Type: application/json');
 
 /**
- * Measurements per person per mission, and the window they are counted over.
+ * Routed legs per person per mission, and the window they are counted over.
  *
- * Every one of them is two calls billed to the organisation's own Google
- * account. Thirty in ten minutes is well past anyone measuring by hand and
- * well short of a stuck script or a finger resting on a phone screen running
- * up an invoice.
+ * Every leg is two calls billed to the organisation's own Google account; a
+ * «πιο κοντινή ομάδα» question is up to three legs. Thirty in ten minutes is
+ * well past anyone measuring by hand and well short of a stuck script or a
+ * finger resting on a phone screen running up an invoice.
  */
 const MEASURE_RATE_MAX = 30;
 const MEASURE_RATE_WINDOW = 600;
+
+/** How many teams «Ποια ομάδα είναι πιο κοντά» routes. */
+const MEASURE_NEAREST_MAX = 3;
+
+/**
+ * Height lookups, counted apart from routing: the service is free, but the
+ * point menu asks it every time it opens, and it must not be possible to lean
+ * on it from here without limit either.
+ */
+const ELEVATION_RATE_MAX = 120;
 
 $userId = (int) getCurrentUserId();
 
@@ -69,47 +87,88 @@ if (!$canManageWarRoom && !$isApprovedParticipant) {
     exit;
 }
 
-$coords = [];
-foreach (['from_lat' => 90, 'from_lng' => 180, 'to_lat' => 90, 'to_lng' => 180] as $field => $limit) {
-    $raw = post($field);
-    if (!is_numeric($raw) || abs((float) $raw) > $limit) {
-        echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
+$fail = function (string $error): void {
+    echo json_encode(['ok' => false, 'error' => $error]);
+    exit;
+};
+
+/** A point from two POST fields, or null when either is not a coordinate. */
+$pointFromFields = function (string $latField, string $lngField): ?array {
+    $lat = post($latField);
+    $lng = post($lngField);
+    if (!is_numeric($lat) || !is_numeric($lng) || abs((float) $lat) > 90 || abs((float) $lng) > 180) return null;
+    return [(float) $lat, (float) $lng];
+};
+
+/** A list of points from one JSON field, or null unless every entry is one. */
+$pointsFromJson = function (string $field, int $max): ?array {
+    $list = json_decode((string) post($field), true);
+    if (!is_array($list) || !$list || count($list) > $max) return null;
+    $points = [];
+    foreach ($list as $p) {
+        if (!is_array($p) || count($p) !== 2 || !is_numeric($p[0] ?? null) || !is_numeric($p[1] ?? null)) return null;
+        if (abs((float) $p[0]) > 90 || abs((float) $p[1]) > 180) return null;
+        $points[] = [(float) $p[0], (float) $p[1]];
+    }
+    return $points;
+};
+
+/**
+ * Counted in the session, like the assistant's own limit, and BEFORE the
+ * session is released below, because the counter lives in it. Returns the
+ * wait in seconds when over, null when the $cost calls were granted.
+ */
+$takeQuota = function (string $key, int $max, int $cost): ?int {
+    $now = time();
+    $calls = array_values(array_filter(
+        (array) ($_SESSION[$key] ?? []),
+        fn($ts) => is_int($ts) && $ts > $now - MEASURE_RATE_WINDOW
+    ));
+    if (count($calls) + $cost > $max) {
+        return max(1, MEASURE_RATE_WINDOW - ($now - ($calls[0] ?? $now)));
+    }
+    $_SESSION[$key] = array_merge($calls, array_fill(0, $cost, $now));
+    return null;
+};
+
+$action = (string) (post('action') ?: 'route');
+
+if ($action === 'elevation') {
+    $points = $pointsFromJson('points', ELEVATION_MAX_POINTS);
+    if ($points === null) $fail(t('common.invalid_request'));
+    if ($takeQuota('elevation_calls_' . $missionId, ELEVATION_RATE_MAX, 1) !== null) {
+        // Heights are an extra on the card, never the answer to the question
+        // asked, so running out of them says nothing: the card simply goes
+        // without, rather than showing an error beside a perfectly good route.
+        echo json_encode(['ok' => true, 'elevations' => null]);
         exit;
     }
-    $coords[$field] = (float) $raw;
-}
-
-// Counted in the session, like the assistant's own limit, and BEFORE the
-// session is released below, because the counter lives in it.
-$rateKey = 'measure_calls_' . $missionId;
-$now = time();
-$calls = array_values(array_filter(
-    (array) ($_SESSION[$rateKey] ?? []),
-    fn($ts) => is_int($ts) && $ts > $now - MEASURE_RATE_WINDOW
-));
-if (count($calls) >= MEASURE_RATE_MAX) {
-    $wait = max(1, MEASURE_RATE_WINDOW - ($now - $calls[0]));
-    echo json_encode(['ok' => false, 'error' => t('measure.rate_limited', ['n' => (int) ceil($wait / 60)])]);
+    session_write_close();
+    echo json_encode(['ok' => true, 'elevations' => elevationLookup($points)]);
     exit;
 }
-$calls[] = $now;
-$_SESSION[$rateKey] = $calls;
+
+if ($action !== 'route' && $action !== 'nearest') $fail(t('common.invalid_request'));
+
+$to = $pointFromFields('to_lat', 'to_lng');
+$origins = $action === 'route'
+    ? (($from = $pointFromFields('from_lat', 'from_lng')) !== null ? [$from] : null)
+    : $pointsFromJson('from', MEASURE_NEAREST_MAX);
+if ($to === null || $origins === null) $fail(t('common.invalid_request'));
+
+$wait = $takeQuota('measure_calls_' . $missionId, MEASURE_RATE_MAX, count($origins));
+if ($wait !== null) $fail(t('measure.rate_limited', ['n' => (int) ceil($wait / 60)]));
 
 // The routers can take seconds to answer. PHP's session file stays locked for
 // the whole request otherwise, and every other request from this browser —
 // the 5s poll included — would queue behind one measurement.
 session_write_close();
 
-$straight = gpsDistanceMeters($coords['from_lat'], $coords['from_lng'], $coords['to_lat'], $coords['to_lng']);
+$straights = array_map(fn($o) => gpsDistanceMeters($o[0], $o[1], $to[0], $to[1]), $origins);
+$routing = routeDistanceAvailable();
+$measured = $routing ? routeDistanceMeasureMany($origins, $to[0], $to[1]) : [];
 
-if (!routeDistanceAvailable()) {
-    echo json_encode(['ok' => true, 'straight_m' => (int) round($straight), 'walking' => null, 'driving' => null, 'walk_tried' => false, 'routing' => false]);
-    exit;
-}
-
-$routes = routeDistanceMeasure($coords['from_lat'], $coords['from_lng'], $coords['to_lat'], $coords['to_lng']);
-
-$shape = function (?array $route) use ($straight): ?array {
+$shape = function (?array $route, float $straight): ?array {
     if ($route === null) return null;
     return [
         'meters'  => $route['meters'],
@@ -120,12 +179,21 @@ $shape = function (?array $route) use ($straight): ?array {
     ];
 };
 
-echo json_encode([
-    'ok'          => true,
-    'straight_m'  => (int) round($straight),
-    'walking'     => $shape($routes['walking']),
-    'driving'     => $shape($routes['driving']),
-    'walk_tried'  => $routes['walk_tried'],
-    'walk_failed' => $routes['walk_failed'],
-    'routing'     => true,
-]);
+$results = [];
+foreach ($origins as $i => $_) {
+    $m = $measured[$i] ?? ['walking' => null, 'driving' => null, 'walk_tried' => false, 'walk_failed' => false];
+    $results[] = [
+        'straight_m'  => (int) round($straights[$i]),
+        'walking'     => $shape($m['walking'], $straights[$i]),
+        'driving'     => $shape($m['driving'], $straights[$i]),
+        'walk_tried'  => $m['walk_tried'],
+        'walk_failed' => $m['walk_failed'],
+    ];
+}
+
+if ($action === 'nearest') {
+    echo json_encode(['ok' => true, 'routing' => $routing, 'results' => $results]);
+    exit;
+}
+
+echo json_encode(['ok' => true, 'routing' => $routing] + $results[0]);

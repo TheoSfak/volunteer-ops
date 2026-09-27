@@ -67,6 +67,9 @@ const {
     compassHeadingFromOrientation,
     smoothHeading,
     unwrapRotation,
+    samplePolylineEvenly,
+    elevationClimb,
+    naismithMinutes,
 } = require('../../assets/js/war-room-utils.js');
 
 // Local-only Haversine, not exported by war-room-utils.js — this file has no
@@ -1209,4 +1212,44 @@ test('the arrow keeps turning the short way instead of spinning back through 0',
     assert.equal(unwrapRotation(355, 5), 365);
     assert.equal(unwrapRotation(365, 350), 350);
     assert.equal(unwrapRotation(720, 10), 730);
+});
+
+// ── Heights along a measured line (the map's «Απόσταση από εδώ») ──────────
+
+test('a straight line is sampled evenly between its two ends, ends included', () => {
+    // ~1.1 km due north: one sample per 100 m gives 13 points, 0.001° apart.
+    const s = samplePolylineEvenly([[35.0, 25.0], [35.01, 25.0]], 100, 100);
+    assert.equal(s.length, 13);
+    assert.deepEqual(s[0], [35.0, 25.0]);
+    assert.deepEqual(s[s.length - 1], [35.01, 25.0]);
+    const gaps = s.slice(1).map((p, i) => p[0] - s[i][0]);
+    assert.ok(gaps.every(g => Math.abs(g - gaps[0]) < 2e-5), 'evenly spaced');
+});
+
+test('samples follow the distance along a route, not its vertices', () => {
+    // A dense wiggle at the start and one long straight after it: vertex-count
+    // sampling would put almost every sample in the wiggle.
+    const route = [[35.0, 25.0], [35.0001, 25.0], [35.0002, 25.0], [35.0003, 25.0], [35.01, 25.0]];
+    const s = samplePolylineEvenly(route, 100, 100);
+    assert.ok(s.filter(p => p[0] > 35.005).length >= 5, 'the long straight gets its share');
+});
+
+test('sampling never exceeds the cap and never drops below the two ends', () => {
+    assert.equal(samplePolylineEvenly([[35.0, 25.0], [35.5, 25.0]], 100, 100).length, 100);
+    assert.equal(samplePolylineEvenly([[35.0, 25.0], [35.0, 25.0]], 100, 100).length, 2);
+    assert.deepEqual(samplePolylineEvenly([[35.0, 25.0]], 100, 100), [[35.0, 25.0]]);
+    assert.deepEqual(samplePolylineEvenly([], 100, 100), []);
+});
+
+test('climb and descent are added up separately over a profile', () => {
+    assert.deepEqual(elevationClimb([349, 500, 450, 1344]), {ascent: 1045, descent: 50, min: 349, max: 1344});
+    assert.equal(elevationClimb([100]), null);
+    assert.equal(elevationClimb(null), null);
+});
+
+test('Naismith adds an hour per 600 m climbed to 5 km/h on the level', () => {
+    assert.equal(naismithMinutes(5000, 0), 60);
+    assert.equal(naismithMinutes(5000, 600), 120);
+    assert.equal(naismithMinutes(0, 300), 30);
+    assert.equal(naismithMinutes(1000, -200), 12, 'a descent adds nothing');
 });

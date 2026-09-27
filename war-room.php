@@ -2527,14 +2527,21 @@ include __DIR__ . '/includes/header.php';
     .wr-measure-pin { width: 22px; height: 22px; border-radius: 50%; background: #1f2937; color: #fff; border: 2px solid #fff; box-shadow: 0 1px 4px #0008; font: 700 11px/18px system-ui, sans-serif; text-align: center; }
     .wr-measure-card { background: #fff; border-radius: 8px; box-shadow: 0 2px 10px #0004; padding: 8px 10px; width: 260px; max-width: calc(100vw - 60px); font-size: .85rem; }
     /* On a phone the card shares a narrow map with the route it describes. */
+    .wr-measure-card.wr-measure-wide { width: 310px; }
     @media (max-width: 575.98px) {
         .wr-measure-card { width: 200px; padding: 6px 8px; font-size: .8rem; }
+        /* Leaves the zoom buttons at the map's top-left uncovered. */
+        .wr-measure-card.wr-measure-wide { width: calc(100vw - 110px); }
         .wr-measure-label { display: none; }
     }
     .wr-measure-card .btn-close { width: .6em; height: .6em; }
     .wr-measure-table { width: 100%; }
     .wr-measure-table td { padding: 2px 0; vertical-align: top; }
     .wr-measure-table td:last-child { text-align: right; font-weight: 600; white-space: nowrap; padding-left: 8px; }
+    .wr-nearest-row { margin: 0 -6px; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+    .wr-nearest-row:hover { background: #f1f5f9; }
+    .wr-nearest-row.active { background: #e7f0ff; }
+    .wr-nearest-num { display: inline-block; width: 18px; height: 18px; border-radius: 50%; background: #1f2937; color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
     .wr-anno-arrowhead { width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 16px solid; filter: drop-shadow(0 1px 2px #0008); }
     .wr-anno-text-label { display: inline-block; padding: 2px 8px; border-radius: 4px; color: #fff; font-weight: 600; font-size: .78rem; white-space: nowrap; box-shadow: 0 1px 3px #0006; }
     .wr-weather-ctl { background: #fff; padding: .5rem .6rem .45rem; }
@@ -9129,12 +9136,17 @@ let measureFrom = null;     // the first point, while the second is awaited
 let measureLayer = null;    // both pins, the straight line and the routes
 let measureControl = null;  // the card; a Leaflet control, so it stays in fullscreen
 let measureSeq = 0;         // a slow answer must never land on a newer measurement
+let measureNearestState = null; // «Ποια ομάδα είναι πιο κοντά», while its card is open
 // Pixels, not metres, so reaching for a person or a point feels the same at
 // every zoom.
 const MEASURE_SNAP_PX = 18;
 // Below this the two points are the same spot and there is nothing to route.
 const MEASURE_MIN_ROUTE_M = 10;
 const MEASURE_ROUTE_COLOURS = {walking: '#198754', driving: '#0d6efd'};
+// The same cap the endpoint enforces.
+const MEASURE_NEAREST_MAX = 3;
+// Below this much climb Naismith adds nothing a reader would act on.
+const MEASURE_NAISMITH_MIN_ASCENT_M = 50;
 // Whether a walking route will be looked for at all (it needs the Google key).
 // Only the yes/no reaches the page, never the key. Known up front so the card's
 // rows do not rearrange themselves when the answer arrives.
@@ -9181,7 +9193,8 @@ function openMapContextMenu(point, touch) {
         `<button type="button" class="wr-ctx-item${cls}" data-ctx="${action}"><i class="bi ${icon}"></i>${escapeHtml(label)}</button>`;
     const measureItems = measureFrom
         ? item('measure-to', 'bi-flag-fill', t('measure.to_here'), ' wr-ctx-primary') + item('measure-cancel', 'bi-x-circle', t('measure.cancel'))
-        : item('measure-from', 'bi-rulers', t('measure.from_here')) + item('measure-me', 'bi-person-walking', t('measure.from_me'));
+        : item('measure-from', 'bi-rulers', t('measure.from_here')) + item('measure-me', 'bi-person-walking', t('measure.from_me'))
+            + item('nearest', 'bi-people-fill', t('measure.nearest'));
     const sectorLines = mapSectorsAt(point.lat, point.lng)
         .map(s => `<div class="text-muted">${escapeHtml(t('measure.in_sector', {name: s}))}</div>`).join('');
     const html = `<div class="wr-ctx-menu">${measureItems}<div class="wr-ctx-sep"></div>
@@ -9191,6 +9204,7 @@ function openMapContextMenu(point, touch) {
                 <span class="wr-ctx-coords">${coords}</span>
                 <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" data-ctx="copy" title="${escapeHtml(t('measure.copy'))}" aria-label="${escapeHtml(t('measure.copy'))}"><i class="bi bi-clipboard"></i></button>
             </div>
+            <div class="text-muted" data-ctx-altitude>${escapeHtml(t('measure.altitude_loading'))}</div>
             ${sectorLines}
             <div class="text-muted mt-1">${escapeHtml(t('measure.navigate'))}</div>
             ${navigationPairHtml(point.lat, point.lng, 'block')}
@@ -9207,7 +9221,32 @@ function openMapContextMenu(point, touch) {
         else if (action === 'measure-to') measureFinish(point);
         else if (action === 'measure-cancel') measureClear();
         else if (action === 'measure-me') measureFromMe(point);
+        else if (action === 'nearest') measureNearest(point);
     });
+    // The height fills in when it arrives, and the line simply goes away if
+    // it cannot be had — it is a detail of the point, not worth an error.
+    measureElevations([[point.lat, point.lng]]).then(heights => {
+        const line = popup.getElement()?.querySelector('[data-ctx-altitude]');
+        if (!line) return;
+        if (heights) line.textContent = t('measure.altitude', {height: measureMetres(heights[0])});
+        else line.remove();
+    });
+}
+
+// Heights of the ground at a list of [lat, lng], or null — never an error the
+// viewer has to read: every caller has something to show without them.
+function measureElevations(points) {
+    const body = new URLSearchParams({
+        csrf_token: csrfToken, mission_id: '<?= $missionId ?>', action: 'elevation', points: JSON.stringify(points),
+    });
+    return fetch('mission-measure.php', {method: 'POST', body})
+        .then(r => r.ok ? r.json() : null)
+        .then(res => (res && res.ok && Array.isArray(res.elevations) && res.elevations.length === points.length) ? res.elevations : null)
+        .catch(() => null);
+}
+
+function measureMetres(m) {
+    return `${Math.round(m).toLocaleString(jsLocale)} ${t('common.unit_m')}`;
 }
 
 // The clipboard API needs a secure context and a permission some WebViews
@@ -9239,7 +9278,8 @@ function measurePin(p, letter) {
     });
 }
 
-function measureShowCard(html) {
+// wide: a list of teams needs the width a single measurement does not.
+function measureShowCard(html, wide = false) {
     if (!measureControl) {
         const MeasureControl = L.Control.extend({
             options: {position: 'topright'},
@@ -9248,19 +9288,22 @@ function measureShowCard(html) {
                 L.DomEvent.disableClickPropagation(div);
                 L.DomEvent.disableScrollPropagation(div);
                 div.addEventListener('click', ev => {
-                    if (ev.target.closest('[data-measure="close"]')) measureClear();
+                    if (ev.target.closest('[data-measure="close"]')) { measureClear(); return; }
+                    const row = ev.target.closest('[data-nearest]');
+                    if (row) measureNearestSelect(Number(row.dataset.nearest));
                 });
                 return div;
             },
         });
         measureControl = new MeasureControl().addTo(map);
     }
+    measureControl.getContainer().classList.toggle('wr-measure-wide', wide);
     measureControl.getContainer().innerHTML = html;
 }
 
-function measureCardHead(title) {
+function measureCardHead(title, icon = 'bi-rulers') {
     return `<div class="d-flex align-items-start justify-content-between gap-2 mb-1">
-        <strong><i class="bi bi-rulers me-1"></i>${escapeHtml(title)}</strong>
+        <strong><i class="bi ${icon} me-1"></i>${escapeHtml(title)}</strong>
         <button type="button" class="btn-close btn-close-sm" data-measure="close" aria-label="${escapeHtml(t('common.close'))}"></button>
     </div>`;
 }
@@ -9268,6 +9311,7 @@ function measureCardHead(title) {
 function measureClear() {
     measureSeq++;
     measureFrom = null;
+    measureNearestState = null;
     if (measureLayer) measureLayer.clearLayers();
     if (measureControl) { measureControl.remove(); measureControl = null; }
 }
@@ -9354,7 +9398,7 @@ function measureDraw(from, to) {
         from, to, straight,
         dir: bearingToCompassAbbr(bearing(from, to)),
         loading: straight >= MEASURE_MIN_ROUTE_M,
-        result: null, error: null,
+        result: null, error: null, profile: null,
     };
     measureRenderResult(state);
     if (!state.loading) return;
@@ -9371,13 +9415,43 @@ function measureDraw(from, to) {
             if (res && res.ok) { state.result = res; measureDrawRoutes(res, from, to); }
             else state.error = (res && res.error) || t('measure.failed');
             measureRenderResult(state);
+            measureProfile(state, seq);
         })
         .catch(() => {
             if (seq !== measureSeq) return;
             state.loading = false;
             state.error = t('measure.failed');
             measureRenderResult(state);
+            measureProfile(state, seq);
         });
+}
+
+// The ground between the two points: heights at Α and Β, the climb, and
+// Naismith's walking time with that climb in it. Asked AFTER the route, so
+// the climb can follow the walking path when there is one — a path zig-zags
+// up the slope that the straight line goes straight over — and falls back to
+// the straight line, which on a mountain with no mapped path is the honest
+// measure anyway. Either way the profile runs from Α itself to Β itself: the
+// walk from the point to the start of a path is part of the climb.
+function measureProfile(state, seq) {
+    const walk = state.result && state.result.walking;
+    const alongWalk = !!(walk && Array.isArray(walk.points) && walk.points.length >= 2);
+    const a = [state.from.lat, state.from.lng], b = [state.to.lat, state.to.lng];
+    const samples = alongWalk
+        ? [a, ...samplePolylineEvenly(walk.points, 98, 100), b]
+        : samplePolylineEvenly([a, b], 100, 100);
+    state.profile = {loading: true};
+    measureRenderResult(state);
+    measureElevations(samples).then(heights => {
+        if (seq !== measureSeq) return;
+        const climb = heights ? elevationClimb(heights) : null;
+        state.profile = climb ? {
+            loading: false, alongWalk, climb,
+            from: heights[0], to: heights[heights.length - 1],
+            distance: alongWalk ? walk.meters : state.straight,
+        } : null;
+        measureRenderResult(state);
+    });
 }
 
 function measureDrawRoutes(res, from, to) {
@@ -9420,8 +9494,26 @@ function measureRenderResult(s) {
         if (MEASURE_WALK_AVAILABLE) rows += row('bi-person-walking', MEASURE_ROUTE_COLOURS.walking, t('measure.walk'), routeValue('walking'));
         rows += row('bi-car-front-fill', MEASURE_ROUTE_COLOURS.driving, t('measure.drive'), routeValue('driving'));
     }
+    const p = tooClose ? null : s.profile;
+    if (p && p.loading) {
+        rows += row('bi-triangle', null, t('measure.altitude_ab'), `<span class="text-muted fw-normal">${escapeHtml(t('measure.loading'))}</span>`);
+    } else if (p) {
+        // Heights are «~»: a 90 m terrain model averages a summit down by
+        // tens of metres (Ψηλορείτης reads 2396 for 2456).
+        rows += row('bi-triangle', null, t('measure.altitude_ab'),
+            `~${escapeHtml(Math.round(p.from).toLocaleString(jsLocale))} → ~${escapeHtml(measureMetres(p.to))}`);
+        rows += row('bi-graph-up-arrow', null, t(p.alongWalk ? 'measure.climb_walk' : 'measure.climb_straight'),
+            `+${escapeHtml(Math.round(p.climb.ascent).toLocaleString(jsLocale))} / −${escapeHtml(measureMetres(p.climb.descent))}`);
+    }
 
     const notes = [];
+    // Naismith as a sentence rather than a row: on a phone the rows lose
+    // their labels, and a bare time beside an hourglass would be read as the
+    // route's own. Off a path the rule is the least it will take, not a guess.
+    if (p && !p.loading && p.climb.ascent >= MEASURE_NAISMITH_MIN_ASCENT_M) {
+        const time = measureDuration(naismithMinutes(p.distance, p.climb.ascent));
+        notes.push(['text-body', t(p.alongWalk ? 'measure.naismith_walk' : 'measure.naismith_straight', {time})]);
+    }
     if (tooClose) notes.push(['text-muted', t('measure.too_close')]);
     if (s.error) notes.push(['text-danger', s.error]);
     if (r && !r.routing) notes.push(['text-muted', t('measure.routing_unavailable')]);
@@ -9455,6 +9547,149 @@ function measureRenderResult(s) {
         + `<table class="wr-measure-table">${rows}</table>`
         + notes.map(([cls, text]) => `<div class="small ${cls} mt-1">${escapeHtml(text)}</div>`).join('')
         + links);
+}
+
+// «Ποια ομάδα είναι πιο κοντά εδώ», from the positions this map is showing.
+// A team is stood for by whichever of its members is nearest the point — the
+// first of them to get there — and anyone on no team by themselves. Chosen
+// here rather than on the server so the answer is about exactly the dots the
+// viewer is looking at; only the routing goes to the server.
+function measureNearestCandidates(point) {
+    const here = L.latLng(point.lat, point.lng);
+    const best = new Map();
+    (pins || []).forEach(p => {
+        if (p.lat === null || p.lat === undefined || p.lng === null || p.lng === undefined) return;
+        const key = p.team_label ? 'team:' + p.team_label : 'user:' + p.user_id;
+        const straight = here.distanceTo(L.latLng(Number(p.lat), Number(p.lng)));
+        const current = best.get(key);
+        if (current && current.straight <= straight) return;
+        best.set(key, {
+            lat: Number(p.lat), lng: Number(p.lng), straight,
+            label: p.team_label ? `${p.team_label} · ${p.name}` : p.name,
+            stale: !!p.is_stale, time: p.time,
+        });
+    });
+    return [...best.values()].sort((a, b) => a.straight - b.straight).slice(0, MEASURE_NEAREST_MAX);
+}
+
+function measureNearest(point) {
+    measureClear();
+    const seq = measureSeq;
+    measureEnsureLayer();
+    const candidates = measureNearestCandidates(point);
+    measurePin(point, '◎').addTo(measureLayer);
+    if (!candidates.length) {
+        measureShowCard(measureCardHead(t('measure.nearest_title'), 'bi-people-fill')
+            + `<div class="small text-muted">${escapeHtml(t('measure.nearest_none'))}</div>`);
+        return;
+    }
+    candidates.forEach((c, i) => {
+        L.polyline([[c.lat, c.lng], [point.lat, point.lng]], {color: '#6b7280', weight: 2, dashArray: '4 6', interactive: false}).addTo(measureLayer);
+        measurePin(c, String(i + 1)).addTo(measureLayer);
+    });
+    const state = measureNearestState = {
+        seq, point, candidates, selected: 0, loading: true, results: null, routing: null, error: null,
+        routeLayer: L.layerGroup().addTo(measureLayer),
+    };
+    measureRenderNearest(state);
+
+    const body = new URLSearchParams({
+        csrf_token: csrfToken, mission_id: '<?= $missionId ?>', action: 'nearest',
+        from: JSON.stringify(candidates.map(c => [c.lat, c.lng])), to_lat: point.lat, to_lng: point.lng,
+    });
+    fetch('mission-measure.php', {method: 'POST', body})
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+        .then(res => {
+            if (seq !== measureSeq) return;
+            state.loading = false;
+            if (res && res.ok) { state.results = res.results; state.routing = res.routing; }
+            else state.error = (res && res.error) || t('measure.failed');
+            measureNearestSelect(0);
+        })
+        .catch(() => {
+            if (seq !== measureSeq) return;
+            state.loading = false;
+            state.error = t('measure.failed');
+            measureRenderNearest(state);
+        });
+}
+
+// One team's routes at a time: three pairs of lines to one point would be a
+// tangle nobody could follow. Tapping a row puts that team's on the map.
+function measureNearestSelect(index) {
+    const s = measureNearestState;
+    if (!s || !s.candidates[index]) return;
+    s.selected = index;
+    s.routeLayer.clearLayers();
+    const c = s.candidates[index];
+    const r = s.results && s.results[index];
+    const bounds = L.latLngBounds([[c.lat, c.lng], [s.point.lat, s.point.lng]]);
+    if (r) {
+        ['driving', 'walking'].forEach(mode => {
+            const route = r[mode];
+            if (!route || !Array.isArray(route.points) || route.points.length < 2) return;
+            L.polyline(route.points, {
+                color: MEASURE_ROUTE_COLOURS[mode], weight: mode === 'walking' ? 4 : 5, opacity: 0.8,
+                dashArray: mode === 'walking' ? '8 7' : null, interactive: false,
+            }).addTo(s.routeLayer);
+            route.points.forEach(p => bounds.extend(p));
+        });
+    }
+    if (bounds.isValid() && !map.getBounds().contains(bounds)) map.fitBounds(bounds, {padding: [40, 40]});
+    measureRenderNearest(s);
+}
+
+function measureRenderNearest(s) {
+    const figure = (route, icon, colour) => `<i class="bi ${icon}" style="color:${colour}"></i> `
+        + (route ? `${escapeHtml(formatDistanceMeters(route.meters))} · ${escapeHtml(measureDuration(route.minutes))}` : '—');
+    // Nearest is not always first to arrive: a team 2 km away across a gorge
+    // can be slower than one 4 km away on a road. The list stays in the order
+    // asked for, and the quickest — on foot or by car, whichever is less — is
+    // marked, since that is the one a coordinator is actually choosing.
+    const bestMinutes = r => Math.min(...[r && r.walking, r && r.driving].filter(Boolean).map(x => x.minutes));
+    const timed = (!s.loading && s.routing && s.results) ? s.results.map(bestMinutes) : [];
+    const fastest = timed.filter(isFinite).length > 1 ? timed.indexOf(Math.min(...timed.filter(isFinite))) : -1;
+    const rows = s.candidates.map((c, i) => {
+        const r = s.results && s.results[i];
+        let routes = '';
+        if (s.loading) routes = `<span class="text-muted">${escapeHtml(t('measure.loading'))}</span>`;
+        else if (r && s.routing) {
+            routes = [
+                MEASURE_WALK_AVAILABLE ? figure(r.walking, 'bi-person-walking', MEASURE_ROUTE_COLOURS.walking) : null,
+                figure(r.driving, 'bi-car-front-fill', MEASURE_ROUTE_COLOURS.driving),
+            ].filter(Boolean).join(' &nbsp; ');
+            if ((r.walking && r.walking.detour) || (r.driving && r.driving.detour)) {
+                routes += ` <i class="bi bi-exclamation-triangle-fill text-danger" title="${escapeHtml(t('measure.detour'))}"></i>`;
+            }
+        }
+        // The direction the TEAM would set off in, which is what one reads
+        // out to them.
+        const dir = bearingToCompassAbbr(bearing(c, s.point));
+        if (i === fastest) routes += ` <span class="badge text-bg-success fw-normal">${escapeHtml(t('measure.fastest'))}</span>`;
+        // One line per team, the name cut short rather than wrapped: three
+        // teams on a phone would otherwise fill the map they are drawn on.
+        return `<div class="wr-nearest-row${i === s.selected ? ' active' : ''}" data-nearest="${i}" role="button" tabindex="0">
+            <div class="d-flex justify-content-between gap-2">
+                <span class="fw-semibold text-truncate" style="min-width:0" title="${escapeHtml(c.label)}"><span class="wr-nearest-num">${i + 1}</span> ${escapeHtml(c.label)}</span>
+                <span class="text-nowrap">${escapeHtml(formatDistanceMeters(c.straight))} ${escapeHtml(dir)}</span>
+            </div>
+            ${routes ? `<div class="small">${routes}</div>` : ''}
+            ${c.stale ? `<div class="small text-warning-emphasis">${escapeHtml(t('measure.position_at', {time: c.time}))}</div>` : ''}
+        </div>`;
+    }).join('');
+
+    const results = (!s.loading && s.routing && s.results) ? s.results : [];
+    const notes = [];
+    if (s.error) notes.push(['text-danger', s.error]);
+    if (!s.loading && !s.error && s.routing === false) notes.push(['text-muted', t('measure.routing_unavailable')]);
+    if (results.some(r => r.walk_failed)) notes.push(['text-muted', t(CAN_MANAGE_WAR_ROOM ? 'measure.walk_failed_admin' : 'measure.walk_failed')]);
+    else if (results.some(r => r.walk_tried && !r.walking)) notes.push(['text-warning-emphasis', t('measure.no_walk_path')]);
+    if (results.some(r => (r.walking && r.walking.detour) || (r.driving && r.driving.detour))) notes.push(['text-danger', t('measure.detour')]);
+    if (!s.loading && s.candidates.length > 1) notes.push(['text-muted', t('measure.nearest_hint')]);
+
+    measureShowCard(measureCardHead(t('measure.nearest_title'), 'bi-people-fill')
+        + rows
+        + notes.map(([cls, text]) => `<div class="small ${cls} mt-1">${escapeHtml(text)}</div>`).join(''), true);
 }
 
 map.on('contextmenu', e => {

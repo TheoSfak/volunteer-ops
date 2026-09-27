@@ -520,6 +520,24 @@ final class MissionTargetDistanceTest extends TestCase
         $this->assertSame([], routeDistanceSimplify([]));
     }
 
+    public function testHeightsAreReadOnePerPointOrNotAtAll(): void
+    {
+        require_once __DIR__ . '/../includes/elevation.php';
+
+        // The shape Open-Meteo actually answered the probe with.
+        $this->assertSame([349, 1344, 0], elevationParse('{"elevation":[349.0, 1344.0, 0.0]}', 3));
+        $this->assertSame([2396], elevationParse('{"elevation":[2395.6]}', 1));
+
+        // A climb added up over a profile with a hole in it would be a wrong
+        // number stated with confidence, so a short or broken answer is
+        // refused whole rather than half used.
+        $this->assertNull(elevationParse('{"elevation":[349.0, 1344.0]}', 3));
+        $this->assertNull(elevationParse('{"elevation":[349.0, null, 0.0]}', 3));
+        $this->assertNull(elevationParse('{"error":true,"reason":"Latitude must be in range"}', 1));
+        $this->assertNull(elevationParse('not json', 1));
+        $this->assertNull(elevationParse(null, 1));
+    }
+
     public function testTheMapAndTheAssistantShareOneDetourThreshold(): void
     {
         $this->assertSame(ROUTE_DISTANCE_DETOUR_RATIO, AI_LIVE_ROUTE_DETOUR_RATIO);

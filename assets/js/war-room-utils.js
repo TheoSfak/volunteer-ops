@@ -712,6 +712,60 @@ function bearingToCompassAbbr(deg) {
     return t(keys[Math.round(deg / 45) % 8]);
 }
 
+// Points evenly spaced BY DISTANCE along a line of [lat, lng], both ends
+// always included — the places the live map's measuring tool asks the height
+// of the ground at. Evenly by distance rather than by vertex, because a route
+// is dense with vertices where a road winds and bare along a straight, and a
+// climb added up at the vertices would weigh the bends and miss the hills.
+// Roughly one sample per stepMetres, never more than maxSamples (the elevation
+// service answers 100 at a time), never fewer than the two ends. A two-point
+// line — the straight line from Α to Β — is interpolated.
+function samplePolylineEvenly(points, maxSamples, stepMetres) {
+    if (!Array.isArray(points) || points.length === 0) return [];
+    if (points.length === 1) return [[points[0][0], points[0][1]]];
+    const segMetres = (a, b) => {
+        const midLat = (a[0] + b[0]) / 2;
+        return Math.hypot((b[0] - a[0]) * metersPerDegreeLat(midLat), (b[1] - a[1]) * metersPerDegreeLng(midLat));
+    };
+    const cum = [0];
+    for (let i = 1; i < points.length; i++) cum.push(cum[i - 1] + segMetres(points[i - 1], points[i]));
+    const total = cum[cum.length - 1];
+    const n = Math.max(2, Math.min(maxSamples, Math.ceil(total / stepMetres) + 1));
+    const round5 = v => Math.round(v * 1e5) / 1e5;
+    const out = [];
+    let seg = 1;
+    for (let k = 0; k < n; k++) {
+        const d = total * k / (n - 1);
+        while (seg < points.length - 1 && cum[seg] < d) seg++;
+        const a = points[seg - 1], b = points[seg];
+        const span = cum[seg] - cum[seg - 1];
+        const f = span > 0 ? Math.min(1, Math.max(0, (d - cum[seg - 1]) / span)) : 0;
+        out.push([round5(a[0] + (b[0] - a[0]) * f), round5(a[1] + (b[1] - a[1]) * f)]);
+    }
+    return out;
+}
+
+// Total metres climbed and descended over a height profile, plus its lowest
+// and highest point. null for a profile too short to have a direction.
+function elevationClimb(heights) {
+    if (!Array.isArray(heights) || heights.length < 2) return null;
+    let ascent = 0, descent = 0;
+    for (let i = 1; i < heights.length; i++) {
+        const d = heights[i] - heights[i - 1];
+        if (d > 0) ascent += d; else descent -= d;
+    }
+    return {ascent, descent, min: Math.min(...heights), max: Math.max(...heights)};
+}
+
+// Naismith's rule, the mountain-rescue rule of thumb: 5 km/h on the level plus
+// an hour for every 600 m climbed. It is what the routers' walking times leave
+// out — they are the same whether a path runs along a valley or up its side.
+// A rough figure for a fit walker on a path; off a path it is a floor, not an
+// estimate, which is why the card says what it is.
+function naismithMinutes(distanceMetres, ascentMetres) {
+    return Math.round(distanceMetres / 1000 * 12 + Math.max(0, ascentMetres) / 10);
+}
+
 // Which way the top of the phone points, degrees clockwise from north, from a
 // DeviceOrientationEvent — or null when the event cannot say. iOS gives it
 // directly (webkitCompassHeading). Elsewhere only an ABSOLUTE event is a
@@ -1153,6 +1207,9 @@ if (typeof module !== 'undefined' && module.exports) {
         areaTierForGroup,
         areaUnitPreference,
         bearingToCompassAbbr,
+        samplePolylineEvenly,
+        elevationClimb,
+        naismithMinutes,
         compassHeadingFromOrientation,
         smoothHeading,
         unwrapRotation,

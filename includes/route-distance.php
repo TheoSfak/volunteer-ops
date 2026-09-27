@@ -427,30 +427,55 @@ function routeDistanceRunBatch(array $provider, array $legs): array {
  * path" for a broken key sends an admin looking at the terrain.
  */
 function routeDistanceMeasure(float $fromLat, float $fromLng, float $toLat, float $toLng): array {
-    $leg  = [$fromLat, $fromLng, $toLat, $toLng];
+    return routeDistanceMeasureMany([[$fromLat, $fromLng]], $toLat, $toLng)[0];
+}
+
+/**
+ * The same, from several starting points to one destination, all in parallel:
+ * «Ποια ομάδα είναι πιο κοντά εδώ» routes each of the nearest teams at once,
+ * so the whole answer costs one router timeout rather than one per team.
+ *
+ * $origins is a list of [lat, lng]; the result is a list in the same order,
+ * each entry shaped exactly like routeDistanceMeasure()'s.
+ */
+function routeDistanceMeasureMany(array $origins, float $toLat, float $toLng): array {
     $key  = trim((string) getSetting('google_maps_api_key', ''));
     $osrm = routeDistanceProviderFor('');
+    $origins = array_values($origins);
 
     $jobs = [];
-    if ($key !== '') {
-        $jobs['walking'] = ['provider' => ['name' => 'google', 'mode' => 'walking', 'key' => $key], 'leg' => $leg, 'geometry' => true];
-        $jobs['driving'] = ['provider' => ['name' => 'google', 'mode' => 'driving', 'key' => $key], 'leg' => $leg, 'geometry' => true];
-    } else {
-        $jobs['driving'] = ['provider' => $osrm, 'leg' => $leg, 'geometry' => true];
+    foreach ($origins as $i => [$fromLat, $fromLng]) {
+        $leg = [(float) $fromLat, (float) $fromLng, $toLat, $toLng];
+        if ($key !== '') {
+            $jobs["walking:$i"] = ['provider' => ['name' => 'google', 'mode' => 'walking', 'key' => $key], 'leg' => $leg, 'geometry' => true];
+            $jobs["driving:$i"] = ['provider' => ['name' => 'google', 'mode' => 'driving', 'key' => $key], 'leg' => $leg, 'geometry' => true];
+        } else {
+            $jobs["driving:$i"] = ['provider' => $osrm, 'leg' => $leg, 'geometry' => true];
+        }
     }
     $failed = [];
     $out = routeDistanceRunJobs($jobs, $failed);
 
-    if (!isset($out['driving']) && $key !== '') {
-        $out += routeDistanceRunJobs(['driving' => ['provider' => $osrm, 'leg' => $leg, 'geometry' => true]]);
+    if ($key !== '') {
+        $fallback = [];
+        foreach ($origins as $i => [$fromLat, $fromLng]) {
+            if (!isset($out["driving:$i"])) {
+                $fallback["driving:$i"] = ['provider' => $osrm, 'leg' => [(float) $fromLat, (float) $fromLng, $toLat, $toLng], 'geometry' => true];
+            }
+        }
+        if ($fallback) $out += routeDistanceRunJobs($fallback);
     }
 
-    return [
-        'walking'     => $out['walking'] ?? null,
-        'driving'     => $out['driving'] ?? null,
-        'walk_tried'  => $key !== '',
-        'walk_failed' => in_array('walking', $failed, true),
-    ];
+    $results = [];
+    foreach ($origins as $i => $_) {
+        $results[] = [
+            'walking'     => $out["walking:$i"] ?? null,
+            'driving'     => $out["driving:$i"] ?? null,
+            'walk_tried'  => $key !== '',
+            'walk_failed' => in_array("walking:$i", $failed, true),
+        ];
+    }
+    return $results;
 }
 
 /**
