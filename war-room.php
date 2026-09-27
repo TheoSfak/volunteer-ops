@@ -3070,6 +3070,16 @@ include __DIR__ . '/includes/header.php';
         padding: .1rem .15rem; cursor: pointer;
     }
     .ack-tracker-toggle > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* The bar is the whole panel's drag handle, open or minimized — the same
+       touch-action reason as .ack-card-head below. A click on it still opens
+       and closes the list; only a press that travels becomes a drag. */
+    .ack-tracker-bar, .ack-tracker-toggle { cursor: grab; touch-action: none; }
+    .ack-tracker.ack-dragging { opacity: .93; box-shadow: 0 14px 34px rgba(0,0,0,.6); }
+    .ack-tracker.ack-dragging .ack-tracker-bar,
+    .ack-tracker.ack-dragging .ack-tracker-toggle { cursor: grabbing; }
+    /* Minimized means everything goes into the one line, cards parked around
+       the screen included; opening the list brings them back where they were. */
+    .ack-tracker-float.ack-collapsed { display: none; }
     .ack-tracker-chevron { font-size: .7rem; transition: transform .15s ease; flex-shrink: 0; }
     .ack-tracker.ack-collapsed .ack-tracker-chevron { transform: rotate(-90deg); }
     .ack-tracker.ack-collapsed .ack-tracker-list { display: none; }
@@ -3096,6 +3106,22 @@ include __DIR__ . '/includes/header.php';
         padding: .4rem .45rem .35rem;
     }
     .ack-card.ack-card-done { border-left-color: #22c55e; }
+    /* Command took the order back (point deleted, sector deleted or its team
+       removed). The card stays until its X, saying so, with what it used to
+       say still there underneath but greyed — nobody should read those
+       ticks as a live order. */
+    .ack-card.ack-card-gone { border-left-color: #64748b; }
+    .ack-card-gone-note {
+        margin: .3rem 0 .1rem; padding: .3rem .4rem;
+        border-radius: 5px; background: #3f1d1d; color: #fecaca;
+        font-size: .72rem; font-weight: 700; line-height: 1.3;
+    }
+    .ack-card-gone-note small { display: block; font-weight: 400; color: #fca5a5; margin-top: .1rem; }
+    .ack-card.ack-card-gone .ack-card-detail { text-decoration: line-through; color: #94a3b8; }
+    .ack-card.ack-card-gone .ack-card-count,
+    .ack-card.ack-card-gone .ack-card-stage,
+    .ack-card.ack-card-gone .ack-card-people,
+    .ack-card.ack-card-gone .ack-card-progress { opacity: .45; }
     .ack-card-head { display: flex; align-items: flex-start; gap: .35rem; }
     /* The header doubles as the drag handle. touch-action:none is what makes
        this work on a phone at all — without it the browser claims the gesture
@@ -3202,6 +3228,9 @@ include __DIR__ . '/includes/header.php';
            rather than under it. */
         body.wr-ticker-bottom .ack-tracker { bottom: calc(var(--wr-ticker-bottom-h, 0px) + 12px); }
         body.wr-ticker-bottom.wr-tabs-ready .ack-tracker { bottom: calc(var(--wr-ticker-bottom-h, 0px) + 90px); }
+        /* Moved by hand: placeAckPanel() pins it by left/top inline, and
+           without a right edge the auto width would shrink to its text. */
+        .ack-tracker.ack-moved { width: calc(100vw - 16px); }
     }
 
     /* One row per finding. The left border is the severity, so a coordinator
@@ -3593,7 +3622,7 @@ include __DIR__ . '/includes/header.php';
      (see the CSS) — a 290px column down the right of a 375px screen would be
      the map, covered. -->
 <div id="ackTracker" class="ack-tracker" hidden>
-    <div class="ack-tracker-bar">
+    <div class="ack-tracker-bar" title="<?= t('acktracker.panel_drag_hint') ?>">
         <button type="button" id="ackTrackerToggle" class="ack-tracker-toggle" aria-expanded="true" aria-controls="ackTrackerList">
             <i class="bi bi-check2-square"></i>
             <span id="ackTrackerBarLabel"><?= t('acktracker.title') ?></span>
@@ -7955,7 +7984,12 @@ dispatchLayer.on('popupopen', event => {
             if (!confirm(t('dispatch.delete_confirm'))) return;
             const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: <?= $missionId ?>, id: delBtn.dataset.id});
             fetch('mission-dispatch.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
-                if (result.ok) { map.closePopup(); renderDispatches(dispatches = dispatches.filter(d => String(d.id) !== delBtn.dataset.id)); }
+                if (result.ok) {
+                    map.closePopup();
+                    renderDispatches(dispatches = dispatches.filter(d => String(d.id) !== delBtn.dataset.id));
+                    // Its acknowledgement card says so now, not at the next poll.
+                    if (typeof renderAckTracker === 'function') renderAckTracker([]);
+                }
             });
         });
     }
@@ -8059,7 +8093,12 @@ function sectorDelete(id) {
     if (!confirm(t('sector.delete_confirm'))) return;
     const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'delete', id});
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
-        if (result.ok) { if (map) map.closePopup(); sectors = sectors.filter(s => String(s.id) !== String(id)); sectorRefreshAfter(); }
+        if (result.ok) {
+            if (map) map.closePopup();
+            sectors = sectors.filter(s => String(s.id) !== String(id));
+            sectorRefreshAfter();
+            if (typeof renderAckTracker === 'function') renderAckTracker([]);
+        }
     });
 }
 function sectorDeleteBuilding(id) {
@@ -20714,6 +20753,45 @@ function clampAckPos(x, y, w, h) {
     return {x: Math.round(Math.min(Math.max(4, x), maxX)), y: Math.round(Math.min(Math.max(minY, y), maxY))};
 }
 
+// Where the coordinator has moved the whole panel, {x, y}, or null for its
+// own corner (top-right; the bottom edge on a phone). Per device, not per
+// mission: it is where this person wants the thing on this screen, and that
+// does not change from one operation to the next.
+const ACK_PANEL_POS_KEY = 'wr-ack-panel-pos';
+let ackPanelPos = null;
+try {
+    const stored = JSON.parse(localStorage.getItem(ACK_PANEL_POS_KEY) || 'null');
+    if (stored && typeof stored.x === 'number' && typeof stored.y === 'number') ackPanelPos = stored;
+} catch (e) { /* blocked storage — the panel starts in its corner */ }
+
+function persistAckPanelPos() {
+    try { localStorage.setItem(ACK_PANEL_POS_KEY, JSON.stringify(ackPanelPos)); } catch (e) {}
+}
+
+// Puts the panel where it was moved to, kept fully on screen. Clamped for the
+// panel's CURRENT size and never written back: a panel moved low while
+// minimized has to ride up when its list opens, and come back down to the
+// spot that was chosen when it is minimized again.
+function placeAckPanel() {
+    const panel = document.getElementById('ackTracker');
+    if (!panel) return;
+    panel.classList.toggle('ack-moved', !!ackPanelPos);
+    if (!ackPanelPos) {
+        panel.style.left = panel.style.top = panel.style.right = panel.style.bottom = '';
+        return;
+    }
+    // Inline, because the phone rules dock it by `bottom` with selectors
+    // (body.wr-tabs-ready …) that a class here would not outrank.
+    panel.style.right = 'auto';
+    panel.style.bottom = 'auto';
+    panel.style.left = ackPanelPos.x + 'px';
+    panel.style.top = ackPanelPos.y + 'px';
+    if (panel.hidden) return;
+    const pos = clampAckPos(ackPanelPos.x, ackPanelPos.y, panel.offsetWidth, panel.offsetHeight);
+    panel.style.left = pos.x + 'px';
+    panel.style.top = pos.y + 'px';
+}
+
 function persistAckDismissed() {
     try {
         // Bounded: a long operation must not grow this without limit, and the
@@ -20749,6 +20827,33 @@ const ackTickedBefore = new Map();
 // last render. A row flashes when its level changes — the team reaching point
 // 2 — and a card this tab has not drawn before flashes nothing.
 const ackStagesBefore = new Map();
+
+// Orders command has taken back since they went out, {key: {why, at}}.
+//
+// A dispatched point or area and a search sector are DELETEd outright
+// (mission-dispatch.php / mission-sector.php, singly or in bulk), and a sector
+// whose team is removed drops out of the card query — so the card just stops
+// arriving. That alone proves nothing: a card also stops arriving when it ages
+// past ACK_TRACKER_MAX_PER_KIND, and ackOpenCards keeps it either way. The
+// map's own lists do prove it, because they carry EVERY dispatch and sector of
+// the mission, not the newest twelve. Without this the card sat there frozen,
+// still asking who had confirmed an order that no longer existed.
+//
+// `at` is when this tab noticed — within one poll of the deletion.
+const ackGone = new Map();
+function ackGoneReason(key) {
+    const [kind, id] = key.split(':');
+    if (kind === 'dispatch') {
+        return dispatches.some(d => String(d.id) === id) ? null : 'deleted';
+    }
+    if (kind === 'sector') {
+        const sector = sectors.find(s => String(s.id) === id);
+        if (!sector) return 'deleted';
+        // Same two conditions that keep a sector out of the card query.
+        if (!sector.team_id || sector.status === 'not_started') return 'unassigned';
+    }
+    return null;
+}
 
 // Whether a card still has anything to wait for. The server decides, per kind
 // (loadAckTrackerCardsForMission): «Ελήφθη» from everyone is not the end of a
@@ -20953,11 +21058,17 @@ function ackCardHtml(card, inlineStyle) {
         ? (declinedCount ? t('acktracker.all_answered') + declinedText : t('acktracker.all_done'))
         : t('acktracker.count', {acked: acked, total: total}) + declinedText;
     const stageText = ackStageSummary(card);
+    const gone = card.gone
+        ? `<div class="ack-card-gone-note" role="status">🗑 ${escapeHtml(t('acktracker.gone_' + card.gone.why, {time: ackTimeLabel(card.gone.at)}))}
+                <small>${escapeHtml(t('acktracker.gone_close_hint'))}</small></div>`
+        : '';
+    const stateCls = card.gone ? ' ack-card-gone' : (done ? ' ack-card-done' : '') + (declinedCount ? ' ack-card-declined' : '');
 
-    return `<div class="ack-card${done ? ' ack-card-done' : ''}${declinedCount ? ' ack-card-declined' : ''}" data-ack-key="${escapeHtml(card.key)}"${inlineStyle ? ` style="${inlineStyle}"` : ''}>
+    return `<div class="ack-card${stateCls}" data-ack-key="${escapeHtml(card.key)}"${inlineStyle ? ` style="${inlineStyle}"` : ''}>
                 <div class="ack-card-head" title="${escapeHtml(t('acktracker.drag_hint'))}">
                     <div class="ack-card-titles">
                         <div class="ack-card-kind">${escapeHtml(card.title)}</div>
+                        ${gone}
                         ${detail}
                         <div class="ack-card-meta">${escapeHtml(ackTimeLabel(card.ts))} · ${escapeHtml(t('acktracker.sent_by', {name: card.by || ''}))}</div>
                         <div class="ack-card-count">${escapeHtml(countText)}</div>
@@ -20992,7 +21103,19 @@ function renderAckTracker(cards) {
     });
     ackTrackerSeeded = true;
 
-    const open = Array.from(ackOpenCards.values()).sort((a, b) => b.ts - a.ts);
+    // A card in this payload existed when the payload was built, and that
+    // outranks the map lists: they are queried a moment EARLIER in the same
+    // request, so an order created in between would otherwise read as deleted.
+    const inPayload = new Set(cards.map(c => c.key));
+    ackOpenCards.forEach((card, key) => {
+        const why = inPayload.has(key) ? null : ackGoneReason(key);
+        if (!why) { ackGone.delete(key); return; }
+        if (ackGone.get(key)?.why !== why) ackGone.set(key, {why, at: Math.floor(Date.now() / 1000)});
+    });
+
+    const open = Array.from(ackOpenCards.values())
+        .map(c => ackGone.has(c.key) ? Object.assign({}, c, {gone: ackGone.get(c.key)}) : c)
+        .sort((a, b) => b.ts - a.ts);
     // A card the coordinator has dragged somewhere lives in the floating
     // layer; everything else stays in the stack. Which of the two a card is in
     // is decided by one thing only — whether it has a remembered position — so
@@ -21066,8 +21189,11 @@ function renderAckTracker(cards) {
 // time, so it has to carry the number that decides whether it is worth
 // opening — not just the word "Acknowledgements".
 function syncAckTrackerBar() {
-    const open = Array.from(ackOpenCards.values());
-    if (!open.length) return;
+    // A deleted order is not an order any more: it counts for nothing here.
+    const open = Array.from(ackOpenCards.values()).filter(c => !ackGone.has(c.key));
+    const label = document.getElementById('ackTrackerBarLabel');
+    if (!label) return;
+    if (!open.length) { label.textContent = t('acktracker.title'); return; }
     let acked = 0, total = 0, declined = 0;
     open.forEach(card => {
         total += card.people.length;
@@ -21075,28 +21201,38 @@ function syncAckTrackerBar() {
         acked += card.people.filter(p => p.ack_ts && !p.declined).length;
         declined += card.people.filter(p => p.declined).length;
     });
-    const label = document.getElementById('ackTrackerBarLabel');
-    if (!label) return;
     label.textContent = (open.length === 1
         ? t('acktracker.mobile_summary_one', {acked: acked, total: total})
         : t('acktracker.mobile_summary', {cards: open.length, acked: acked, total: total}))
         + (declined ? ' · ' + t(declined === 1 ? 'acktracker.declined_one' : 'acktracker.declined_many', {n: declined}) : '');
 }
 
+// Makes the next renderAckTracker() rebuild both places a card can be.
+//
+// delete, never `= ''`: '' is exactly the signature of an EMPTY place. Closing
+// the last card parked out on the screen used to reset the float layer to ''
+// and then render it with nothing in it — '' against '' reads as "unchanged",
+// the rebuild was skipped, and the closed card stayed on screen with an X
+// that went on doing nothing however often it was pressed.
+function invalidateAckRender() {
+    ['ackTrackerList', 'ackTrackerFloat'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) delete el.dataset.ackSig;
+    });
+}
+
 function dismissAckCard(key) {
     ackDismissed.add(key);
     ackOpenCards.delete(key);
     ackTickedBefore.delete(key);
+    ackGone.delete(key);
     // A closed card must not leave its parking spot behind: reopening the same
     // key later (it cannot today, but nothing stops a future caller) would put
     // it back at coordinates the coordinator has long forgotten choosing.
     if (ackPositions[key]) { delete ackPositions[key]; persistAckPositions(); }
     persistAckDismissed();
-    // Both signatures, because the card could have been in either place.
-    const list = document.getElementById('ackTrackerList');
-    if (list) list.dataset.ackSig = '';
-    const floatLayer = document.getElementById('ackTrackerFloat');
-    if (floatLayer) floatLayer.dataset.ackSig = '';
+    // Both places, because the card could have been in either.
+    invalidateAckRender();
     renderAckTracker([]);
 }
 
@@ -21132,10 +21268,16 @@ function dismissAckCard(key) {
 // it, or starting a text selection, must not find it has silently torn loose
 // and been remembered there — so nothing happens until the pointer has
 // actually travelled past a threshold, and only then does the card detach.
+//
+// The panel's own bar is a handle too, for the whole panel with every docked
+// card in it — open or minimized to its one line. Same threshold, and for the
+// same reason: the bar is also the button that opens and closes the list, so
+// a press that does not travel has to stay a click.
+let ackPanelDragEndedAt = 0;
 (function initAckCardDragging() {
     const DRAG_THRESHOLD_PX = 5;
-    let pending = null;   // {key, startX, startY, grabDX, grabDY, w, h}
-    let dragging = null;  // the floating element currently following the pointer
+    let pending = null;   // {key | panel:true, startX, startY, grabDX, grabDY, w, h}
+    let dragging = null;  // the element currently following the pointer
 
     function cardElement(key) {
         return document.querySelector(`.ack-tracker-float .ack-card[data-ack-key="${CSS.escape(key)}"]`);
@@ -21145,6 +21287,20 @@ function dismissAckCard(key) {
         // Left button / touch / pen only, and never when the gesture starts on
         // the close button — that is a click, not a handle.
         if (e.button !== undefined && e.button !== 0) return;
+        if (e.target.closest('#ackTracker .ack-tracker-bar')) {
+            if (e.target.closest('.ack-tracker-close')) return;
+            const rect = document.getElementById('ackTracker').getBoundingClientRect();
+            pending = {
+                panel: true,
+                startX: e.clientX,
+                startY: e.clientY,
+                grabDX: e.clientX - rect.left,
+                grabDY: e.clientY - rect.top,
+                w: rect.width,
+                h: rect.height
+            };
+            return;
+        }
         const head = e.target.closest('.ack-card-head');
         if (!head || e.target.closest('.ack-card-close')) return;
         const card = head.closest('.ack-card');
@@ -21169,6 +21325,20 @@ function dismissAckCard(key) {
 
     function onPointerMove(e) {
         if (!pending) return;
+
+        if (pending.panel) {
+            const panel = document.getElementById('ackTracker');
+            if (!dragging) {
+                if (Math.hypot(e.clientX - pending.startX, e.clientY - pending.startY) < DRAG_THRESHOLD_PX) return;
+                dragging = panel;
+                panel.classList.add('ack-dragging');
+                document.body.style.userSelect = 'none';
+            }
+            ackPanelPos = clampAckPos(e.clientX - pending.grabDX, e.clientY - pending.grabDY, pending.w, pending.h);
+            placeAckPanel();
+            e.preventDefault();
+            return;
+        }
 
         if (!dragging) {
             const moved = Math.hypot(e.clientX - pending.startX, e.clientY - pending.startY);
@@ -21196,14 +21366,21 @@ function dismissAckCard(key) {
     }
 
     function onPointerUp() {
-        if (dragging) {
+        if (dragging && pending?.panel) {
+            dragging.classList.remove('ack-dragging');
+            document.body.style.userSelect = '';
+            persistAckPanelPos();
+            // The pointer is still over the bar, which is the open/close
+            // button, so a click is about to land on it. It must not also
+            // fold the list away at the end of a move.
+            ackPanelDragEndedAt = performance.now();
+        } else if (dragging) {
             dragging.classList.remove('ack-dragging');
             document.body.style.userSelect = '';
             // The signature carries the position, so without this the next
             // poll would see a stale signature and skip the re-render that
             // keeps the DOM and ackPositions in agreement.
-            const floatLayer = document.getElementById('ackTrackerFloat');
-            if (floatLayer) floatLayer.dataset.ackSig = '';
+            invalidateAckRender();
             persistAckPositions();
             renderAckTracker([]);
         }
@@ -21218,7 +21395,9 @@ function dismissAckCard(key) {
 
     // A parked card must not be left stranded off-screen when the window
     // shrinks, is rotated, or the same account is opened on a smaller device.
+    // Nor the panel.
     window.addEventListener('resize', () => {
+        placeAckPanel();
         let changed = false;
         Object.keys(ackPositions).forEach(key => {
             const el = cardElement(key);
@@ -21232,29 +21411,54 @@ function dismissAckCard(key) {
         });
         if (changed) {
             persistAckPositions();
-            const floatLayer = document.getElementById('ackTrackerFloat');
-            if (floatLayer) floatLayer.dataset.ackSig = '';
+            invalidateAckRender();
             renderAckTracker([]);
         }
     });
 })();
 
+// No double-click "back to the corner" on the bar, unlike a parked card's
+// header: the bar is also the open/close button, so a double-click's first
+// click folds the list — and a panel moved low then drops to its one-line spot,
+// leaving the second click to land on whatever was underneath (tried: it
+// followed a sidebar link off the page).
+
 document.getElementById('ackTrackerCloseAll')?.addEventListener('click', () => {
     Array.from(ackOpenCards.keys()).forEach(key => {
         ackDismissed.add(key);
         ackTickedBefore.delete(key);
+        ackGone.delete(key);
         delete ackPositions[key];
     });
     ackOpenCards.clear();
     persistAckDismissed();
     persistAckPositions();
+    invalidateAckRender();
     renderAckTracker([]);
 });
 
+// Minimized = the panel's list AND every card parked out on the screen, all
+// into the one line. Opening it again puts each back where it was.
+function applyAckCollapsed(collapsed) {
+    document.getElementById('ackTracker')?.classList.toggle('ack-collapsed', collapsed);
+    document.getElementById('ackTrackerFloat')?.classList.toggle('ack-collapsed', collapsed);
+    document.getElementById('ackTrackerToggle')?.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
+
+// A moved panel is re-fitted on screen whenever its size changes, whatever
+// changed it: a card arriving or closing, the list opening, or the height cap
+// moving with the ticker and the fullscreen map (--wr-acktracker-top), which
+// no render of this panel hears about. Runs after layout and before paint, so
+// the panel never shows at the overhanging position first.
+if (window.ResizeObserver && document.getElementById('ackTracker')) {
+    new ResizeObserver(() => placeAckPanel()).observe(document.getElementById('ackTracker'));
+}
+
 document.getElementById('ackTrackerToggle')?.addEventListener('click', () => {
-    const panel = document.getElementById('ackTracker');
-    const collapsed = panel.classList.toggle('ack-collapsed');
-    document.getElementById('ackTrackerToggle').setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    // The end of a drag by the bar, not a click on it.
+    if (performance.now() - ackPanelDragEndedAt < 400) return;
+    const collapsed = !document.getElementById('ackTracker').classList.contains('ack-collapsed');
+    applyAckCollapsed(collapsed);
     try { localStorage.setItem(ACK_DISMISS_KEY + '-collapsed', collapsed ? '1' : '0'); } catch (e) {}
 });
 
@@ -21275,9 +21479,7 @@ document.getElementById('ackTrackerToggle')?.addEventListener('click', () => {
     if (!panel) return;
     let stored = null;
     try { stored = localStorage.getItem(ACK_DISMISS_KEY + '-collapsed'); } catch (e) {}
-    const collapsed = stored === '1';
-    panel.classList.toggle('ack-collapsed', collapsed);
-    document.getElementById('ackTrackerToggle')?.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    applyAckCollapsed(stored === '1');
 })();
 
 renderAckTracker(ackTrackerCards);
