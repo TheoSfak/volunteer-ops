@@ -440,4 +440,92 @@ final class MissionTargetDistanceTest extends TestCase
         }
         $this->assertNull(routeDistanceParse('osrm', null));
     }
+
+    // ── The map's measuring tool (right-click «Απόσταση από εδώ») ──────────
+
+    public function testTheMeasuringToolAsksGoogleToDriveAsWellAsWalk(): void
+    {
+        $body = json_decode(routeDistanceGoogleBody(35.1464, 24.9159, 35.1960, 24.9271, 'DRIVE'), true);
+        $this->assertSame('DRIVE', $body['travelMode']);
+        // Still coordinates and nothing else, whichever way it travels.
+        $this->assertSame(['origin', 'destination', 'travelMode'], array_keys($body));
+    }
+
+    public function testTheRouteShapeIsAskedForOnlyWhenItWillBeDrawn(): void
+    {
+        // The digest never draws anything; the shape is most of the response,
+        // so it must not start asking for it just because the map does.
+        $this->assertSame('routes.distanceMeters,routes.duration', routeDistanceGoogleFieldMask(false));
+        $this->assertSame(
+            'routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline',
+            routeDistanceGoogleFieldMask(true)
+        );
+    }
+
+    public function testAPolylineDecodesToGooglesOwnPublishedExample(): void
+    {
+        // The worked example from Google's polyline algorithm documentation.
+        $this->assertSame(
+            [[38.5, -120.2], [40.7, -120.95], [43.252, -126.453]],
+            routeDistanceDecodePolyline('_p~iF~ps|U_ulLnnqC_mqNvxq`@')
+        );
+        $this->assertSame([], routeDistanceDecodePolyline(''));
+    }
+
+    public function testAPolylineCutOffMidNumberKeepsOnlyWholePoints(): void
+    {
+        // A truncated response must not invent a last point out of half a
+        // number: that point would be drawn somewhere nobody was sent.
+        $cut = routeDistanceDecodePolyline('_p~iF~ps|U_ulLnnqC_mqN');
+        $this->assertSame([[38.5, -120.2], [40.7, -120.95]], $cut);
+    }
+
+    public function testBothRoutersHandBackTheShapeWhenAskedForIt(): void
+    {
+        $google = routeDistanceParse('google',
+            '{"routes":[{"distanceMeters":4322,"duration":"780s","polyline":{"encodedPolyline":"_p~iF~ps|U_ulLnnqC"}}]}', true);
+        $this->assertSame([[38.5, -120.2], [40.7, -120.95]], $google['points']);
+        $this->assertSame(4322, $google['meters']);
+
+        $osrm = routeDistanceParse('osrm',
+            '{"code":"Ok","routes":[{"distance":4321.6,"duration":780,"geometry":"_p~iF~ps|U_ulLnnqC"}]}', true);
+        $this->assertSame([[38.5, -120.2], [40.7, -120.95]], $osrm['points']);
+
+        // Not asked for, not returned — the digest's legs stay as small as before.
+        $this->assertArrayNotHasKey('points', routeDistanceParse('osrm', '{"code":"Ok","routes":[{"distance":1,"duration":1}]}'));
+
+        // A route with no shape is still a route: the figures are what matter,
+        // and the straight line is already on the map.
+        $bare = routeDistanceParse('google', '{"routes":[{"distanceMeters":4322,"duration":"780s"}]}', true);
+        $this->assertSame([], $bare['points']);
+        $this->assertSame(4322, $bare['meters']);
+    }
+
+    public function testASimplifiedRouteKeepsItsEndsAndItsCorners(): void
+    {
+        // A straight road sampled every ~10 m, then a right-angle turn and
+        // another straight stretch: only the two ends and the corner matter.
+        $route = [];
+        for ($i = 0; $i <= 50; $i++) $route[] = [35.0 + $i * 0.0001, 25.0];
+        for ($i = 1; $i <= 50; $i++) $route[] = [35.005, 25.0 + $i * 0.0001];
+
+        $this->assertSame([$route[0], $route[50], $route[100]], routeDistanceSimplify($route));
+
+        // A bend wider than the tolerance survives; one inside it does not.
+        $this->assertCount(3, routeDistanceSimplify([[35.0, 25.0], [35.0005, 25.0002], [35.001, 25.0]]));
+        $this->assertCount(2, routeDistanceSimplify([[35.0, 25.0], [35.0005, 25.00002], [35.001, 25.0]]));
+
+        // Nothing to simplify in fewer than three points.
+        $this->assertSame([[35.0, 25.0], [35.1, 25.1]], routeDistanceSimplify([[35.0, 25.0], [35.1, 25.1]]));
+        $this->assertSame([], routeDistanceSimplify([]));
+    }
+
+    public function testTheMapAndTheAssistantShareOneDetourThreshold(): void
+    {
+        $this->assertSame(ROUTE_DISTANCE_DETOUR_RATIO, AI_LIVE_ROUTE_DETOUR_RATIO);
+        $this->assertSame(ROUTE_DISTANCE_DETOUR_MIN_METRES, AI_LIVE_ROUTE_DETOUR_MIN_METRES);
+        $this->assertTrue(routeDistanceIsDetour(6200, 70000));
+        $this->assertFalse(routeDistanceIsDetour(5800, 18700));
+        $this->assertFalse(routeDistanceIsDetour(200, 1500));
+    }
 }

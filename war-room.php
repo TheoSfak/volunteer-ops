@@ -2508,6 +2508,33 @@ include __DIR__ . '/includes/header.php';
     #mapCard.wr-draw-active .leaflet-marker-pane .leaflet-interactive,
     #mapCard.wr-draw-active .leaflet-triage-pane,
     #mapCard.wr-draw-active .leaflet-triage-pane .leaflet-interactive { pointer-events: none; }
+    /* The right-click / long-press menu and «Απόσταση από εδώ». On a phone a
+       long press over the map IS the menu, so no callout and no word selected
+       under the finger; popups keep both, so a coordinate can still be
+       selected and copied by hand. */
+    #warRoomMap { -webkit-touch-callout: none; }
+    #warRoomMap .leaflet-map-pane { -webkit-user-select: none; user-select: none; }
+    #warRoomMap .leaflet-popup-pane { -webkit-touch-callout: default; -webkit-user-select: text; user-select: text; }
+    .wr-ctx-popup .leaflet-popup-content { margin: 6px 0; }
+    .wr-ctx-item { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; color: inherit; text-align: left; padding: 7px 14px; font-size: .9rem; }
+    .wr-ctx-item:hover, .wr-ctx-item:focus-visible { background: #f1f5f9; }
+    .wr-ctx-item.wr-ctx-primary { font-weight: 600; color: #0d6efd; }
+    .wr-ctx-sep { border-top: 1px solid #e5e7eb; margin: 4px 0; }
+    .wr-ctx-point { padding: 4px 14px 6px; font-size: .8rem; }
+    .wr-ctx-coords { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; -webkit-user-select: all; user-select: all; }
+    /* A finger needs bigger rows than a pointer does. */
+    @media (pointer: coarse) { .wr-ctx-item { padding: 11px 16px; font-size: 1rem; } }
+    .wr-measure-pin { width: 22px; height: 22px; border-radius: 50%; background: #1f2937; color: #fff; border: 2px solid #fff; box-shadow: 0 1px 4px #0008; font: 700 11px/18px system-ui, sans-serif; text-align: center; }
+    .wr-measure-card { background: #fff; border-radius: 8px; box-shadow: 0 2px 10px #0004; padding: 8px 10px; width: 260px; max-width: calc(100vw - 60px); font-size: .85rem; }
+    /* On a phone the card shares a narrow map with the route it describes. */
+    @media (max-width: 575.98px) {
+        .wr-measure-card { width: 200px; padding: 6px 8px; font-size: .8rem; }
+        .wr-measure-label { display: none; }
+    }
+    .wr-measure-card .btn-close { width: .6em; height: .6em; }
+    .wr-measure-table { width: 100%; }
+    .wr-measure-table td { padding: 2px 0; vertical-align: top; }
+    .wr-measure-table td:last-child { text-align: right; font-weight: 600; white-space: nowrap; padding-left: 8px; }
     .wr-anno-arrowhead { width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 16px solid; filter: drop-shadow(0 1px 2px #0008); }
     .wr-anno-text-label { display: inline-block; padding: 2px 8px; border-radius: 4px; color: #fff; font-weight: 600; font-size: .78rem; white-space: nowrap; box-shadow: 0 1px 3px #0006; }
     .wr-weather-ctl { background: #fff; padding: .5rem .6rem .45rem; }
@@ -9088,6 +9115,361 @@ map.on('click', e => {
         }, 0);
     }
 });
+// ── Right-click / long-press menu, and «Απόσταση από εδώ / Έως εδώ» ─────────
+// One menu for both gestures, because Leaflet already turns a phone's long
+// press into the same 'contextmenu' event a mouse's right button fires
+// (Android's browser and WebView do it natively; on iOS Leaflet's own tapHold
+// simulates it). It offers only what anyone looking at this map may do —
+// measure, and the point itself — so volunteers get it too. Not while a drawing
+// tool or a pick is waiting for its click: the same gesture would be read twice.
+//
+// A measurement is this viewer's own question. It is drawn on this screen only
+// and never saved, sent to anyone or put in the operation's record.
+let measureFrom = null;     // the first point, while the second is awaited
+let measureLayer = null;    // both pins, the straight line and the routes
+let measureControl = null;  // the card; a Leaflet control, so it stays in fullscreen
+let measureSeq = 0;         // a slow answer must never land on a newer measurement
+// Pixels, not metres, so reaching for a person or a point feels the same at
+// every zoom.
+const MEASURE_SNAP_PX = 18;
+// Below this the two points are the same spot and there is nothing to route.
+const MEASURE_MIN_ROUTE_M = 10;
+const MEASURE_ROUTE_COLOURS = {walking: '#198754', driving: '#0d6efd'};
+// Whether a walking route will be looked for at all (it needs the Google key).
+// Only the yes/no reaches the page, never the key. Known up front so the card's
+// rows do not rearrange themselves when the answer arrives.
+const MEASURE_WALK_AVAILABLE = <?= json_encode(trim((string) getSetting('google_maps_api_key', '')) !== '') ?>;
+
+function mapGestureIsTouch(ev) {
+    return !!ev && (ev.pointerType === 'touch' || !!ev._simulated
+        || !!(ev.sourceCapabilities && ev.sourceCapabilities.firesTouchEvents));
+}
+
+// A right-click on a person, a dispatch point or the base measures from THAT,
+// named, rather than from wherever the pointer landed a few pixels off it.
+function mapGesturePoint(e) {
+    let best = null, bestPx = MEASURE_SNAP_PX;
+    const consider = (lat, lng, label) => {
+        if (lat === null || lat === undefined || lng === null || lng === undefined) return;
+        const px = map.latLngToContainerPoint([Number(lat), Number(lng)]).distanceTo(e.containerPoint);
+        if (px <= bestPx) { bestPx = px; best = {lat: Number(lat), lng: Number(lng), label: label || null}; }
+    };
+    (pins || []).forEach(p => consider(p.lat, p.lng, p.name));
+    (dispatches || []).forEach(d => {
+        if (d.type === 'point' && d.geo) consider(d.geo.lat, d.geo.lng, [d.team_label, d.label].filter(Boolean).join(' — '));
+    });
+    if (missionLocation.lat) consider(missionLocation.lat, missionLocation.lng, t('map.mission_point_label'));
+    return best || {lat: e.latlng.lat, lng: e.latlng.lng, label: null};
+}
+
+// Named the way the sectors card names them: sector names repeat across the
+// rings of one mission, and «Τομέας Α» alone would name two pieces of ground.
+function mapSectorsAt(lat, lng) {
+    return (sectors || []).filter(s => Array.isArray(s.geo) && s.geo.length >= 3 && pointInPolygon(lat, lng, s.geo)).map(s => {
+        const area = (areas || []).find(a => a.id === s.area_id);
+        return s.label + (area ? ' — ' + area.label : '');
+    });
+}
+
+function mapPointText(p) {
+    return p.label || `${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}`;
+}
+
+function openMapContextMenu(point, touch) {
+    const coords = `${point.lat.toFixed(6)}, ${point.lng.toFixed(6)}`;
+    const item = (action, icon, label, cls = '') =>
+        `<button type="button" class="wr-ctx-item${cls}" data-ctx="${action}"><i class="bi ${icon}"></i>${escapeHtml(label)}</button>`;
+    const measureItems = measureFrom
+        ? item('measure-to', 'bi-flag-fill', t('measure.to_here'), ' wr-ctx-primary') + item('measure-cancel', 'bi-x-circle', t('measure.cancel'))
+        : item('measure-from', 'bi-rulers', t('measure.from_here')) + item('measure-me', 'bi-person-walking', t('measure.from_me'));
+    const sectorLines = mapSectorsAt(point.lat, point.lng)
+        .map(s => `<div class="text-muted">${escapeHtml(t('measure.in_sector', {name: s}))}</div>`).join('');
+    const html = `<div class="wr-ctx-menu">${measureItems}<div class="wr-ctx-sep"></div>
+        <div class="wr-ctx-point">
+            ${point.label ? `<div class="fw-semibold">${escapeHtml(point.label)}</div>` : ''}
+            <div class="d-flex align-items-center gap-2">
+                <span class="wr-ctx-coords">${coords}</span>
+                <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" data-ctx="copy" title="${escapeHtml(t('measure.copy'))}" aria-label="${escapeHtml(t('measure.copy'))}"><i class="bi bi-clipboard"></i></button>
+            </div>
+            ${sectorLines}
+            <div class="text-muted mt-1">${escapeHtml(t('measure.navigate'))}</div>
+            ${navigationPairHtml(point.lat, point.lng, 'block')}
+        </div></div>`;
+    const popup = L.popup({className: 'wr-ctx-popup', closeButton: false, minWidth: 220, maxWidth: 300})
+        .setLatLng([point.lat, point.lng]).setContent(html).openOn(map);
+    popup.getElement()?.addEventListener('click', ev => {
+        const btn = ev.target.closest('[data-ctx]');
+        if (!btn) return;
+        const action = btn.dataset.ctx;
+        if (action === 'copy') { mapCopyCoords(coords, btn); return; }
+        map.closePopup(popup);
+        if (action === 'measure-from') measureStart(point, touch);
+        else if (action === 'measure-to') measureFinish(point);
+        else if (action === 'measure-cancel') measureClear();
+        else if (action === 'measure-me') measureFromMe(point);
+    });
+}
+
+// The clipboard API needs a secure context and a permission some WebViews
+// never grant, so on failure the coordinates are left SELECTED instead —
+// one tap on the phone's own «Αντιγραφή» from there.
+function mapCopyCoords(text, btn) {
+    const done = () => { btn.innerHTML = '<i class="bi bi-check2"></i>'; btn.title = t('measure.copied'); };
+    const selectInstead = () => {
+        const span = btn.parentElement.querySelector('.wr-ctx-coords');
+        if (!span) return;
+        const range = document.createRange();
+        range.selectNodeContents(span);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+    };
+    if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(done, selectInstead);
+    else selectInstead();
+}
+
+function measureEnsureLayer() {
+    if (!measureLayer) measureLayer = L.layerGroup().addTo(map);
+}
+
+function measurePin(p, letter) {
+    return L.marker([p.lat, p.lng], {
+        interactive: false, keyboard: false, zIndexOffset: 2000,
+        icon: L.divIcon({className: '', html: `<div class="wr-measure-pin">${escapeHtml(letter)}</div>`, iconSize: [22, 22], iconAnchor: [11, 11]}),
+    });
+}
+
+function measureShowCard(html) {
+    if (!measureControl) {
+        const MeasureControl = L.Control.extend({
+            options: {position: 'topright'},
+            onAdd: function () {
+                const div = L.DomUtil.create('div', 'leaflet-control wr-measure-card');
+                L.DomEvent.disableClickPropagation(div);
+                L.DomEvent.disableScrollPropagation(div);
+                div.addEventListener('click', ev => {
+                    if (ev.target.closest('[data-measure="close"]')) measureClear();
+                });
+                return div;
+            },
+        });
+        measureControl = new MeasureControl().addTo(map);
+    }
+    measureControl.getContainer().innerHTML = html;
+}
+
+function measureCardHead(title) {
+    return `<div class="d-flex align-items-start justify-content-between gap-2 mb-1">
+        <strong><i class="bi bi-rulers me-1"></i>${escapeHtml(title)}</strong>
+        <button type="button" class="btn-close btn-close-sm" data-measure="close" aria-label="${escapeHtml(t('common.close'))}"></button>
+    </div>`;
+}
+
+function measureClear() {
+    measureSeq++;
+    measureFrom = null;
+    if (measureLayer) measureLayer.clearLayers();
+    if (measureControl) { measureControl.remove(); measureControl = null; }
+}
+
+function measureStart(point, touch) {
+    measureClear();
+    measureFrom = point;
+    measureEnsureLayer();
+    measurePin(point, t('measure.pin_a')).addTo(measureLayer);
+    measureShowCard(measureCardHead(t('measure.title'))
+        + `<div class="small">${escapeHtml(t('measure.from_label', {place: mapPointText(point)}))}</div>`
+        + `<div class="small text-muted mt-1">${escapeHtml(t(touch ? 'measure.pick_hint_touch' : 'measure.pick_hint_mouse'))}</div>`);
+}
+
+function measureFinish(to) {
+    const from = measureFrom;
+    if (!from) return;
+    measureFrom = null;
+    measureDraw(from, to);
+}
+
+// «Απόσταση από εμένα»: a fix the GPS tick took in the last minute is used as
+// it is; otherwise the phone is asked once, and only if it cannot answer does
+// the last position this page knows stand in — WITH ITS TIME, because it can
+// be a quarter of an hour old or, for my own pin on the map, from yesterday.
+function measureFromMe(to) {
+    measureClear();
+    const seq = measureSeq;
+    measureShowCard(measureCardHead(t('measure.title')) + `<div class="small text-muted">${escapeHtml(t('measure.locating'))}</div>`);
+    const use = (pos, label) => { if (seq === measureSeq) measureDraw({lat: pos.lat, lng: pos.lng, label, isMe: true}, to); };
+    const auto = latestAutoPosition && latestAutoPosition.coords ? latestAutoPosition : null;
+    if (auto && Date.now() - auto.timestamp < 60000) {
+        use({lat: auto.coords.latitude, lng: auto.coords.longitude}, t('measure.me'));
+        return;
+    }
+    const fallBack = () => {
+        if (auto && Date.now() - auto.timestamp < 15 * 60000) {
+            const time = new Date(auto.timestamp).toLocaleTimeString(jsLocale, {hour: '2-digit', minute: '2-digit'});
+            use({lat: auto.coords.latitude, lng: auto.coords.longitude}, t('measure.me_at', {time}));
+            return;
+        }
+        const mine = (pins || []).find(p => Number(p.user_id) === WR_MY_USER_ID && p.lat !== null && p.lat !== undefined);
+        if (mine) { use({lat: Number(mine.lat), lng: Number(mine.lng)}, t('measure.me_at', {time: mine.time})); return; }
+        if (seq === measureSeq) {
+            measureShowCard(measureCardHead(t('measure.title')) + `<div class="small text-danger">${escapeHtml(t('measure.no_position'))}</div>`);
+        }
+    };
+    if (!navigator.geolocation) { fallBack(); return; }
+    navigator.geolocation.getCurrentPosition(
+        p => use({lat: p.coords.latitude, lng: p.coords.longitude}, t('measure.me')),
+        fallBack,
+        {enableHighAccuracy: true, timeout: 10000, maximumAge: 30000}
+    );
+}
+
+function measureDuration(minutes) {
+    const m = Math.max(1, Math.round(minutes));
+    if (m < 60) return t('measure.duration_min', {m});
+    return t('measure.duration_hm', {h: Math.floor(m / 60), m: String(m % 60).padStart(2, '0')});
+}
+
+// Google Maps from the first point to the second — not from the device, which
+// is what the ordinary 🚗/🚶 links do: whoever measured asked about THIS pair.
+// From «me» it is left to the device, whose position is fresher than ours.
+function measureMapsUrl(from, to, mode) {
+    const ll = p => `${p.lat.toFixed(6)},${p.lng.toFixed(6)}`;
+    const origin = from.isMe ? '' : `&origin=${ll(from)}`;
+    return `https://www.google.com/maps/dir/?api=1${origin}&destination=${ll(to)}&travelmode=${mode}`;
+}
+
+function measureDraw(from, to) {
+    const seq = ++measureSeq;
+    measureFrom = null;
+    measureEnsureLayer();
+    measureLayer.clearLayers();
+    L.polyline([[from.lat, from.lng], [to.lat, to.lng]], {color: '#374151', weight: 2, dashArray: '4 6', interactive: false}).addTo(measureLayer);
+    measurePin(from, t('measure.pin_a')).addTo(measureLayer);
+    measurePin(to, t('measure.pin_b')).addTo(measureLayer);
+
+    // The straight line is arithmetic and is on screen at once; only the two
+    // routed figures wait for the server.
+    const straight = L.latLng(from.lat, from.lng).distanceTo(L.latLng(to.lat, to.lng));
+    const state = {
+        from, to, straight,
+        dir: bearingToCompassAbbr(bearing(from, to)),
+        loading: straight >= MEASURE_MIN_ROUTE_M,
+        result: null, error: null,
+    };
+    measureRenderResult(state);
+    if (!state.loading) return;
+
+    const body = new URLSearchParams({
+        csrf_token: csrfToken, mission_id: '<?= $missionId ?>',
+        from_lat: from.lat, from_lng: from.lng, to_lat: to.lat, to_lng: to.lng,
+    });
+    fetch('mission-measure.php', {method: 'POST', body})
+        .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+        .then(res => {
+            if (seq !== measureSeq) return;
+            state.loading = false;
+            if (res && res.ok) { state.result = res; measureDrawRoutes(res, from, to); }
+            else state.error = (res && res.error) || t('measure.failed');
+            measureRenderResult(state);
+        })
+        .catch(() => {
+            if (seq !== measureSeq) return;
+            state.loading = false;
+            state.error = t('measure.failed');
+            measureRenderResult(state);
+        });
+}
+
+function measureDrawRoutes(res, from, to) {
+    const bounds = L.latLngBounds([[from.lat, from.lng], [to.lat, to.lng]]);
+    // Driving first so the walking line, usually the one that matters in the
+    // field, is drawn on top where the two share a road.
+    ['driving', 'walking'].forEach(mode => {
+        const route = res[mode];
+        if (!route || !Array.isArray(route.points) || route.points.length < 2) return;
+        L.polyline(route.points, {
+            color: MEASURE_ROUTE_COLOURS[mode], weight: mode === 'walking' ? 4 : 5, opacity: 0.8,
+            dashArray: mode === 'walking' ? '8 7' : null, interactive: false,
+        }).addTo(measureLayer);
+        route.points.forEach(p => bounds.extend(p));
+    });
+    // Brought into view only when part of it is off screen: a coordinator who
+    // measured something already in view has framed the map the way they want.
+    if (bounds.isValid() && !map.getBounds().contains(bounds)) map.fitBounds(bounds, {padding: [40, 40]});
+}
+
+function measureRenderResult(s) {
+    const r = s.result;
+    // The label hides on a phone, leaving the icon in the same colour as its
+    // line on the map: the card shares a narrow map with what it describes.
+    const row = (icon, colour, label, value) =>
+        `<tr><td title="${escapeHtml(label)}"><i class="bi ${icon} me-1"${colour ? ` style="color:${colour}"` : ''}></i><span class="wr-measure-label">${escapeHtml(label)}</span></td><td>${value}</td></tr>`;
+    const routeValue = mode => {
+        if (s.loading) return `<span class="text-muted fw-normal">${escapeHtml(t('measure.loading'))}</span>`;
+        const route = r && r[mode];
+        if (!route) return '<span class="text-muted fw-normal">—</span>';
+        // Said when the car figure came from the free router after Google's
+        // failed, so nobody compares two numbers from two routers unawares.
+        const via = route.source === 'osrm' && MEASURE_WALK_AVAILABLE ? ' <span class="text-muted fw-normal small">(OSRM)</span>' : '';
+        return `${escapeHtml(formatDistanceMeters(route.meters))} · ${escapeHtml(measureDuration(route.minutes))}${via}`;
+    };
+    const tooClose = s.straight < MEASURE_MIN_ROUTE_M;
+    let rows = row('bi-arrows-angle-expand', null, t('measure.straight'),
+        escapeHtml(formatDistanceMeters(s.straight)) + (tooClose ? '' : ' ' + escapeHtml(s.dir)));
+    if (!tooClose) {
+        if (MEASURE_WALK_AVAILABLE) rows += row('bi-person-walking', MEASURE_ROUTE_COLOURS.walking, t('measure.walk'), routeValue('walking'));
+        rows += row('bi-car-front-fill', MEASURE_ROUTE_COLOURS.driving, t('measure.drive'), routeValue('driving'));
+    }
+
+    const notes = [];
+    if (tooClose) notes.push(['text-muted', t('measure.too_close')]);
+    if (s.error) notes.push(['text-danger', s.error]);
+    if (r && !r.routing) notes.push(['text-muted', t('measure.routing_unavailable')]);
+    if (r && r.routing) {
+        // Tried and found nothing is a different fact from never tried. On a
+        // mountain it means the paths are not mapped, NOT that nobody can walk
+        // there — and then the straight line is the figure to go by.
+        // And Google not answering at all is a third: a fact about the key,
+        // not the terrain, and only an admin can act on it.
+        if (r.walk_failed) notes.push(['text-muted', t(CAN_MANAGE_WAR_ROOM ? 'measure.walk_failed_admin' : 'measure.walk_failed')]);
+        else if (r.walk_tried && !r.walking) notes.push(['text-warning-emphasis', t('measure.no_walk_path')]);
+        if (!r.driving) notes.push(['text-muted', t('measure.no_drive_route')]);
+        if ((r.walking && r.walking.detour) || (r.driving && r.driving.detour)) notes.push(['text-danger', t('measure.detour')]);
+    }
+    if (!MEASURE_WALK_AVAILABLE && CAN_MANAGE_WAR_ROOM && !tooClose) notes.push(['text-muted', t('measure.no_walk_key')]);
+
+    const mapsLink = (mode, icon, label) =>
+        `<a class="btn btn-sm btn-outline-success py-0 px-2" target="_blank" rel="noopener" href="${measureMapsUrl(s.from, s.to, mode)}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"><i class="bi ${icon}"></i></a>`;
+    const links = tooClose ? '' : `<div class="d-flex align-items-center gap-1 mt-2">
+        <span class="small text-muted me-auto">${escapeHtml(t('measure.open_in_maps'))}</span>
+        ${mapsLink('driving', 'bi-car-front-fill', t('nav.drive'))}${mapsLink('walking', 'bi-person-walking', t('nav.walk'))}
+    </div>`;
+
+    // Only a NAMED end earns a line: bare coordinates add two lines of digits
+    // to a card whose pins already show where Α and Β are.
+    const named = [[t('measure.pin_a'), s.from], [t('measure.pin_b'), s.to]].filter(([, p]) => p.label)
+        .map(([letter, p]) => `${escapeHtml(letter)}: ${escapeHtml(p.label)}`).join('<br>');
+
+    measureShowCard(measureCardHead(t('measure.title'))
+        + (named ? `<div class="small text-muted mb-1">${named}</div>` : '')
+        + `<table class="wr-measure-table">${rows}</table>`
+        + notes.map(([cls, text]) => `<div class="small ${cls} mt-1">${escapeHtml(text)}</div>`).join('')
+        + links);
+}
+
+map.on('contextmenu', e => {
+    if (activeTool || triagePickKind || addingBuildingToSectorId !== null) return;
+    const ev = e.originalEvent;
+    if (ev && ev.target && ev.target.closest && ev.target.closest('.leaflet-popup, .leaflet-control')) return;
+    const touch = mapGestureIsTouch(ev);
+    // The one sign on a phone that the press was taken, before the menu paints.
+    if (touch && navigator.vibrate) { try { navigator.vibrate(15); } catch (_) {} }
+    openMapContextMenu(mapGesturePoint(e), touch);
+});
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && (measureFrom || measureControl) && !document.querySelector('.modal.show')) measureClear();
+});
+
 // The mission's own point is the base/RV, i.e. where «Επιστροφή στη Βάση»
 // sends everyone — so it gets directions like any other destination. The
 // briefing sheet (briefing-view.php) has always offered them here; the live

@@ -407,25 +407,15 @@ function aiLiveDistanceToTargetWords(
 }
 
 /**
- * Past this ratio the routed number is about roads, not about the people.
- *
- * Measured on a real Psiloritis mission: a crew 6,2 km from their sector in a
- * straight line came back as 70 km by road, because the router snapped both
- * ends to the nearest asphalt and went round the whole mountain. Eleven times
- * the real separation, stated flatly, is the kind of figure a coordinator acts
- * on — and it would send a vehicle on a two-hour drive to reach people who are
- * an hour's walk away.
- *
- * So the number is kept, because it IS the driving distance and sometimes that
- * is exactly the question, and it is labelled for what it is. Four times is
- * the threshold: a genuine road detour around a valley runs two to three, and
- * anything past four is the router leaving the terrain the team is standing
- * on.
+ * Past this ratio the routed number is about roads, not about the people —
+ * the reasoning and the Psiloritis measurement behind it are on
+ * ROUTE_DISTANCE_DETOUR_RATIO (route-distance.php), which the map's measuring
+ * tool uses too, so the two can never disagree about what counts as a detour.
  */
-const AI_LIVE_ROUTE_DETOUR_RATIO = 4.0;
+const AI_LIVE_ROUTE_DETOUR_RATIO = ROUTE_DISTANCE_DETOUR_RATIO;
 
 /** Below this the ratio means nothing — short legs are all detour. */
-const AI_LIVE_ROUTE_DETOUR_MIN_METRES = 1000.0;
+const AI_LIVE_ROUTE_DETOUR_MIN_METRES = ROUTE_DISTANCE_DETOUR_MIN_METRES;
 
 const AI_LIVE_ROUTE_DETOUR_NOTE =
     '(ΠΡΟΣΟΧΗ: ο δρομολογητής κάνει πολύ μεγάλο γύρο από δρόμο — εκτός δρόμου το χρήσιμο νούμερο είναι η ευθεία)';
@@ -468,8 +458,7 @@ const AI_LIVE_ROUTE_NO_WALK_NOTE =
     'Οπου γραφει "(χωρις πεζη διαδρομη)", ζητηθηκε χρονος πεζοποριας και δεν βρεθηκε: στο βουνο τα μονοπατια συχνα δεν ειναι καταγεγραμμενα στον χαρτη. ΔΕΝ σημαινει οτι δεν γινεται με τα ποδια — σημαινει οτι ο οδηγος ειναι η ευθεια αποσταση.';
 
 function aiLiveRouteIsDetour(float $straightMetres, float $routedMetres): bool {
-    if ($straightMetres < AI_LIVE_ROUTE_DETOUR_MIN_METRES) return false;
-    return $routedMetres > $straightMetres * AI_LIVE_ROUTE_DETOUR_RATIO;
+    return routeDistanceIsDetour($straightMetres, $routedMetres);
 }
 
 /**

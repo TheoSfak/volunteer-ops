@@ -104,6 +104,10 @@ define('WAR_ROOM_ACTION_SCRIPTS', [
     // the same phone, often after it sat locked, and partner-org guests get
     // orders too.
     'mission-decline.php',
+    // mission-measure.php (the live map's «Απόσταση από εδώ / Έως εδώ»,
+    // right-click or long-press) is used from the same long-open tab and the
+    // same phones, partner-org guests included.
+    'mission-measure.php',
 ]);
 
 function initSession() {
