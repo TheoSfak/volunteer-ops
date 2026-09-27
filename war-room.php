@@ -3994,8 +3994,8 @@ include __DIR__ . '/includes/header.php';
                         </ul>
                     </div>
                     <?php endif; ?>
-                    <button type="button" id="mapSatelliteToggle" class="btn btn-sm btn-outline-secondary" title="<?= t('map.btn_satellite_view') ?>">
-                        <i class="bi bi-globe-americas"></i>
+                    <button type="button" id="mapSatelliteToggle" class="btn btn-sm btn-outline-secondary" title="<?= t('map.base_layer_menu') ?>">
+                        <i class="bi bi-layers"></i>
                     </button>
                     <button type="button" id="mapFullscreenToggle" class="btn btn-sm btn-outline-secondary" title="<?= t('map.btn_fullscreen') ?>">
                         <i class="bi bi-arrows-fullscreen"></i>
@@ -4998,7 +4998,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 <div class="modal-content">
                     <div class="modal-header py-2">
                         <h5 class="modal-title"><i class="bi bi-geo-alt-fill me-1"></i><?= t('missing_person.last_seen_location_label') ?></h5>
-                        <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="missingPersonPickSatelliteToggle" title="<?= t('map.btn_satellite_view') ?>"><i class="bi bi-globe-americas"></i></button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="missingPersonPickSatelliteToggle" title="<?= t('map.base_layer_menu') ?>"><i class="bi bi-layers"></i></button>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body p-0 d-flex flex-column">
@@ -5765,7 +5765,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h5 class="modal-title"><i class="bi bi-pin-map-fill me-1"></i><?= t('dispatch.card_title') ?></h5>
-                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="dispatchSatelliteToggle" title="<?= t('map.btn_satellite_view') ?>"><i class="bi bi-globe-americas"></i></button>
+                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="dispatchSatelliteToggle" title="<?= t('map.base_layer_menu') ?>"><i class="bi bi-layers"></i></button>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-0 d-flex flex-column">
@@ -5797,7 +5797,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h5 class="modal-title"><i class="bi bi-scissors me-1"></i><span id="divideSectorsAreaLabel"></span></h5>
-                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="divideSectorsSatelliteToggle" title="<?= t('map.btn_satellite_view') ?>"><i class="bi bi-globe-americas"></i></button>
+                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="divideSectorsSatelliteToggle" title="<?= t('map.base_layer_menu') ?>"><i class="bi bi-layers"></i></button>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-0 d-flex flex-column flex-md-row">
@@ -5847,7 +5847,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h5 class="modal-title"><i class="bi bi-scissors me-1"></i><span id="splitSectorLabel"></span></h5>
-                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="splitSectorSatelliteToggle" title="<?= t('map.btn_satellite_view') ?>"><i class="bi bi-globe-americas"></i></button>
+                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="splitSectorSatelliteToggle" title="<?= t('map.base_layer_menu') ?>"><i class="bi bi-layers"></i></button>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-0 d-flex flex-column flex-md-row">
@@ -5882,7 +5882,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h5 class="modal-title"><i class="bi bi-bounding-box me-1"></i><?= t('sector.area_card_new_btn') ?></h5>
-                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="areaComposerSatelliteToggle" title="<?= t('map.btn_satellite_view') ?>"><i class="bi bi-globe-americas"></i></button>
+                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="areaComposerSatelliteToggle" title="<?= t('map.base_layer_menu') ?>"><i class="bi bi-layers"></i></button>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-0 d-flex flex-column">
@@ -5921,7 +5921,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h5 class="modal-title"><i class="bi bi-exclamation-triangle-fill me-1 text-danger"></i><?= t('restricted_area.new_btn') ?></h5>
-                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="restrictedAreaSatelliteToggle" title="<?= t('map.btn_satellite_view') ?>"><i class="bi bi-globe-americas"></i></button>
+                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="restrictedAreaSatelliteToggle" title="<?= t('map.base_layer_menu') ?>"><i class="bi bi-layers"></i></button>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-0 d-flex flex-column">
@@ -5954,7 +5954,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
         <div class="modal-content">
             <div class="modal-header py-2">
                 <h5 class="modal-title"><i class="bi bi-signpost-split-fill me-1"></i><?= t('route.composer_title') ?></h5>
-                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="routeSatelliteToggle" title="<?= t('map.btn_satellite_view') ?>"><i class="bi bi-globe-americas"></i></button>
+                <button type="button" class="btn btn-sm btn-outline-secondary me-2" id="routeSatelliteToggle" title="<?= t('map.base_layer_menu') ?>"><i class="bi bi-layers"></i></button>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-0 d-flex flex-column">
@@ -6924,12 +6924,14 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
 // pre-3.186.0 absence of 'topo') just falls back to street.
 //
 // toggleBtnId is optional — the live map and every composer pass their own
-// button id. The button CYCLES street -> topo -> satellite -> street rather
-// than toggling a pair, and keeps the existing convention that its icon and
-// title advertise the state a click would move TO (matching
-// mapFullscreenToggle's own convention), so it stays self-explanatory now
-// that there are three stops instead of two.
-const MAP_BASE_LAYER_CYCLE = ['street', 'topo', 'satellite', 'cadastre'];
+// button id. The button opens a small menu that NAMES every view and ticks
+// the one on screen. It used to cycle, with its icon and title advertising
+// the stop a click would move TO — so while the topographic map was showing,
+// the button read «Δορυφορική προβολή», and people reasonably concluded the
+// satellite view was the one with the contour lines. A named list cannot be
+// read the wrong way round, and on a phone (no hover titles) it is the only
+// place the names appear at all.
+const MAP_BASE_LAYER_KEYS = ['street', 'topo', 'satellite'];
 // Every layer may be zoomed past the depth its tiles actually reach, with
 // Leaflet upscaling the deepest real tile — the trick OpenTopoMap has used
 // here since v3.186.0, now applied to all three.
@@ -6956,52 +6958,69 @@ function addMapBaseLayers(targetMap, toggleBtnId) {
             maxNativeZoom: 19,
             maxZoom: MAP_MAX_ZOOM,
         }),
-        // The Hellenic Cadastre's orthophoto, for judging a pin against the
-        // ground. Esri's mosaic is only specified to ~5 m, and over Heraklion
-        // it sits ~3 m WSW of this one (image correlation at five sites,
-        // 2026-09-25) — so a phone that is right looks 3 m wrong on it. Greece
-        // only; a plain WMS, asked for in lat/lng per tile, which over one
-        // tile differs from the map's projection by far under a pixel.
-        cadastre: L.tileLayer.wms('https://gis.ktimanet.gr/wms/wmsopen/wmsserver.aspx', {
-            layers: 'BASEMAP',
-            format: 'image/jpeg',
-            crs: L.CRS.EPSG4326,
-            tileSize: 512,
-            attribution: '© Ελληνικό Κτηματολόγιο',
-            maxZoom: MAP_MAX_ZOOM,
-        }),
     };
-    // Keyed by the layer each entry describes; the button shows the one a
-    // click moves to. (It used to be keyed by the layer showing but looked up
-    // by the next, so it always advertised the wrong stop.)
-    const layerBtnState = {
-        street:    {icon: 'bi-map',             title: 'map.btn_street_view'},
-        topo:      {icon: 'bi-triangle',        title: 'map.btn_topo_view'},
-        satellite: {icon: 'bi-globe-americas',  title: 'map.btn_satellite_view'},
-        cadastre:  {icon: 'bi-airplane',        title: 'map.btn_cadastre_view'},
+    const layerMeta = {
+        street:    {icon: 'bi-map',            label: 'map.btn_street_view'},
+        topo:      {icon: 'bi-triangle',       label: 'map.btn_topo_view'},
+        satellite: {icon: 'bi-globe-americas', label: 'map.btn_satellite_view'},
     };
 
-    let currentKey = localStorage.getItem('wr_map_base_layer');
+    // A stored value this list no longer has (e.g. the removed 'cadastre')
+    // falls back to street.
+    let currentKey = null;
+    try { currentKey = localStorage.getItem('wr_map_base_layer'); } catch (e) {}
     if (!layers[currentKey]) currentKey = 'street';
     layers[currentKey].addTo(targetMap);
 
     const btn = toggleBtnId ? document.getElementById(toggleBtnId) : null;
     if (btn) {
-        const refreshBtn = () => {
-            // What a click moves TO, not what is showing now.
-            const nextKey = MAP_BASE_LAYER_CYCLE[(MAP_BASE_LAYER_CYCLE.indexOf(currentKey) + 1) % MAP_BASE_LAYER_CYCLE.length];
-            btn.innerHTML = '<i class="bi ' + layerBtnState[nextKey].icon + '"></i>';
-            btn.title = t(layerBtnState[nextKey].title);
-        };
-        refreshBtn();
-        btn.addEventListener('click', () => {
-            const nextKey = MAP_BASE_LAYER_CYCLE[(MAP_BASE_LAYER_CYCLE.indexOf(currentKey) + 1) % MAP_BASE_LAYER_CYCLE.length];
-            targetMap.removeLayer(layers[currentKey]);
-            targetMap.addLayer(layers[nextKey]);
-            currentKey = nextKey;
-            try { localStorage.setItem('wr_map_base_layer', currentKey); } catch (e) {}
-            refreshBtn();
+        // Wrapped into a Bootstrap dropdown here rather than in each of the
+        // eight places the button is written, so every map gets the same menu.
+        const wrap = document.createElement('div');
+        wrap.className = 'dropdown d-inline-block';
+        btn.parentNode.insertBefore(wrap, btn);
+        wrap.appendChild(btn);
+        btn.setAttribute('data-bs-toggle', 'dropdown');
+        btn.setAttribute('aria-expanded', 'false');
+        btn.innerHTML = '<i class="bi bi-layers"></i>';
+
+        const menu = document.createElement('ul');
+        menu.className = 'dropdown-menu dropdown-menu-end';
+        const header = document.createElement('li');
+        header.innerHTML = '<h6 class="dropdown-header"></h6>';
+        header.firstChild.textContent = t('map.base_layer_menu');
+        menu.appendChild(header);
+        MAP_BASE_LAYER_KEYS.forEach(key => {
+            const li = document.createElement('li');
+            li.innerHTML = '<button type="button" class="dropdown-item d-flex align-items-center">'
+                + '<i class="bi ' + layerMeta[key].icon + ' me-2"></i><span class="flex-grow-1"></span>'
+                + '<i class="bi bi-check-lg ms-3"></i></button>';
+            const item = li.firstChild;
+            item.dataset.layer = key;
+            item.querySelector('span').textContent = t(layerMeta[key].label);
+            menu.appendChild(li);
         });
+        wrap.appendChild(menu);
+
+        const refresh = () => {
+            btn.title = t('map.base_layer_menu') + ': ' + t(layerMeta[currentKey].label);
+            menu.querySelectorAll('[data-layer]').forEach(item => {
+                const on = item.dataset.layer === currentKey;
+                item.classList.toggle('active', on);
+                item.setAttribute('aria-current', on ? 'true' : 'false');
+                item.querySelector('.bi-check-lg').style.visibility = on ? 'visible' : 'hidden';
+            });
+        };
+        menu.addEventListener('click', e => {
+            const item = e.target.closest('[data-layer]');
+            if (!item || item.dataset.layer === currentKey) return;
+            targetMap.removeLayer(layers[currentKey]);
+            currentKey = item.dataset.layer;
+            targetMap.addLayer(layers[currentKey]);
+            try { localStorage.setItem('wr_map_base_layer', currentKey); } catch (e) {}
+            refresh();
+        });
+        refresh();
     }
     return layers;
 }

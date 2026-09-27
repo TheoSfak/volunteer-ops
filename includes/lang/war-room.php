@@ -501,10 +501,10 @@ return [
         'map.follow_off_title' => 'Αυτόματο κεντράρισμα σε παύση — πατήστε για επαναφορά',
         'map.btn_fullscreen' => 'Πλήρης οθόνη χάρτη',
         'map.btn_exit_fullscreen' => 'Έξοδος πλήρους οθόνης χάρτη',
-        'map.btn_satellite_view' => 'Δορυφορική προβολή',
-        'map.btn_street_view' => 'Προβολή χάρτη',
-        'map.btn_topo_view' => 'Τοπογραφική προβολή (ισοϋψείς)',
-        'map.btn_cadastre_view' => 'Αεροφωτογραφία Κτηματολογίου (πιο ακριβής θέση)',
+        'map.base_layer_menu' => 'Προβολή χάρτη',
+        'map.btn_satellite_view' => 'Δορυφορική (αεροφωτογραφία)',
+        'map.btn_street_view' => 'Οδικός χάρτης',
+        'map.btn_topo_view' => 'Τοπογραφική (ισοϋψείς)',
 
         // Geographic export (exports/export-mission-geo.php) — GPX/KML/GeoJSON
         'geo.export_btn' => 'Εξαγωγή χάρτη',
@@ -2719,10 +2719,10 @@ return [
         'map.follow_off_title' => 'Auto-centring paused — click to resume',
         'map.btn_fullscreen' => 'Fullscreen map',
         'map.btn_exit_fullscreen' => 'Exit map fullscreen',
-        'map.btn_satellite_view' => 'Satellite view',
-        'map.btn_street_view' => 'Map view',
-        'map.btn_topo_view' => 'Topographic view (contour lines)',
-        'map.btn_cadastre_view' => 'Hellenic Cadastre aerial photo (more accurate positions)',
+        'map.base_layer_menu' => 'Map view',
+        'map.btn_satellite_view' => 'Satellite (aerial photo)',
+        'map.btn_street_view' => 'Street map',
+        'map.btn_topo_view' => 'Topographic (contour lines)',
 
         // Geographic export (exports/export-mission-geo.php) — GPX/KML/GeoJSON
         'geo.export_btn' => 'Export map',
