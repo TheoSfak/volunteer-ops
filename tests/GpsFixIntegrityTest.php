@@ -304,6 +304,17 @@ final class GpsFixIntegrityTest extends TestCase
         $this->assertSame(2, $this->pingCount());
     }
 
+    public function testAManualTapDoesNotLetThePagesNextAutomaticFixThrough(): void
+    {
+        // v3.336.4: the manual tap is the newest row and says 'browser'; the
+        // native fix just behind it still means the service is delivering.
+        $this->seedPing(35.33, 5, 'native');
+        recordVolunteerPing($this->user(), $this->shiftId, 35.33005, 25.13, 6.0, 80, 'manual', 'browser', 500);
+        $result = recordVolunteerPing($this->user(), $this->shiftId, 35.33008, 25.13, 7.0, 80, 'auto', 'browser', 100);
+        $this->assertSame('native_active', $result['skipped'] ?? null);
+        $this->assertSame(2, $this->pingCount());
+    }
+
     public function testThePageTakesOverOnceTheNativeServiceHasGoneQuiet(): void
     {
         $cadence = (int) getSetting('war_room_auto_ping_seconds', '180');

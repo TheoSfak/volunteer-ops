@@ -4262,9 +4262,18 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     // two cadences. A manual tap is never skipped — somebody asked for it.
     // Checked before the accuracy gate so a poor fix from the page cannot flag
     // a phone whose native fixes are fine.
-    if ($source === 'auto' && $via === 'browser' && $prev && $prev['via'] === 'native'
-        && (int) $prev['age_s'] < warRoomNativeActiveWindowSeconds()) {
-        return ['ok' => true, 'skipped' => 'native_active', 'ts' => date('H:i:s')];
+    //
+    // Any of the four newest rows counts, not only the newest (v3.336.4). A
+    // manual «Στείλε στίγμα» from inside the app is stored via='browser', so
+    // checking the newest row alone let the page's next automatic fix
+    // through as well, and the pin alternated between the two receivers
+    // again until the service's next fix. The rows are already in hand.
+    if ($source === 'auto' && $via === 'browser') {
+        foreach ($recentRows as $row) {
+            if ($row['via'] === 'native' && (int) $row['age_s'] < warRoomNativeActiveWindowSeconds()) {
+                return ['ok' => true, 'skipped' => 'native_active', 'ts' => date('H:i:s')];
+            }
+        }
     }
 
     // Never store a fix older than the newest one already on file. It keeps
