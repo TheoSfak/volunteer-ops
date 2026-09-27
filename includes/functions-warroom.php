@@ -440,8 +440,16 @@ function recordNativePingBatch(array $user, int $shiftId, array $items): array {
  * could ever say that one phone was turned away forty times and another
  * never. Best-effort: a missing table (before migration 163) or a lock must
  * never turn a refusal into an error.
+ *
+ * v3.338.0: with $fix, the refusal is also kept on its own in
+ * volunteer_ping_refusal_log — when the fix was taken, where, how accurate
+ * the phone said it was. A count cannot say WHEN, so a gap in a trail could
+ * not be told apart from a phone that sent nothing (the 27/09/2026 Almyros
+ * gorge walk: 14 minutes of movement without a position, and no way to know
+ * which it was). $fix = ['lat','lng','acc','via','speed','gnss','age_s',
+ * 'implied_kmh'], any of them null.
  */
-function recordVolunteerPingRefusal(int $missionId, int $userId, string $reason): void {
+function recordVolunteerPingRefusal(int $missionId, int $userId, string $reason, ?array $fix = null): void {
     try {
         dbExecute(
             "INSERT INTO volunteer_ping_refusals (mission_id, user_id, reason, refused_count, last_refused_at)
@@ -451,6 +459,29 @@ function recordVolunteerPingRefusal(int $missionId, int $userId, string $reason)
         );
     } catch (Exception $e) {
         // Non-critical.
+    }
+    if ($fix === null) {
+        return;
+    }
+    // Clamped to what the columns hold, so an absurd reading (a jump across
+    // the world in one second) is still logged rather than lost to a range
+    // error in strict mode.
+    $clamp = fn($v, float $max) => $v === null ? null : min((float) $v, $max);
+    try {
+        dbExecute(
+            "INSERT INTO volunteer_ping_refusal_log
+                    (mission_id, user_id, reason, via, lat, lng, accuracy_m, speed_mps, implied_kmh, gnss_used, gnss_cn0, fix_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL ? SECOND))",
+            [$missionId, $userId, $reason,
+             in_array($fix['via'] ?? null, ['browser', 'native'], true) ? $fix['via'] : null,
+             $fix['lat'] ?? null, $fix['lng'] ?? null,
+             $clamp($fix['acc'] ?? null, 999999.0), $clamp($fix['speed'] ?? null, 9999.0),
+             $clamp($fix['implied_kmh'] ?? null, 9999999.0),
+             $fix['gnss']['used'] ?? null, $fix['gnss']['cn0'] ?? null,
+             max(0, (int) ($fix['age_s'] ?? 0))]
+        );
+    } catch (Exception $e) {
+        // Non-critical, and absent before migration 171.
     }
 }
 
@@ -1424,8 +1455,9 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
     // trail while everyone else kept theirs in full, for no reason
     // connected to anything about their actual participation.
     $rows = dbFetchAll(
-        "SELECT user_id, lat, lng, accuracy_meters, created_at, source, name, team_id, team_color FROM (
+        "SELECT user_id, lat, lng, accuracy_meters, created_at, source, via, raw_accuracy_m, gnss_used, gnss_cn0, name, team_id, team_color FROM (
             SELECT vp.user_id, vp.lat, vp.lng, vp.accuracy_meters, vp.created_at, vp.source,
+                    vp.via, vp.raw_accuracy_m, vp.gnss_used, vp.gnss_cn0,
                     u.name, mtm.team_id, mt.color AS team_color,
                     ROW_NUMBER() OVER (PARTITION BY vp.user_id ORDER BY vp.created_at DESC) AS rn
              FROM volunteer_pings vp
@@ -1507,6 +1539,17 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
             // itself already exists to avoid; every consumer of 'time' is
             // untouched.
             'ts'     => strtotime($row['created_at']),
+            // v3.338.0, for reviewing a route afterwards: 'acc' above is the
+            // filter's estimate, which bottoms out near 3 m whatever the
+            // phone said; these are what the device itself reported — its
+            // own ± (null on rows older than v163, whose lat/lng were raw
+            // and whose 'acc' is therefore already the device's), which
+            // client produced the fix, and what the receiver saw (Android
+            // app 1.0.20 / 1.1.19 on, null otherwise).
+            'raw_acc' => $row['raw_accuracy_m'] === null ? null : (float) $row['raw_accuracy_m'],
+            'via'     => $row['via'],
+            'sats'    => $row['gnss_used'] === null ? null : (int) $row['gnss_used'],
+            'cn0'     => $row['gnss_cn0'] === null ? null : (float) $row['gnss_cn0'],
         ];
     }
 
@@ -4232,16 +4275,6 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
         return ['ok' => false, 'error' => t('ping.not_action_room_participant', [], $lang)];
     }
 
-    // A fake-GPS app feeds Android a position through a "mock provider", and
-    // Android marks every such fix. It is never a real field position, so it
-    // is refused outright and named on the roster — silently dropping it
-    // would leave a volunteer who looks present and is somewhere else.
-    if ($isMock) {
-        recordVolunteerGpsErrorReason((int) $pr['mission_id'], $userId, 'mock');
-        recordVolunteerPingRefusal((int) $pr['mission_id'], $userId, 'mock');
-        return ['ok' => false, 'error' => t('ping.mock_location', [], $lang)];
-    }
-
     // How old the fix is, in whole seconds. The row is stamped with when the
     // fix was TAKEN, not when it arrived: the Android app queues fixes while
     // it has no signal and sends them all within seconds once it does, and
@@ -4251,8 +4284,26 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     // hour the fix is history rather than a position, and it is dropped
     // without flagging the phone — nothing is wrong with it NOW.
     $fixAgeSeconds = $fixAgeMs === null ? 0 : (int) round(max(0, $fixAgeMs) / 1000);
+
+    // What every refusal below keeps about the fix it turned away (v3.338.0,
+    // recordVolunteerPingRefusal()), taken at the fix's own time.
+    $refusedFix = fn(array $extra = []) => [
+        'lat' => $lat, 'lng' => $lng, 'acc' => $accuracy, 'via' => $via,
+        'speed' => $speedMps, 'gnss' => $gnss, 'age_s' => $fixAgeSeconds,
+    ] + $extra;
+
+    // A fake-GPS app feeds Android a position through a "mock provider", and
+    // Android marks every such fix. It is never a real field position, so it
+    // is refused outright and named on the roster — silently dropping it
+    // would leave a volunteer who looks present and is somewhere else.
+    if ($isMock) {
+        recordVolunteerGpsErrorReason((int) $pr['mission_id'], $userId, 'mock');
+        recordVolunteerPingRefusal((int) $pr['mission_id'], $userId, 'mock', $refusedFix());
+        return ['ok' => false, 'error' => t('ping.mock_location', [], $lang)];
+    }
+
     if ($fixAgeSeconds > WAR_ROOM_MAX_FIX_AGE_SECONDS) {
-        recordVolunteerPingRefusal((int) $pr['mission_id'], $userId, 'too_old');
+        recordVolunteerPingRefusal((int) $pr['mission_id'], $userId, 'too_old', $refusedFix());
         return ['ok' => false, 'error' => t('ping.fix_too_old', [], $lang)];
     }
 
@@ -4325,7 +4376,7 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     $maxAccuracy = (float) getSetting('war_room_max_ping_accuracy_m', '50');
     if ($maxAccuracy > 0 && $accuracy !== null && $accuracy > $maxAccuracy) {
         recordVolunteerGpsErrorReason((int) $pr['mission_id'], $userId, 'imprecise');
-        recordVolunteerPingRefusal((int) $pr['mission_id'], $userId, 'imprecise');
+        recordVolunteerPingRefusal((int) $pr['mission_id'], $userId, 'imprecise', $refusedFix());
         return ['ok' => false, 'error' => t('ping.accuracy_too_poor', [
             'acc' => (int) round($accuracy),
             'max' => (int) round($maxAccuracy),
@@ -4412,7 +4463,7 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
                     // shows for at most one cadence; only a phone that keeps
                     // producing them stays flagged to the command post.
                     recordVolunteerGpsErrorReason((int) $pr['mission_id'], $userId, 'implausible');
-                    recordVolunteerPingRefusal((int) $pr['mission_id'], $userId, 'implausible');
+                    recordVolunteerPingRefusal((int) $pr['mission_id'], $userId, 'implausible', $refusedFix(['implied_kmh' => $impliedKmh]));
                     return ['ok' => false, 'error' => t('ping.jump_implausible', [
                         'kmh' => (int) round($impliedKmh),
                         'max' => (int) round($maxSpeedKmh),

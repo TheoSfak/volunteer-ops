@@ -356,6 +356,121 @@ final class GpsFixIntegrityTest extends TestCase
         $this->assertSame(1, $me['no_sat']);
     }
 
+    public function testTheTrailCarriesWhatThePhoneItselfReported(): void
+    {
+        // v3.338.0: the trail's 'acc' is the filter's estimate, which floors
+        // near 3 m; reviewing a route needs the device's own reading too.
+        $fix = $this->nativeFix(0, 500) + ['gnss_used' => 11, 'gnss_cn0' => 34.5];
+        $this->assertTrue(recordNativePingFromJson($this->user(), $this->shiftId, $fix)['ok']);
+        $point = loadMissionTrailForMission($this->missionId, 0, true)[0]['points'][0];
+        $this->assertSame('native', $point['via']);
+        $this->assertEqualsWithDelta(8.0, $point['raw_acc'], 0.01);
+        $this->assertSame(11, $point['sats']);
+        $this->assertEqualsWithDelta(34.5, $point['cn0'], 0.01);
+    }
+
+    // ── Refusals on record, and the gaps they explain (v3.338.0) ───────────
+
+    private function refusalLog(): array
+    {
+        return dbFetchAll(
+            "SELECT reason, via, lat, accuracy_m, implied_kmh, gnss_used, gnss_cn0,
+                    TIMESTAMPDIFF(SECOND, fix_at, NOW()) AS age_s
+               FROM volunteer_ping_refusal_log WHERE mission_id = ? AND user_id = ? ORDER BY id",
+            [$this->missionId, $this->volunteerId]
+        );
+    }
+
+    private function setRefusalLogSince(?int $ts): void
+    {
+        dbExecute("DELETE FROM settings WHERE setting_key = 'gps_refusal_log_since'");
+        if ($ts !== null) {
+            dbExecute(
+                "INSERT INTO settings (setting_key, setting_value) VALUES ('gps_refusal_log_since', ?)",
+                [date('Y-m-d H:i:s', $ts)]
+            );
+        }
+    }
+
+    private function myGaps(): array
+    {
+        require_once __DIR__ . '/../includes/functions-gps-quality.php';
+        return array_values(array_filter(
+            loadMissionGpsGaps($this->missionId, 60)['gaps'],
+            fn($g) => $g['user_id'] === $this->volunteerId
+        ));
+    }
+
+    public function testARefusedFixIsKeptWithWhenWhereAndHowAccurate(): void
+    {
+        // Taken 40 s ago, the phone itself saying ±900 m: refused, never a map
+        // position, but on record at the time it was taken.
+        $fix = ['latitude' => 35.3312, 'longitude' => 25.13, 'accuracy' => 900.0, 'speed' => 0.4,
+                'fix_age_ms' => 40000, 'battery_level' => 70, 'gnss_used' => 3, 'gnss_cn0' => 18.5];
+        $this->assertFalse(recordNativePingFromJson($this->user(), $this->shiftId, $fix)['ok']);
+        $this->assertSame(0, $this->pingCount());
+        $log = $this->refusalLog();
+        $this->assertCount(1, $log);
+        $this->assertSame('imprecise', $log[0]['reason']);
+        $this->assertSame('native', $log[0]['via']);
+        $this->assertEqualsWithDelta(35.3312, (float) $log[0]['lat'], 1e-7);
+        $this->assertEqualsWithDelta(900.0, (float) $log[0]['accuracy_m'], 0.01);
+        $this->assertSame(3, (int) $log[0]['gnss_used']);
+        $this->assertEqualsWithDelta(18.5, (float) $log[0]['gnss_cn0'], 0.01);
+        $this->assertEqualsWithDelta(40, (int) $log[0]['age_s'], 2);
+    }
+
+    public function testAnImpossibleJumpIsKeptWithTheSpeedItImplied(): void
+    {
+        // 272 m in 20 s with no speed from the phone: 49 km/h, refused.
+        $this->seedPing(35.33, 20, 'native');
+        $jump = recordVolunteerPing($this->user(), $this->shiftId, $this->northOf(35.33, 272), 25.13, 6.0, 80, 'auto', 'native', 0);
+        $this->assertFalse($jump['ok']);
+        $log = $this->refusalLog();
+        $this->assertCount(1, $log);
+        $this->assertSame('implausible', $log[0]['reason']);
+        $this->assertEqualsWithDelta(272 / 20 * 3.6, (float) $log[0]['implied_kmh'], 1.5);
+    }
+
+    public function testAGapSaysWhetherTheServerRefusedFixesOrNoneArrived(): void
+    {
+        $this->setRefusalLogSince(time() - 86400);
+        // Stored 20 min, 12 min, 4 min and 3¾ min ago: two gaps and a normal
+        // step. Two refusals inside the older gap, nothing in the newer one.
+        $this->seedPing(35.330, 1200, 'native');
+        $this->seedPing(35.331, 720, 'native');
+        $this->seedPing(35.332, 240, 'native');
+        $this->seedPing(35.332, 225, 'native');
+        foreach ([[1000, 35.0], [900, 61.0]] as [$ago, $acc]) {
+            recordVolunteerPingRefusal($this->missionId, $this->volunteerId, 'imprecise',
+                ['lat' => 35.3305, 'lng' => 25.13, 'acc' => $acc, 'via' => 'native', 'age_s' => $ago]);
+        }
+
+        $gaps = $this->myGaps();
+        $this->assertCount(2, $gaps, 'the 15 s step is not a gap');
+        [$newer, $older] = $gaps;
+        $this->assertSame([], $newer['refused']);
+        $this->assertTrue($newer['logged'], 'the log was running, so nothing refused means nothing arrived');
+        $this->assertSame(['imprecise' => 2], $older['refused']);
+        $this->assertEqualsWithDelta(35.0, $older['acc_min'], 0.01);
+        $this->assertEqualsWithDelta(61.0, $older['acc_max'], 0.01);
+        $this->assertEqualsWithDelta(480, $older['seconds'], 2);
+        $this->assertEqualsWithDelta(111, $older['line_m'], 2, 'the straight line the trail draws across it');
+    }
+
+    public function testAGapFromBeforeTheLogBeganIsNeverReadAsNothingArrived(): void
+    {
+        $this->seedPing(35.330, 1200, 'native');
+        $this->seedPing(35.331, 720, 'native');
+
+        $this->setRefusalLogSince(time() - 300);
+        $this->assertFalse($this->myGaps()[0]['logged']);
+
+        // An install created from schema.sql has the table from the start.
+        $this->setRefusalLogSince(null);
+        $this->assertTrue($this->myGaps()[0]['logged']);
+    }
+
     public function testAManualTapDoesNotLetThePagesNextAutomaticFixThrough(): void
     {
         // v3.336.4: the manual tap is the newest row and says 'browser'; the

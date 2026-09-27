@@ -7279,6 +7279,36 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 171,
+            'description' => "Add volunteer_ping_refusal_log: one row per fix the server refused (v3.338.0) — when it was taken, why, where, how accurate the phone said it was, and for an impossible jump the speed it implied. volunteer_ping_refusals only COUNTS refusals per reason, so a gap in somebody's trail could not be told apart from a phone that sent nothing: on the 27/09/2026 walk into the Almyros gorge, 14 minutes of movement left no position and nothing on record could say whether the 20 m accuracy limit had thrown the fixes away or the phone never sent them. Also stores when this log began (setting gps_refusal_log_since), so the GPS quality report never reads «nothing was refused» into a gap from before anything was being logged. fix_at is DATETIME, not TIMESTAMP: an older MariaDB without explicit_defaults_for_timestamp would give a NOT NULL TIMESTAMP an ON UPDATE clause.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS volunteer_ping_refusal_log (
+                    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    user_id INT UNSIGNED NOT NULL,
+                    reason VARCHAR(20) NOT NULL,
+                    via ENUM('browser','native') NULL,
+                    lat DECIMAL(10, 8) NULL,
+                    lng DECIMAL(11, 8) NULL,
+                    accuracy_m DECIMAL(8, 2) NULL COMMENT 'Device-reported accuracy of the refused fix',
+                    speed_mps DECIMAL(6, 2) NULL COMMENT 'Device-reported (Doppler) speed, m/s',
+                    implied_kmh DECIMAL(8, 1) NULL COMMENT 'Speed the jump implied (implausible only)',
+                    gnss_used TINYINT UNSIGNED NULL,
+                    gnss_cn0 DECIMAL(4, 1) NULL,
+                    fix_at DATETIME NOT NULL COMMENT 'When the fix was TAKEN, like volunteer_pings.created_at',
+                    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_refusal_log_mission_user (mission_id, user_id, fix_at),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                dbExecute(
+                    "INSERT IGNORE INTO settings (setting_key, setting_value) VALUES ('gps_refusal_log_since', ?)",
+                    [date('Y-m-d H:i:s')]
+                );
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

@@ -10,6 +10,9 @@
  * report page, outside the Action Room's own bilingual scope. Command staff
  * only (canManageActionRoom), and available for a CLOSED mission too — the
  * question "how accurate was the drill" is asked after it ends.
+ *
+ * v3.338.0: «Κενά στην καταγραφή» — every stretch without a stored position,
+ * and whether the server refused fixes inside it or none arrived at all.
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -32,6 +35,13 @@ if (!canManageActionRoom($mission['responsible_user_id'] ? (int) $mission['respo
 }
 
 $overview = loadMissionGpsQuality($missionId);
+
+// Gaps: a position counts as stale past three cadences (the app's own
+// definition), and nothing under a minute is worth a row.
+$cadenceSeconds = max(1, (int) getSetting('war_room_auto_ping_seconds', '180'));
+$gapMinSeconds  = max(60, warRoomPingStaleThresholdSeconds());
+$allGaps        = get('gaps') === 'all';
+$gapReport      = loadMissionGpsGaps($missionId, $gapMinSeconds, $allGaps ? 500 : 25);
 
 // Reference points to measure against: the mission's own dispatch points,
 // because in a drill the natural "stand here" is a point the coordinator has
@@ -81,6 +91,9 @@ $reasonLabels = [
     'imprecise' => 'κακή ακρίβεια', 'implausible' => 'αδύνατο άλμα',
     'mock' => 'ψεύτικη τοποθεσία', 'too_old' => 'πολύ παλιό',
 ];
+$duration = fn(int $s) => $s >= 3600
+    ? sprintf('%d ώ. %02d′', intdiv($s, 3600), intdiv($s % 3600, 60))
+    : sprintf('%d′%02d″', intdiv($s, 60), $s % 60);
 
 $pageTitle = 'Ποιότητα GPS: ' . $mission['title'];
 include __DIR__ . '/includes/header.php';
@@ -136,9 +149,10 @@ include __DIR__ . '/includes/header.php';
                         <td class="gq-num <?= ($p['acc_p90'] ?? 0) > 50 ? 'gq-warn' : '' ?>"><?= $m($p['acc_median']) ?> · <?= $m($p['acc_p90']) ?></td>
                         <td class="gq-num"><?= $m($p['shift_median']) ?></td>
                         <td class="gq-num small">
-                            <?php if (!$p['sats_reported']): ?><span class="gq-muted">—</span>
+                            <?php if (!$p['sats_reported'] && $p['cn0_median'] === null): ?><span class="gq-muted">—</span>
                             <?php else: ?>
-                                <?= (int) $p['sats_median'] ?> ·
+                                <?php // A receiver that never marks a satellite as "used" still reports signal strength (VopsGnssMonitor); it used to be hidden behind «—» like a phone that reported nothing. ?>
+                                <?= $p['sats_reported'] ? (int) $p['sats_median'] : '<span class="gq-muted" title="Ο δέκτης δεν δηλώνει πόσους δορυφόρους χρησιμοποίησε">?</span>' ?> ·
                                 <?php if ($p['cn0_median'] !== null): ?>
                                     <span class="<?= $p['cn0_median'] < 25 ? 'gq-bad' : ($p['cn0_median'] < 30 ? 'gq-warn' : 'gq-good') ?>"><?= number_format($p['cn0_median'], 0) ?> dB-Hz</span>
                                 <?php else: ?><span class="gq-muted">—</span><?php endif; ?>
@@ -160,6 +174,58 @@ include __DIR__ . '/includes/header.php';
         </div>
         <p class="gq-help mb-0"><strong>Δηλωμένη ακρίβεια</strong>: το ±μ. που δίνει το ίδιο το κινητό για κάθε στίγμα (τυπική τιμή και η τιμή που δεν ξεπερνά το 90% των στιγμάτων). <strong>Μετακίνηση εξομάλυνσης</strong>: πόσο μετατόπισε τυπικά το φίλτρο το στίγμα της συσκευής. <strong>Απορρίψεις</strong>: στίγματα που ο server δεν κατέγραψε, ανά λόγο — πολλές απορρίψεις «κακής ακρίβειας» δείχνουν κινητό ή σημείο χωρίς καλό σήμα, «αδύνατα άλματα» δείχνουν ανακλάσεις. Η συσκευή φαίνεται μόνο για την εφαρμογή Android· ο browser δεν λέει σε ποιο κινητό τρέχει.</p>
         <p class="gq-help mb-0 mt-2"><strong>Δορυφόροι · σήμα</strong> (μόνο εφαρμογή Android, από την έκδοση με αυτή τη στήλη): πόσους δορυφόρους χρησιμοποίησε τυπικά ο δέκτης σε κάθε στίγμα, και πόσο δυνατό ήταν το σήμα των τεσσάρων ισχυρότερων (dB-Hz). Γύρω στα <strong>35–45</strong> είναι ανοιχτός ουρανός· <strong>κάτω από 25</strong> σημαίνει κινητό σε τσέπη, κάτω από σκεπή ή μέσα σε σακίδιο — τότε φταίει το πού το κουβαλάει, όχι το κινητό. Καλό σήμα με κακή ακρίβεια δείχνει αδύναμο δέκτη ή ανακλάσεις από κτίρια. <strong>2η συχνότητα</strong>: πόσα στίγματα χρησιμοποίησαν και δεύτερη συχνότητα (L5/E5a), που περιορίζει τις ανακλάσεις — το υποστηρίζουν μόνο ορισμένα κινητά. <strong>Χωρίς δορυφόρο</strong>: στίγματα που το Android έδωσε από Wi-Fi/κεραίες ενώ ο δέκτης δεν είχε κανέναν δορυφόρο.</p>
+        <?php endif; ?>
+    </div>
+
+    <div class="gq-card">
+        <h2><i class="bi bi-signpost-split"></i>Κενά στην καταγραφή</h2>
+        <?php if (!$gapReport['gaps']): ?>
+            <p class="gq-muted fst-italic mb-0">Κανένα κενό <?= h($duration($gapMinSeconds)) ?> ή μεγαλύτερο σε αυτή την αποστολή.</p>
+        <?php else: ?>
+        <div class="table-responsive">
+            <table class="table table-sm gq-table mb-2">
+                <thead><tr>
+                    <th>Εθελοντής</th><th>Από – Έως</th>
+                    <th class="gq-num">Διάρκεια</th><th class="gq-num">Ευθεία<br>στον χάρτη</th>
+                    <th>Τι έγινε</th>
+                </tr></thead>
+                <tbody>
+                <?php foreach ($gapReport['gaps'] as $g):
+                    $refusedTotal = array_sum($g['refused']);
+                    $expected = max(1, (int) round($g['seconds'] / $cadenceSeconds) - 1); ?>
+                    <tr>
+                        <td><?= h($g['name']) ?></td>
+                        <td class="small text-nowrap"><?= date('d/m H:i:s', $g['from']) ?> – <?= date(date('Y-m-d', $g['from']) === date('Y-m-d', $g['to']) ? 'H:i:s' : 'd/m H:i:s', $g['to']) ?></td>
+                        <td class="gq-num"><?= h($duration($g['seconds'])) ?></td>
+                        <td class="gq-num"><?= $m($g['line_m']) ?></td>
+                        <td class="small">
+                            <?php if ($refusedTotal > 0): ?>
+                                <?php // "of ~N expected" only when fewer were refused than the cadence implies: the rest never arrived. The cadence is today's setting, so it is not a count to argue with when it is exceeded. ?>
+                                <span class="gq-warn">Απορρίφθηκαν <?= $refusedTotal ?></span><?= $refusedTotal < $expected ? ' από ~' . $expected . ' αναμενόμενα' : '' ?>:
+                                <?= h(implode(', ', array_map(function ($reason, $count) use ($g, $reasonLabels) {
+                                    $label = ($reasonLabels[$reason] ?? $reason) . ' ' . $count;
+                                    if ($reason === 'imprecise' && $g['acc_min'] !== null) {
+                                        $label .= ' (±' . round($g['acc_min']) . ($g['acc_max'] - $g['acc_min'] >= 1 ? '–' . round($g['acc_max']) : '') . ' μ.)';
+                                    } elseif ($reason === 'implausible' && $g['kmh_max'] !== null) {
+                                        $label .= ' (έως ' . round($g['kmh_max']) . ' km/h)';
+                                    }
+                                    return $label;
+                                }, array_keys($g['refused']), $g['refused']))) ?>
+                            <?php elseif ($g['logged']): ?>
+                                <span class="gq-bad">Δεν έφτασε κανένα στίγμα</span> — το κινητό δεν έστελνε
+                            <?php else: ?>
+                                <span class="gq-muted">Άγνωστο — πριν ξεκινήσει η καταγραφή απορρίψεων</span>
+                            <?php endif; ?>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+            </table>
+        </div>
+        <?php if ($gapReport['total'] > count($gapReport['gaps'])): ?>
+            <p class="gq-help mb-2">Εμφανίζονται τα <?= count($gapReport['gaps']) ?> πιο πρόσφατα από <?= $gapReport['total'] ?>.<?php if (!$allGaps): ?> <a href="mission-gps-quality.php?id=<?= $missionId ?>&amp;gaps=all">Όλα τα κενά</a><?php endif; ?></p>
+        <?php endif; ?>
+        <p class="gq-help mb-0">Διαστήματα <?= h($duration($gapMinSeconds)) ?> και πάνω χωρίς αποθηκευμένο στίγμα. <strong>Ευθεία στον χάρτη</strong>: η γραμμή που τραβάει η Πορεία πάνω από το κενό — ό,τι έγινε ανάμεσα δεν φαίνεται. <strong>Απορρίφθηκαν</strong>: τα στίγματα έφταναν, αλλά ο server τα κράτησε έξω· με «κακή ακρίβεια» το ±μ. του κινητού ξεπερνούσε το όριο του Ρυθμίσεις → Action Room, με «αδύνατο άλμα» η θέση πήδηξε πιο γρήγορα απ' όσο επιτρέπει το όριο ταχύτητας. Λίγες απορρίψεις σε μεγάλο κενό σημαίνει ότι και τα περισσότερα στίγματα δεν έφτασαν. <strong>Δεν έφτασε κανένα στίγμα</strong>: το κινητό δεν έστελνε — χωρίς δορυφόρους, εφαρμογή ή σελίδα κλειστή, GPS σε παύση ή εκτός Action Room.</p>
         <?php endif; ?>
     </div>
 

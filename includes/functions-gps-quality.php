@@ -163,6 +163,108 @@ function loadMissionGpsQuality(int $missionId): array {
 }
 
 /**
+ * Every stretch where somebody's position went stale — no fix stored for
+ * $minGapSeconds or longer — and what the server turned away inside it
+ * (v3.338.0). The one question a trail with a hole in it raises: did the
+ * phone send nothing, or did it send fixes that a gate refused? The two need
+ * opposite fixes (where the phone is carried, or the app, versus a limit in
+ * Settings), and before volunteer_ping_refusal_log they looked identical.
+ *
+ * Newest first, at most $limit. Each gap: user_id, name, from, to (unix
+ * seconds of the fixes either side), seconds, line_m (the straight line the
+ * trail draws across it), refused (reason => count, oldest reason first),
+ * acc_min/acc_max (the phone's own ± over the fixes refused as imprecise),
+ * kmh_max (the fastest impossible jump), and logged — true only when the
+ * refusal log was already running when the gap began, so that an empty
+ * 'refused' really does mean nothing arrived.
+ */
+function loadMissionGpsGaps(int $missionId, int $minGapSeconds, int $limit = 100): array {
+    $byUser = [];
+    foreach (dbFetchAll(
+        "SELECT vp.user_id, u.name, UNIX_TIMESTAMP(vp.created_at) AS ts, vp.lat, vp.lng
+           FROM volunteer_pings vp
+           JOIN shifts s ON s.id = vp.shift_id
+           JOIN users u ON u.id = vp.user_id
+          WHERE s.mission_id = ?
+          ORDER BY vp.user_id, vp.created_at, vp.id",
+        [$missionId]
+    ) as $row) {
+        $byUser[(int) $row['user_id']][] = $row;
+    }
+
+    $refused = [];
+    $logSince = null; // null = no log at all: no gap can be judged
+    try {
+        foreach (dbFetchAll(
+            "SELECT user_id, reason, UNIX_TIMESTAMP(fix_at) AS ts, accuracy_m, implied_kmh
+               FROM volunteer_ping_refusal_log
+              WHERE mission_id = ?
+              ORDER BY user_id, fix_at, id",
+            [$missionId]
+        ) as $row) {
+            $refused[(int) $row['user_id']][] = $row;
+        }
+        // Read directly, not through getSetting()'s per-request cache. No
+        // row means an install created from schema.sql with the table
+        // already in it: the log has been running from the start.
+        $since = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'gps_refusal_log_since'");
+        $logSince = $since ? (int) strtotime((string) $since) : 0;
+    } catch (Exception $e) {
+        // Before migration 171.
+    }
+
+    $gaps = [];
+    foreach ($byUser as $uid => $fixes) {
+        $log = $refused[$uid] ?? [];
+        $next = 0;
+        for ($i = 1, $n = count($fixes); $i < $n; $i++) {
+            $from = (int) $fixes[$i - 1]['ts'];
+            $to   = (int) $fixes[$i]['ts'];
+            if ($to - $from < $minGapSeconds) {
+                continue;
+            }
+            // Both lists run oldest first, so one pointer serves every gap.
+            while ($next < count($log) && (int) $log[$next]['ts'] <= $from) {
+                $next++;
+            }
+            $counts = [];
+            $accMin = $accMax = $kmhMax = null;
+            for ($j = $next; $j < count($log) && (int) $log[$j]['ts'] < $to; $j++) {
+                $r = $log[$j];
+                $counts[$r['reason']] = ($counts[$r['reason']] ?? 0) + 1;
+                if ($r['reason'] === 'imprecise' && $r['accuracy_m'] !== null) {
+                    $a = (float) $r['accuracy_m'];
+                    $accMin = $accMin === null ? $a : min($accMin, $a);
+                    $accMax = $accMax === null ? $a : max($accMax, $a);
+                }
+                if ($r['implied_kmh'] !== null) {
+                    $kmhMax = max($kmhMax ?? 0.0, (float) $r['implied_kmh']);
+                }
+            }
+            $gaps[] = [
+                'user_id' => $uid,
+                'name'    => $fixes[$i]['name'],
+                'from'    => $from,
+                'to'      => $to,
+                'seconds' => $to - $from,
+                'line_m'  => gpsDistanceMeters(
+                    (float) $fixes[$i - 1]['lat'], (float) $fixes[$i - 1]['lng'],
+                    (float) $fixes[$i]['lat'], (float) $fixes[$i]['lng']
+                ),
+                'refused' => $counts,
+                'acc_min' => $accMin,
+                'acc_max' => $accMax,
+                'kmh_max' => $kmhMax,
+                'logged'  => $logSince !== null && $from >= $logSince,
+            ];
+        }
+    }
+
+    usort($gaps, fn($a, $b) => $b['to'] <=> $a['to']);
+    return ['gaps' => array_slice($gaps, 0, $limit), 'total' => count($gaps)];
+}
+
+/**
  * The drill: every fix taken inside [$from, $to] measured against a known
  * reference point. Returns one row per phone plus an 'all' summary, each with
  * the raw fix's error (median, p95), the filtered estimate's error (median,

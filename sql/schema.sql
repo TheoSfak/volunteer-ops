@@ -1516,6 +1516,29 @@ CREATE TABLE IF NOT EXISTS `volunteer_ping_refusals` (
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- Each refused fix on its own (v171): when it was taken, why, where and how
+-- accurate the phone said it was. Never a map position — it lives only here,
+-- for the GPS quality report, which uses it to tell a gap the server made
+-- (fixes arrived and were turned away) from one the phone made (nothing came).
+CREATE TABLE IF NOT EXISTS `volunteer_ping_refusal_log` (
+    `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `reason` VARCHAR(20) NOT NULL,
+    `via` ENUM('browser','native') NULL,
+    `lat` DECIMAL(10, 8) NULL,
+    `lng` DECIMAL(11, 8) NULL,
+    `accuracy_m` DECIMAL(8, 2) NULL COMMENT 'Device-reported accuracy of the refused fix',
+    `speed_mps` DECIMAL(6, 2) NULL COMMENT 'Device-reported (Doppler) speed, m/s',
+    `implied_kmh` DECIMAL(8, 1) NULL COMMENT 'Speed the jump implied (implausible only)',
+    `gnss_used` TINYINT UNSIGNED NULL,
+    `gnss_cn0` DECIMAL(4, 1) NULL,
+    `fix_at` DATETIME NOT NULL COMMENT 'When the fix was TAKEN, like volunteer_pings.created_at',
+    `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_refusal_log_mission_user` (`mission_id`, `user_id`, `fix_at`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 CREATE TABLE IF NOT EXISTS `mobile_api_tokens` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `user_id` INT UNSIGNED NOT NULL,
