@@ -2511,7 +2511,31 @@ include __DIR__ . '/includes/header.php';
     #mapCard.wr-draw-active .leaflet-overlay-pane .leaflet-interactive,
     #mapCard.wr-draw-active .leaflet-marker-pane .leaflet-interactive,
     #mapCard.wr-draw-active .leaflet-triage-pane,
-    #mapCard.wr-draw-active .leaflet-triage-pane .leaflet-interactive { pointer-events: none; }
+    #mapCard.wr-draw-active .leaflet-triage-pane .leaflet-interactive,
+    /* A restricted area's click target (restrictedHitPane, see map init). */
+    #mapCard.wr-draw-active .leaflet-restrictedHit-pane .leaflet-interactive { pointer-events: none; }
+    /* «Τι υπάρχει εδώ;» — the list a click opens when it lands on two or more
+       overlapping shapes, and the outline that says which shape an entry is. */
+    .wr-pick-popup .leaflet-popup-content { margin: 8px 8px 6px; min-width: 210px; }
+    .wr-pick-head { font-size: .78rem; color: #6c757d; margin: 0 4px 4px; }
+    .wr-pick-item { display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; border: 0; background: none; padding: 6px 4px; border-radius: 6px; line-height: 1.2; color: inherit; }
+    .wr-pick-item:hover, .wr-pick-item:focus-visible { background: #f1f3f5; outline: none; }
+    .wr-pick-swatch { flex: 0 0 16px; height: 16px; border: 2px solid var(--c); border-radius: 3px; background: var(--cf); }
+    .wr-pick-swatch-ring { border-radius: 50%; }
+    .wr-pick-swatch-area { border-style: dashed; }
+    .wr-pick-swatch-restricted { background: repeating-linear-gradient(45deg, var(--c) 0 2px, transparent 2px 5px); }
+    .wr-pick-text { display: flex; flex-direction: column; min-width: 0; }
+    .wr-pick-title { font-weight: 600; font-size: .875rem; overflow-wrap: anywhere; }
+    .wr-pick-sub { font-size: .75rem; color: #6c757d; }
+    #warRoomMap path.wr-pick-hl { stroke: #f59e0b; stroke-width: 6px; stroke-opacity: 1; stroke-dasharray: none; }
+    /* «Επίπεδα»: the show/hide list under the map-view button, the dot on that
+       button while anything is hidden, and the chip on the map that says so. */
+    .dropdown-item.wr-overlay-item { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    .wr-overlay-item .form-check-input { margin: 0; flex-shrink: 0; }
+    .wr-overlays-hidden { position: relative; }
+    .wr-overlays-hidden::after { content: ''; position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; border-radius: 50%; background: #dc3545; box-shadow: 0 0 0 2px #fff; }
+    .wr-hidden-chip { background: #fff8e1; border: 1px solid #f59e0b; border-radius: 6px; padding: 4px 8px; font-size: .78rem; max-width: 240px; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
+    .wr-hidden-chip button { border: 0; background: none; padding: 0; color: #0d6efd; text-decoration: underline; font-size: inherit; }
     /* The right-click / long-press menu and «Απόσταση από εδώ». On a phone a
        long press over the map IS the menu, so no callout and no word selected
        under the finger; popups keep both, so a coordinate can still be
@@ -7123,6 +7147,15 @@ searchRingsLayer = L.featureGroup().addTo(map);
 // above annotationPane without needing to renumber anything else.
 map.createPane('restrictedAreaPane');
 map.getPane('restrictedAreaPane').style.zIndex = 700;
+// ...but only to the EYE. The hatch drawn up there takes no clicks at all; a
+// restricted area is clicked through an invisible copy of itself down here,
+// below every other shape (areaPane is 340). Painted on top and clickable on
+// top, it swallowed every click inside it: a volunteer's pin standing in a
+// hazard zone could not be opened, nor a sector drawn across one. Now
+// anything else under the pointer wins, and «Τι υπάρχει εδώ;» (mapPickClick)
+// still lists the zone beside it, so it is never out of reach either.
+map.createPane('restrictedHitPane');
+map.getPane('restrictedHitPane').style.zIndex = 330;
 restrictedAreaLayer = L.featureGroup().addTo(map);
 // Diagonal-hatch fill pattern, injected once as a standalone SVG appended
 // to document.body — deliberately NOT reaching into Leaflet's internals
@@ -7144,6 +7177,238 @@ if (!document.getElementById('restrictedHatchDefs')) {
         + '</pattern></defs>';
     document.body.appendChild(hatchSvg);
 }
+
+// ── «Τι υπάρχει εδώ;» ───────────────────────────────────────────────────────
+// Every kind of shape lives in a pane of its own, stacked in a fixed order
+// (areas 340 < sectors 350 < rings and area dispatches 400), and a click only
+// ever reaches the TOP one under the pointer. Right for the eye, wrong for the
+// hand: a sector drawn for the search inside a missing person's ring could not
+// be opened at all, because every click on it opened the ring.
+//
+// So a click on any of these shapes first asks what ELSE is under that point.
+// One shape: its own popup opens, exactly as before. Two or more: a short list
+// names them, smallest first (the most specific ground is the likelier
+// target), outlines each on hover and opens the one picked. Nothing to set up
+// and nothing to re-order first, which a layer-order panel would have asked
+// for every time the work moved from one kind of shape to another.
+//
+// Rings are nested, so only the innermost one holding the point is listed --
+// the band a click there has always opened. Point markers are not part of
+// this: they sit above every shape for clicks (restricted areas too, see
+// restrictedHitPane) and a click on one is never ambiguous.
+function mapPickGroups() {
+    return [restrictedAreaLayer, searchRingsLayer, dispatchLayer, sectorLayer, areaLayer];
+}
+// info: {kind, id, title, sub, color, visual?} -- visual is the layer to
+// outline when it is not the clicked one (a restricted area's hatch).
+// bindPopup()'s own click handler is taken off: it opened the popup and
+// stopped the map click, and mapPickClick does both itself, deciding first
+// whether a list is needed.
+function markMapPickable(layer, info) {
+    layer._wrPick = info;
+    layer.off('click', layer._openPopup, layer);
+    layer.on('click', mapPickClick);
+    return layer;
+}
+function mapPickRing(layer) {
+    let pts = layer.getLatLngs();
+    while (Array.isArray(pts[0])) pts = pts[0];
+    return pts.map(p => [p.lat, p.lng]);
+}
+function mapPickContains(layer, latlng) {
+    if (layer instanceof L.Circle) return map.distance(layer.getLatLng(), latlng) <= layer.getRadius();
+    const ring = mapPickRing(layer);
+    return ring.length >= 3 && pointInPolygon(latlng.lat, latlng.lng, ring);
+}
+function mapPickSize(layer) {
+    return layer instanceof L.Circle ? Math.PI * layer.getRadius() ** 2 : polygonAreaSquareMeters(mapPickRing(layer));
+}
+// The clicked shape is always in the answer, even when the click caught its
+// edge a hair outside its own fill.
+function mapPickHitsAt(latlng, clicked) {
+    const hits = [];
+    let ring = null;
+    mapPickGroups().forEach(group => {
+        if (!group || !map.hasLayer(group)) return;
+        group.eachLayer(layer => {
+            if (!layer._wrPick) return;
+            const inside = mapPickContains(layer, latlng);
+            if (layer._wrPick.kind === 'ring') {
+                if (inside && (!ring || layer.getRadius() < ring.getRadius())) ring = layer;
+            } else if (inside || layer === clicked) {
+                hits.push(layer);
+            }
+        });
+    });
+    if (!ring && clicked?._wrPick?.kind === 'ring') ring = clicked;
+    if (ring) hits.push(ring);
+    return hits.map(layer => ({layer, size: mapPickSize(layer)})).sort((a, b) => a.size - b.size).map(h => h.layer);
+}
+// Looked up afresh, never held: a poll tick may rebuild the shape while the
+// list is open, and the old layer would no longer be on the map.
+function mapPickFind(ref) {
+    let found = null;
+    mapPickGroups().forEach(group => group?.eachLayer(layer => {
+        if (!found && layer._wrPick && layer._wrPick.kind === ref.kind && String(layer._wrPick.id) === String(ref.id)) found = layer;
+    }));
+    return found;
+}
+let mapPickLitEl = null;
+function mapPickUnlight() {
+    if (mapPickLitEl) mapPickLitEl.classList.remove('wr-pick-hl');
+    mapPickLitEl = null;
+}
+function mapPickLight(ref) {
+    mapPickUnlight();
+    const layer = mapPickFind(ref);
+    const el = layer ? (layer._wrPick.visual || layer).getElement() : null;
+    if (el) { el.classList.add('wr-pick-hl'); mapPickLitEl = el; }
+}
+function mapPickClick(e) {
+    L.DomEvent.stop(e);
+    const hits = mapPickHitsAt(e.latlng, e.target);
+    if (hits.length === 1) { hits[0].openPopup(e.latlng); return; }
+    openMapPickList(e.latlng, hits);
+}
+// Swatch fill strength per kind, as hex alpha -- roughly each shape's own.
+const MAP_PICK_FILL_ALPHA = {sector: '59', dispatch: '40', ring: '26', area: '1a'};
+function openMapPickList(latlng, hits) {
+    const box = document.createElement('div');
+    const head = document.createElement('div');
+    head.className = 'wr-pick-head';
+    head.textContent = t('map_pick.head', {n: hits.length});
+    box.appendChild(head);
+    hits.forEach(layer => {
+        const info = layer._wrPick;
+        const ref = {kind: info.kind, id: info.id};
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'wr-pick-item';
+        btn.innerHTML = '<span class="wr-pick-swatch"></span><span class="wr-pick-text"><span class="wr-pick-title"></span><span class="wr-pick-sub"></span></span>';
+        const swatch = btn.querySelector('.wr-pick-swatch');
+        swatch.classList.add('wr-pick-swatch-' + info.kind);
+        swatch.style.setProperty('--c', info.color);
+        swatch.style.setProperty('--cf', /^#[0-9a-f]{6}$/i.test(info.color) ? info.color + (MAP_PICK_FILL_ALPHA[info.kind] || '40') : 'transparent');
+        btn.querySelector('.wr-pick-title').textContent = info.title;
+        btn.querySelector('.wr-pick-sub').textContent = info.sub;
+        btn.addEventListener('mouseenter', () => mapPickLight(ref));
+        btn.addEventListener('focus', () => mapPickLight(ref));
+        btn.addEventListener('mouseleave', mapPickUnlight);
+        btn.addEventListener('blur', mapPickUnlight);
+        btn.addEventListener('click', () => {
+            const live = mapPickFind(ref);
+            map.closePopup();
+            if (live) live.openPopup(latlng);
+        });
+        box.appendChild(btn);
+    });
+    const popup = L.popup({className: 'wr-pick-popup', maxWidth: 300, minWidth: 210}).setLatLng(latlng).setContent(box);
+    popup.on('remove', mapPickUnlight);
+    popup.openOn(map);
+}
+
+// ── «Εμφάνιση στον χάρτη» ──────────────────────────────────────────────────
+// Show or hide each kind of shape, from the same menu as the map view: one
+// layers button, not two. The list above already makes every shape
+// reachable; this is for SEEING -- rings, a sector grid, dispatches and
+// sketches all at once can bury the one thing being worked on.
+//
+// Remembered for this tab only (sessionStorage), never into a new session: a
+// hidden restricted area is a hazard nobody sees. For the same reason
+// anything hidden is announced on the map itself, with one tap to bring it
+// all back, not only by a dot on a button.
+const MAP_OVERLAYS = [
+    {key: 'restricted',  icon: 'bi-exclamation-triangle-fill', label: 'map.overlay_restricted',  groups: () => [restrictedAreaLayer]},
+    {key: 'rings',       icon: 'bi-bullseye',                  label: 'map.overlay_rings',       groups: () => [searchRingsLayer]},
+    {key: 'areas',       icon: 'bi-bounding-box',              label: 'map.overlay_areas',       groups: () => [areaLayer]},
+    {key: 'sectors',     icon: 'bi-grid-3x3-gap-fill',         label: 'map.overlay_sectors',     groups: () => [sectorLayer, sectorBuildingLayer]},
+    {key: 'dispatch',    icon: 'bi-geo-fill',                  label: 'map.overlay_dispatch',    groups: () => [dispatchLayer]},
+    {key: 'routes',      icon: 'bi-signpost-split-fill',       label: 'map.overlay_routes',      groups: () => [routeLayer]},
+    {key: 'annotations', icon: 'bi-pencil',                    label: 'map.overlay_annotations', groups: () => [annotationLayer]},
+];
+const MAP_OVERLAYS_KEY = 'wr_hidden_overlays_<?= $missionId ?>';
+const mapOverlaysHidden = new Set();
+let mapHiddenChip = null;
+function setMapOverlayShown(key, shown) {
+    const def = MAP_OVERLAYS.find(o => o.key === key);
+    if (!def || !map) return;
+    if (shown) mapOverlaysHidden.delete(key); else mapOverlaysHidden.add(key);
+    def.groups().forEach(group => {
+        if (!group) return;
+        if (shown && !map.hasLayer(group)) {
+            group.addTo(map);
+            // Re-adding reopens every permanent label at whatever it last
+            // said, including ones the zoom had hidden.
+            applyPolygonLabelTiers(group);
+        } else if (!shown && map.hasLayer(group)) {
+            map.removeLayer(group);
+        }
+    });
+    try { sessionStorage.setItem(MAP_OVERLAYS_KEY, JSON.stringify([...mapOverlaysHidden])); } catch (e) {}
+    refreshMapOverlayUi();
+}
+// For every path that shows a shape of a kind the user may have hidden: a
+// sector picked from the list, a sketch tool picked up.
+function mapOverlayEnsureShown(key) {
+    if (mapOverlaysHidden.has(key)) setMapOverlayShown(key, true);
+}
+function refreshMapOverlayUi() {
+    const hidden = MAP_OVERLAYS.filter(o => mapOverlaysHidden.has(o.key)).map(o => t(o.label));
+    document.querySelectorAll('input[data-overlay]').forEach(input => { input.checked = !mapOverlaysHidden.has(input.dataset.overlay); });
+    document.getElementById('mapSatelliteToggle')?.classList.toggle('wr-overlays-hidden', hidden.length > 0);
+    if (!hidden.length) {
+        if (mapHiddenChip) { mapHiddenChip.remove(); mapHiddenChip = null; }
+        return;
+    }
+    if (!mapHiddenChip) {
+        const HiddenChip = L.Control.extend({
+            options: {position: 'topleft'},
+            onAdd: function () {
+                const div = L.DomUtil.create('div', 'leaflet-control wr-hidden-chip');
+                L.DomEvent.disableClickPropagation(div);
+                div.addEventListener('click', ev => {
+                    if (ev.target.closest('[data-overlays-show-all]')) MAP_OVERLAYS.forEach(o => mapOverlayEnsureShown(o.key));
+                });
+                return div;
+            },
+        });
+        mapHiddenChip = new HiddenChip().addTo(map);
+    }
+    mapHiddenChip.getContainer().innerHTML = '<i class="bi bi-eye-slash me-1"></i>'
+        + escapeHtml(t('map.overlays_hidden', {list: hidden.join(', ')}))
+        + ` <button type="button" data-overlays-show-all>${escapeHtml(t('map.overlays_show_all'))}</button>`;
+}
+(function addMapOverlayToggles() {
+    const btn = document.getElementById('mapSatelliteToggle');
+    const menu = btn?.parentNode.querySelector('.dropdown-menu');
+    if (!menu) return;
+    // Ticking a box must not close the menu. Picking a map view still does,
+    // as it always has (the listener at the bottom).
+    btn.setAttribute('data-bs-auto-close', 'outside');
+    const divider = document.createElement('li');
+    divider.innerHTML = '<hr class="dropdown-divider">';
+    const header = document.createElement('li');
+    header.innerHTML = '<h6 class="dropdown-header"></h6>';
+    header.firstChild.textContent = t('map.overlays_header');
+    menu.append(divider, header);
+    MAP_OVERLAYS.forEach(o => {
+        const li = document.createElement('li');
+        li.innerHTML = `<label class="dropdown-item wr-overlay-item"><input type="checkbox" class="form-check-input" data-overlay="${o.key}" checked><i class="bi ${o.icon}"></i><span></span></label>`;
+        li.querySelector('span').textContent = t(o.label);
+        menu.appendChild(li);
+    });
+    menu.addEventListener('change', e => {
+        const input = e.target.closest('input[data-overlay]');
+        if (input) setMapOverlayShown(input.dataset.overlay, input.checked);
+    });
+    menu.addEventListener('click', e => {
+        if (e.target.closest('[data-layer]')) bootstrap.Dropdown.getInstance(btn)?.hide();
+    });
+})();
+try {
+    JSON.parse(sessionStorage.getItem(MAP_OVERLAYS_KEY) || '[]').forEach(key => setMapOverlayShown(key, false));
+} catch (e) {}
+
 const ANNOTATION_COLOR = '#1f2937';
 // Battle-map annotation tool state — a plain toggle over the same live map
 // instance (not a second map, unlike the dispatch-composition modal), since
@@ -7169,6 +7434,8 @@ function setActiveTool(tool) {
     cancelActiveDrawing();
     if (map) map.closePopup();
     activeTool = (activeTool === tool) ? null : tool;
+    // Sketching onto hidden sketches would draw nothing anyone can see.
+    if (activeTool) mapOverlayEnsureShown('annotations');
     document.querySelectorAll('#annotationToolbar button').forEach(b => b.classList.toggle('active', b.dataset.tool === activeTool));
     const mapCardEl = document.getElementById('mapCard');
     if (mapCardEl) mapCardEl.classList.toggle('wr-draw-active', !!activeTool);
@@ -7522,6 +7789,8 @@ function renderDispatches(items) {
             layer.bindTooltip(dispatchTeamLabelHtml(item), {permanent:true, direction:'right', offset:[8,-8], className:'dispatch-team-label', interactive:false});
         } else if (item.type === 'polygon') {
             layer = L.polygon(item.geo, {color:'#7c3aed', fillOpacity:0.15}).addTo(dispatchLayer).bindPopup(popupHtml);
+            markMapPickable(layer, {kind: 'dispatch', id: item.id, color: '#7c3aed',
+                title: item.team_label + (item.label ? ' — ' + item.label : ''), sub: t('map_pick.kind_dispatch')});
             // direction:'center' anchors the label at the polygon's own
             // centroid, which sits it right on top of the fill/border — use
             // 'top' with a small upward offset instead, same "off to the
@@ -8485,6 +8754,7 @@ function renderAreaLayer(items) {
             + polygonNavigationBtnHtml(item.geo, {block: true}) + manageHtml;
 
         const layer = L.polygon(item.geo, {pane: 'areaPane', color: '#dc3545', weight: 4, dashArray: '10,6', fillColor: '#dc3545', fillOpacity: 0.06}).addTo(areaLayer).bindPopup(popupHtml);
+        markMapPickable(layer, {kind: 'area', id: item.id, color: '#dc3545', title: item.label, sub: t('map_pick.kind_area')});
         const areaLabelMarker = L.marker(areaLabelAnchor(item.geo), {icon: L.divIcon({className: '', iconSize: [0, 0]}), interactive: false});
         bindTieredPolygonLabel(areaLabelMarker, item.label, item.geo, 'wr-polygon-label');
         areaLabelMarker.addTo(areaLayer);
@@ -8534,8 +8804,13 @@ function renderRestrictedAreaLayer(items) {
             <div class="mt-2">
                 <button type="button" class="btn btn-sm btn-outline-danger restricted-area-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
             </div>` : '');
-        const layer = L.polygon(item.geo, {pane: 'restrictedAreaPane', color: '#dc3545', weight: 3, fillColor: 'url(#restrictedHatch)', fillOpacity: 0.55}).addTo(restrictedAreaLayer).bindPopup(popupHtml);
-        bindTieredPolygonLabel(layer, item.label, item.geo, 'wr-polygon-label wr-polygon-label-restricted', {slack: LABEL_SLACK_RESTRICTED, short: LABEL_RESTRICTED_SHORT});
+        // Drawn on top of everything, clicked from underneath everything: the
+        // hatch takes no clicks, and the popup lives on an invisible copy in
+        // restrictedHitPane (see its note at map init).
+        const visual = L.polygon(item.geo, {pane: 'restrictedAreaPane', color: '#dc3545', weight: 3, fillColor: 'url(#restrictedHatch)', fillOpacity: 0.55, interactive: false}).addTo(restrictedAreaLayer);
+        bindTieredPolygonLabel(visual, item.label, item.geo, 'wr-polygon-label wr-polygon-label-restricted', {slack: LABEL_SLACK_RESTRICTED, short: LABEL_RESTRICTED_SHORT});
+        const layer = L.polygon(item.geo, {pane: 'restrictedHitPane', weight: 3, opacity: 0, fillColor: '#dc3545', fillOpacity: 0}).addTo(restrictedAreaLayer).bindPopup(popupHtml);
+        markMapPickable(layer, {kind: 'restricted', id: item.id, color: '#dc3545', title: item.label, sub: t('map_pick.kind_restricted'), visual});
         layer.restrictedAreaId = item.id;
         if (String(item.id) === String(openId)) reopenLayer = layer;
     });
@@ -8923,6 +9198,12 @@ function renderSectorLayer(items) {
                 sizeLine + buildingsSummary + completePrompt + navBtn + ackBtn + selfReportBtn + manageHtml;
 
             const layer = L.polygon(item.geo, {pane: 'sectorPane', color, fillColor: color, fillOpacity: 0.35, weight: 2}).addTo(sectorLayer).bindPopup(popupHtml);
+            // Named the way mapSectorsAt() names them: sector names repeat
+            // across the rings of one mission.
+            const pickArea = (areas || []).find(a => a.id === item.area_id);
+            markMapPickable(layer, {kind: 'sector', id: item.id, color,
+                title: item.label + (pickArea ? ' — ' + pickArea.label : ''),
+                sub: [t('map_pick.kind_sector'), item.team_label, item.status_label].filter(Boolean).join(' · ')});
             // Same sectorCoverageBadgeHtml() as the popup above (so the
             // buildings-suppress-% rule and the ⚠️ low-coverage warning stay
             // identical in both places) — but only added here, on-map, while
@@ -9061,6 +9342,7 @@ function renderSectorsList(items) {
         const item = sectors.find(s => String(s.id) === row.dataset.id);
         if (item && item.geo && item.geo.length) {
             map.fitBounds(L.latLngBounds(item.geo), {padding: [40, 40], maxZoom: 17});
+            mapOverlayEnsureShown('sectors');
             sectorLayer.eachLayer(l => { if (String(l.sectorId) === row.dataset.id) l.openPopup(); });
         }
     }));
@@ -9077,6 +9359,7 @@ function renderSectorsList(items) {
         const area = areas.find(a => String(a.id) === header.dataset.id);
         if (area && area.geo && area.geo.length) {
             map.fitBounds(L.latLngBounds(area.geo), {padding: [40, 40], maxZoom: 16});
+            mapOverlayEnsureShown('areas');
             areaLayer.eachLayer(l => { if (String(l.areaId) === header.dataset.id) l.openPopup(); });
         }
     }));
@@ -10960,7 +11243,7 @@ function enterTrailMode() {
             trailLayer.addTo(map);
             trailModeActive = true;
         }
-        if (includeAdmin) { if (!map.hasLayer(dispatchLayer)) dispatchLayer.addTo(map); }
+        if (includeAdmin && !mapOverlaysHidden.has('dispatch')) { if (!map.hasLayer(dispatchLayer)) dispatchLayer.addTo(map); }
         else if (map.hasLayer(dispatchLayer)) { map.removeLayer(dispatchLayer); }
         currentTrails = result.trails;
         currentTrailEvents = result.events || [];
@@ -10977,7 +11260,7 @@ function exitTrailMode() {
     trailLayer.clearLayers();
     if (map.hasLayer(trailLayer)) map.removeLayer(trailLayer);
     sharedMarkerCluster.addLayers(currentPinMarkers);
-    if (!map.hasLayer(dispatchLayer)) dispatchLayer.addTo(map);
+    if (!map.hasLayer(dispatchLayer) && !mapOverlaysHidden.has('dispatch')) dispatchLayer.addTo(map);
 }
 const trailModeToggleBtn = document.getElementById('trailModeToggle');
 if (trailModeToggleBtn) {
@@ -13041,6 +13324,7 @@ function opGotoMap(m, afterAck) {
         // the receipt has landed: its reply re-renders the layer and closes
         // any popup open at that moment.
         if (m.kind === 'dispatch' && dispatchLayer) {
+            mapOverlayEnsureShown('dispatch');
             Promise.resolve(afterAck).then(() => dispatchLayer.eachLayer(layer => {
                 if (String(layer.dispatchId) === String(m.id)) layer.openPopup();
             }));
@@ -15154,6 +15438,7 @@ function renderSearchRingsLayer(item) {
         circle.ringLat = item.last_seen_lat;
         circle.ringLng = item.last_seen_lng;
         circle.bindPopup(`${label}${actionButtons}`);
+        markMapPickable(circle, {kind: 'ring', id: i, color: '#7c3aed', title: ringText, sub: t('map_pick.kind_ring')});
         if (i === 3) {
             // Outermost ring only: an always-visible caption (not just a
             // hover tooltip) so the feature reads as self-explanatory the
@@ -15167,7 +15452,10 @@ function renderSearchRingsLayer(item) {
             // the sentence teaches you once, the number is what you re-read.
             // The mission map opens at z13, where the full caption still
             // shows, so nothing about that first reading changes.
-            bindTieredPolygonLabel(circle, `${ringText} — ${t('missing_person.ring_caption')}`, circle.getBounds(),
+            // Bounds from the geography, not circle.getBounds(): that one
+            // needs the circle ON the map, and with «Ζώνες αναζήτησης» hidden
+            // it threw and cut this render off after the first ring.
+            bindTieredPolygonLabel(circle, `${ringText} — ${t('missing_person.ring_caption')}`, L.latLng(center).toBounds(radii[i] * 2),
                 'search-rings-caption', {short: ringText, suffix: ringCoverageBadgeHtml(i), direction: 'top'});
         } else {
             circle.bindTooltip(label, {sticky: true});
@@ -23109,9 +23397,12 @@ function renderRouteLayer(allRoutes) {
             // Matches what the admin saw while composing: L.polygon draws the
             // implicit last→first segment, fillOpacity:0 keeps it a closed
             // path rather than a shaded zone.
-            L.polygon(coords, {color: route.team_color_bg || '#0d6efd', weight: 3, opacity: 0.7, dashArray: '6,6', fillOpacity: 0}).addTo(routeLayer);
+            // interactive:false because an unfilled polygon still takes every
+            // click inside its loop -- with no popup of its own, it made a
+            // sector inside a perimeter route unclickable for nothing.
+            L.polygon(coords, {color: route.team_color_bg || '#0d6efd', weight: 3, opacity: 0.7, dashArray: '6,6', fillOpacity: 0, interactive: false}).addTo(routeLayer);
         } else if (coords.length >= 2) {
-            L.polyline(coords, {color: route.team_color_bg || '#0d6efd', weight: 3, opacity: 0.7, dashArray: '6,6'}).addTo(routeLayer);
+            L.polyline(coords, {color: route.team_color_bg || '#0d6efd', weight: 3, opacity: 0.7, dashArray: '6,6', interactive: false}).addTo(routeLayer);
         }
     });
     if (reopenLayer) reopenLayer.openPopup();
