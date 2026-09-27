@@ -19,11 +19,47 @@
  * below still bounds the file.
  * GET (admin session) renders the log as plain text so it can be read from
  * a live domain this session has no direct file access to.
+ *
+ * WHERE THE FILE LIVES (v3.336.1). It used to be uploads/mobile-debug.log, and
+ * on both live sites anyone could download it without logging in: they run
+ * LiteSpeed, which ignores the root .htaccess <FilesMatch> that denies *.log
+ * (README.md and CHANGELOG.md are served there too, the same way). The file
+ * held every native fix's raw coordinates, every few seconds, with the user id
+ * — where each volunteer's phone spent the night. Now it is storage/, whose
+ * own deny-all .htaccess is a directory-level rule, the kind LiteSpeed does
+ * honour (sql/, backups/ and tests/ answer 403 live). ensurePrivateUploadDir()
+ * re-creates that guard if a deployment ever arrives without it. The old file
+ * is deleted the first time this endpoint runs.
  */
 require_once __DIR__ . '/bootstrap.php';
 
+$logDir = __DIR__ . '/storage';
+ensurePrivateUploadDir($logDir);
+$logFile = $logDir . '/mobile-debug.log';
+if (is_file(__DIR__ . '/uploads/mobile-debug.log')) {
+    @unlink(__DIR__ . '/uploads/mobile-debug.log');
+}
+
 if (isPost()) {
     header('Content-Type: application/json');
+
+    // Two request shapes: native (bearer-authed) sends a JSON body, JS
+    // (session-authed) sends normal form fields — same branch this file's
+    // sibling mobile-ping-location.php already uses for the same reason.
+    $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
+    $isJson = stripos($contentType, 'application/json') !== false;
+    $body = $isJson ? (json_decode(file_get_contents('php://input'), true) ?? []) : [];
+
+    // Apps up to 1.1.18 / 1.0.19 report every single fix here, with its
+    // coordinates, on top of the ping that already stores it — a second
+    // HTTPS request per fix for the phone and one more token lookup for the
+    // server. Every fix that reaches the server is in volunteer_pings anyway
+    // (raw_* holds exactly what the phone said), so these are answered at
+    // once, before the database is touched, and never written.
+    if ($isJson && ($body['event'] ?? '') === 'location_received') {
+        echo json_encode(['ok' => true, 'skipped' => 'location_received']);
+        exit;
+    }
 
     $authHeader = $_SERVER['HTTP_AUTHORIZATION'] ?? ($_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '');
     if (preg_match('/^Bearer\s+([A-Za-z0-9]+)$/', trim($authHeader), $matches)) {
@@ -47,12 +83,7 @@ if (isPost()) {
         $userId = getCurrentUserId();
     }
 
-    // Two request shapes: native (bearer-authed) sends a JSON body, JS
-    // (session-authed) sends normal form fields — same branch this file's
-    // sibling mobile-ping-location.php already uses for the same reason.
-    $contentType = $_SERVER['CONTENT_TYPE'] ?? '';
-    if (stripos($contentType, 'application/json') !== false) {
-        $body = json_decode(file_get_contents('php://input'), true) ?? [];
+    if ($isJson) {
         $source = substr((string) ($body['source'] ?? '?'), 0, 20);
         $event = substr((string) ($body['event'] ?? '?'), 0, 60);
         $detail = substr((string) ($body['detail'] ?? ''), 0, 4000);
@@ -71,11 +102,13 @@ if (isPost()) {
         str_replace(["\r", "\n"], ' ', $detail)
     );
 
-    $logFile = __DIR__ . '/uploads/mobile-debug.log';
-    // Defensive size cap — this is a temporary diagnostic tool, not a
-    // rotated production log, so just truncate rather than growing forever.
+    // Size cap. Keeps the newer half rather than emptying the file: wiping it
+    // threw away the whole history at the moment it had grown busy enough to
+    // be worth reading.
     if (file_exists($logFile) && filesize($logFile) > 500000) {
-        file_put_contents($logFile, '');
+        $kept = (string) @file_get_contents($logFile, false, null, -250000);
+        $cut = strpos($kept, "\n");
+        file_put_contents($logFile, $cut === false ? '' : substr($kept, $cut + 1), LOCK_EX);
     }
     file_put_contents($logFile, $line, FILE_APPEND | LOCK_EX);
 
@@ -90,7 +123,6 @@ if (!isAdmin()) {
     die('Forbidden');
 }
 
-$logFile = __DIR__ . '/uploads/mobile-debug.log';
 $content = file_exists($logFile) ? file_get_contents($logFile) : '(no log entries yet)';
 header('Content-Type: text/plain; charset=utf-8');
 echo $content;

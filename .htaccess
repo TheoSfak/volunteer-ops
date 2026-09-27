@@ -34,6 +34,14 @@
     RewriteEngine On
     RewriteRule ^uploads/(volunteer-docs|training/materials|subscription-receipts|mission-photos|mission-voice)/ - [F,L]
 
+    # Private runtime files, and any log that ever lands under uploads/. The
+    # <FilesMatch> at the top of this file already denies *.log, but the live
+    # hosts run LiteSpeed, which ignores it: uploads/mobile-debug.log (raw GPS
+    # fixes with user ids) was downloadable there without logging in until
+    # v3.336.1. storage/ also has its own deny-all .htaccess.
+    RewriteRule ^storage/ - [F,L]
+    RewriteRule ^uploads/.*\.log$ - [F,L]
+
     # Apache strips the Authorization header from $_SERVER by default (it's
     # reserved for Apache's own Basic Auth) — mobile-ping-location.php and
     # mobile-token-issue.php's bearer-token auth (native Android app) need it

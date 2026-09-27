@@ -17,6 +17,11 @@ desktop.ini
 *.log
 logs/
 
+# Private runtime files (mobile-debug-log.php). The folder ships only for its
+# deny-all .htaccess; nothing written into it may ever be committed.
+storage/*
+!storage/.htaccess
+
 # Dependencies (if any added later)
 vendor/
 node_modules/

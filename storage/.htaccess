@@ -1,0 +1,9 @@
+# Private runtime files (mobile-debug-log.php writes its log here). Nothing in
+# this folder is ever served. A directory-level rule on purpose: the live hosts
+# run LiteSpeed, which ignores the root .htaccess <FilesMatch> for *.log but
+# honours a folder's own deny (sql/, backups/, tests/ answer 403 there).
+Require all denied
+<IfModule !mod_authz_core.c>
+    Order Deny,Allow
+    Deny from all
+</IfModule>
