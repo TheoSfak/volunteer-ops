@@ -17747,6 +17747,60 @@ document.addEventListener('visibilitychange', recheckNativeGps);
 // something is actually wrong (and then throttled per reason).
 setInterval(recheckNativeGps, 30000);
 
+// ── Whose token is on this phone (v3.336.2) ──────────────────────────────────
+// The app keeps ONE bearer token for its background service, and nothing used
+// to record whose it was. A second person logging in on the same phone (a team
+// phone, a handover, an admin testing two accounts) left the service reporting
+// as the FIRST person: the second person's fixes were refused as not their
+// shift, the server then told the service to stop, and the orders it raised on
+// the lock screen were the first person's. The owner's id now sits next to the
+// token. A token with no recorded owner (installs before v3.336.2) or somebody
+// else's is checked with mobile-token-check.php, which revokes it when it is
+// not the logged-in user's — cutting off that person's orders and positions
+// from a phone they no longer hold. Resolves the token to use, or null when a
+// new one must be issued.
+async function settleNativeTokenOwner(BackgroundGeolocation, Preferences) {
+    let token = null, owner = null;
+    try {
+        token = ((await Preferences.get({key: 'mobile_api_token'})) || {}).value || null;
+        owner = ((await Preferences.get({key: 'mobile_api_token_user'})) || {}).value || null;
+    } catch (e) {}
+    if (!token) return null;
+    if (owner === String(WR_MY_USER_ID)) return token;
+    let verdict = null;
+    try {
+        const resp = await fetch('mobile-token-check.php', {
+            method: 'POST',
+            headers: {Authorization: 'Bearer ' + token},
+            body: new URLSearchParams({csrf_token: csrfToken}),
+        });
+        verdict = await resp.json();
+    } catch (e) {}
+    if (verdict && verdict.ok && verdict.valid && verdict.mine) {
+        try { await Preferences.set({key: 'mobile_api_token_user', value: String(WR_MY_USER_ID)}); } catch (e) {}
+        return token;
+    }
+    if (!verdict || !verdict.ok) {
+        // No answer (no signal). A token recorded as somebody else's is never
+        // used; one from before owners were recorded is almost always this
+        // person's own, and tracking with it beats not tracking at all.
+        bgDebugLog('token_owner_unchecked', 'owner=' + (owner || 'unrecorded'));
+        return owner === null ? token : null;
+    }
+    try {
+        await Preferences.remove({key: 'mobile_api_token'});
+        await Preferences.remove({key: 'mobile_api_token_user'});
+    } catch (e) {}
+    if (verdict.revoked) {
+        // The service carrying it is that person's tracking. Stopped here
+        // when this app process started it; otherwise the revoked token
+        // already cuts it off, and a start() below re-configures it.
+        bgDebugLog('token_other_user', 'revoked; stopping their background tracking');
+        try { await BackgroundGeolocation.stop(); } catch (e) {}
+    }
+    return null;
+}
+
 function startNativeBackgroundTracking() {
     // Guarded: the poll and the pageshow listener below can both reach here.
     if (bgTrackingKickedOff) return;
@@ -17755,6 +17809,13 @@ function startNativeBackgroundTracking() {
     (async () => {
         const { BackgroundGeolocation, Preferences } = window.Capacitor.Plugins;
         const pingButton = document.querySelector('.send-ping');
+        // Before anything else, including the no-button branch below: a
+        // phone that changed hands must stop reporting as its previous owner
+        // even when its new one is not being tracked at all.
+        let settledToken = null;
+        try {
+            settledToken = await settleNativeTokenOwner(BackgroundGeolocation, Preferences);
+        } catch (e) {}
 
         if (!pingButton) {
             // v3.330.0: an app that can take the server's word leaves it to
@@ -17776,8 +17837,8 @@ function startNativeBackgroundTracking() {
         }
 
         try {
-            const stored = await Preferences.get({ key: 'mobile_api_token' });
-            let token = stored && stored.value;
+            let token = settledToken;
+            let tokenIssuedNow = false;
             if (!token) {
                 // The phone's model rather than the literal 'Android', so the
                 // token row says which device this is. Older APKs have no
@@ -17790,7 +17851,9 @@ function startNativeBackgroundTracking() {
                 const issued = await issueResp.json();
                 if (issued.ok) {
                     token = issued.token;
+                    tokenIssuedNow = true;
                     await Preferences.set({ key: 'mobile_api_token', value: token });
+                    await Preferences.set({ key: 'mobile_api_token_user', value: String(WR_MY_USER_ID) });
                 }
             }
             // No token (issuance failed) — leave native tracking off rather
@@ -17870,12 +17933,19 @@ function startNativeBackgroundTracking() {
                 // has no "read current config" API) — not on every ordinary
                 // reload/tab-refocus, which would otherwise cause a brief
                 // tracking gap for no reason.
+                //
+                // v3.336.2: the interval is not the only thing the running
+                // service can hold stale. Its token (a phone that changed
+                // hands, a token re-issued) and its ping URL (the shift — a
+                // volunteer who moved to another open mission kept reporting
+                // on the first one's) need the same restart, so the whole
+                // configuration is compared, not the interval alone.
                 if (e && e.code === 'ALREADY_STARTED') {
-                    // Compared with the interval stored BEFORE this start was
+                    // Compared with what was stored BEFORE this start was
                     // dispatched: the rejection arrives asynchronously, after
                     // the new value has already been written below.
-                    bgDebugLog('already_started', 'storedInterval=' + intervalBeforeStart + ' wantInterval=' + AUTO_PING_CADENCE_MS);
-                    if (intervalBeforeStart !== String(AUTO_PING_CADENCE_MS)) {
+                    bgDebugLog('already_started', 'configChanged=' + (configBeforeStart !== trackingConfig) + ' wantInterval=' + AUTO_PING_CADENCE_MS);
+                    if (configBeforeStart !== trackingConfig) {
                         try {
                             await BackgroundGeolocation.stop();
                             BackgroundGeolocation.start(startOptions, onLocation);
@@ -17891,8 +17961,17 @@ function startNativeBackgroundTracking() {
                 }
             };
 
-            const storedBefore = await Preferences.get({ key: 'bg_tracking_interval_ms' });
-            const intervalBeforeStart = storedBefore && storedBefore.value;
+            // What the running service was last started with. The token
+            // enters only as its tail: enough to tell two apart, and this
+            // key is not where the token itself is kept.
+            const trackingConfig = [AUTO_PING_CADENCE_MS, pingUrl, token.slice(-12)].join('|');
+            const storedConfig = await Preferences.get({ key: 'bg_tracking_config' });
+            const storedInterval = await Preferences.get({ key: 'bg_tracking_interval_ms' });
+            // Installs before v3.336.2 recorded only the interval. Read as
+            // unchanged when that still matches and the token was not just
+            // re-issued, so nobody's tracking restarts for the upgrade alone.
+            const configBeforeStart = (storedConfig && storedConfig.value)
+                || ((storedInterval && storedInterval.value === String(AUTO_PING_CADENCE_MS) && !tokenIssuedNow) ? trackingConfig : null);
             // Before start(): the dialog lets the volunteer turn location on
             // (and Google's accuracy mode with it) in one tap. start() itself
             // no longer refuses when the switch is off (the plugin patch), so
@@ -17901,6 +17980,7 @@ function startNativeBackgroundTracking() {
             await offerNativeLocationSettings(Preferences);
             bgDebugLog('start_attempt', 'intervalMs=' + AUTO_PING_CADENCE_MS + ' url=' + pingUrl);
             BackgroundGeolocation.start(startOptions, onLocation);
+            await Preferences.set({ key: 'bg_tracking_config', value: trackingConfig });
             await Preferences.set({ key: 'bg_tracking_interval_ms', value: String(AUTO_PING_CADENCE_MS) });
             // Dispatched — a refusal, if any, arrives at onLocation.
             bgDebugLog('start_dispatched', '');

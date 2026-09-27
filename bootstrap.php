@@ -177,8 +177,12 @@ if (isLoggedIn() && isExternalGuest()) {
     // mobile-token-issue.php/mobile-app-setup.php (that issues a long-lived
     // native-app bearer token — more standing access than a disposable,
     // unvetted, single-mission walk-up account should get).
+    // mobile-token-check.php is on BOTH lists: it grants nothing, it only
+    // says whether the token already on this phone is the logged-in user's
+    // and revokes it when it belongs to somebody else — which matters just as
+    // much when a visitor is handed a phone that was somebody's before.
     $__extAllowed = $__isMissionVisitor
-        ? array_merge(WAR_ROOM_ACTION_SCRIPTS, ['logout.php'])
+        ? array_merge(WAR_ROOM_ACTION_SCRIPTS, ['logout.php', 'mobile-token-check.php'])
         : array_merge(WAR_ROOM_ACTION_SCRIPTS, [
             'missions.php', 'profile.php', 'logout.php',
             'mission-certificate-print.php', 'certificate-verify.php',
@@ -190,7 +194,7 @@ if (isLoggedIn() && isExternalGuest()) {
             // (mobile-ping-location.php itself is NOT on this list: it's
             // bearer-token-authed with no session at all, so isLoggedIn() is
             // false and this whole guest gate never runs for it.)
-            'mobile-token-issue.php', 'mobile-app-setup.php',
+            'mobile-token-issue.php', 'mobile-app-setup.php', 'mobile-token-check.php',
         ]);
     if (!in_array($__extScript, $__extAllowed, true)) {
         if ($__isMissionVisitor) {
