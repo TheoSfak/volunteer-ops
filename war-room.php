@@ -17490,6 +17490,38 @@ function hideWarRoomBannerRow(id) {
         .filter(Boolean)
         .map(el => ({el: el, parent: el.parentNode, next: el.nextSibling}));
 
+    // Modals, for the same reason, but only for as long as they are open. A
+    // command given from the fullscreen map — the right-click menu's «Στείλε
+    // ομάδα εδώ» / «Νέα διαδρομή από εδώ» / «Νέο συμβάν εδώ», or any composer a
+    // map popup opens — shows a modal that lives under <body>, so it was not
+    // painted and the command looked as if it did nothing until fullscreen was
+    // left. Any modal that opens while the map is fullscreen moves in here,
+    // with its backdrop, and goes back home when it closes (or when fullscreen
+    // ends with it still open).
+    const modalHomes = new Map();
+    const mapIsFullscreen = () => mapCardEl.classList.contains('map-fullscreen-active');
+    function modalBackHome(el) {
+        const home = modalHomes.get(el);
+        if (!home) return;
+        modalHomes.delete(el);
+        // Its old neighbour may itself have moved (into this card, say).
+        if (home.next && home.next.parentNode !== home.parent) home.parent.appendChild(el);
+        else home.parent.insertBefore(el, home.next);
+    }
+    document.addEventListener('show.bs.modal', e => {
+        const el = e.target;
+        if (!mapIsFullscreen() || modalHomes.has(el) || mapCardEl.contains(el)) return;
+        modalHomes.set(el, {parent: el.parentNode, next: el.nextSibling});
+        mapCardEl.appendChild(el);
+        // Bootstrap appends the backdrop to <body> right after this event,
+        // in the same call, so a microtask finds it already there.
+        queueMicrotask(() => {
+            const backdrop = [...document.querySelectorAll('body > .modal-backdrop')].pop();
+            if (backdrop && modalHomes.has(el)) mapCardEl.insertBefore(backdrop, el);
+        });
+    });
+    document.addEventListener('hidden.bs.modal', e => modalBackHome(e.target));
+
     function setMapFullscreen(active) {
         mapCardEl.classList.toggle('map-fullscreen-active', active);
         mapFsBtn.innerHTML = active ? '<i class="bi bi-fullscreen-exit"></i>' : '<i class="bi bi-arrows-fullscreen"></i>';
@@ -17507,6 +17539,10 @@ function hideWarRoomBannerRow(id) {
                 home.parent.insertBefore(home.el, home.next);
             }
         });
+        if (!active) {
+            [...modalHomes.keys()].forEach(modalBackHome);
+            mapCardEl.querySelectorAll(':scope > .modal-backdrop').forEach(bd => document.body.appendChild(bd));
+        }
         if (bannerEl && mapBodyEl && bannerHome) {
             if (active) {
                 mapBodyEl.appendChild(bannerEl);
