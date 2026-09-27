@@ -6901,6 +6901,11 @@ function computeTeamDistanceMatrix(array $teamPositions): array {
             $matrix[] = [
                 'a_label' => $a['label'], 'a_color' => $a['color'],
                 'b_label' => $b['label'], 'b_color' => $b['color'],
+                // The two ends, so the live map's «Αποστάσεις μεταξύ ομάδων»
+                // can draw exactly the pairs and figures this panel lists,
+                // from the same team positions, rather than work out its own.
+                'a_lat' => $a['lat'], 'a_lng' => $a['lng'], 'a_time' => $a['time'] ?? null,
+                'b_lat' => $b['lat'], 'b_lng' => $b['lng'], 'b_time' => $b['time'] ?? null,
                 'distance_m' => gpsDistanceMeters($a['lat'], $a['lng'], $b['lat'], $b['lng']),
                 'is_stale' => $a['is_stale'] || $b['is_stale'],
                 // Worse (lower) of the two sides wins — mirrors the is_stale

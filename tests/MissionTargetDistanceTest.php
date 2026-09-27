@@ -538,6 +538,28 @@ final class MissionTargetDistanceTest extends TestCase
         $this->assertNull(elevationParse(null, 1));
     }
 
+    public function testEachTeamPairCarriesBothEndsForTheMapToDraw(): void
+    {
+        // «Αποστάσεις μεταξύ ομάδων» draws the Teams panel's own pairs, so the
+        // map and the panel can never show two figures for one pair — which
+        // only holds if the pair itself says where its two ends are.
+        $positions = [
+            ['label' => 'Alpha 1', 'color' => '#dc3545', 'lat' => 35.1910, 'lng' => 24.9180, 'time' => '10:09 19/08/2026', 'is_stale' => false],
+            ['label' => 'Bravo 2', 'color' => '#0d6efd', 'lat' => 35.1630, 'lng' => 24.9481, 'time' => '10:11 19/08/2026', 'is_stale' => true],
+        ];
+        $pairs = computeTeamDistanceMatrix($positions);
+
+        $this->assertCount(1, $pairs);
+        $pair = $pairs[0];
+        $this->assertSame([35.1910, 24.9180, '10:09 19/08/2026'], [$pair['a_lat'], $pair['a_lng'], $pair['a_time']]);
+        $this->assertSame([35.1630, 24.9481, '10:11 19/08/2026'], [$pair['b_lat'], $pair['b_lng'], $pair['b_time']]);
+        $this->assertEqualsWithDelta(
+            gpsDistanceMeters(35.1910, 24.9180, 35.1630, 24.9481), $pair['distance_m'], 0.001,
+            'the figure written on the line is the distance between the two ends it is drawn between'
+        );
+        $this->assertTrue($pair['is_stale']);
+    }
+
     public function testTheMapAndTheAssistantShareOneDetourThreshold(): void
     {
         $this->assertSame(ROUTE_DISTANCE_DETOUR_RATIO, AI_LIVE_ROUTE_DETOUR_RATIO);

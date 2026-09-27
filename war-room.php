@@ -966,7 +966,11 @@ if (isPost()) {
         }
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'report_incident') {
-        if (!$isApprovedParticipant) {
+        // Command staff too, since v3.341.0: «Νέο συμβάν εδώ» on the live map's
+        // right-click menu, for a casualty reported by phone or radio at a
+        // place nobody from the operation is standing. The form then carries
+        // the clicked point and no accuracy — it was placed, not measured.
+        if (!$isApprovedParticipant && !$canManageWarRoom) {
             setFlash('error', t('wr.perm.report_incident'));
             redirect('war-room.php?id=' . $missionId);
         }
@@ -2532,6 +2536,7 @@ include __DIR__ . '/includes/header.php';
         .wr-measure-card { width: 200px; padding: 6px 8px; font-size: .8rem; }
         /* Leaves the zoom buttons at the map's top-left uncovered. */
         .wr-measure-card.wr-measure-wide { width: calc(100vw - 110px); }
+        .wr-measure-scroll { max-height: 170px; }
         .wr-measure-label { display: none; }
     }
     .wr-measure-card .btn-close { width: .6em; height: .6em; }
@@ -2541,6 +2546,14 @@ include __DIR__ . '/includes/header.php';
     .wr-nearest-row { margin: 0 -6px; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
     .wr-nearest-row:hover { background: #f1f5f9; }
     .wr-nearest-row.active { background: #e7f0ff; }
+    /* The rows' own -6px side margins would otherwise spill out of a
+       scrolling box and give it a horizontal scrollbar. */
+    .wr-measure-scroll { max-height: 240px; overflow-y: auto; overflow-x: hidden; margin: 0 -6px; padding: 0 6px; }
+    /* The distance written on each team-to-team line, and each team's name
+       on the position it is measured from. Centred on their point by the
+       transform: the Leaflet icon itself is 0×0. */
+    .wr-pair-label { display: inline-block; transform: translate(-50%, -50%); background: #fff; border: 1px solid #9ca3af; border-radius: 4px; padding: 0 4px; font: 600 11px/16px system-ui, sans-serif; color: #111827; white-space: nowrap; box-shadow: 0 1px 3px #0003; }
+    .wr-team-chip { display: inline-block; transform: translate(-50%, calc(-100% - 10px)); background: #fff; border-left: 4px solid #374151; border-radius: 4px; padding: 0 5px; font: 700 11px/18px system-ui, sans-serif; color: #111827; white-space: nowrap; box-shadow: 0 1px 4px #0005; }
     .wr-nearest-num { display: inline-block; width: 18px; height: 18px; border-radius: 50%; background: #1f2937; color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
     .wr-anno-arrowhead { width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 16px solid; filter: drop-shadow(0 1px 2px #0008); }
     .wr-anno-text-label { display: inline-block; padding: 2px 8px; border-radius: 4px; color: #fff; font-weight: 600; font-size: .78rem; white-space: nowrap; box-shadow: 0 1px 3px #0006; }
@@ -6006,6 +6019,64 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
         </div>
     </div>
 </div>
+
+<?php
+// «Νέο συμβάν εδώ» from the live map's right-click menu: the field form's
+// fields, but the place is the clicked point rather than the reporter's own
+// GPS — a casualty called in by phone is somewhere command is not. Posts the
+// same report_incident action, so it is stored, audited and notified exactly
+// like a report from the field.
+?>
+<div class="modal fade" id="mapIncidentModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <form method="post" class="modal-content" id="mapIncidentForm">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-heart-pulse-fill me-1 text-danger"></i><?= t('measure.incident_title') ?></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <?= csrfField() ?>
+                <input type="hidden" name="action" value="report_incident">
+                <input type="hidden" name="lat" id="mapIncidentLat" value="">
+                <input type="hidden" name="lng" id="mapIncidentLng" value="">
+                <div class="small text-muted mb-2" id="mapIncidentPlace"></div>
+                <label class="form-label small fw-semibold"><?= t('incident.type_label') ?></label>
+                <select name="incident_type" class="form-select mb-2" required>
+                    <?php foreach (INCIDENT_TYPE_LABELS as $val => $label): ?>
+                    <option value="<?= h($val) ?>"><?= h(incidentTypeLabel($val)) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <label class="form-label small fw-semibold"><?= t('incident.severity_label') ?></label>
+                <select name="severity" class="form-select mb-2" required>
+                    <?php foreach (SHORTAGE_SEVERITY_LABELS as $val => $label): ?>
+                    <option value="<?= h($val) ?>" <?= $val === 'medium' ? 'selected' : '' ?>><?= h(incidentSeverityLabel($val)) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <div class="form-check mb-2">
+                    <input type="checkbox" class="form-check-input" name="is_unknown_patient" value="1" id="mapIncidentUnknownPatient">
+                    <label class="form-check-label small" for="mapIncidentUnknownPatient"><?= t('incident.unknown_patient_label') ?></label>
+                </div>
+                <div id="mapIncidentPatientFields">
+                    <input type="text" name="patient_name" class="form-control mb-2" maxlength="255" placeholder="<?= t('incident.patient_name_placeholder') ?>">
+                    <input type="tel" name="phone" class="form-control mb-2" maxlength="30" placeholder="<?= t('incident.phone_placeholder') ?>">
+                </div>
+                <input type="text" name="estimated_age" class="form-control mb-2" maxlength="50" placeholder="<?= t('incident.age_placeholder') ?>">
+                <select name="gender" class="form-select mb-2">
+                    <option value=""><?= t('incident.gender_placeholder') ?></option>
+                    <?php foreach (INCIDENT_GENDER_LABELS as $val => $label): ?>
+                    <option value="<?= h($val) ?>"><?= h(incidentGenderLabel($val)) ?></option>
+                    <?php endforeach; ?>
+                </select>
+                <textarea name="notes" class="form-control mb-2" rows="2" maxlength="2000" placeholder="<?= t('incident.notes_placeholder') ?>"></textarea>
+                <div class="small text-muted"><?= t('incident.staff_only_hint') ?></div>
+            </div>
+            <div class="modal-footer py-2">
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal"><?= t('common.cancel') ?></button>
+                <button type="submit" class="btn btn-danger btn-sm fw-semibold"><i class="bi bi-send-fill me-1"></i><?= t('incident.submit_btn') ?></button>
+            </div>
+        </form>
+    </div>
+</div>
 <?php endif; ?>
 
 <div class="modal fade" id="mediaViewModal" tabindex="-1">
@@ -9046,6 +9117,29 @@ document.getElementById('warRoomMap').addEventListener('touchstart', e => {
     document.addEventListener('touchend', onEnd);
 }, {passive: false});
 
+// Text annotation's inline form. Shared by the 'text' tool's click below and
+// by «Σημείωση εδώ» on the right-click menu, which is the same thing reached
+// without first picking a tool.
+function openTextAnnotationPopup(latlng) {
+    L.popup({closeOnClick: false})
+        .setLatLng(latlng)
+        .setContent(`<input type="text" maxlength="80" class="form-control form-control-sm mb-1" id="annoTextInput" placeholder="${t('annotation.text_placeholder')}">
+                      <button type="button" class="btn btn-sm btn-primary w-100" id="annoTextSave">${t('common.save')}</button>`)
+        .openOn(map);
+    setTimeout(() => {
+        const input = document.getElementById('annoTextInput');
+        if (!input) return;
+        input.focus();
+        const save = () => {
+            const text = input.value.trim();
+            if (text) submitAnnotation('text', {lat: latlng.lat, lng: latlng.lng}, text);
+            map.closePopup();
+        };
+        document.getElementById('annoTextSave')?.addEventListener('click', save);
+        input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); save(); } });
+    }, 0);
+}
+
 // Arrow: two clicks (start, then end) — matches the dispatch polygon tool's
 // own "click commits a point, no mousemove rubber-band" interaction, rather
 // than inventing a richer one. Text: one click opens a Leaflet popup with a
@@ -9064,24 +9158,7 @@ map.on('click', e => {
             submitAnnotation('arrow', points, null);
         }
     } else if (activeTool === 'text') {
-        const latlng = e.latlng;
-        L.popup({closeOnClick: false})
-            .setLatLng(latlng)
-            .setContent(`<input type="text" maxlength="80" class="form-control form-control-sm mb-1" id="annoTextInput" placeholder="${t('annotation.text_placeholder')}">
-                          <button type="button" class="btn btn-sm btn-primary w-100" id="annoTextSave">${t('common.save')}</button>`)
-            .openOn(map);
-        setTimeout(() => {
-            const input = document.getElementById('annoTextInput');
-            if (!input) return;
-            input.focus();
-            const save = () => {
-                const text = input.value.trim();
-                if (text) submitAnnotation('text', {lat: latlng.lat, lng: latlng.lng}, text);
-                map.closePopup();
-            };
-            document.getElementById('annoTextSave')?.addEventListener('click', save);
-            input.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); save(); } });
-        }, 0);
+        openTextAnnotationPopup(e.latlng);
     } else if (addingBuildingToSectorId !== null) {
         // Same click-opens-a-popup-with-an-inline-form technique as the
         // 'text' annotation tool just above, not a native prompt() — one-
@@ -9137,6 +9214,7 @@ let measureLayer = null;    // both pins, the straight line and the routes
 let measureControl = null;  // the card; a Leaflet control, so it stays in fullscreen
 let measureSeq = 0;         // a slow answer must never land on a newer measurement
 let measureNearestState = null; // «Ποια ομάδα είναι πιο κοντά», while its card is open
+let measurePairsState = null;   // «Αποστάσεις μεταξύ ομάδων», while its card is open
 // Pixels, not metres, so reaching for a person or a point feels the same at
 // every zoom.
 const MEASURE_SNAP_PX = 18;
@@ -9194,10 +9272,22 @@ function openMapContextMenu(point, touch) {
     const measureItems = measureFrom
         ? item('measure-to', 'bi-flag-fill', t('measure.to_here'), ' wr-ctx-primary') + item('measure-cancel', 'bi-x-circle', t('measure.cancel'))
         : item('measure-from', 'bi-rulers', t('measure.from_here')) + item('measure-me', 'bi-person-walking', t('measure.from_me'))
-            + item('nearest', 'bi-people-fill', t('measure.nearest'));
+            + item('nearest', 'bi-people-fill', t('measure.nearest'))
+            + item('team-distances', 'bi-diagram-3', t('measure.team_distances'));
+    // What command does AT a place, for command staff only. Each opens the
+    // tool that already does it, with the place filled in; each is offered
+    // only when that tool is on this page.
+    const commandItems = (CAN_MANAGE_WAR_ROOM && !measureFrom)
+        ? [
+            document.getElementById('dispatchMapModal') ? item('cmd-dispatch', 'bi-send-fill', t('measure.cmd_dispatch')) : '',
+            document.getElementById('routeComposerModal') ? item('cmd-route', 'bi-signpost-split', t('measure.cmd_route')) : '',
+            document.getElementById('mapIncidentModal') ? item('cmd-incident', 'bi-heart-pulse-fill', t('measure.cmd_incident')) : '',
+            item('cmd-note', 'bi-fonts', t('measure.cmd_note')),
+        ].join('')
+        : '';
     const sectorLines = mapSectorsAt(point.lat, point.lng)
         .map(s => `<div class="text-muted">${escapeHtml(t('measure.in_sector', {name: s}))}</div>`).join('');
-    const html = `<div class="wr-ctx-menu">${measureItems}<div class="wr-ctx-sep"></div>
+    const html = `<div class="wr-ctx-menu">${measureItems}${commandItems ? '<div class="wr-ctx-sep"></div>' + commandItems : ''}<div class="wr-ctx-sep"></div>
         <div class="wr-ctx-point">
             ${point.label ? `<div class="fw-semibold">${escapeHtml(point.label)}</div>` : ''}
             <div class="d-flex align-items-center gap-2">
@@ -9222,6 +9312,11 @@ function openMapContextMenu(point, touch) {
         else if (action === 'measure-cancel') measureClear();
         else if (action === 'measure-me') measureFromMe(point);
         else if (action === 'nearest') measureNearest(point);
+        else if (action === 'team-distances') measureTeamDistances();
+        else if (action === 'cmd-dispatch') mapCommandDispatch(point);
+        else if (action === 'cmd-route') mapCommandRoute(point);
+        else if (action === 'cmd-incident') mapCommandIncident(point);
+        else if (action === 'cmd-note') openTextAnnotationPopup(L.latLng(point.lat, point.lng));
     });
     // The height fills in when it arrives, and the line simply goes away if
     // it cannot be had — it is a detail of the point, not worth an error.
@@ -9291,6 +9386,8 @@ function measureShowCard(html, wide = false) {
                     if (ev.target.closest('[data-measure="close"]')) { measureClear(); return; }
                     const row = ev.target.closest('[data-nearest]');
                     if (row) measureNearestSelect(Number(row.dataset.nearest));
+                    const pair = ev.target.closest('[data-pair]');
+                    if (pair) measureTeamPairSelect(Number(pair.dataset.pair));
                 });
                 return div;
             },
@@ -9312,6 +9409,7 @@ function measureClear() {
     measureSeq++;
     measureFrom = null;
     measureNearestState = null;
+    measurePairsState = null;
     if (measureLayer) measureLayer.clearLayers();
     if (measureControl) { measureControl.remove(); measureControl = null; }
 }
@@ -9640,8 +9738,6 @@ function measureNearestSelect(index) {
 }
 
 function measureRenderNearest(s) {
-    const figure = (route, icon, colour) => `<i class="bi ${icon}" style="color:${colour}"></i> `
-        + (route ? `${escapeHtml(formatDistanceMeters(route.meters))} · ${escapeHtml(measureDuration(route.minutes))}` : '—');
     // Nearest is not always first to arrive: a team 2 km away across a gorge
     // can be slower than one 4 km away on a road. The list stays in the order
     // asked for, and the quickest — on foot or by car, whichever is less — is
@@ -9655,8 +9751,8 @@ function measureRenderNearest(s) {
         if (s.loading) routes = `<span class="text-muted">${escapeHtml(t('measure.loading'))}</span>`;
         else if (r && s.routing) {
             routes = [
-                MEASURE_WALK_AVAILABLE ? figure(r.walking, 'bi-person-walking', MEASURE_ROUTE_COLOURS.walking) : null,
-                figure(r.driving, 'bi-car-front-fill', MEASURE_ROUTE_COLOURS.driving),
+                MEASURE_WALK_AVAILABLE ? measureRouteFigure(r.walking, 'bi-person-walking', MEASURE_ROUTE_COLOURS.walking) : null,
+                measureRouteFigure(r.driving, 'bi-car-front-fill', MEASURE_ROUTE_COLOURS.driving),
             ].filter(Boolean).join(' &nbsp; ');
             if ((r.walking && r.walking.detour) || (r.driving && r.driving.detour)) {
                 routes += ` <i class="bi bi-exclamation-triangle-fill text-danger" title="${escapeHtml(t('measure.detour'))}"></i>`;
@@ -9691,6 +9787,173 @@ function measureRenderNearest(s) {
         + rows
         + notes.map(([cls, text]) => `<div class="small ${cls} mt-1">${escapeHtml(text)}</div>`).join(''), true);
 }
+
+// A route's distance and time beside its mode's icon, or «—» when there is none.
+function measureRouteFigure(route, icon, colour) {
+    return `<i class="bi ${icon}" style="color:${colour}"></i> `
+        + (route ? `${escapeHtml(formatDistanceMeters(route.meters))} · ${escapeHtml(measureDuration(route.minutes))}` : '—');
+}
+
+// «Αποστάσεις μεταξύ ομάδων»: every pair of teams as a line on the map with
+// its distance written on it. The pairs are the Teams panel's own list
+// (teamDistances, refreshed by the 5 s poll), from the same team positions,
+// so the map and the panel can never show two figures for one pair. Drawn as
+// they stood when asked; asking again redraws it.
+function measureTeamDistances() {
+    measureClear();
+    measureEnsureLayer();
+    const pairs = (teamDistances || []).filter(p => p.a_lat !== undefined && p.a_lat !== null && p.b_lat !== undefined && p.b_lat !== null);
+    if (!pairs.length) {
+        measureShowCard(measureCardHead(t('measure.team_distances'), 'bi-diagram-3')
+            + `<div class="small text-muted">${escapeHtml(t('measure.team_distances_none'))}</div>`);
+        return;
+    }
+    const lines = pairs.map(p => {
+        const line = L.polyline([[p.a_lat, p.a_lng], [p.b_lat, p.b_lng]], {color: '#374151', weight: 2, opacity: 0.75, dashArray: '4 6', interactive: false}).addTo(measureLayer);
+        L.marker([(p.a_lat + p.b_lat) / 2, (p.a_lng + p.b_lng) / 2], {
+            interactive: false, keyboard: false,
+            icon: L.divIcon({className: '', html: `<span class="wr-pair-label">${escapeHtml(formatDistanceMeters(p.distance_m))}</span>`, iconSize: [0, 0]}),
+        }).addTo(measureLayer);
+        return line;
+    });
+    // Each team's name on the position its distances are measured from — the
+    // newest fix of any member, which is not necessarily the dot one expects.
+    const teamsDrawn = new Map();
+    pairs.forEach(p => {
+        teamsDrawn.set(p.a_label, {lat: p.a_lat, lng: p.a_lng, color: p.a_color});
+        teamsDrawn.set(p.b_label, {lat: p.b_lat, lng: p.b_lng, color: p.b_color});
+    });
+    const bounds = L.latLngBounds([]);
+    teamsDrawn.forEach((pos, label) => {
+        L.marker([pos.lat, pos.lng], {
+            interactive: false, keyboard: false, zIndexOffset: 2000,
+            icon: L.divIcon({className: '', html: `<span class="wr-team-chip" style="border-left-color:${escapeHtml(pos.color || '#374151')}">${escapeHtml(label)}</span>`, iconSize: [0, 0]}),
+        }).addTo(measureLayer);
+        bounds.extend([pos.lat, pos.lng]);
+    });
+    if (bounds.isValid() && !map.getBounds().contains(bounds)) map.fitBounds(bounds, {padding: [40, 40]});
+    measurePairsState = {pairs, lines, selected: null, routes: {}, routeLayer: L.layerGroup().addTo(measureLayer)};
+    measureRenderPairs(measurePairsState);
+}
+
+// A pair's walk and drive, asked only when that pair is tapped: routing every
+// pair of eight teams would be 28 legs, 56 calls on the organisation's key,
+// for figures nobody looked at. Kept once fetched while the card is open.
+function measureTeamPairSelect(index) {
+    const s = measurePairsState;
+    if (!s || !s.pairs[index]) return;
+    s.selected = index;
+    s.lines.forEach((line, i) => line.setStyle(i === index
+        ? {color: '#dc3545', weight: 4, opacity: 1, dashArray: null}
+        : {color: '#374151', weight: 2, opacity: 0.35, dashArray: '4 6'}));
+    s.routeLayer.clearLayers();
+    const p = s.pairs[index];
+    const known = s.routes[index];
+    if (known && known !== 'loading' && !known.error) measureDrawPairRoutes(s, known);
+    if (!known) {
+        s.routes[index] = 'loading';
+        const body = new URLSearchParams({
+            csrf_token: csrfToken, mission_id: '<?= $missionId ?>',
+            from_lat: p.a_lat, from_lng: p.a_lng, to_lat: p.b_lat, to_lng: p.b_lng,
+        });
+        fetch('mission-measure.php', {method: 'POST', body})
+            .then(r => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+            .then(res => {
+                if (s !== measurePairsState) return;
+                s.routes[index] = (res && res.ok) ? res : {error: (res && res.error) || t('measure.failed')};
+                if (s.selected === index && res && res.ok) measureDrawPairRoutes(s, res);
+                measureRenderPairs(s);
+            })
+            .catch(() => {
+                if (s !== measurePairsState) return;
+                s.routes[index] = {error: t('measure.failed')};
+                measureRenderPairs(s);
+            });
+    }
+    measureRenderPairs(s);
+}
+
+function measureDrawPairRoutes(s, res) {
+    ['driving', 'walking'].forEach(mode => {
+        const route = res[mode];
+        if (!route || !Array.isArray(route.points) || route.points.length < 2) return;
+        L.polyline(route.points, {
+            color: MEASURE_ROUTE_COLOURS[mode], weight: mode === 'walking' ? 4 : 5, opacity: 0.8,
+            dashArray: mode === 'walking' ? '8 7' : null, interactive: false,
+        }).addTo(s.routeLayer);
+    });
+}
+
+function measureRenderPairs(s) {
+    const swatch = colour => `<span class="d-inline-block rounded-circle me-1" style="width:9px;height:9px;background:${escapeHtml(colour || '#6c757d')}"></span>`;
+    const rows = s.pairs.map((p, i) => {
+        const r = s.routes[i];
+        let routed = '';
+        if (r === 'loading') routed = `<span class="text-muted">${escapeHtml(t('measure.loading'))}</span>`;
+        else if (r && r.error) routed = `<span class="text-danger">${escapeHtml(r.error)}</span>`;
+        else if (r && r.routing === false) routed = `<span class="text-muted">${escapeHtml(t('measure.routing_unavailable'))}</span>`;
+        else if (r) {
+            routed = [
+                MEASURE_WALK_AVAILABLE ? measureRouteFigure(r.walking, 'bi-person-walking', MEASURE_ROUTE_COLOURS.walking) : null,
+                measureRouteFigure(r.driving, 'bi-car-front-fill', MEASURE_ROUTE_COLOURS.driving),
+            ].filter(Boolean).join(' &nbsp; ');
+            if ((r.walking && r.walking.detour) || (r.driving && r.driving.detour)) {
+                routed += ` <i class="bi bi-exclamation-triangle-fill text-danger" title="${escapeHtml(t('measure.detour'))}"></i>`;
+            }
+        }
+        return `<div class="wr-nearest-row${i === s.selected ? ' active' : ''}" data-pair="${i}" role="button" tabindex="0">
+            <div class="d-flex justify-content-between gap-2">
+                <span class="text-truncate" style="min-width:0">${swatch(p.a_color)}${escapeHtml(p.a_label)} ↔ ${swatch(p.b_color)}${escapeHtml(p.b_label)}</span>
+                <span class="text-nowrap fw-semibold">${escapeHtml(formatDistanceMeters(p.distance_m))}${p.is_stale ? ` <span class="text-warning" title="${escapeHtml(t('map.pin_stale'))}">⚠</span>` : ''}</span>
+            </div>
+            ${routed ? `<div class="small">${routed}</div>` : ''}
+        </div>`;
+    }).join('');
+    const notes = [];
+    if (s.pairs.some(p => p.is_stale)) notes.push(['text-warning-emphasis', t('measure.team_distances_stale')]);
+    notes.push(['text-muted', t('measure.team_distances_hint')]);
+    measureShowCard(measureCardHead(t('measure.team_distances'), 'bi-diagram-3')
+        + `<div class="wr-measure-scroll">${rows}</div>`
+        + notes.map(([cls, text]) => `<div class="small ${cls} mt-1">${escapeHtml(text)}</div>`).join(''), true);
+}
+
+// ── What command does at a place (right-click menu, command staff only) ────
+// Each opens the tool that already does the job, with the place filled in,
+// through the same one-shot seeds the search rings already use.
+function mapCommandDispatch(point) {
+    const modalEl = document.getElementById('dispatchMapModal');
+    if (!modalEl) return;
+    pendingDispatchSeed = {points: [[point.lat, point.lng]], label: point.label || '', closed: false};
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+function mapCommandRoute(point) {
+    const modalEl = document.getElementById('routeComposerModal');
+    if (!modalEl) return;
+    pendingRouteSeed = {points: [[point.lat, point.lng]], label: '', closed: false};
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+function mapCommandIncident(point) {
+    const modalEl = document.getElementById('mapIncidentModal');
+    if (!modalEl) return;
+    document.getElementById('mapIncidentLat').value = point.lat.toFixed(6);
+    document.getElementById('mapIncidentLng').value = point.lng.toFixed(6);
+    const sectorsHere = mapSectorsAt(point.lat, point.lng);
+    document.getElementById('mapIncidentPlace').textContent = t('measure.incident_place', {place: mapPointText(point)})
+        + (sectorsHere.length ? ' · ' + t('measure.in_sector', {name: sectorsHere[0]}) : '');
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+(function wireMapIncidentForm() {
+    const unknown = document.getElementById('mapIncidentUnknownPatient');
+    const fields = document.getElementById('mapIncidentPatientFields');
+    if (!unknown || !fields) return;
+    unknown.addEventListener('change', () => {
+        fields.classList.toggle('d-none', unknown.checked);
+        fields.querySelectorAll('input').forEach(input => { input.disabled = unknown.checked; });
+    });
+})();
 
 map.on('contextmenu', e => {
     if (activeTool || triagePickKind || addingBuildingToSectorId !== null) return;
@@ -21443,17 +21706,22 @@ document.querySelectorAll('.team-form').forEach(form => {
         // "click near point 1" gesture already does for a hand-drawn polygon.
         if (pendingDispatchSeed) {
             pendingDispatchSeed.points.forEach(pt => addDrawPoint(pt[0], pt[1]));
-            isClosed = true;
+            // A ring's band is an area; «Στείλε ομάδα εδώ» from the live map's
+            // right-click menu is one point, which is sent as a point only
+            // while the shape stays open (see the send handler below).
+            isClosed = pendingDispatchSeed.closed !== false;
             updateShapePreview();
             updateSendState();
-            noteInput.value = pendingDispatchSeed.label;
+            noteInput.value = pendingDispatchSeed.label || '';
             // Pre-select the team chosen in the ring popup itself, in this
             // same dropdown the normal "New Dispatch" sidebar card flow
             // already uses at send time — no other change needed for the
             // send handler to pick it up correctly.
             if (pendingDispatchSeed.teamId) teamSelect.value = pendingDispatchSeed.teamId;
             pendingRingIndex = pendingDispatchSeed.ringIndex ?? null;
-            if (drawPoints.length) dispatchMap.fitBounds(L.latLngBounds(drawPoints), {padding: [30, 30]});
+            // fitBounds() on a single point zooms all the way in.
+            if (drawPoints.length === 1) dispatchMap.setView(drawPoints[0], Math.max(dispatchMap.getZoom(), 15));
+            else if (drawPoints.length) dispatchMap.fitBounds(L.latLngBounds(drawPoints), {padding: [30, 30]});
             pendingDispatchSeed = null;
         }
         setTimeout(() => dispatchMap.invalidateSize(), 100);
@@ -23419,7 +23687,7 @@ function renderWaypointPanel() {
             routeClosed = pendingRouteSeed.closed;
             renderRouteComposerMap();
             renderWaypointPanel();
-            titleInput.value = pendingRouteSeed.label;
+            titleInput.value = pendingRouteSeed.label || '';
             // Pre-select the team chosen in the ring popup — but unlike the
             // dispatch composer above, this select drives a cascading member
             // picker (renderRouteMemberPicker(), wired to this select's own
@@ -23434,7 +23702,10 @@ function renderWaypointPanel() {
                 teamSelect.dispatchEvent(new Event('change'));
             }
             pendingRouteRingIndex = pendingRouteSeed.ringIndex ?? null;
-            if (routeWaypoints.length) routeMap.fitBounds(L.latLngBounds(routeWaypoints.map(wp => [wp.lat, wp.lng])), {padding: [30, 30]});
+            // «Νέα διαδρομή από εδώ» seeds one waypoint, and fitBounds() on a
+            // single point zooms all the way in.
+            if (routeWaypoints.length === 1) routeMap.setView([routeWaypoints[0].lat, routeWaypoints[0].lng], Math.max(routeMap.getZoom(), 15));
+            else if (routeWaypoints.length) routeMap.fitBounds(L.latLngBounds(routeWaypoints.map(wp => [wp.lat, wp.lng])), {padding: [30, 30]});
             pendingRouteSeed = null;
         }
         setTimeout(() => routeMap.invalidateSize(), 100);
