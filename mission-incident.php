@@ -4,10 +4,13 @@
  * War Room: any admin/responsible user can mark an incident report "Είδα"
  * (seen) then close it with an outcome — same two-step shape as
  * mission-shortage.php, just with a fixed outcome enum instead of free-text
- * resolved/not_resolved. POST only, AJAX. Reporting a new incident happens
- * inline in war-room.php's own POST handler (action=report_incident),
- * mirroring how report_shortage works there — this file only ever
- * acknowledges/resolves an existing row.
+ * resolved/not_resolved. POST only, AJAX. A volunteer's report from the field
+ * form is handled inline in war-room.php's own POST handler
+ * (action=report_incident), mirroring how report_shortage works there.
+ * Command's «Νέο συμβάν εδώ» on the live map posts here instead (action
+ * report, v3.344.0), because it needs the new incident's id back to send a
+ * team to it without reloading the page. Both go through
+ * reportMissionIncident().
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -28,17 +31,29 @@ if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', 
 }
 
 $action = post('action');
-$incidentId = (int) post('incident_id');
 
-$incident = dbFetchOne(
-    "SELECT i.id, i.mission_id, i.reporter_id, i.team_id, i.incident_type, i.acknowledged_at, i.resolved_at,
-            m.title AS mission_title, m.responsible_user_id, mt.codename, mt.team_number
-     FROM mission_incidents i
-     JOIN missions m ON m.id = i.mission_id
-     LEFT JOIN mission_teams mt ON mt.id = i.team_id
-     WHERE i.id = ?",
-    [$incidentId]
-);
+if ($action === 'report') {
+    $missionId = (int) post('mission_id');
+    $mission = dbFetchOne(
+        "SELECT id, title, status, show_in_ops, responsible_user_id FROM missions WHERE id = ? AND deleted_at IS NULL",
+        [$missionId]
+    );
+    if (!$mission || $mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
+        echo json_encode(['ok' => false, 'error' => t('common.mission_not_found_or_inactive')]);
+        exit;
+    }
+    if (!canManageActionRoom($mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, (int) $userId)) {
+        echo json_encode(['ok' => false, 'error' => t('incident.no_manage_permission')]);
+        exit;
+    }
+    $result = reportMissionIncident($mission, getCurrentUser(), $_POST, true);
+    unset($result['level']);
+    echo json_encode($result);
+    exit;
+}
+
+$incidentId = (int) post('incident_id');
+$incident = loadIncidentForAction($incidentId);
 if (!$incident) {
     echo json_encode(['ok' => false, 'error' => t('incident.report_not_found')]);
     exit;
@@ -50,43 +65,8 @@ if (!$canManageWarRoom) {
     exit;
 }
 
-// Notify whoever the report actually concerns when the admin acts on it — same
-// recipient resolution as mission-shortage.php's notifyShortageAffectedUsers().
-function notifyIncidentAffectedUsers(array $incident, string $titleKey, string $messageKey, string $notifCode, int $actingUserId): void {
-    if ($incident['team_id']) {
-        $recipientIds = array_map('intval', array_column(
-            dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [(int) $incident['team_id']]),
-            'user_id'
-        ));
-    } else {
-        $recipientIds = [(int) $incident['reporter_id']];
-    }
-    $recipientIds = array_values(array_unique(array_diff($recipientIds, [$actingUserId])));
-    if (!$recipientIds) {
-        return;
-    }
-
-    $teamLabel = $incident['team_id'] ? teamLabel($incident['codename'], $incident['team_number']) : t('history.no_team_capitalized');
-    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $incident['mission_id'];
-    $langs = getUserLanguages($recipientIds);
-    foreach ($recipientIds as $recipientId) {
-        $lang = $langs[$recipientId] ?? DEFAULT_LANGUAGE;
-        $notifTitle = t($titleKey, ['mission' => $incident['mission_title']], $lang);
-        $notifMessage = t($messageKey, ['type' => incidentTypeLabel($incident['incident_type'], $lang), 'team' => $teamLabel], $lang);
-        sendNotification($recipientId, $notifTitle, $notifMessage, 'success', $notifCode, [
-            'url' => $warRoomUrl,
-            'tag' => $notifCode . '-' . $incident['id'],
-            'bannerMission' => $incident['mission_id'],
-        ]);
-    }
-}
-
 if ($action === 'seen') {
-    if (!$incident['acknowledged_at']) {
-        dbExecute("UPDATE mission_incidents SET acknowledged_at = NOW(), acknowledged_by = ? WHERE id = ?", [$userId, $incidentId]);
-        logAudit('acknowledge_mission_incident', 'mission_incidents', $incidentId, null, ['mission_id' => $incident['mission_id']]);
-        notifyIncidentAffectedUsers($incident, 'incident.seen_notify_title', 'incident.seen_notify_message', 'mission_incident_seen', $userId);
-    }
+    markIncidentSeen($incident, (int) $userId);
     echo json_encode(['ok' => true]);
     exit;
 }
@@ -108,7 +88,11 @@ if ($action === 'resolve') {
             [$userId, $userId, $outcome, $outcomeLocation ?: null, $incidentId]
         );
         logAudit('resolve_mission_incident', 'mission_incidents', $incidentId, null, ['mission_id' => $incident['mission_id'], 'outcome' => $outcome]);
-        notifyIncidentAffectedUsers($incident, 'incident.resolved_notify_title', 'incident.resolved_notify_message', 'mission_incident_resolved', $userId);
+        // The teams still on their way to it hear the outcome; the reporter's
+        // team hears that it closed — once each, the first message winning
+        // for anyone who is both.
+        $told = notifyIncidentClosedToResponders(['outcome' => $outcome, 'outcome_location' => $outcomeLocation] + $incident, (int) $userId);
+        notifyIncidentAffectedUsers($incident, 'incident.resolved_notify_title', 'incident.resolved_notify_message', 'mission_incident_resolved', $userId, $told);
     }
     echo json_encode(['ok' => true]);
     exit;

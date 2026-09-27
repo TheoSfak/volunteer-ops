@@ -807,7 +807,7 @@ function loadDispatchProgress(array $dispatchIds): array {
  */
 function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canManageWarRoom, bool $isApprovedParticipant): array {
     $rows = dbFetchAll(
-        "SELECT d.id, d.team_id, d.type, d.geo, d.label, d.ring_index, mt.codename, mt.team_number, mt.color
+        "SELECT d.id, d.team_id, d.type, d.geo, d.label, d.ring_index, d.incident_id, mt.codename, mt.team_number, mt.color
          FROM mission_dispatch_points d
          LEFT JOIN mission_teams mt ON mt.id = d.team_id
          WHERE d.mission_id = ?
@@ -871,7 +871,39 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
     $myScopeKey = dispatchProgressScopeKey($myTeamId, $userId);
     $declines = loadActiveOrderDeclines($missionId);
 
-    return array_map(function ($row) use ($canManageWarRoom, $isApprovedParticipant, $userId, $myTeamId, $acksByDispatch, $receiptsByDispatch, $progressByDispatch, $myScopeKey, $declines) {
+    // The casualty a dispatch was sent to (v3.344.0). Everyone this query
+    // returned the dispatch to is someone it was sent to (or command), so the
+    // name and phone go out unmasked: the team is going to that person and
+    // may need to call them. Notes stay command-only, as everywhere else.
+    $incidentIds = array_values(array_unique(array_filter(array_map('intval', array_column($rows, 'incident_id')))));
+    $incidentsById = [];
+    if ($incidentIds) {
+        $incidentPlaceholders = implode(',', array_fill(0, count($incidentIds), '?'));
+        foreach (dbFetchAll(
+            "SELECT id, incident_type, severity, is_unknown_patient, patient_name, estimated_age, gender, phone,
+                    resolved_at, outcome, outcome_location
+             FROM mission_incidents WHERE id IN ($incidentPlaceholders)",
+            $incidentIds
+        ) as $incident) {
+            $isUnknown = (bool) $incident['is_unknown_patient'];
+            $incidentsById[(int) $incident['id']] = [
+                'id'                 => (int) $incident['id'],
+                'type_label'         => incidentTypeLabel($incident['incident_type']),
+                'severity'           => $incident['severity'],
+                'severity_label'     => incidentSeverityLabel($incident['severity']),
+                'is_unknown_patient' => $isUnknown,
+                'patient_name'       => $isUnknown ? null : $incident['patient_name'],
+                'phone'              => $isUnknown ? null : $incident['phone'],
+                'estimated_age'      => $incident['estimated_age'],
+                'gender_label'       => $incident['gender'] ? incidentGenderLabel($incident['gender']) : null,
+                'resolved'           => $incident['resolved_at'] !== null,
+                'outcome_label'      => $incident['outcome'] ? incidentOutcomeLabel($incident['outcome']) : null,
+                'outcome_location'   => $incident['outcome'] === 'transported' ? $incident['outcome_location'] : null,
+            ];
+        }
+    }
+
+    return array_map(function ($row) use ($canManageWarRoom, $isApprovedParticipant, $userId, $myTeamId, $acksByDispatch, $receiptsByDispatch, $progressByDispatch, $myScopeKey, $declines, $incidentsById) {
         $dispatchId = (int) $row['id'];
         $teamId = $row['team_id'] ? (int) $row['team_id'] : null;
         $acks = $acksByDispatch[$dispatchId] ?? [];
@@ -918,6 +950,7 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             'eta'         => $eta,
             'label'       => $row['label'],
             'ring_index'  => $row['ring_index'] !== null ? (int) $row['ring_index'] : null,
+            'incident'    => $row['incident_id'] !== null ? ($incidentsById[(int) $row['incident_id']] ?? null) : null,
             'team_id'     => $teamId,
             'team_label'  => $teamId ? teamLabel($row['codename'], $row['team_number']) : t('common.all_teams'),
             'team_color_bg' => $teamColorBg,
@@ -5330,14 +5363,278 @@ function maskPatientPhone(string $phone): string {
 }
 
 /**
+ * Stores an incident report and alerts command staff. One implementation for
+ * the volunteer's field form (war-room.php, action report_incident) and for
+ * command's «Νέο συμβάν εδώ» on the live map (mission-incident.php, action
+ * report), which posts the clicked point instead of the reporter's own GPS.
+ * $in holds the form's raw fields. Returns ['ok' => true, 'id' => …], or
+ * ['ok' => false, 'level' => 'error'|'warning', 'error' => …].
+ *
+ * A report written by command staff is stored already seen: they wrote it,
+ * and «Είδα» on it would be a step that tells nobody anything.
+ */
+function reportMissionIncident(array $mission, array $user, array $in, bool $byCommand): array {
+    $missionId = (int) $mission['id'];
+    $field = fn(string $key) => trim((string) ($in[$key] ?? ''));
+    $incidentType = $field('incident_type');
+    $severity = $field('severity');
+    $isUnknownPatient = $field('is_unknown_patient') === '1';
+    $patientName = $isUnknownPatient ? '' : mb_substr($field('patient_name'), 0, 255);
+    $estimatedAge = mb_substr($field('estimated_age'), 0, 50);
+    $gender = $field('gender');
+    $phone = $isUnknownPatient ? '' : mb_substr($field('phone'), 0, 30);
+    $notes = mb_substr($field('notes'), 0, 2000);
+    $lat = is_numeric($field('lat')) ? (float) $field('lat') : null;
+    $lng = is_numeric($field('lng')) ? (float) $field('lng') : null;
+    if ($lat === null || $lng === null) { $lat = null; $lng = null; }
+    // The map form sends no accuracy: its point was placed, not measured.
+    $accuracy = parseAccuracyMeters($field('accuracy'), $lat);
+
+    if (!in_array($incidentType, array_keys(INCIDENT_TYPE_LABELS), true)
+        || !in_array($severity, ['low', 'medium', 'high', 'critical'], true)
+        || ($gender !== '' && !in_array($gender, array_keys(INCIDENT_GENDER_LABELS), true))) {
+        return ['ok' => false, 'level' => 'error', 'error' => t('incident.invalid_fields')];
+    }
+    if (!$isUnknownPatient && $patientName === '') {
+        return ['ok' => false, 'level' => 'warning', 'error' => t('incident.missing_fields')];
+    }
+
+    $userId = (int) $user['id'];
+    $teamId = getUserTeamIdForMission($missionId, $userId);
+    $incidentId = (int) dbInsert(
+        "INSERT INTO mission_incidents
+            (mission_id, reporter_id, team_id, lat, lng, accuracy_m, incident_type, severity,
+             is_unknown_patient, patient_name, estimated_age, gender, phone, notes,
+             acknowledged_at, acknowledged_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, " . ($byCommand ? 'NOW()' : 'NULL') . ", ?, NOW())",
+        [
+            $missionId, $userId, $teamId, $lat, $lng, $accuracy, $incidentType, $severity,
+            $isUnknownPatient ? 1 : 0, $patientName ?: null, $estimatedAge ?: null,
+            $gender ?: null, $phone ?: null, $notes ?: null, $byCommand ? $userId : null,
+        ]
+    );
+    logAudit('report_mission_incident', 'mission_incidents', $incidentId, null, ['mission_id' => $missionId, 'severity' => $severity]);
+
+    $recipientIds = getMissionCommandStaffIds($missionId, $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId);
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $langs = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langs[$recipientId] ?? DEFAULT_LANGUAGE;
+        $notifTitle = t('incident.notify_title', ['mission' => $mission['title']], $lang);
+        $notifMessage = t('incident.notify_message', [
+            'name' => h($user['name']),
+            'type' => incidentTypeLabel($incidentType, $lang),
+            'severity' => incidentSeverityLabel($severity, $lang),
+        ], $lang);
+        $pushData = ['url' => $warRoomUrl, 'tag' => 'incident-report-mission-' . $missionId, 'bannerMission' => $missionId, 'vibrate' => [300, 100, 300, 100, 500]];
+        // Always mandatory (empty code, same as orders/SOS/needs_help) — a
+        // person needing help can never be silently muted by an admin's
+        // own notification preference, unlike shortage's low/medium tier.
+        sendNotification($recipientId, $notifTitle, $notifMessage, 'danger', '', $pushData);
+    }
+    return ['ok' => true, 'id' => $incidentId];
+}
+
+/**
+ * The incident row mission-incident.php and mission-dispatch.php act on, with
+ * what its notifications need. Null if it is not this mission's.
+ */
+function loadIncidentForAction(int $incidentId, ?int $missionId = null): ?array {
+    $row = dbFetchOne(
+        "SELECT i.id, i.mission_id, i.reporter_id, i.team_id, i.incident_type, i.severity, i.acknowledged_at, i.resolved_at,
+                i.outcome, i.outcome_location,
+                m.title AS mission_title, m.responsible_user_id, mt.codename, mt.team_number
+         FROM mission_incidents i
+         JOIN missions m ON m.id = i.mission_id
+         LEFT JOIN mission_teams mt ON mt.id = i.team_id
+         WHERE i.id = ?",
+        [$incidentId]
+    );
+    if (!$row || ($missionId !== null && (int) $row['mission_id'] !== $missionId)) {
+        return null;
+    }
+    return $row;
+}
+
+/**
+ * Whoever the report concerns, when command acts on it: the reporter's team,
+ * or the reporter alone without one — same recipient resolution as
+ * mission-shortage.php's notifyShortageAffectedUsers(). Moved here from
+ * mission-incident.php (v3.344.0) so that sending a team to an incident can
+ * mark it seen the same way «Είδα» does.
+ */
+function notifyIncidentAffectedUsers(array $incident, string $titleKey, string $messageKey, string $notifCode, int $actingUserId, array $alreadyTold = []): void {
+    if ($incident['team_id']) {
+        $recipientIds = array_map('intval', array_column(
+            dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [(int) $incident['team_id']]),
+            'user_id'
+        ));
+    } else {
+        $recipientIds = [(int) $incident['reporter_id']];
+    }
+    $recipientIds = array_values(array_unique(array_diff($recipientIds, [$actingUserId], array_map('intval', $alreadyTold))));
+    if (!$recipientIds) {
+        return;
+    }
+
+    $teamLabel = $incident['team_id'] ? teamLabel($incident['codename'], $incident['team_number']) : t('history.no_team_capitalized');
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $incident['mission_id'];
+    $langs = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langs[$recipientId] ?? DEFAULT_LANGUAGE;
+        $notifTitle = t($titleKey, ['mission' => $incident['mission_title']], $lang);
+        $notifMessage = t($messageKey, ['type' => incidentTypeLabel($incident['incident_type'], $lang), 'team' => $teamLabel], $lang);
+        sendNotification($recipientId, $notifTitle, $notifMessage, 'success', $notifCode, [
+            'url' => $warRoomUrl,
+            'tag' => $notifCode . '-' . $incident['id'],
+            'bannerMission' => $incident['mission_id'],
+        ]);
+    }
+}
+
+/**
+ * «Είδα» on an incident, once. Sending a team to it says the same thing, so
+ * mission-dispatch.php calls this too: a reporter should not wait for a
+ * «seen» that never comes because command went straight to sending help.
+ */
+function markIncidentSeen(array $incident, int $userId): void {
+    if ($incident['acknowledged_at']) {
+        return;
+    }
+    $changed = dbExecute(
+        "UPDATE mission_incidents SET acknowledged_at = NOW(), acknowledged_by = ? WHERE id = ? AND acknowledged_at IS NULL",
+        [$userId, (int) $incident['id']]
+    );
+    if ($changed > 0) {
+        logAudit('acknowledge_mission_incident', 'mission_incidents', (int) $incident['id'], null, ['mission_id' => (int) $incident['mission_id']]);
+        notifyIncidentAffectedUsers($incident, 'incident.seen_notify_title', 'incident.seen_notify_message', 'mission_incident_seen', $userId);
+    }
+}
+
+/**
+ * Tells the teams sent to an incident that command has closed it, with the
+ * outcome — only people whose part is still under way (not completed, not
+ * «Δεν μπορώ»), the same people a deleted dispatch would reach
+ * (withdrawnDispatchLines()). The dispatch itself stays: the team still
+ * presses «Ολοκληρώθηκε» when it is done there, and its times are the
+ * incident's response record. Returns who was told.
+ */
+function notifyIncidentClosedToResponders(array $incident, int $actingUserId): array {
+    $missionId = (int) $incident['mission_id'];
+    $dispatchIds = array_map('intval', array_column(
+        dbFetchAll("SELECT id FROM mission_dispatch_points WHERE mission_id = ? AND incident_id = ?", [$missionId, (int) $incident['id']]),
+        'id'
+    ));
+    $recipientIds = array_map('intval', array_keys(withdrawnDispatchLines($missionId, $dispatchIds, $actingUserId)));
+    if (!$recipientIds) {
+        return [];
+    }
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $langs = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langs[$recipientId] ?? DEFAULT_LANGUAGE;
+        $outcome = $incident['outcome'] ? incidentOutcomeLabel($incident['outcome'], $lang) : '—';
+        if ($incident['outcome'] === 'transported' && trim((string) $incident['outcome_location']) !== '') {
+            $outcome .= ' (' . trim((string) $incident['outcome_location']) . ')';
+        }
+        sendNotification((int) $recipientId,
+            t('incident.closed_for_team_title', ['mission' => $incident['mission_title']], $lang),
+            t('incident.closed_for_team_message', ['type' => incidentTypeLabel($incident['incident_type'], $lang), 'outcome' => $outcome], $lang),
+            'info', 'mission_incident_resolved', [
+                'url' => $warRoomUrl,
+                'tag' => 'mission_incident_resolved-' . $incident['id'],
+                'bannerMission' => $missionId,
+                // A notice in the order popup («Κατάλαβα»), not a ticker line.
+                'popupInfo' => 'mission_incident_closed',
+            ]
+        );
+    }
+    return $recipientIds;
+}
+
+/**
+ * The teams sent to each of these incidents and how far each has got:
+ * [incidentId => [line, …]], one line per team. A dispatch to one team is that
+ * team's line from the moment it is sent; one to every team has a line for
+ * each team that has moved or said «Δεν μπορώ», and a single «Όλες οι ομάδες»
+ * line until then. Times are H:i; *_raw are the stored values, for the report.
+ */
+function loadIncidentResponders(int $missionId, array $incidentIds): array {
+    $incidentIds = array_values(array_unique(array_filter(array_map('intval', $incidentIds))));
+    if (!$incidentIds) {
+        return [];
+    }
+    $placeholders = implode(',', array_fill(0, count($incidentIds), '?'));
+    $rows = dbFetchAll(
+        "SELECT d.id, d.incident_id, d.team_id, d.created_at, mt.codename, mt.team_number
+         FROM mission_dispatch_points d
+         LEFT JOIN mission_teams mt ON mt.id = d.team_id
+         WHERE d.mission_id = ? AND d.incident_id IN ($placeholders)
+         ORDER BY d.created_at, d.id",
+        array_merge([$missionId], $incidentIds)
+    );
+    if (!$rows) {
+        return [];
+    }
+    $progress = loadDispatchProgress(array_map('intval', array_column($rows, 'id')));
+    $declines = loadActiveOrderDeclines($missionId);
+    $hm = fn($ts) => $ts ? date('H:i', strtotime($ts)) : null;
+
+    $out = [];
+    foreach ($rows as $row) {
+        $dispatchId = (int) $row['id'];
+        $teamId = $row['team_id'] !== null ? (int) $row['team_id'] : null;
+        $steps = $progress[$dispatchId] ?? [];
+        $declined = $declines['dispatch:' . $dispatchId] ?? [];
+        $line = fn(string $label, ?array $p, bool $isDeclined) => [
+            'dispatch_id'  => $dispatchId,
+            'label'        => $label,
+            'sent'         => $hm($row['created_at']),
+            'sent_raw'     => $row['created_at'],
+            'departed'     => $p['departed'] ?? null,
+            'arrived'      => $p['arrived'] ?? null,
+            'arrived_raw'  => $p['arrived_raw'] ?? null,
+            'completed'    => $p['completed'] ?? null,
+            'declined'     => $isDeclined,
+        ];
+        $lines = [];
+        if ($teamId !== null) {
+            $lines[] = $line(teamLabel($row['codename'], $row['team_number']), $steps['t' . $teamId] ?? null, isset($declined['t' . $teamId]));
+        } else {
+            foreach ($steps as $scope => $p) {
+                $lines[] = $line($p['label'], $p, isset($declined[$scope]));
+            }
+            foreach ($declined as $scope => $dc) {
+                if (!isset($steps[$scope])) {
+                    $lines[] = $line($dc['team'] ?? ($dc['by'] ?? '—'), null, true);
+                }
+            }
+            if (!$lines) {
+                $lines[] = $line(t('common.all_teams'), null, false);
+            }
+        }
+        foreach ($lines as $l) {
+            $out[(int) $row['incident_id']][] = $l;
+        }
+    }
+    return $out;
+}
+
+/**
  * War Room: open (unresolved) incidents for the mission, shaped for both
  * audiences from one query — $unmasked=true (command staff) gets the real
  * patient_name/phone/notes, $unmasked=false (any other approved participant)
  * gets maskPatientName()/maskPatientPhone() and notes stripped entirely (never
  * shown outside command staff, per the mission owner's privacy decision).
  * Mirrors loadUnresolvedShortageReportsForMission()'s shape/ordering.
+ *
+ * Since v3.344.0 one exception to the masking: a volunteer whose team was
+ * sent to the incident ($viewerId's team, or a dispatch to every team) sees
+ * the name and phone in full — they are going to that person and may need to
+ * call them. Notes stay command-only regardless. Command staff also get
+ * 'responders', every team sent to it and how far along each is.
  */
-function loadUnresolvedIncidentsForMission(int $missionId, bool $unmasked): array {
+function loadUnresolvedIncidentsForMission(int $missionId, bool $unmasked, ?int $viewerId = null): array {
     $rows = dbFetchAll(
         "SELECT i.id, i.incident_type, i.severity, i.is_unknown_patient, i.patient_name,
                 i.estimated_age, i.gender, i.phone, i.notes, i.team_id, i.lat, i.lng, i.accuracy_m,
@@ -5354,21 +5651,37 @@ function loadUnresolvedIncidentsForMission(int $missionId, bool $unmasked): arra
          ORDER BY FIELD(i.severity, 'critical', 'high', 'medium', 'low'), i.created_at ASC",
         [$missionId]
     );
+    $ids = array_map('intval', array_column($rows, 'id'));
+    $responders = ($unmasked && $ids) ? loadIncidentResponders($missionId, $ids) : [];
+    $sentToViewer = [];
+    if (!$unmasked && $viewerId && $ids) {
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $viewerTeamId = getUserTeamIdForMission($missionId, $viewerId);
+        foreach (dbFetchAll(
+            "SELECT DISTINCT incident_id FROM mission_dispatch_points
+             WHERE mission_id = ? AND incident_id IN ($placeholders) AND (team_id IS NULL OR team_id = ?)",
+            array_merge([$missionId], $ids, [$viewerTeamId ?: 0])
+        ) as $sent) {
+            $sentToViewer[(int) $sent['incident_id']] = true;
+        }
+    }
 
-    return array_map(function ($row) use ($unmasked) {
+    return array_map(function ($row) use ($unmasked, $responders, $sentToViewer) {
         $isUnknown = (bool) $row['is_unknown_patient'];
         [$homeBg, $homeFg] = teamBadgeColors($row['home_team_color']);
+        $showPatient = $unmasked || isset($sentToViewer[(int) $row['id']]);
         return [
             'id'                 => (int) $row['id'],
             'type_label'         => incidentTypeLabel($row['incident_type']),
             'severity'           => $row['severity'],
             'severity_label'     => incidentSeverityLabel($row['severity']),
             'is_unknown_patient' => $isUnknown,
-            'patient_name'       => $isUnknown ? null : ($unmasked ? $row['patient_name'] : maskPatientName($row['patient_name'])),
+            'patient_name'       => $isUnknown ? null : ($showPatient ? $row['patient_name'] : maskPatientName($row['patient_name'])),
             'estimated_age'      => $row['estimated_age'],
             'gender_label'       => $row['gender'] ? incidentGenderLabel($row['gender']) : null,
-            'phone'              => $row['phone'] ? ($unmasked ? $row['phone'] : maskPatientPhone($row['phone'])) : null,
+            'phone'              => $row['phone'] ? ($showPatient ? $row['phone'] : maskPatientPhone($row['phone'])) : null,
             'notes'              => $unmasked ? $row['notes'] : null,
+            'responders'         => $responders[(int) $row['id']] ?? [],
             'reporter_name'      => $row['reporter_name'],
             'is_external'        => (bool) $row['is_external'],
             'guest_org_name'     => $row['guest_org_name'],
@@ -5560,7 +5873,7 @@ function loadMissingPersonForMission(int $missionId): ?array {
  */
 function loadIncidentDetailForMissionReport(int $missionId): array {
     $rows = dbFetchAll(
-        "SELECT i.incident_type, i.severity, i.is_unknown_patient, i.patient_name, i.phone,
+        "SELECT i.id, i.incident_type, i.severity, i.is_unknown_patient, i.patient_name, i.phone,
                 i.estimated_age, i.gender, i.outcome, i.outcome_location, i.team_id,
                 i.created_at, i.acknowledged_at, i.resolved_at,
                 u.name AS reporter_name, mt.codename, mt.team_number
@@ -5571,10 +5884,22 @@ function loadIncidentDetailForMissionReport(int $missionId): array {
          ORDER BY FIELD(i.severity, 'critical', 'high', 'medium', 'low'), i.created_at ASC",
         [$missionId]
     );
+    $responders = loadIncidentResponders($missionId, array_column($rows, 'id'));
 
-    return array_map(function ($row) {
+    return array_map(function ($row) use ($responders) {
         $isUnknown = (bool) $row['is_unknown_patient'];
+        $reportedTs = strtotime($row['created_at']);
         return [
+            // Every team sent to it (v3.344.0), with the minutes from the
+            // report to that team's arrival — the incident's response time.
+            'responders'       => array_map(fn($r) => [
+                'label'          => $r['label'],
+                'sent'           => $r['sent'],
+                'arrived'        => $r['arrived'],
+                'completed'      => $r['completed'],
+                'declined'       => $r['declined'],
+                'arrive_minutes' => $r['arrived_raw'] ? max(0, (int) round((strtotime($r['arrived_raw']) - $reportedTs) / 60)) : null,
+            ], $responders[(int) $row['id']] ?? []),
             'severity'         => $row['severity'],
             'severity_label'   => incidentSeverityLabel($row['severity']),
             'type_label'       => incidentTypeLabel($row['incident_type']),

@@ -7309,6 +7309,33 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 172,
+            'description' => "Add mission_dispatch_points.incident_id: the casualty a dispatch was sent to (v3.344.0). Before this an incident was a record and nothing more — command could declare one from the live map's right-click menu, but sending a team to it was a separate dispatch that knew nothing about it: the team did not know it was going to a casualty, and the incident card did not know anyone was on the way. With the link the team's order carries the casualty's name and phone, the incident card shows every team sent and how far along it is, and the team is told when command closes the incident. NULL = an ordinary dispatch. ON DELETE SET NULL, though incidents are only ever deleted with their mission.",
+            'up' => function () {
+                $haveColumn = (bool) dbFetchValue(
+                    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_dispatch_points' AND COLUMN_NAME = 'incident_id'"
+                );
+                if (!$haveColumn) {
+                    dbExecute("ALTER TABLE mission_dispatch_points
+                               ADD COLUMN incident_id INT UNSIGNED NULL COMMENT 'The incident this dispatch was sent to; NULL = an ordinary dispatch',
+                               ADD INDEX idx_dispatch_incident (incident_id)");
+                }
+                // Its own statement: MariaDB will not take ADD COLUMN and a
+                // foreign key on that same column in one ALTER.
+                $haveKey = (bool) dbFetchValue(
+                    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+                      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_dispatch_points'
+                        AND COLUMN_NAME = 'incident_id' AND REFERENCED_TABLE_NAME = 'mission_incidents'"
+                );
+                if (!$haveKey) {
+                    dbExecute("ALTER TABLE mission_dispatch_points
+                               ADD CONSTRAINT fk_dispatch_incident FOREIGN KEY (incident_id) REFERENCES mission_incidents(id) ON DELETE SET NULL");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

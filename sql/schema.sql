@@ -2594,6 +2594,13 @@ CREATE TABLE IF NOT EXISTS `mission_incidents` (
     INDEX `idx_incident_mission` (`mission_id`, `resolved_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- The incident a dispatch was sent to (v172), NULL for an ordinary dispatch.
+-- Here rather than on mission_dispatch_points itself, which is created before
+-- mission_incidents exists. Two statements: MariaDB will not take ADD COLUMN
+-- and a foreign key on that same column in one ALTER.
+ALTER TABLE `mission_dispatch_points` ADD COLUMN `incident_id` INT UNSIGNED NULL COMMENT 'The incident this dispatch was sent to; NULL = an ordinary dispatch', ADD INDEX `idx_dispatch_incident` (`incident_id`);
+ALTER TABLE `mission_dispatch_points` ADD CONSTRAINT `fk_dispatch_incident` FOREIGN KEY (`incident_id`) REFERENCES `mission_incidents`(`id`) ON DELETE SET NULL;
+
 -- =============================================
 -- MISSION ACTIVITY NOTES (War Room: hand-typed command-staff entries in the
 -- activity log — a radio call, a decision taken, anything that happened off

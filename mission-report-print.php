@@ -999,6 +999,11 @@ if ($trActive) {
         <div class="event-row">
             <div><span class="badge badge-<?= SHORTAGE_SEVERITY_COLORS[$d['severity']] ?? 'secondary' ?>"><?= h($d['severity_label']) ?></span> <?= h($d['type_label']) ?> <strong><?= h($d['team_label']) ?></strong> — <?= h($d['reporter_name']) ?> (<?= h($d['who']) ?><?= $d['estimated_age'] || $d['gender_label'] ? ', ' . h(trim($d['estimated_age'] . ' ' . $d['gender_label'])) : '' ?><?= $d['phone'] ? ', ' . h($d['phone']) : '' ?>)</div>
             <div class="event-time">Αναφέρθηκε <?= $d['created_at'] ?> · Είδε <?= $d['acknowledged_at'] ?: '—' ?> · Έκβαση <?= $d['outcome_label'] ? h($d['outcome_label']) . ($d['outcome_location'] ? ' (' . h($d['outcome_location']) . ')' : '') . ' — ' . $d['resolved_at'] : '—' ?></div>
+            <?php foreach ($d['responders'] as $r): ?>
+            <div class="event-time">🚑 <?= h($r['label']) ?>: <?= $r['declined'] ? 'δεν μπορούσε να πάει' : 'στάλθηκε ' . h($r['sent'])
+                . ($r['arrived'] ? ' · έφτασε ' . h($r['arrived']) . ($r['arrive_minutes'] !== null ? ' (' . (int) $r['arrive_minutes'] . ' λεπ. από την αναφορά)' : '') : '')
+                . ($r['completed'] ? ' · ολοκλήρωσε ' . h($r['completed']) : '') ?></div>
+            <?php endforeach; ?>
         </div>
         <?php endforeach; ?>
     <?php endif; ?>

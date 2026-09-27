@@ -966,70 +966,18 @@ if (isPost()) {
         }
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'report_incident') {
-        // Command staff too, since v3.341.0: «Νέο συμβάν εδώ» on the live map's
-        // right-click menu, for a casualty reported by phone or radio at a
-        // place nobody from the operation is standing. The form then carries
-        // the clicked point and no accuracy — it was placed, not measured.
+        // The field form. Command's «Νέο συμβάν εδώ» on the live map posts to
+        // mission-incident.php instead (v3.344.0); both are
+        // reportMissionIncident(). Command staff may still use this form too.
         if (!$isApprovedParticipant && !$canManageWarRoom) {
             setFlash('error', t('wr.perm.report_incident'));
             redirect('war-room.php?id=' . $missionId);
         }
-
-        $allowedTypes = array_keys(INCIDENT_TYPE_LABELS);
-        $allowedSeverities = ['low', 'medium', 'high', 'critical'];
-        $incidentType = post('incident_type');
-        $severity = post('severity');
-        $isUnknownPatient = post('is_unknown_patient') === '1';
-        $patientName = $isUnknownPatient ? '' : mb_substr(trim((string) post('patient_name')), 0, 255);
-        $estimatedAge = mb_substr(trim((string) post('estimated_age')), 0, 50);
-        $gender = post('gender');
-        $allowedGenders = array_keys(INCIDENT_GENDER_LABELS);
-        $phone = $isUnknownPatient ? '' : mb_substr(trim((string) post('phone')), 0, 30);
-        $notes = mb_substr(trim((string) post('notes')), 0, 2000);
-        $lat = is_numeric(post('lat')) ? (float) post('lat') : null;
-        $lng = is_numeric(post('lng')) ? (float) post('lng') : null;
-        if ($lat === null || $lng === null) { $lat = null; $lng = null; }
-        $accuracy = parseAccuracyMeters(post('accuracy'), $lat);
-
-        if (!in_array($incidentType, $allowedTypes, true) || !in_array($severity, $allowedSeverities, true)) {
-            setFlash('error', t('incident.invalid_fields'));
-        } elseif (!$isUnknownPatient && $patientName === '') {
-            setFlash('warning', t('incident.missing_fields'));
-        } elseif ($gender !== '' && !in_array($gender, $allowedGenders, true)) {
-            setFlash('error', t('incident.invalid_fields'));
-        } else {
-            $teamId = getUserTeamIdForMission($missionId, $user['id']);
-            $incidentId = dbInsert(
-                "INSERT INTO mission_incidents
-                    (mission_id, reporter_id, team_id, lat, lng, accuracy_m, incident_type, severity,
-                     is_unknown_patient, patient_name, estimated_age, gender, phone, notes, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
-                [
-                    $missionId, $user['id'], $teamId, $lat, $lng, $accuracy, $incidentType, $severity,
-                    $isUnknownPatient ? 1 : 0, $patientName ?: null, $estimatedAge ?: null,
-                    $gender ?: null, $phone ?: null, $notes ?: null,
-                ]
-            );
-            logAudit('report_mission_incident', 'mission_incidents', $incidentId, null, ['mission_id' => $missionId, 'severity' => $severity]);
-
-            $recipientIds = getMissionCommandStaffIds($missionId, $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, (int) $user['id']);
-            $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-            $incidentRecipientLangs = getUserLanguages($recipientIds);
-            foreach ($recipientIds as $recipientId) {
-                $lang = $incidentRecipientLangs[$recipientId] ?? DEFAULT_LANGUAGE;
-                $notifTitle = t('incident.notify_title', ['mission' => $mission['title']], $lang);
-                $notifMessage = t('incident.notify_message', [
-                    'name' => h($user['name']),
-                    'type' => incidentTypeLabel($incidentType, $lang),
-                    'severity' => incidentSeverityLabel($severity, $lang),
-                ], $lang);
-                $pushData = ['url' => $warRoomUrl, 'tag' => 'incident-report-mission-' . $missionId, 'bannerMission' => $missionId, 'vibrate' => [300, 100, 300, 100, 500]];
-                // Always mandatory (empty code, same as orders/SOS/needs_help) — a
-                // person needing help can never be silently muted by an admin's
-                // own notification preference, unlike shortage's low/medium tier.
-                sendNotification($recipientId, $notifTitle, $notifMessage, 'danger', '', $pushData);
-            }
+        $result = reportMissionIncident($mission, $user, $_POST, $canManageWarRoom);
+        if ($result['ok']) {
             setFlash('success', t('incident.submitted_flash'));
+        } else {
+            setFlash($result['level'], $result['error']);
         }
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'add_activity_note') {
@@ -1612,7 +1560,7 @@ if (get('ajax') === '1') {
     $liveStreams = ($canManageWarRoom && livekitConfigured()) ? loadActiveLiveStreamsForMission($missionId) : [];
     $routes = loadRoutesForUser($missionId, (int)$user['id'], $canManageWarRoom);
     $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
-    $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom) : [];
+    $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom, (int) $user['id']) : [];
     // Mass-casualty triage board. Null on a mission that never had a Μαζικό
     // Συμβάν, so an ordinary mission's poll carries one null and nothing else.
     $triage = ($canManageWarRoom || $isApprovedParticipant) ? loadTriageStateForMission($missionId, $canManageWarRoom, (int) $user['id']) : null;
@@ -1826,7 +1774,7 @@ if (livekitConfigured()) { expireStaleLiveStreams($missionId); }
 $myLive = loadMyLiveStreamForUser($missionId, (int)$user['id']);
 $routes = loadRoutesForUser($missionId, (int)$user['id'], $canManageWarRoom);
 $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
-$incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom) : [];
+$incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom, (int) $user['id']) : [];
 $triage = ($canManageWarRoom || $isApprovedParticipant) ? loadTriageStateForMission($missionId, $canManageWarRoom, (int) $user['id']) : null;
 $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
 $voiceMessages = $canManageWarRoom ? loadUnacknowledgedVoiceMessagesForMission($missionId) : [];
@@ -5267,13 +5215,6 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-geo-fill me-1"></i><?= t('dispatch.card_title') ?></h5></div>
             <div class="card-body">
                 <p class="small text-muted"><?= t('dispatch.note') ?></p>
-                <label class="form-label small fw-semibold"><?= t('dispatch.recipients_label') ?></label>
-                <select class="form-select mb-3" id="dispatchTeamSelect">
-                    <option value=""><?= t('common.all_teams') ?></option>
-                    <?php foreach ($teams as $team): ?>
-                    <option value="<?= $team['id'] ?>"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></option>
-                    <?php endforeach; ?>
-                </select>
                 <button type="button" class="btn btn-primary w-100 fw-semibold" data-bs-toggle="modal" data-bs-target="#dispatchMapModal">
                     <i class="bi bi-pin-map-fill me-1"></i><?= t('dispatch.send_btn') ?>
                 </button>
@@ -5315,24 +5256,6 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-signpost-split-fill me-1"></i><?= t('route.card_title') ?></h5></div>
             <div class="card-body">
                 <p class="small text-muted"><?= t('route.note') ?></p>
-                <label class="form-label small fw-semibold"><?= t('route.recipients_label') ?></label>
-                <select class="form-select mb-3" id="routeTeamSelect">
-                    <?php foreach ($teams as $team): ?>
-                    <option value="<?= $team['id'] ?>"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></option>
-                    <?php endforeach; ?>
-                    <?php if (count($teams) >= 2): ?>
-                    <option value=""><?= t('route.cross_team_option') ?></option>
-                    <?php endif; ?>
-                </select>
-                <div class="mb-3">
-                    <label class="form-label small fw-semibold mb-1"><?= t('route.members_label') ?></label>
-                    <div id="routeMemberPicker" class="d-flex flex-wrap gap-2 small"></div>
-                </div>
-                <div class="form-check mb-3" id="routeReturnToStartWrap">
-                    <input class="form-check-input" type="checkbox" id="routeReturnToStartCheck">
-                    <label class="form-check-label small" for="routeReturnToStartCheck"><?= t('route.return_to_start_checkbox') ?></label>
-                    <div class="text-muted" style="font-size:.75rem;"><?= t('route.return_to_start_hint') ?></div>
-                </div>
                 <button type="button" class="btn btn-primary w-100 fw-semibold" data-bs-toggle="modal" data-bs-target="#routeComposerModal">
                     <i class="bi bi-signpost-split-fill me-1"></i><?= t('route.send_btn') ?>
                 </button>
@@ -5822,6 +5745,26 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-0 d-flex flex-column">
+                <?php
+                // Who it goes to, chosen here, in the window that sends it
+                // (v3.344.0). It used to live on the sidebar card, where the
+                // right-click menu's «Στείλε ομάδα εδώ» and an incident's
+                // «Στείλε ομάδα» never showed it: they sent to whatever that
+                // hidden list said, which by default was every team. Nothing
+                // is picked on open, so nothing goes out until someone
+                // chooses; «Όλες οι ομάδες» is a choice like any other.
+                ?>
+                <div class="px-2 pt-2 d-flex flex-wrap gap-2 align-items-center bg-light">
+                    <label class="small fw-semibold mb-0" for="dispatchTeamSelect"><?= t('dispatch.recipients_label') ?></label>
+                    <select class="form-select form-select-sm" id="dispatchTeamSelect" style="max-width:260px;">
+                        <option value="" disabled selected><?= t('dispatch.pick_team_placeholder') ?></option>
+                        <?php foreach ($teams as $team): ?>
+                        <option value="<?= $team['id'] ?>"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></option>
+                        <?php endforeach; ?>
+                        <option value="all"><?= t('common.all_teams') ?></option>
+                    </select>
+                    <span class="small text-danger fw-semibold d-none" id="dispatchIncidentLine"><i class="bi bi-heart-pulse-fill me-1"></i><span></span></span>
+                </div>
                 <div class="p-2 border-bottom d-flex flex-wrap gap-2 align-items-center bg-light">
                     <input type="text" id="dispatchAddressInput" class="form-control" style="max-width:320px;" placeholder="<?= t('dispatch.address_placeholder') ?>">
                     <button type="button" class="btn btn-outline-secondary btn-sm" id="dispatchAddressSearch"><i class="bi bi-search me-1"></i><?= t('dispatch.search_btn') ?></button>
@@ -6028,7 +5971,39 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                 <div class="small text-muted px-2 py-1 bg-light border-bottom"><?= t('route.map_instructions') ?></div>
                 <div class="d-flex flex-grow-1" style="min-height:0;">
                     <div id="routeMap" style="flex:1;min-height:0;"></div>
-                    <div id="routeWaypointPanel" style="width:360px;min-width:280px;overflow-y:auto;border-left:1px solid #dee2e6;padding:.5rem;background:#fff;"></div>
+                    <div class="d-flex flex-column" style="width:360px;min-width:280px;border-left:1px solid #dee2e6;background:#fff;">
+                        <?php
+                        // Who walks it, chosen here, in the window that sends
+                        // it (v3.344.0) — the same move as the dispatch
+                        // window's list, for the same reason: from the
+                        // right-click menu's «Νέα διαδρομή από εδώ» the
+                        // sidebar card's list was never on screen. Outside
+                        // #routeWaypointPanel, which renderWaypointPanel()
+                        // rewrites whole.
+                        ?>
+                        <?php if (!empty($teams)): ?>
+                        <div class="p-2 border-bottom" style="max-height:40%;overflow-y:auto;">
+                            <label class="form-label small fw-semibold mb-1" for="routeTeamSelect"><?= t('route.recipients_label') ?></label>
+                            <select class="form-select form-select-sm mb-2" id="routeTeamSelect">
+                                <option value="pick" disabled selected><?= t('dispatch.pick_team_placeholder') ?></option>
+                                <?php foreach ($teams as $team): ?>
+                                <option value="<?= $team['id'] ?>"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></option>
+                                <?php endforeach; ?>
+                                <?php if (count($teams) >= 2): ?>
+                                <option value=""><?= t('route.cross_team_option') ?></option>
+                                <?php endif; ?>
+                            </select>
+                            <label class="form-label small fw-semibold mb-1"><?= t('route.members_label') ?></label>
+                            <div id="routeMemberPicker" class="d-flex flex-wrap gap-2 small mb-1"></div>
+                            <div class="form-check mb-0" id="routeReturnToStartWrap">
+                                <input class="form-check-input" type="checkbox" id="routeReturnToStartCheck">
+                                <label class="form-check-label small" for="routeReturnToStartCheck"><?= t('route.return_to_start_checkbox') ?></label>
+                                <div class="text-muted" style="font-size:.75rem;"><?= t('route.return_to_start_hint') ?></div>
+                            </div>
+                        </div>
+                        <?php endif; ?>
+                        <div id="routeWaypointPanel" class="flex-grow-1" style="overflow-y:auto;padding:.5rem;min-height:0;"></div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -6125,7 +6100,8 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
             </div>
             <div class="modal-footer py-2">
                 <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal"><?= t('common.cancel') ?></button>
-                <button type="submit" class="btn btn-danger btn-sm fw-semibold"><i class="bi bi-send-fill me-1"></i><?= t('incident.submit_btn') ?></button>
+                <button type="submit" class="btn btn-outline-danger btn-sm" data-then="save"><?= t('incident.submit_btn') ?></button>
+                <button type="submit" class="btn btn-danger btn-sm fw-semibold" data-then="dispatch"><i class="bi bi-send-fill me-1"></i><?= t('incident.submit_and_dispatch_btn') ?></button>
             </div>
         </form>
     </div>
@@ -7719,6 +7695,29 @@ function dispatchTeamLabelHtml(item) {
     const status = p ? (p.completed ? '✅ ' : (p.arrived ? '📍 ' : (p.departed ? '🚶 ' : ''))) : '';
     return `<span style="background:${item.team_color_bg};color:${item.team_color_fg};padding:2px 8px;border-radius:10px;font-weight:700;font-size:.72rem;white-space:nowrap;box-shadow:0 1px 3px #0006;">${status}${escapeHtml(item.team_label)}</span>`;
 }
+// The casualty a dispatch was sent to (v3.344.0), wherever the order is shown
+// to the team going: who, a button that calls them, and — once command has
+// closed the incident — how it ended, so nobody keeps running to someone
+// already taken away.
+function dispatchIncidentHtml(inc) {
+    if (!inc) return '';
+    const who = inc.is_unknown_patient ? t('incident.unknown_patient_label') : (inc.patient_name || '—');
+    const details = [inc.estimated_age, inc.gender_label].filter(Boolean).join(' · ');
+    const dial = inc.phone ? String(inc.phone).replace(/[^\d+]/g, '') : '';
+    const phone = dial
+        ? `<a class="btn btn-sm btn-outline-danger py-0 px-2 mt-1" href="tel:${escapeHtml(dial)}"><i class="bi bi-telephone-fill me-1"></i>${escapeHtml(t('incident.call_btn', {phone: inc.phone}))}</a>`
+        : '';
+    const outcome = inc.outcome_label ? inc.outcome_label + (inc.outcome_location ? ' (' + inc.outcome_location + ')' : '') : '';
+    const closed = inc.resolved
+        ? `<div class="text-success fw-semibold mt-1"><i class="bi bi-check-circle-fill me-1"></i>${escapeHtml(t('incident.closed_line', {outcome: outcome || '—'}))}</div>`
+        : '';
+    return `<div class="small border border-danger rounded p-1 mt-1 text-start">
+        <div class="fw-semibold text-danger"><i class="bi bi-heart-pulse-fill me-1"></i>${escapeHtml(incidentShortText(inc))}</div>
+        <div>${escapeHtml(who)}${details ? ' · ' + escapeHtml(details) : ''}</div>
+        ${phone}${closed}
+    </div>`;
+}
+
 // Same whole-array-JSON signature technique as renderPins/mediaSignature —
 // skips the rebuild (and the open-popup-preservation dance below, which
 // itself isn't free) on a poll tick where literally nothing about any
@@ -7809,7 +7808,7 @@ function renderDispatches(items) {
               `${item.eta.source === 'straight_line' ? ' ' + escapeHtml(t('dispatch.eta_straight_line_suffix')) : ''}` +
               `${item.eta.is_stale ? ' ' + escapeHtml(t('dispatch.eta_stale_suffix')) : ''}</div>`
             : '';
-        const popupHtml = `<strong>${escapeHtml(item.team_label)}</strong>${item.label ? '<br>' + escapeHtml(item.label) : ''}` + etaHtml + (progressHtml || acksHtml) + declinesHtml + receiveHtml + ackHtml + directionsHtml +
+        const popupHtml = `<strong>${escapeHtml(item.team_label)}</strong>${item.label ? '<br>' + escapeHtml(item.label) : ''}` + dispatchIncidentHtml(item.incident) + etaHtml + (progressHtml || acksHtml) + declinesHtml + receiveHtml + ackHtml + directionsHtml +
             (item.can_delete ? `<br><button type="button" class="btn btn-sm btn-outline-danger mt-1 dispatch-delete-btn" data-id="${item.id}">${t('common.delete')}</button>` : '');
         let layer = null;
         if (item.type === 'point') {
@@ -9578,19 +9577,29 @@ function mapGestureIsTouch(ev) {
 
 // A right-click on a person, a dispatch point or the base measures from THAT,
 // named, rather than from wherever the pointer landed a few pixels off it.
+// An incident too (v3.344.0), and then the point remembers which one, so
+// «Στείλε ομάδα» from here goes to that casualty rather than to a spot a few
+// metres off it that knows nothing about them.
 function mapGesturePoint(e) {
     let best = null, bestPx = MEASURE_SNAP_PX;
-    const consider = (lat, lng, label) => {
+    const consider = (lat, lng, label, extra) => {
         if (lat === null || lat === undefined || lng === null || lng === undefined) return;
         const px = map.latLngToContainerPoint([Number(lat), Number(lng)]).distanceTo(e.containerPoint);
-        if (px <= bestPx) { bestPx = px; best = {lat: Number(lat), lng: Number(lng), label: label || null}; }
+        if (px <= bestPx) { bestPx = px; best = Object.assign({lat: Number(lat), lng: Number(lng), label: label || null}, extra || {}); }
     };
     (pins || []).forEach(p => consider(p.lat, p.lng, p.name));
     (dispatches || []).forEach(d => {
         if (d.type === 'point' && d.geo) consider(d.geo.lat, d.geo.lng, [d.team_label, d.label].filter(Boolean).join(' — '));
     });
+    (missionIncidents || []).forEach(r => consider(r.lat, r.lng, incidentShortText(r), {incident: r}));
     if (missionLocation.lat) consider(missionLocation.lat, missionLocation.lng, t('map.mission_point_label'));
     return best || {lat: e.latlng.lat, lng: e.latlng.lng, label: null};
+}
+
+// «Τραύμα — Κρίσιμο»: how an incident is named on a dispatch sent to it and
+// wherever the page points at one.
+function incidentShortText(r) {
+    return t('incident.short_text', {type: r.type_label, severity: r.severity_label});
 }
 
 // Named the way the sectors card names them: sector names repeat across the
@@ -9620,7 +9629,7 @@ function openMapContextMenu(point, touch) {
     // only when that tool is on this page.
     const commandItems = (CAN_MANAGE_WAR_ROOM && !measureFrom)
         ? [
-            document.getElementById('dispatchMapModal') ? item('cmd-dispatch', 'bi-send-fill', t('measure.cmd_dispatch')) : '',
+            document.getElementById('dispatchMapModal') ? item('cmd-dispatch', 'bi-send-fill', t(point.incident ? 'measure.cmd_dispatch_incident' : 'measure.cmd_dispatch'), point.incident ? ' wr-ctx-primary' : '') : '',
             document.getElementById('routeComposerModal') ? item('cmd-route', 'bi-signpost-split', t('measure.cmd_route')) : '',
             document.getElementById('mapIncidentModal') ? item('cmd-incident', 'bi-heart-pulse-fill', t('measure.cmd_incident')) : '',
             item('cmd-note', 'bi-fonts', t('measure.cmd_note')),
@@ -10262,9 +10271,28 @@ function measureRenderPairs(s) {
 // Each opens the tool that already does the job, with the place filled in,
 // through the same one-shot seeds the search rings already use.
 function mapCommandDispatch(point) {
+    if (point.incident) { openDispatchForIncident(point.incident); return; }
     const modalEl = document.getElementById('dispatchMapModal');
     if (!modalEl) return;
     pendingDispatchSeed = {points: [[point.lat, point.lng]], label: point.label || '', closed: false};
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+// «Στείλε ομάδα» to a casualty: from a right-click on its pin, its card in
+// the incidents panel, or «Καταχώριση και αποστολή ομάδας» on the map's
+// incident form. The dispatch window opens on the incident's point with the
+// incident named, and the dispatch is sent linked to it (incident_id).
+function openDispatchForIncident(incident) {
+    const modalEl = document.getElementById('dispatchMapModal');
+    if (!modalEl || incident.lat === null || incident.lng === null) return;
+    const text = incidentShortText(incident);
+    pendingDispatchSeed = {
+        points: [[Number(incident.lat), Number(incident.lng)]], closed: false,
+        label: t('incident.dispatch_label', {text: text}),
+        incidentId: incident.id,
+        incidentText: t('incident.dispatch_for', {text: text}),
+    };
+    map.closePopup();
     bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
 
@@ -10289,10 +10317,52 @@ function mapCommandIncident(point) {
 (function wireMapIncidentForm() {
     const unknown = document.getElementById('mapIncidentUnknownPatient');
     const fields = document.getElementById('mapIncidentPatientFields');
-    if (!unknown || !fields) return;
-    unknown.addEventListener('change', () => {
+    const form = document.getElementById('mapIncidentForm');
+    const modalEl = document.getElementById('mapIncidentModal');
+    if (!unknown || !fields || !form || !modalEl) return;
+    const syncUnknown = () => {
         fields.classList.toggle('d-none', unknown.checked);
         fields.querySelectorAll('input').forEach(input => { input.disabled = unknown.checked; });
+    };
+    unknown.addEventListener('change', syncUnknown);
+
+    // Sent in the background (v3.344.0) rather than as a page post: the
+    // second button needs the new incident's id to send a team to it, and
+    // a reload would lose the map command was working on. Without script the
+    // form still posts to war-room.php's report_incident, as before.
+    let then = 'save';
+    form.querySelectorAll('button[data-then]').forEach(btn => btn.addEventListener('click', () => { then = btn.dataset.then; }));
+    form.addEventListener('submit', ev => {
+        ev.preventDefault();
+        const buttons = form.querySelectorAll('button[type="submit"]');
+        const body = new FormData(form);
+        body.set('action', 'report');
+        body.set('mission_id', '<?= $missionId ?>');
+        const typeSelect = form.querySelector('[name="incident_type"]');
+        const severitySelect = form.querySelector('[name="severity"]');
+        const incident = {
+            lat: Number(body.get('lat')), lng: Number(body.get('lng')),
+            type_label: typeSelect.options[typeSelect.selectedIndex].text,
+            severity_label: severitySelect.options[severitySelect.selectedIndex].text,
+        };
+        const sendTeam = then === 'dispatch';
+        buttons.forEach(b => { b.disabled = true; });
+        fetchWithTimeout('mission-incident.php', {method: 'POST', body}, FIELD_POST_TIMEOUT_MS)
+            .then(r => { if (!checkSessionAlive(r)) return null; return r.json(); })
+            .then(result => {
+                buttons.forEach(b => { b.disabled = false; });
+                if (!result) return;
+                if (!result.ok) { alert(result.error || t('common.failed')); return; }
+                incident.id = result.id;
+                // The next window opens once this one has gone, so the two
+                // never stack their backdrops.
+                if (sendTeam) modalEl.addEventListener('hidden.bs.modal', () => openDispatchForIncident(incident), {once: true});
+                bootstrap.Modal.getInstance(modalEl).hide();
+                form.reset();
+                syncUnknown();
+                if (typeof pollWarRoomData === 'function') pollWarRoomData();
+            })
+            .catch(() => { buttons.forEach(b => { b.disabled = false; }); alert(t('common.send_failed')); });
     });
 })();
 
@@ -12047,8 +12117,10 @@ function opModelFromDispatch(d) {
     [d.my_receipt, d.my_departed, d.my_ack, d.my_completed].forEach((time, k) => { if (time) stepTimes[k] = time; });
     return {
         key: 'dispatch:' + d.id, kind: 'dispatch', id: d.id, type: isPoint ? 'dispatch_point' : 'dispatch_area',
-        cat: 'move', icon: isPoint ? 'bi-geo-alt-fill' : 'bi-bounding-box-circles',
-        title: t(isPoint ? 'popup.type.dispatch_point' : 'popup.type.dispatch_area'),
+        cat: 'move', icon: d.incident ? 'bi-heart-pulse-fill' : (isPoint ? 'bi-geo-alt-fill' : 'bi-bounding-box-circles'),
+        title: t(d.incident ? 'popup.type.dispatch_incident' : (isPoint ? 'popup.type.dispatch_point' : 'popup.type.dispatch_area')),
+        // Who the team is going to, with a button that calls them.
+        casualty: d.incident || null,
         text: d.label || t(isPoint ? 'popup.text.dispatch_point' : 'popup.text.dispatch_area'),
         meta: t('popup.to_team', {team: d.team_label}),
         acked: acked, outstanding: !d.my_completed && !d.my_declined,
@@ -12183,14 +12255,14 @@ function myOrderEntriesFromDispatches(items) {
             if (d.my_declined && !d.my_completed) {
                 return {
                     outstanding: false,
-                    html: myOrderRow(labelHtml, escapeHtml(d.team_label), declineNoticeHtml('dispatch', d.id, d.my_declined, !!d.can_decline)),
+                    html: myOrderRow(labelHtml, escapeHtml(d.team_label), dispatchIncidentHtml(d.incident) + declineNoticeHtml('dispatch', d.id, d.my_declined, !!d.can_decline)),
                     popup: opModelFromDispatch(d),
                 };
             }
             const declineHtml = d.can_decline && !d.my_completed ? declineOpenBtnHtml('dispatch:' + d.id) : '';
             return {
                 outstanding: !d.my_completed,
-                html: myOrderRow(labelHtml, escapeHtml(d.team_label), receiptHtml + actionHtml + directionsHtml + declineHtml),
+                html: myOrderRow(labelHtml, escapeHtml(d.team_label), dispatchIncidentHtml(d.incident) + receiptHtml + actionHtml + directionsHtml + declineHtml),
                 popup: opModelFromDispatch(d),
             };
         });
@@ -12606,6 +12678,20 @@ function opArrive(key, b) {
 // sector command has taken back. The text is the notification's own, already
 // in this person's language.
 function opModelFromNotice(key, b) {
+    // The incident this person's team was sent to has been closed by command
+    // (v3.344.0), with how it ended. Their order stays: they still press
+    // «Ολοκληρώθηκε» when they are done there.
+    if (b.popup.info === 'mission_incident_closed') {
+        return {
+            key: key, kind: 'info', id: 0, type: 'incident_closed',
+            cat: 'info', icon: 'bi-heart-pulse-fill',
+            title: t('popup.type.incident_closed'),
+            text: b.message, meta: '',
+            acked: false, outstanding: true, steps: [t('popup.step.seen')], step: 0, stepTimes: {},
+            hint: '', speakText: '', target: null,
+            card: 'myTasksCard', cardLabel: t('popup.btn.show_order'),
+        };
+    }
     if (b.popup.info === 'mission_order_withdrawn') {
         // The order itself has already left this page — deleted, or no longer
         // this team's — so there is nothing to show beyond the words.
@@ -12897,6 +12983,7 @@ function opArrivalCardHtml(m, i, n) {
         <div class="wr-op-body">
             <div class="wr-op-text">${escapeHtml(m.text)}</div>
             <div class="wr-op-meta">${escapeHtml(m.meta)}</div>
+            ${dispatchIncidentHtml(m.casualty)}
             ${m.target ? opMiniHtml(m) : ''}
             ${m.hint ? `<div class="wr-op-hint"><i class="bi bi-info-circle me-1"></i>${escapeHtml(m.hint)}</div>` : ''}
             <div class="wr-op-actions mt-2">
@@ -12937,6 +13024,7 @@ function opReviewCardHtml(m, i, n) {
         <div class="wr-op-body pt-1">
             <div class="wr-op-text">${escapeHtml(m.text)}</div>
             <div class="wr-op-meta">${escapeHtml(m.meta)}</div>
+            ${dispatchIncidentHtml(m.casualty)}
             ${m.type === 'speak' ? opReplayBtnHtml() : ''}
             <div class="wr-op-steps">${steps}</div>
             ${m.kind === 'arrive' ? '' : opCompassBtnHtml(m)}
@@ -14323,10 +14411,32 @@ const INCIDENT_OUTCOME_OPTIONS = [
 // also folds in canManageIncidents so a card never gets stuck mid-render if
 // that ever changed within a session (it can't today, but costs nothing).
 let missionIncidentsRenderedSig = null;
+// Every team sent to the incident and how far it has got — the answer to
+// "is anyone going?" that the card could not give before v3.344.0. A team
+// that has finished there is command's cue to record the outcome.
+function incidentRespondersHtml(r) {
+    const lines = r.responders || [];
+    if (!lines.length) {
+        return canManageIncidents ? `<div class="small text-danger mt-1"><i class="bi bi-exclamation-circle me-1"></i>${escapeHtml(t('incident.nobody_sent'))}</div>` : '';
+    }
+    return '<div class="small mt-1">' + lines.map(l => {
+        if (l.declined) return `✋ <strong>${escapeHtml(l.label)}</strong>: ${escapeHtml(t('incident.responder_declined'))}`;
+        const steps = [
+            t('incident.responder_sent', {time: l.sent}),
+            l.departed ? t('dispatch.progress_departed', {time: l.departed}) : '',
+            l.arrived ? t('dispatch.progress_arrived', {time: l.arrived}) : '',
+            l.completed ? t('dispatch.progress_completed', {time: l.completed}) : '',
+        ].filter(Boolean);
+        const icon = l.completed ? '✅' : (l.arrived ? '📍' : (l.departed ? '🚶' : '📨'));
+        return `${icon} <strong>${escapeHtml(l.label)}</strong>: ${escapeHtml(steps.join(' · '))}`
+            + (l.completed && canManageIncidents ? ` <span class="text-success fw-semibold">— ${escapeHtml(t('incident.record_outcome_hint'))}</span>` : '');
+    }).join('<br>') + '</div>';
+}
+
 function renderMissionIncidents(items) {
     const list = document.getElementById('incidentsList');
     if (!list) return;
-    const sig = canManageIncidents + '|' + items.map(r => r.id + ':' + (r.acknowledged_at ? '1' : '0')).join(',');
+    const sig = canManageIncidents + '|' + items.map(r => r.id + ':' + (r.acknowledged_at ? '1' : '0') + ':' + JSON.stringify(r.responders || [])).join(',');
     if (sig === missionIncidentsRenderedSig) return;
     missionIncidentsRenderedSig = sig;
 
@@ -14345,6 +14455,10 @@ function renderMissionIncidents(items) {
             ${details ? `<div class="small mt-1">${escapeHtml(details)}</div>` : ''}
             ${r.notes ? `<div class="small fst-italic mt-1">"${escapeHtml(r.notes)}"</div>` : ''}
             <div class="text-muted" style="font-size:.75rem;">${guestNameHtml(r.reporter_name, r.is_external, r.home_team_name, r.home_team_color_bg, r.home_team_color_fg, r.guest_country_code)}${k9BadgeHtml(r.user_id, true)}${captainBadgeHtml(r.user_id, true)} (${escapeHtml(r.team_label)}) · ${r.created_at}${r.acknowledged_at ? t('shortage.seen_at_prefix', {time: r.acknowledged_at}) : ''}</div>
+            ${incidentRespondersHtml(r)}
+            ${canManageIncidents && r.lat !== null && document.getElementById('dispatchMapModal')
+                ? `<button type="button" class="btn btn-sm btn-danger w-100 mt-1 incident-dispatch-btn" data-incident-id="${r.id}"><i class="bi bi-send-fill me-1"></i>${escapeHtml(t((r.responders || []).length ? 'incident.dispatch_another_btn' : 'incident.dispatch_btn'))}</button>`
+                : ''}
             ${navigationBtnHtml(r.lat, r.lng, {block: true})}
             ${canManageIncidents ? `<div class="mt-1 d-flex gap-1">${r.acknowledged_at
                 ? `<select class="form-select form-select-sm incident-outcome-select" data-incident-id="${r.id}"><option value="">${t('incident.outcome_label')}…</option>${outcomeOptions}</select>
@@ -14356,6 +14470,10 @@ function renderMissionIncidents(items) {
     }).join('');
     if (!canManageIncidents) return;
 
+    list.querySelectorAll('.incident-dispatch-btn').forEach(btn => btn.addEventListener('click', () => {
+        const incident = missionIncidents.find(x => String(x.id) === btn.dataset.incidentId);
+        if (incident) openDispatchForIncident(incident);
+    }));
     list.querySelectorAll('.incident-outcome-select').forEach(sel => sel.addEventListener('change', () => {
         const locInput = list.querySelector(`.incident-outcome-location-input[data-incident-id="${sel.dataset.incidentId}"]`);
         if (locInput) locInput.classList.toggle('d-none', sel.value !== 'transported');
@@ -22161,6 +22279,11 @@ document.querySelectorAll('.team-form').forEach(form => {
     // dispatch correctly gets no ring_index. Reset in hidden.bs.modal, same
     // one-shot lifetime as the seed it came from.
     let pendingRingIndex = null;
+    // The incident this dispatch is for (pendingDispatchSeed.incidentId), same
+    // one-shot lifetime. Sent as incident_id: the team's order then carries the
+    // casualty, and the incident card shows the team on its way.
+    let pendingIncidentId = null;
+    const incidentLine = document.getElementById('dispatchIncidentLine');
 
     // Dimmed, read-only copy of what the live map currently shows (volunteer
     // pings + existing dispatch points/areas) so the admin isn't drawing a
@@ -22191,9 +22314,11 @@ document.querySelectorAll('.team-form').forEach(form => {
             : L.polyline(drawPoints, {color:'#7c3aed'}).addTo(dispatchMap);
     }
 
+    // A place and a recipient: nothing goes to every team by default.
     function updateSendState() {
-        sendBtn.disabled = !(drawPoints.length === 1 || (isClosed && drawPoints.length >= 3));
+        sendBtn.disabled = !(drawPoints.length === 1 || (isClosed && drawPoints.length >= 3)) || !teamSelect.value;
     }
+    teamSelect.addEventListener('change', updateSendState);
 
     // Shared by real map clicks and the manual coordinates field below — one
     // place that actually appends to drawPoints, so a future third way to add
@@ -22277,6 +22402,12 @@ document.querySelectorAll('.team-form').forEach(form => {
             // send handler to pick it up correctly.
             if (pendingDispatchSeed.teamId) teamSelect.value = pendingDispatchSeed.teamId;
             pendingRingIndex = pendingDispatchSeed.ringIndex ?? null;
+            pendingIncidentId = pendingDispatchSeed.incidentId || null;
+            if (incidentLine && pendingDispatchSeed.incidentText) {
+                incidentLine.querySelector('span').textContent = pendingDispatchSeed.incidentText;
+                incidentLine.classList.remove('d-none');
+            }
+            updateSendState();
             // fitBounds() on a single point zooms all the way in.
             if (drawPoints.length === 1) dispatchMap.setView(drawPoints[0], Math.max(dispatchMap.getZoom(), 15));
             else if (drawPoints.length) dispatchMap.fitBounds(L.latLngBounds(drawPoints), {padding: [30, 30]});
@@ -22293,9 +22424,13 @@ document.querySelectorAll('.team-form').forEach(form => {
         coordsInput.value = '';
         noteInput.value = '';
         pendingRingIndex = null;
+        pendingIncidentId = null;
+        if (incidentLine) incidentLine.classList.add('d-none');
+        // Back to «— Διάλεξε ομάδα —»: the next dispatch is chosen afresh.
+        teamSelect.value = '';
     });
 
-    clearBtn.addEventListener('click', resetDrawing);
+    clearBtn.addEventListener('click', () => { resetDrawing(); updateSendState(); });
 
     addressSearchBtn.addEventListener('click', () => {
         const q = addressInput.value.trim();
@@ -22317,10 +22452,13 @@ document.querySelectorAll('.team-form').forEach(form => {
         const geo = type === 'point' ? {lat: drawPoints[0][0], lng: drawPoints[0][1]} : drawPoints;
         const noteText = noteInput.value.trim();
         const combinedLabel = noteText && lastAddressLabel ? (noteText + ' — ' + lastAddressLabel) : (noteText || lastAddressLabel);
+        if (!teamSelect.value) { alert(t('dispatch.pick_team_first')); return; }
         const data = new URLSearchParams({
             csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>,
-            team_id: teamSelect.value, type: type, geo: JSON.stringify(geo), label: combinedLabel,
+            // «Όλες οι ομάδες» is 'all' here and no team to the endpoint.
+            team_id: teamSelect.value === 'all' ? '' : teamSelect.value, type: type, geo: JSON.stringify(geo), label: combinedLabel,
             ring_index: pendingRingIndex ?? '',
+            incident_id: pendingIncidentId ?? '',
         });
         sendBtn.disabled = true;
         fetch('mission-dispatch.php', {method:'POST', body:data}).then(response => response.json()).then(result => {
@@ -22328,7 +22466,11 @@ document.querySelectorAll('.team-form').forEach(form => {
                 bootstrap.Modal.getInstance(modalEl).hide();
                 fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId)
                     .then(response => response.json())
-                    .then(d => { if (d.dispatches) renderDispatches(dispatches = d.dispatches); });
+                    .then(d => {
+                        if (d.dispatches) renderDispatches(dispatches = d.dispatches);
+                        // The incident card's «Σε πορεία» line, now.
+                        if (d.incidents) { missionIncidents = d.incidents; renderMissionIncidents(missionIncidents); renderIncidentLayer(missionIncidents); }
+                    });
             } else {
                 alert(result.error || t('common.send_failed'));
                 sendBtn.disabled = false;
@@ -23886,9 +24028,11 @@ let routeComposerPinsRenderedSig = null;
 // same one-shot lifetime as the seed it came from.
 let pendingRouteRingIndex = null;
 
+// A point and a recipient — the team list opens on «— Διάλεξε ομάδα —».
 function updateRouteSendState() {
     const sendBtn = document.getElementById('routeSendBtn');
-    if (sendBtn) sendBtn.disabled = routeWaypoints.length < 1;
+    const teamSelect = document.getElementById('routeTeamSelect');
+    if (sendBtn) sendBtn.disabled = routeWaypoints.length < 1 || (!!teamSelect && teamSelect.value === 'pick');
 }
 
 function renderRouteComposerMap() {
@@ -24079,10 +24223,10 @@ function renderWaypointPanel() {
     const sendBtn = document.getElementById('routeSendBtn');
     const teamSelect = document.getElementById('routeTeamSelect');
     const memberPicker = document.getElementById('routeMemberPicker');
-    // routeTeamSelect/routeMemberPicker live in routeOrderCard — the SIDEBAR
-    // card, not this modal's own HTML — and that whole card only renders
-    // inside a server-side "teams non-empty" guard (war-room.php ~2742). On
-    // a zero-team mission neither element exists at all.
+    // routeTeamSelect/routeMemberPicker are rendered only inside a server-side
+    // "teams non-empty" guard — on routeOrderCard until v3.344.0, in this
+    // modal's own side panel since. On a zero-team mission neither element
+    // exists at all.
     //
     // Used to be a hard `if (!teamSelect) return;` right here, which — since
     // this is the top of the IIFE — meant shown.bs.modal never got attached
@@ -24113,6 +24257,15 @@ function renderWaypointPanel() {
         // only honors it when team_id is set).
         const returnWrap = document.getElementById('routeReturnToStartWrap');
         const returnCheck = document.getElementById('routeReturnToStartCheck');
+        updateRouteSendState();
+        // Nothing chosen yet (v3.344.0: the composer opens on «— Διάλεξε
+        // ομάδα —») — nobody to list, and nothing to return to.
+        if (teamSelect.value === 'pick') {
+            returnWrap.classList.add('d-none');
+            returnCheck.checked = false;
+            memberPicker.innerHTML = `<span class="text-muted">${escapeHtml(t('route.pick_team_first'))}</span>`;
+            return;
+        }
         const isCrossTeam = teamSelect.value === '';
         returnWrap.classList.toggle('d-none', isCrossTeam);
         if (isCrossTeam) returnCheck.checked = false;
@@ -24279,6 +24432,11 @@ function renderWaypointPanel() {
         addressStatus.textContent = '';
         coordsInput.value = '';
         pendingRouteRingIndex = null;
+        // The next route's team is chosen afresh.
+        if (teamSelect) {
+            teamSelect.value = 'pick';
+            renderRouteMemberPicker();
+        }
     });
 
     clearBtn.addEventListener('click', resetRouteComposer);
@@ -24305,6 +24463,7 @@ function renderWaypointPanel() {
         // instead so the map/waypoint-planning part of the composer stays
         // usable even before a team exists (see the top-of-IIFE comment).
         if (!teamSelect) { alert(t('briefing.no_teams_yet')); return; }
+        if (teamSelect.value === 'pick') { alert(t('dispatch.pick_team_first')); return; }
         const payload = routeWaypoints.map(wp => ({
             lat: wp.lat, lng: wp.lng, label: wp.label, instructions: wp.instructions,
             dwell_minutes: wp.dwell_minutes, require_photo: wp.require_photo ? 1 : 0,

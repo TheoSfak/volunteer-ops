@@ -123,6 +123,22 @@ if ($action === 'create') {
         exit;
     }
 
+    // The casualty this team is being sent to (v3.344.0): from the incident
+    // card's «Στείλε ομάδα», a right-click on the incident's pin, or
+    // «Καταχώριση και αποστολή ομάδας» on the map's incident form.
+    $incident = null;
+    if ((int) post('incident_id') > 0) {
+        $incident = loadIncidentForAction((int) post('incident_id'), $missionId);
+        if (!$incident) {
+            echo json_encode(['ok' => false, 'error' => t('incident.report_not_found')]);
+            exit;
+        }
+        if ($incident['resolved_at']) {
+            echo json_encode(['ok' => false, 'error' => t('incident.already_closed')]);
+            exit;
+        }
+    }
+
     $type = post('type');
     $label = trim((string) post('label'));
     $label = $label !== '' ? mb_substr($label, 0, 255) : null;
@@ -160,10 +176,13 @@ if ($action === 'create') {
     }
 
     $dispatchId = dbInsert(
-        "INSERT INTO mission_dispatch_points (mission_id, team_id, type, geo, label, ring_index, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
-        [$missionId, $teamId, $type, json_encode($geo), $label, $ringIndex, $userId]
+        "INSERT INTO mission_dispatch_points (mission_id, team_id, type, geo, label, ring_index, incident_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+        [$missionId, $teamId, $type, json_encode($geo), $label, $ringIndex, $incident ? (int) $incident['id'] : null, $userId]
     );
-    logAudit('create_mission_dispatch', 'mission_dispatch_points', $dispatchId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'type' => $type, 'ring_index' => $ringIndex]);
+    logAudit('create_mission_dispatch', 'mission_dispatch_points', $dispatchId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'type' => $type, 'ring_index' => $ringIndex, 'incident_id' => $incident ? (int) $incident['id'] : null]);
+    if ($incident) {
+        markIncidentSeen($incident, (int) $userId);
+    }
 
     // Recipients: a team-targeted dispatch only alerts (banner + sound) that
     // team — matching who can actually see the pin/area on their map
