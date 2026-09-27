@@ -35,12 +35,26 @@ function gpsPercentile(array $sorted, float $p): ?float {
 }
 
 /**
- * Per-participant GPS overview for the whole mission. Every Action Room
- * participant appears, including somebody who never produced a single fix —
- * that absence is itself the finding.
+ * Per-phone GPS overview for the whole mission. Every Action Room participant
+ * appears, including somebody who never produced a single fix — that absence
+ * is itself the finding.
+ *
+ * So does everybody who produced fixes and has had their GPS tick removed
+ * since ('ticked' => false), v3.336.3. They used to vanish: the list was only
+ * the people ticked NOW, so a phone handed over mid-mission lost its row, and
+ * after the end-of-mission untick the whole report came back empty — which is
+ * exactly when the reference-point drill below is meant to be read. Every
+ * stored fix was taken while its owner was ticked (recordVolunteerPing()
+ * refuses the rest at the door), so these are the Action Room's own records.
  */
 function loadMissionGpsQuality(int $missionId): array {
     $people = [];
+    $person = fn(int $uid, string $name, ?string $lastError, bool $ticked) => [
+        'user_id' => $uid, 'name' => $name, 'ticked' => $ticked,
+        'fixes' => 0, 'native' => 0, 'browser' => 0,
+        'acc' => [], 'shift' => [], 'refusals' => [], 'refused_total' => 0,
+        'device' => null, 'last_gps_error' => $lastError,
+    ];
     foreach (dbFetchAll(
         "SELECT arp.user_id, u.name, arp.last_gps_error
            FROM mission_action_room_participants arp
@@ -49,12 +63,20 @@ function loadMissionGpsQuality(int $missionId): array {
           ORDER BY u.name",
         [$missionId]
     ) as $row) {
-        $people[(int) $row['user_id']] = [
-            'user_id' => (int) $row['user_id'], 'name' => $row['name'],
-            'fixes' => 0, 'native' => 0, 'browser' => 0,
-            'acc' => [], 'shift' => [], 'refusals' => [], 'refused_total' => 0,
-            'device' => null, 'last_gps_error' => $row['last_gps_error'],
-        ];
+        $people[(int) $row['user_id']] = $person((int) $row['user_id'], $row['name'], $row['last_gps_error'], true);
+    }
+    foreach (dbFetchAll(
+        "SELECT DISTINCT u.id, u.name
+           FROM volunteer_pings vp
+           JOIN shifts s ON s.id = vp.shift_id
+           JOIN users u ON u.id = vp.user_id
+          WHERE s.mission_id = ?
+          ORDER BY u.name",
+        [$missionId]
+    ) as $row) {
+        if (!isset($people[(int) $row['id']])) {
+            $people[(int) $row['id']] = $person((int) $row['id'], $row['name'], null, false);
+        }
     }
 
     // One narrow row per fix: the claimed accuracy (the device's, not the
@@ -73,9 +95,6 @@ function loadMissionGpsQuality(int $missionId): array {
     );
     foreach ($rows as $row) {
         $uid = (int) $row['user_id'];
-        if (!isset($people[$uid])) {
-            continue; // unticked since; their fixes are not the Action Room's any more
-        }
         $people[$uid]['fixes']++;
         if ($row['via'] === 'native') $people[$uid]['native']++;
         elseif ($row['via'] === 'browser') $people[$uid]['browser']++;

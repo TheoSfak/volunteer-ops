@@ -430,21 +430,43 @@ final class ActionRoomParticipantsTest extends TestCase
         $this->assertSame(1, (int) dbFetchValue("SELECT COUNT(*) FROM volunteer_pings WHERE user_id = ?", [$this->volunteerIds[0]]));
     }
 
-    public function testATrailNeverIncludesSomebodyWhoNoLongerTakesPart(): void
+    public function testATrailKeepsWhatWasRecordedBeforeTheTickCameOff(): void
     {
-        // Their earlier fixes are still on file: they were ticked when those
-        // were recorded. The trail is the display half of the same rule and
-        // has to drop them the moment the switch goes off, not whenever their
-        // last fix happens to age out.
+        // v3.336.3 reversed this: the trail used to drop somebody the moment
+        // their tick came off, which erased the route a handed-over phone had
+        // already walked and emptied every trail after the end-of-mission
+        // untick. Their fixes were taken while they were ticked; after the
+        // untick no NEW fix is stored (see the refusal test above), so the
+        // trail keeps exactly what they walked and nothing more.
         $this->tick($this->volunteerIds[0]);
-        recordVolunteerPing($this->userRow($this->volunteerIds[0]), $this->shiftId, 35.33, 25.13, null, null, 'manual');
-        recordVolunteerPing($this->userRow($this->volunteerIds[0]), $this->shiftId, 35.34, 25.14, null, null, 'manual');
-
-        $this->assertNotSame([], loadMissionTrailForMission($this->missionId, 0, true));
+        // ~11 m apart: inside the speed gate's 75 m no-accuracy allowance,
+        // so both are stored even a second apart.
+        recordVolunteerPing($this->userRow($this->volunteerIds[0]), $this->shiftId, 35.3300, 25.1300, null, null, 'manual');
+        recordVolunteerPing($this->userRow($this->volunteerIds[0]), $this->shiftId, 35.3301, 25.1300, null, null, 'manual');
 
         setActionRoomParticipation($this->missionId, $this->volunteerIds[0], false, $this->adminId);
+        recordVolunteerPing($this->userRow($this->volunteerIds[0]), $this->shiftId, 35.3302, 25.1300, null, null, 'manual');
 
-        $this->assertSame([], loadMissionTrailForMission($this->missionId, 0, true));
+        $trails = loadMissionTrailForMission($this->missionId, 0, true);
+        $this->assertCount(1, $trails);
+        $this->assertSame($this->volunteerIds[0], $trails[0]['user_id']);
+        $this->assertCount(2, $trails[0]['points']);
+    }
+
+    public function testTheGpsQualityReportKeepsSomebodyUntickedAfterTheirFixes(): void
+    {
+        require_once __DIR__ . '/../includes/functions-gps-quality.php';
+        $this->tick($this->volunteerIds[0]);
+        recordVolunteerPing($this->userRow($this->volunteerIds[0]), $this->shiftId, 35.33, 25.13, 8.0, null, 'manual');
+        setActionRoomParticipation($this->missionId, $this->volunteerIds[0], false, $this->adminId);
+
+        $rows = array_values(array_filter(
+            loadMissionGpsQuality($this->missionId),
+            fn($p) => $p['user_id'] === $this->volunteerIds[0]
+        ));
+        $this->assertCount(1, $rows);
+        $this->assertFalse($rows[0]['ticked']);
+        $this->assertSame(1, $rows[0]['fixes']);
     }
 
     // ── Who an order or an alert may reach ──────────────────────────────────

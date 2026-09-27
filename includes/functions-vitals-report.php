@@ -73,8 +73,19 @@ function vitalsOrderedSeries(int $missionId): array {
  * refuses their readings — so listing them as people whose heart rate is
  * unknown reports a decision as a gap, and on a ten-person operation carried by
  * two phones that is eight lines of it.
+ *
+ * $alsoUserIds (v3.336.3): people with readings on record who may have had
+ * their tick removed since. The history views (episodes, team load) pass
+ * everyone in the series, because a reading was only ever stored while its
+ * owner was ticked; without this, handing a phone over mid-mission erased the
+ * previous wearer's episodes from the report. The live table does not pass it
+ * — somebody unticked now is not being measured now.
  */
-function vitalsParticipantContext(int $missionId): array {
+function vitalsParticipantContext(int $missionId, array $alsoUserIds = []): array {
+    $alsoUserIds = array_values(array_unique(array_map('intval', $alsoUserIds)));
+    $alsoClause = $alsoUserIds
+        ? ' OR pr.volunteer_id IN (' . implode(',', array_fill(0, count($alsoUserIds), '?')) . ')'
+        : '';
     try {
         $rows = dbFetchAll(
             "SELECT DISTINCT pr.volunteer_id, u.name, u.is_external, u.guest_org_name, u.guest_country_code,
@@ -87,10 +98,11 @@ function vitalsParticipantContext(int $missionId): array {
              LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
              LEFT JOIN mission_team_members mtm ON mtm.mission_id = s.mission_id AND mtm.user_id = pr.volunteer_id
              LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
-             JOIN mission_action_room_participants arp
+             LEFT JOIN mission_action_room_participants arp
                   ON arp.mission_id = s.mission_id AND arp.user_id = pr.volunteer_id
-             WHERE s.mission_id = ? AND pr.status = ?",
-            [$missionId, PARTICIPATION_APPROVED]
+             WHERE s.mission_id = ? AND pr.status = ?
+               AND (arp.user_id IS NOT NULL{$alsoClause})",
+            array_merge([$missionId, PARTICIPATION_APPROVED], $alsoUserIds)
         );
     } catch (Exception $e) {
         return [];
@@ -246,7 +258,7 @@ function detectVitalsEpisodes(int $missionId): array {
 
     $config   = vitalsConfig();
     $series   = vitalsOrderedSeries($missionId);
-    $context  = vitalsParticipantContext($missionId);
+    $context  = vitalsParticipantContext($missionId, array_keys($series));
     $maxHr    = vitalsMaxHeartRate();
     $elevated = vitalsZoneBpm($config['elevated_pct'], $maxHr);
     $now      = time();
@@ -359,7 +371,7 @@ function loadVitalsTeamLoadForMission(int $missionId, array $episodes = []): arr
 
     $config   = vitalsConfig();
     $series   = vitalsOrderedSeries($missionId);
-    $context  = vitalsParticipantContext($missionId);
+    $context  = vitalsParticipantContext($missionId, array_keys($series));
     $maxHr    = vitalsMaxHeartRate();
     $elevated = vitalsZoneBpm($config['elevated_pct'], $maxHr);
 

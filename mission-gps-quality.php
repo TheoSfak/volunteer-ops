@@ -128,7 +128,7 @@ include __DIR__ . '/includes/header.php';
                 <tbody>
                 <?php foreach ($overview as $p): ?>
                     <tr>
-                        <td><?= h($p['name']) ?><?php if ($p['last_gps_error']): ?><br><small class="gq-bad"><?= h(t('gps_error.row_' . $p['last_gps_error'])) ?></small><?php endif; ?></td>
+                        <td><?= h($p['name']) ?><?php if (!$p['ticked']): ?><br><small class="gq-muted">χωρίς GPS τώρα — στίγματα από πριν</small><?php endif; ?><?php if ($p['last_gps_error']): ?><br><small class="gq-bad"><?= h(t('gps_error.row_' . $p['last_gps_error'])) ?></small><?php endif; ?></td>
                         <td class="small"><?= $p['device'] ? h($p['device']) : '<span class="gq-muted">' . ($p['browser'] > 0 ? 'Browser' : '—') . '</span>' ?></td>
                         <td class="gq-num <?= $p['fixes'] === 0 ? 'gq-bad' : '' ?>"><?= $p['fixes'] ?></td>
                         <td class="gq-num"><?= $p['native'] ?> / <?= $p['browser'] ?></td>

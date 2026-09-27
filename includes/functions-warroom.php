@@ -1384,6 +1384,16 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
  * mission safely match nothing, no separate ownership check needed.
  * Auto-captured pings (source='auto') are excluded unless $includeAuto is
  * true — admin-only opt-in filter, off by default everywhere else.
+ *
+ * NOT filtered by who has the GPS tick NOW (v3.336.3). It used to join
+ * mission_action_room_participants, so removing somebody's tick erased their
+ * whole route: a phone handed over mid-search lost the path its first carrier
+ * walked — the record of which ground was already covered — and after the
+ * end-of-mission untick the trail, the replay and the geo export all came
+ * back empty. Nothing here can leak an untracked person's position: every
+ * stored fix was taken while its owner was ticked, because
+ * recordVolunteerPing() refuses the rest at the door. The LIVE views (pins,
+ * team positions, recipients) still follow the current tick.
  */
 function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAuto): array {
     // Capped PER USER (3000 most recent points each — ~6 days of continuous
@@ -1402,8 +1412,6 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
              FROM volunteer_pings vp
              JOIN shifts s ON s.id = vp.shift_id
              JOIN users u ON u.id = vp.user_id
-             JOIN mission_action_room_participants arp
-                  ON arp.mission_id = s.mission_id AND arp.user_id = vp.user_id
              LEFT JOIN mission_team_members mtm ON mtm.mission_id = s.mission_id AND mtm.user_id = vp.user_id
              LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
              WHERE s.mission_id = ?
