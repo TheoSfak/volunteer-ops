@@ -53,6 +53,9 @@ function loadMissionGpsQuality(int $missionId): array {
         'user_id' => $uid, 'name' => $name, 'ticked' => $ticked,
         'fixes' => 0, 'native' => 0, 'browser' => 0,
         'acc' => [], 'shift' => [], 'refusals' => [], 'refused_total' => 0,
+        // v3.337.0, Android app only: satellites used, signal strength,
+        // second frequency, and fixes with no satellite at all.
+        'sats' => [], 'cn0' => [], 'dual_known' => 0, 'dual_yes' => 0, 'no_sat' => 0,
         'device' => null, 'last_gps_error' => $lastError,
     ];
     foreach (dbFetchAll(
@@ -83,7 +86,7 @@ function loadMissionGpsQuality(int $missionId): array {
     // filter's), and how far the filter moved it. The distance is done in SQL
     // so a long mission's 100.000 fixes cost four numbers each, not a row.
     $rows = dbFetchAll(
-        "SELECT vp.user_id, vp.via,
+        "SELECT vp.user_id, vp.via, vp.gnss_used, vp.gnss_cn0, vp.gnss_dual,
                 COALESCE(vp.raw_accuracy_m, vp.accuracy_meters) AS acc,
                 CASE WHEN vp.raw_lat IS NULL THEN NULL ELSE
                     SQRT(POW((vp.lat - vp.raw_lat) * 111320, 2)
@@ -100,6 +103,15 @@ function loadMissionGpsQuality(int $missionId): array {
         elseif ($row['via'] === 'browser') $people[$uid]['browser']++;
         if ($row['acc'] !== null) $people[$uid]['acc'][] = (float) $row['acc'];
         if ($row['shift_m'] !== null) $people[$uid]['shift'][] = (float) $row['shift_m'];
+        if ($row['gnss_used'] !== null) {
+            $people[$uid]['sats'][] = (int) $row['gnss_used'];
+            if ((int) $row['gnss_used'] === 0) $people[$uid]['no_sat']++;
+        }
+        if ($row['gnss_cn0'] !== null) $people[$uid]['cn0'][] = (float) $row['gnss_cn0'];
+        if ($row['gnss_dual'] !== null) {
+            $people[$uid]['dual_known']++;
+            if ((int) $row['gnss_dual'] === 1) $people[$uid]['dual_yes']++;
+        }
     }
 
     try {
@@ -138,7 +150,13 @@ function loadMissionGpsQuality(int $missionId): array {
         $p['acc_median'] = gpsPercentile($p['acc'], 50);
         $p['acc_p90'] = gpsPercentile($p['acc'], 90);
         $p['shift_median'] = gpsPercentile($p['shift'], 50);
-        unset($p['acc'], $p['shift']);
+        sort($p['sats']);
+        sort($p['cn0']);
+        $p['sats_median'] = gpsPercentile($p['sats'], 50);
+        $p['cn0_median'] = gpsPercentile($p['cn0'], 50);
+        $p['sats_reported'] = count($p['sats']);
+        $p['dual_pct'] = $p['dual_known'] > 0 ? (int) round(100 * $p['dual_yes'] / $p['dual_known']) : null;
+        unset($p['acc'], $p['shift'], $p['sats'], $p['cn0']);
     }
     unset($p);
     return array_values($people);

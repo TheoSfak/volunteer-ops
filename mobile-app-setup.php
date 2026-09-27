@@ -74,6 +74,7 @@ include __DIR__ . '/includes/header.php';
                 <div>
                     <strong>Απενεργοποίηση εξοικονόμησης μπαταρίας για την εφαρμογή <span class="text-danger">(το πιο σημαντικό βήμα)</span></strong>
                     <p class="text-muted mb-2">Τα περισσότερα κινητά Android σταματούν εφαρμογές που «τρέχουν στο παρασκήνιο» για να εξοικονομήσουν μπαταρία — ακριβώς αυτό όμως χρειάζεται η εφαρμογή για να λειτουργήσει. Χωρίς αυτό το βήμα, το στίγμα θα σταματά ξανά μετά από λίγη ώρα, ίδιο πρόβλημα με τον browser.</p>
+                    <p class="text-muted mb-2"><strong>Ο εύκολος τρόπος:</strong> αν η εφαρμογή σας δείχνει στο Επιχειρησιακό την προειδοποίηση για «βελτιστοποίηση μπαταρίας», πατήστε το κουμπί <strong>«Να μην περιορίζεται»</strong> ακριβώς από κάτω και απαντήστε «Να επιτρέπεται» στο παράθυρο του Android. Στα Xiaomi, Huawei, Oppo, Vivo εμφανίζεται επίσης κουμπί για την «Αυτόματη εκκίνηση».</p>
                     <p class="text-muted mb-2"><strong>Γενικά βήματα:</strong> Ρυθμίσεις → Εφαρμογές → <em><?= h(getSetting('app_name', 'VolunteerOps')) ?></em> → Μπαταρία → επιλέξτε «Χωρίς περιορισμούς» (Unrestricted) αντί για «Βελτιστοποιημένη».</p>
                     <p class="text-muted mb-2 small">Η ακριβής ονομασία διαφέρει ανά κατασκευαστή. Σε Xiaomi/MIUI, Samsung, Huawei και Oppo/Realme υπάρχουν συνήθως επιπλέον ρυθμίσεις μπαταρίας πέρα από το «Χωρίς περιορισμούς» — αν παρατηρήσετε ότι το στίγμα σταματά παρόλο που κάνατε τα παραπάνω, ελέγξτε τα εξής:</p>
                     <ul class="text-muted small mb-0">
@@ -85,6 +86,25 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
 
+        </div>
+    </div>
+
+    <?php // v3.337.0. Where the phone is carried decides more of the position's
+          // quality than any setting: the body blocks roughly half the sky
+          // and a pocket or the bottom of a pack weakens every satellite
+          // signal. Measured on a real phone: ±4 m typical in the open, with
+          // runs of ±20-450 m when the signal dropped. ?>
+    <div class="card pp-card accent-info mb-4">
+        <div class="card-header">
+            <h5 class="mb-0"><i class="bi bi-broadcast-pin text-info me-2"></i>Για καλό σήμα GPS στο πεδίο</h5>
+        </div>
+        <div class="card-body">
+            <ul class="mb-0">
+                <li class="mb-2"><strong>Κρατήστε το κινητό ψηλά</strong> — στην τσέπη του στήθους, σε θήκη στον ιμάντα του σακιδίου ή στο μπράτσο. <strong>Όχι</strong> στην τσέπη του παντελονιού ή στον πάτο του σακιδίου: το σώμα κρύβει τον μισό ουρανό και το σήμα των δορυφόρων εξασθενεί πολύ.</li>
+                <li class="mb-2"><strong>Ανοίξτε την εφαρμογή 1–2 λεπτά πριν ξεκινήσετε,</strong> σε ανοιχτό χώρο. Ο δέκτης «κλειδώνει» στους δορυφόρους και τα πρώτα στίγματα βγαίνουν σωστά από την αρχή.</li>
+                <li class="mb-2"><strong>Πριν πάτε σε περιοχή χωρίς σήμα κινητής</strong> (βουνό, φαράγγι), ανοίξτε την εφαρμογή όσο έχετε ακόμα internet: το κινητό κατεβάζει τα δεδομένα των δορυφόρων και βρίσκει θέση πολύ πιο γρήγορα αργότερα. Τα στίγματα που παίρνει χωρίς σήμα κρατιούνται και στέλνονται μόλις επανέλθει.</li>
+                <li><strong>Στο Επιχειρησιακό βλέπετε την ακρίβειά σας</strong> (±μ.) κάτω από το κουμπί «Στείλε στίγμα». Αν είναι πάνω από 50 μ., βγείτε από κάτω από δέντρα, στέγες ή μπαλκόνια.</li>
+            </ul>
         </div>
     </div>
 

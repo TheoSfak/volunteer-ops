@@ -17164,6 +17164,11 @@ const AUTO_PING_CADENCE_MS = <?= (int) getSetting('war_room_auto_ping_seconds', 
 // every trail's points were byte-identical to the point before them. None
 // of that is survivable for deciding who is nearest to a casualty.
 const AUTO_PING_HIGH_ACCURACY = <?= getSetting('war_room_auto_ping_high_accuracy', '1') === '1' ? 'true' : 'false' ?>;
+// Android app only (v3.337.0, Settings → Action Room): sample a fix every
+// second and send the best of each cadence, and optionally GNSS full
+// tracking. See handleLocationBatch() in the app's BackgroundGeolocationService.
+const NATIVE_SAMPLE_MS = <?= getSetting('war_room_native_sampling', '1') === '1' ? 1000 : 0 ?>;
+const NATIVE_FULL_TRACKING = <?= getSetting('war_room_native_full_tracking', '0') === '1' ? 'true' : 'false' ?>;
 // A fix older than this is not worth sending. watchPosition() hands us
 // whatever it last managed to acquire and goes on handing us that same
 // object once the OS stops producing new ones (phone in a pocket, screen
@@ -17642,34 +17647,80 @@ function sendGpsReasonToCommandPost(reason) {
         body: new URLSearchParams({csrf_token: csrfToken, mission_id: '<?= $missionId ?>', reason: reason}),
     }).catch(() => {});
 }
+// v3.337.0: the phone makers whose own "autostart" switch kills the tracking
+// service even with battery "unrestricted" (Xiaomi, Huawei, Oppo, Vivo...)
+// get a one-off hint with a button to that screen. Nothing can tell whether
+// the switch is on, so the hint goes away once the volunteer says they did it.
+let nativeAutostartAcked = null;
+async function nativeAutostartAckedYet() {
+    if (nativeAutostartAcked !== null) return nativeAutostartAcked;
+    try {
+        const v = await window.Capacitor.Plugins.Preferences.get({key: 'vops_autostart_ack'});
+        nativeAutostartAcked = !!(v && v.value);
+    } catch (e) {
+        nativeAutostartAcked = false;
+    }
+    return nativeAutostartAcked;
+}
 async function refreshNativeGpsDiagnostics() {
     const diag = await nativePluginCall('vopsDiagnostics');
     const el = document.getElementById('myNativeGpsNote');
     if (!diag) return null;
+    const plugin = window.Capacitor.Plugins.BackgroundGeolocation;
+    // [level, text, action]: the action is the one button that fixes it.
     const problems = [];
     let reason = null;
-    if (!diag.fine && !diag.coarse) { problems.push(['danger', t('myping.native_denied')]); reason = 'denied'; }
-    else if (!diag.locationEnabled) { problems.push(['danger', t('myping.native_location_off')]); reason = 'location_off'; }
-    else if (!diag.fine) { problems.push(['danger', t('myping.native_approximate')]); reason = 'imprecise'; }
-    if (diag.powerSaveCutsGps) problems.push(['warning', t('myping.native_power_save')]);
-    if (!diag.ignoringBatteryOptimizations) problems.push(['warning', t('myping.native_battery_optimized')]);
+    if (!diag.fine && !diag.coarse) { problems.push(['danger', t('myping.native_denied'), null]); reason = 'denied'; }
+    else if (!diag.locationEnabled) { problems.push(['danger', t('myping.native_location_off'), null]); reason = 'location_off'; }
+    else if (!diag.fine) { problems.push(['danger', t('myping.native_approximate'), null]); reason = 'imprecise'; }
+    if (diag.powerSaveCutsGps) problems.push(['warning', t('myping.native_power_save'), null]);
+    // v3.337.0: Android's own one-tap dialog, where the app has it; older
+    // apps keep the general settings button below.
+    const canAskBattery = typeof plugin.vopsRequestIgnoreBatteryOptimizations === 'function';
+    if (!diag.ignoringBatteryOptimizations) problems.push(['warning', t('myping.native_battery_optimized'), canAskBattery ? 'battery' : null]);
+    const autostartHint = !!diag.autostart && typeof plugin.vopsOpenAutostartSettings === 'function'
+        && !(await nativeAutostartAckedYet());
     if (reason) sendGpsReasonToCommandPost(reason);
     if (el) {
-        if (!problems.length) {
+        if (!problems.length && !autostartHint) {
             el.classList.add('d-none');
             el.innerHTML = '';
         } else {
             // Built once per call from translated strings only — no user data.
-            el.innerHTML = problems.map(([level, text]) =>
+            const btn = (id, icon, label, cls) =>
+                `<button type="button" class="btn btn-sm ${cls} mt-1 me-1" id="${id}"><i class="bi ${icon} me-1"></i>${escapeHtml(label)}</button>`;
+            let html = problems.map(([level, text, action]) =>
                 `<div class="text-${level} fw-bold"><i class="bi bi-exclamation-triangle-fill me-1"></i>${escapeHtml(text)}</div>`
-            ).join('') + `<button type="button" class="btn btn-sm btn-outline-secondary mt-1" id="myNativeGpsSettingsBtn"><i class="bi bi-gear me-1"></i>${escapeHtml(t('myping.native_open_settings'))}</button>`;
+                + (action === 'battery' ? btn('myNativeBatteryBtn', 'bi-battery-charging', t('myping.native_battery_fix'), 'btn-warning') : '')
+            ).join('');
+            // The general button stays for what only the settings page (or
+            // the location dialog) can fix.
+            if (problems.some(p => p[2] === null)) {
+                html += btn('myNativeGpsSettingsBtn', 'bi-gear', t('myping.native_open_settings'), 'btn-outline-secondary');
+            }
+            if (autostartHint) {
+                html += `<div class="small text-muted mt-2"><i class="bi bi-info-circle me-1"></i>${escapeHtml(t('myping.native_autostart_hint'))}</div>`
+                    + btn('myNativeAutostartBtn', 'bi-play-circle', t('myping.native_autostart_open'), 'btn-outline-primary')
+                    + btn('myNativeAutostartDoneBtn', 'bi-check2', t('myping.native_autostart_done'), 'btn-outline-secondary');
+            }
+            el.innerHTML = html;
             el.classList.remove('d-none');
-            const btn = document.getElementById('myNativeGpsSettingsBtn');
+            const settingsBtn = document.getElementById('myNativeGpsSettingsBtn');
             // Location off is fixed in the system dialog, everything else on
             // the app's own settings page (permission, battery).
-            if (btn) btn.addEventListener('click', () => reason === 'location_off'
+            if (settingsBtn) settingsBtn.addEventListener('click', () => reason === 'location_off'
                 ? nativePluginCall('vopsCheckLocationSettings')
                 : nativePluginCall('openSettings'));
+            const batteryBtn = document.getElementById('myNativeBatteryBtn');
+            if (batteryBtn) batteryBtn.addEventListener('click', () => nativePluginCall('vopsRequestIgnoreBatteryOptimizations'));
+            const autostartBtn = document.getElementById('myNativeAutostartBtn');
+            if (autostartBtn) autostartBtn.addEventListener('click', () => nativePluginCall('vopsOpenAutostartSettings'));
+            const doneBtn = document.getElementById('myNativeAutostartDoneBtn');
+            if (doneBtn) doneBtn.addEventListener('click', async () => {
+                nativeAutostartAcked = true;
+                try { await window.Capacitor.Plugins.Preferences.set({key: 'vops_autostart_ack', value: String(Date.now())}); } catch (e) {}
+                refreshNativeGpsDiagnostics();
+            });
         }
     }
     return diag;
@@ -17754,11 +17805,13 @@ setInterval(recheckNativeGps, 30000);
 // as the FIRST person: the second person's fixes were refused as not their
 // shift, the server then told the service to stop, and the orders it raised on
 // the lock screen were the first person's. The owner's id now sits next to the
-// token. A token with no recorded owner (installs before v3.336.2) or somebody
-// else's is checked with mobile-token-check.php, which revokes it when it is
-// not the logged-in user's — cutting off that person's orders and positions
-// from a phone they no longer hold. Resolves the token to use, or null when a
-// new one must be issued.
+// token, and the token is checked with mobile-token-check.php on every load,
+// which revokes it when it is not the logged-in user's — cutting off that
+// person's orders and positions from a phone they no longer hold. Checked
+// even when it is recorded as this user's own (v3.337.0): a token revoked
+// server-side would otherwise be handed to the service on every load, and the
+// service now stops itself on a refused token. Resolves the token to use, or
+// null when a new one must be issued.
 async function settleNativeTokenOwner(BackgroundGeolocation, Preferences) {
     let token = null, owner = null;
     try {
@@ -17766,7 +17819,6 @@ async function settleNativeTokenOwner(BackgroundGeolocation, Preferences) {
         owner = ((await Preferences.get({key: 'mobile_api_token_user'})) || {}).value || null;
     } catch (e) {}
     if (!token) return null;
-    if (owner === String(WR_MY_USER_ID)) return token;
     let verdict = null;
     try {
         const resp = await fetch('mobile-token-check.php', {
@@ -17777,15 +17829,17 @@ async function settleNativeTokenOwner(BackgroundGeolocation, Preferences) {
         verdict = await resp.json();
     } catch (e) {}
     if (verdict && verdict.ok && verdict.valid && verdict.mine) {
-        try { await Preferences.set({key: 'mobile_api_token_user', value: String(WR_MY_USER_ID)}); } catch (e) {}
+        if (owner !== String(WR_MY_USER_ID)) {
+            try { await Preferences.set({key: 'mobile_api_token_user', value: String(WR_MY_USER_ID)}); } catch (e) {}
+        }
         return token;
     }
     if (!verdict || !verdict.ok) {
         // No answer (no signal). A token recorded as somebody else's is never
-        // used; one from before owners were recorded is almost always this
-        // person's own, and tracking with it beats not tracking at all.
+        // used; this person's own, or one from before owners were recorded
+        // (almost always theirs), is — tracking beats not tracking at all.
         bgDebugLog('token_owner_unchecked', 'owner=' + (owner || 'unrecorded'));
-        return owner === null ? token : null;
+        return (owner === null || owner === String(WR_MY_USER_ID)) ? token : null;
     }
     try {
         await Preferences.remove({key: 'mobile_api_token'});
@@ -17882,6 +17936,11 @@ function startNativeBackgroundTracking() {
                 backgroundMessage: t('bgtrack.notification_text'),
                 distanceFilter: 0, // periodic cadence comes from intervalMs below, not movement — a stationary volunteer still needs to stay visible to command staff
                 intervalMs: AUTO_PING_CADENCE_MS,
+                // v3.337.0, ignored by older apps: a fix every second and the
+                // best of each cadence sent (0 = one fix per cadence, as
+                // before), and GNSS full tracking. Settings → Action Room.
+                sampleMs: NATIVE_SAMPLE_MS,
+                fullTracking: NATIVE_FULL_TRACKING,
                 url: pingUrl,
                 authToken: token,
                 requestPermissions: true,
@@ -17964,7 +18023,7 @@ function startNativeBackgroundTracking() {
             // What the running service was last started with. The token
             // enters only as its tail: enough to tell two apart, and this
             // key is not where the token itself is kept.
-            const trackingConfig = [AUTO_PING_CADENCE_MS, pingUrl, token.slice(-12)].join('|');
+            const trackingConfig = [AUTO_PING_CADENCE_MS, pingUrl, token.slice(-12), 's' + NATIVE_SAMPLE_MS, 'f' + (NATIVE_FULL_TRACKING ? 1 : 0)].join('|');
             const storedConfig = await Preferences.get({ key: 'bg_tracking_config' });
             const storedInterval = await Preferences.get({ key: 'bg_tracking_interval_ms' });
             // Installs before v3.336.2 recorded only the interval. Read as

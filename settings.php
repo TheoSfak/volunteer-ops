@@ -44,6 +44,8 @@ $defaults = [
     'war_room_ticker_position' => 'top',
     'war_room_auto_ping_seconds' => '180',
     'war_room_auto_ping_high_accuracy' => '1',
+    'war_room_native_sampling' => '1',
+    'war_room_native_full_tracking' => '0',
     'war_room_max_ping_accuracy_m' => '50',
     'war_room_max_ping_speed_kmh' => '25',
     'war_room_gps_smoothing' => '1',
@@ -493,6 +495,7 @@ $actionRoomFields = [
     'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_area_unit',
     'war_room_grid_max_size_m', 'war_room_grid_max_cells',
     'war_room_auto_ping_seconds', 'war_room_auto_ping_high_accuracy',
+    'war_room_native_sampling', 'war_room_native_full_tracking',
     'war_room_max_ping_accuracy_m', 'war_room_max_ping_speed_kmh', 'war_room_gps_smoothing',
     'war_room_low_battery_pct', 'war_room_max_shift_minutes',
     'vitals_enabled', 'vitals_sample_seconds', 'vitals_elevated_pct', 'vitals_critical_pct',
@@ -521,7 +524,7 @@ if (isPost()) {
         foreach ($fieldsToUpdate as $field) {
                     $value = isset($_POST[$field]) ? $_POST[$field] : '';
 
-                    if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy', 'war_room_gps_smoothing'])) {
+                    if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy', 'war_room_gps_smoothing', 'war_room_native_sampling', 'war_room_native_full_tracking'])) {
                         $value = isset($_POST[$field]) ? '1' : '0';
                     }
 
@@ -2184,6 +2187,22 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                             Υψηλή ακρίβεια στο αυτόματο στίγμα (GPS αντί για Wi-Fi/κεραία)
                         </label>
                         <div><small class="text-muted">Όσο είναι κλειστό, το κινητό δεν ανάβει τον δέκτη GPS για το αυτόματο στίγμα και απαντά με θέση υπολογισμένη από τα γύρω Wi-Fi και τις κεραίες κινητής — σε πυκνοδομημένη περιοχή αυτό σημαίνει σφάλμα δεκάδων μέτρων που <strong>δεν βελτιώνεται αν ο εθελοντής σταθεί ακίνητος</strong>. Αφήστε το ανοιχτό για κάθε πραγματική επιχείρηση ή άσκηση· κλείστε το μόνο αν η αυτονομία μπαταρίας σε πολύωρη αποστολή είναι πιο κρίσιμη από τη θέση. Το χειροκίνητο στίγμα («Στείλε στίγμα») ζητούσε πάντα υψηλή ακρίβεια και δεν επηρεάζεται.</small></div>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="war_room_native_sampling" id="warRoomNativeSampling"
+                               <?= ($settings['war_room_native_sampling'] ?? '1') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="warRoomNativeSampling">
+                            Εφαρμογή Android: το καλύτερο στίγμα κάθε διαστήματος
+                        </label>
+                        <div><small class="text-muted">Η εφαρμογή ζητά θέση κάθε δευτερόλεπτο και σε κάθε αποστολή στέλνει την πιο πρόσφατη — εκτός αν μια λίγο παλιότερη του ίδιου διαστήματος είναι σαφώς ακριβέστερη. Χωρίς αυτό στέλνει ό,τι στίγμα τύχει τη στιγμή της αποστολής: <strong>μετρημένο σε πραγματικό κινητό εν κινήσει, 18% των στιγμάτων ήταν χειρότερα από ±20 μ., τα μισά μεμονωμένα ανάμεσα σε καλά</strong>. Κρατά επίσης τον δέκτη GPS σε συνεχή λειτουργία ανάμεσα στις αποστολές, κάτι που κοστίζει λίγη μπαταρία παραπάνω. Ο χρόνος κάθε στίγματος αποθηκεύεται σωστός. Χρειάζεται την εφαρμογή 1.1.19 / 1.0.20 ή νεότερη· οι παλιότερες το αγνοούν.</small></div>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="war_room_native_full_tracking" id="warRoomNativeFullTracking"
+                               <?= ($settings['war_room_native_full_tracking'] ?? '0') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="warRoomNativeFullTracking">
+                            Εφαρμογή Android: συνεχής παρακολούθηση δορυφόρων (full tracking)
+                        </label>
+                        <div><small class="text-muted">Σε Android 12 και νεότερα, ζητά από τον δέκτη GPS να μη «ξεκουράζεται» ανάμεσα στα στίγματα, ώστε να μη χάνει τους δορυφόρους και να μη δίνει αδύναμο στίγμα κάθε φορά που ξαναξεκινά. <strong>Κοστίζει αισθητά σε μπαταρία.</strong> Ανοίξτε το μόνο αν η <strong>Ποιότητα GPS</strong> δείχνει πολλά στίγματα «χωρίς δορυφόρο» ή αδύναμο σήμα ενώ οι εθελοντές είναι σε ανοιχτό χώρο. Χρειάζεται την εφαρμογή 1.1.19 / 1.0.20 ή νεότερη.</small></div>
                     </div>
                     <div class="form-check mb-3">
                         <input class="form-check-input" type="checkbox" name="war_room_gps_smoothing" id="warRoomGpsSmoothing"

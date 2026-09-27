@@ -211,6 +211,24 @@ function parseSpeedMps($raw): ?float {
 }
 
 /**
+ * What the GPS receiver saw for a fix, as the Android app reports it (v3.337.0,
+ * VopsGnssMonitor.java): satellites used, mean signal strength of the four
+ * strongest (C/N0, dB-Hz), whether a second frequency was among them. Each
+ * field is null when absent or out of range — "not reported" is never
+ * guessed into a value. Returns ['used' => ?int, 'cn0' => ?float, 'dual' => ?int].
+ */
+function parseGnssFields(array $body): array {
+    $used = $body['gnss_used'] ?? null;
+    $cn0  = $body['gnss_cn0'] ?? null;
+    $dual = $body['gnss_dual'] ?? null;
+    return [
+        'used' => (is_numeric($used) && (int) $used >= 0 && (int) $used <= 255) ? (int) $used : null,
+        'cn0'  => (is_numeric($cn0) && (float) $cn0 >= 0 && (float) $cn0 < 100) ? round((float) $cn0, 1) : null,
+        'dual' => ($dual === 0 || $dual === 1 || $dual === '0' || $dual === '1' || is_bool($dual)) ? (int) (bool) $dual : null,
+    ];
+}
+
+/**
  * One step of the position filter: a Kalman filter with a constant-position
  * model, run once per accepted fix at write time (v3.321.0, reworked in
  * v3.322.1 after a real walk).
@@ -394,7 +412,8 @@ function recordNativePingFromJson(array $user, int $shiftId, array $body): array
         // Location.isFromMockProvider(). Only a real boolean true counts: a
         // missing or odd value must not turn an older build's pings away.
         ($body['simulated'] ?? false) === true,
-        parseSpeedMps($body['speed'] ?? null)
+        parseSpeedMps($body['speed'] ?? null),
+        parseGnssFields($body)
     );
 }
 
@@ -4175,8 +4194,11 @@ function computeContinuousFieldMinutesByVolunteerId(int $missionId, int $toleran
  * those are stored exactly as before, stamped with the arrival time.
  * $isMock is Android's own "this came from a mock provider" flag; only the
  * native app can see it.
+ * $gnss is parseGnssFields()'s answer (v3.337.0): satellites used, signal
+ * strength, second frequency — stored for the GPS quality report, never used
+ * to accept or refuse a fix.
  */
-function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, ?float $accuracy, ?int $batteryLevel, string $source, ?string $via = null, ?int $fixAgeMs = null, bool $isMock = false, ?float $speedMps = null): array {
+function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, ?float $accuracy, ?int $batteryLevel, string $source, ?string $via = null, ?int $fixAgeMs = null, bool $isMock = false, ?float $speedMps = null, ?array $gnss = null): array {
     $userId = (int) $user['id'];
     $lang = $user['language'] ?? DEFAULT_LANGUAGE;
 
@@ -4432,8 +4454,8 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     try {
         dbInsert(
             "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, accuracy_meters, battery_level, source, via, created_at,
-                                          raw_lat, raw_lng, raw_accuracy_m, speed_mps)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL ? SECOND), ?, ?, ?, ?)",
+                                          raw_lat, raw_lng, raw_accuracy_m, speed_mps, gnss_used, gnss_cn0, gnss_dual)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL ? SECOND), ?, ?, ?, ?, ?, ?, ?)",
             // Anything that is not one of the two known clients is stored as
             // NULL ("not known") rather than guessed into one of them — an
             // unrecognised caller is exactly the case where a guess would be
@@ -4441,7 +4463,8 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
             [$userId, $shiftId, $estimate['lat'], $estimate['lng'], $estimate['acc'], $batteryLevel, $source,
              in_array($via, ['browser', 'native'], true) ? $via : null,
              $fixAgeSeconds,
-             $lat, $lng, $accuracy, $speedMps]
+             $lat, $lng, $accuracy, $speedMps,
+             $gnss['used'] ?? null, $gnss['cn0'] ?? null, $gnss['dual'] ?? null]
         );
     } catch (Exception $e) {
         return ['ok' => false, 'error' => t('ping.gps_unavailable_migration', [], $lang)];

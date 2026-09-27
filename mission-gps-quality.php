@@ -123,6 +123,7 @@ include __DIR__ . '/includes/header.php';
                     <th class="gq-num">Στίγματα</th><th class="gq-num">Εφαρμογή / Browser</th>
                     <th class="gq-num">Δηλωμένη ακρίβεια<br>(τυπική · 90%)</th>
                     <th class="gq-num">Μετακίνηση<br>εξομάλυνσης</th>
+                    <th class="gq-num">Δορυφόροι · σήμα<br>(τυπικά)</th>
                     <th>Απορρίψεις</th>
                 </tr></thead>
                 <tbody>
@@ -134,6 +135,17 @@ include __DIR__ . '/includes/header.php';
                         <td class="gq-num"><?= $p['native'] ?> / <?= $p['browser'] ?></td>
                         <td class="gq-num <?= ($p['acc_p90'] ?? 0) > 50 ? 'gq-warn' : '' ?>"><?= $m($p['acc_median']) ?> · <?= $m($p['acc_p90']) ?></td>
                         <td class="gq-num"><?= $m($p['shift_median']) ?></td>
+                        <td class="gq-num small">
+                            <?php if (!$p['sats_reported']): ?><span class="gq-muted">—</span>
+                            <?php else: ?>
+                                <?= (int) $p['sats_median'] ?> ·
+                                <?php if ($p['cn0_median'] !== null): ?>
+                                    <span class="<?= $p['cn0_median'] < 25 ? 'gq-bad' : ($p['cn0_median'] < 30 ? 'gq-warn' : 'gq-good') ?>"><?= number_format($p['cn0_median'], 0) ?> dB-Hz</span>
+                                <?php else: ?><span class="gq-muted">—</span><?php endif; ?>
+                                <?php if ($p['dual_pct'] !== null): ?><br><span class="gq-muted">2η συχνότητα <?= $p['dual_pct'] ?>%</span><?php endif; ?>
+                                <?php if ($p['no_sat'] > 0): ?><br><span class="gq-warn">χωρίς δορυφόρο: <?= $p['no_sat'] ?></span><?php endif; ?>
+                            <?php endif; ?>
+                        </td>
                         <td class="small">
                             <?php if (!$p['refused_total']): ?><span class="gq-muted">καμία</span>
                             <?php else: ?>
@@ -147,6 +159,7 @@ include __DIR__ . '/includes/header.php';
             </table>
         </div>
         <p class="gq-help mb-0"><strong>Δηλωμένη ακρίβεια</strong>: το ±μ. που δίνει το ίδιο το κινητό για κάθε στίγμα (τυπική τιμή και η τιμή που δεν ξεπερνά το 90% των στιγμάτων). <strong>Μετακίνηση εξομάλυνσης</strong>: πόσο μετατόπισε τυπικά το φίλτρο το στίγμα της συσκευής. <strong>Απορρίψεις</strong>: στίγματα που ο server δεν κατέγραψε, ανά λόγο — πολλές απορρίψεις «κακής ακρίβειας» δείχνουν κινητό ή σημείο χωρίς καλό σήμα, «αδύνατα άλματα» δείχνουν ανακλάσεις. Η συσκευή φαίνεται μόνο για την εφαρμογή Android· ο browser δεν λέει σε ποιο κινητό τρέχει.</p>
+        <p class="gq-help mb-0 mt-2"><strong>Δορυφόροι · σήμα</strong> (μόνο εφαρμογή Android, από την έκδοση με αυτή τη στήλη): πόσους δορυφόρους χρησιμοποίησε τυπικά ο δέκτης σε κάθε στίγμα, και πόσο δυνατό ήταν το σήμα των τεσσάρων ισχυρότερων (dB-Hz). Γύρω στα <strong>35–45</strong> είναι ανοιχτός ουρανός· <strong>κάτω από 25</strong> σημαίνει κινητό σε τσέπη, κάτω από σκεπή ή μέσα σε σακίδιο — τότε φταίει το πού το κουβαλάει, όχι το κινητό. Καλό σήμα με κακή ακρίβεια δείχνει αδύναμο δέκτη ή ανακλάσεις από κτίρια. <strong>2η συχνότητα</strong>: πόσα στίγματα χρησιμοποίησαν και δεύτερη συχνότητα (L5/E5a), που περιορίζει τις ανακλάσεις — το υποστηρίζουν μόνο ορισμένα κινητά. <strong>Χωρίς δορυφόρο</strong>: στίγματα που το Android έδωσε από Wi-Fi/κεραίες ενώ ο δέκτης δεν είχε κανέναν δορυφόρο.</p>
         <?php endif; ?>
     </div>
 

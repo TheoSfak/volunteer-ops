@@ -1,5 +1,5 @@
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/AndroidManifest.xml b/node_modules/@capgo/background-geolocation/android/src/main/AndroidManifest.xml
-index d389cd7..6641eca 100644
+index d389cd7..8ad4b4c 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/AndroidManifest.xml
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/AndroidManifest.xml
 @@ -11,6 +11,14 @@
@@ -17,6 +17,19 @@ index d389cd7..6641eca 100644
          <receiver
              android:name="com.capgo.capacitor_background_geolocation.GeofenceBootReceiver"
              android:enabled="true"
+@@ -34,6 +42,12 @@
+     <!-- See https://github.com/Cap-go/capacitor-background-geolocation/issues/12 for more details-->
+     <uses-permission android:name="android.permission.WAKE_LOCK" />
+     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
++    <!-- VolunteerOps (v3.337.0): Android's one-tap "let this app run in the
++         background" dialog (vopsRequestIgnoreBatteryOptimizations). Without
++         it the dialog cannot be shown and the volunteer has to find the
++         battery setting by hand. The app is sideloaded, not on Google Play,
++         whose policy restricts this permission. -->
++    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+     <uses-permission android:name="android.permission.INTERNET" />
+     <uses-feature android:name="android.hardware.location.gps" />
+ </manifest>
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertActionReceiver.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertActionReceiver.java
 new file mode 100644
 index 0000000..b0b19e5
@@ -69,10 +82,10 @@ index 0000000..b0b19e5
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
 new file mode 100644
-index 0000000..36efd0a
+index 0000000..050b295
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
-@@ -0,0 +1,580 @@
+@@ -0,0 +1,600 @@
 +package com.capgo.capacitor_background_geolocation;
 +
 +import android.app.Notification;
@@ -204,6 +217,9 @@ index 0000000..36efd0a
 +    static final int STATE_OPEN_APP = 4;
 +
 +    private static ExecutorService executor;
++    // v3.337.0 — see the 401 branch in fetchAndNotify(). Only touched on
++    // this class's single executor thread.
++    private static int consecutiveUnauthorized = 0;
 +
 +    private AlertPoller() {}
 +
@@ -243,7 +259,24 @@ index 0000000..36efd0a
 +            connection.setRequestProperty("Accept", "application/json");
 +            connection.setRequestProperty("Authorization", "Bearer " + authToken);
 +
-+            if (connection.getResponseCode() != 200) {
++            int code = connection.getResponseCode();
++            // v3.337.0: the server refuses this token (revoked because the
++            // phone changed hands — mobile-token-check.php — or the account
++            // was deactivated). Twice in a row, a poll apart, so the moment
++            // between a page re-issuing the token and restarting this service
++            // cannot trip it. From then on every fix and every poll would be
++            // refused, so the service ends; the page starts it again with a
++            // valid token.
++            if (code == 401) {
++                if (++consecutiveUnauthorized >= 2) {
++                    consecutiveUnauthorized = 0;
++                    DebugLog.log(context, "token_refused", "stopping the service");
++                    BackgroundGeolocationService.applyTrackingInstruction("token_revoked");
++                }
++                return;
++            }
++            consecutiveUnauthorized = 0;
++            if (code != 200) {
 +                return;
 +            }
 +
@@ -654,7 +687,7 @@ index 0000000..36efd0a
 +    }
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java
-index 00b9e10..a1c472e 100644
+index 00b9e10..a0af340 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java
 @@ -1,6 +1,7 @@
@@ -680,7 +713,7 @@ index 00b9e10..a1c472e 100644
  import java.net.URL;
  import java.util.Collections;
  import java.util.HashSet;
-@@ -47,10 +52,106 @@ import org.json.JSONObject;
+@@ -47,10 +52,189 @@ import org.json.JSONObject;
          @Permission(strings = { Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION }, alias = "location"),
          @Permission(strings = { Manifest.permission.ACCESS_BACKGROUND_LOCATION }, alias = "backgroundLocation"),
          @Permission(strings = { Manifest.permission.POST_NOTIFICATIONS }, alias = "notification")
@@ -772,6 +805,89 @@ index 00b9e10..a1c472e 100644
 +            });
 +    }
 +
++    /**
++     * VolunteerOps addition (v3.337.0): Android's own one-tap "let this app
++     * run in the background" dialog, instead of sending the volunteer through
++     * Settings → Apps → Battery by hand. Falls back to the system list of
++     * battery optimisations, then to the app's settings page. Resolves
++     * {opened: 'request' | 'list' | 'app_settings' | 'none'}.
++     */
++    @PluginMethod
++    public void vopsRequestIgnoreBatteryOptimizations(PluginCall call) {
++        Context context = getContext();
++        String pkg = context.getPackageName();
++        Intent[] tries = {
++            new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:" + pkg)),
++            new Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
++            new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", pkg, null)),
++        };
++        String[] names = { "request", "list", "app_settings" };
++        JSObject ret = new JSObject();
++        ret.put("opened", "none");
++        for (int i = 0; i < tries.length; i++) {
++            if (vopsTryStart(tries[i])) {
++                ret.put("opened", names[i]);
++                break;
++            }
++        }
++        call.resolve(ret);
++    }
++
++    /**
++     * VolunteerOps addition (v3.337.0): the manufacturer's own "autostart" /
++     * "background launch" screen, which Xiaomi, Huawei, Oppo, Vivo and Asus
++     * keep separate from Android's battery setting — and which kills the
++     * tracking service on those phones even when battery is "unrestricted".
++     * These screens are not public API, so every known one is tried in turn
++     * and the app's settings page is the fallback. Resolves
++     * {opened: '<package>' | 'app_settings' | 'none'}.
++     */
++    @PluginMethod
++    public void vopsOpenAutostartSettings(PluginCall call) {
++        String[][] screens = {
++            { "com.miui.securitycenter", "com.miui.permcenter.autostart.AutoStartManagementActivity" },
++            { "com.huawei.systemmanager", "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity" },
++            { "com.huawei.systemmanager", "com.huawei.systemmanager.optimize.process.ProtectActivity" },
++            { "com.hihonor.systemmanager", "com.hihonor.systemmanager.startupmgr.ui.StartupNormalAppListActivity" },
++            { "com.coloros.safecenter", "com.coloros.safecenter.permission.startup.StartupAppListActivity" },
++            { "com.coloros.safecenter", "com.coloros.safecenter.startupapp.StartupAppListActivity" },
++            { "com.oplus.safecenter", "com.oplus.safecenter.permission.startup.StartupAppListActivity" },
++            { "com.oppo.safe", "com.oppo.safe.permission.startup.StartupAppListActivity" },
++            { "com.vivo.permissionmanager", "com.vivo.permissionmanager.activity.BgStartUpManagerActivity" },
++            { "com.iqoo.secure", "com.iqoo.secure.ui.phoneoptimize.AddWhiteListActivity" },
++            { "com.asus.mobilemanager", "com.asus.mobilemanager.autostart.AutoStartActivity" },
++        };
++        JSObject ret = new JSObject();
++        for (String[] s : screens) {
++            if (vopsTryStart(new Intent().setComponent(new ComponentName(s[0], s[1])))) {
++                ret.put("opened", s[0]);
++                call.resolve(ret);
++                return;
++            }
++        }
++        boolean fallback = vopsTryStart(
++            new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", getContext().getPackageName(), null))
++        );
++        ret.put("opened", fallback ? "app_settings" : "none");
++        call.resolve(ret);
++    }
++
++    // Starting another package's screen: not all of them exist on every
++    // phone, and some are not exported. Either way, "did not open".
++    private boolean vopsTryStart(Intent intent) {
++        try {
++            Activity activity = getActivity();
++            if (activity != null) {
++                activity.startActivity(intent);
++            } else {
++                getContext().startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
++            }
++            return true;
++        } catch (Exception e) {
++            return false;
++        }
++    }
++
 +    @Override
 +    protected void handleOnActivityResult(int requestCode, int resultCode, Intent data) {
 +        if (requestCode != VOPS_LOCATION_SETTINGS_REQUEST || vopsPendingSettingsCall == null) {
@@ -788,7 +904,7 @@ index 00b9e10..a1c472e 100644
      private final String pluginVersion = "";
  
      private CompletableFuture<BackgroundGeolocationService.LocalBinder> serviceConnectionFuture;
-@@ -78,7 +179,13 @@ public class BackgroundGeolocation extends Plugin {
+@@ -78,7 +262,13 @@ public class BackgroundGeolocation extends Plugin {
              return;
          }
  
@@ -803,7 +919,7 @@ index 00b9e10..a1c472e 100644
              call.reject("Service already started", "ALREADY_STARTED");
              return;
          }
-@@ -97,9 +204,16 @@ public class BackgroundGeolocation extends Plugin {
+@@ -97,9 +287,16 @@ public class BackgroundGeolocation extends Plugin {
          }
  
          // location permission granted.
@@ -822,7 +938,7 @@ index 00b9e10..a1c472e 100644
          }
  
          // Everything is OK, continuing to adding a watcher
-@@ -111,13 +225,34 @@ public class BackgroundGeolocation extends Plugin {
+@@ -111,13 +308,39 @@ public class BackgroundGeolocation extends Plugin {
          if (call.getBoolean("stale", false)) {
              fetchLastLocation(call);
          }
@@ -854,12 +970,17 @@ index 00b9e10..a1c472e 100644
 +                call.getString("url", null),
 +                // VolunteerOps patch — see LocationStore.KEY_INTERVAL_MS / KEY_AUTH_TOKEN.
 +                call.getInt("intervalMs", 1000),
-+                call.getString("authToken", null)
++                call.getString("authToken", null),
++                // VolunteerOps (v3.337.0): best fix of each window, and
++                // GNSS full tracking. An older page sends neither: 0/false
++                // is exactly the old behaviour.
++                call.getInt("sampleMs", 0),
++                call.getBoolean("fullTracking", false)
              );
          });
      }
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
-index 85f2a02..9017ad4 100644
+index 85f2a02..066a1ca 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
 @@ -12,6 +12,7 @@ import android.graphics.Color;
@@ -928,7 +1049,7 @@ index 85f2a02..9017ad4 100644
      private MediaPlayer mediaPlayer;
      private double[][] route;
      private double distanceThreshold;
-@@ -50,20 +82,104 @@ public class BackgroundGeolocationService extends Service {
+@@ -50,20 +82,122 @@ public class BackgroundGeolocationService extends Service {
      private Handler watchdogHandler = new Handler(Looper.getMainLooper());
      private Runnable watchdogRunnable;
      private Runnable restartRunnable;
@@ -937,6 +1058,14 @@ index 85f2a02..9017ad4 100644
      private float currentDistanceFilter;
 +    // VolunteerOps patch — see LocationStore.KEY_INTERVAL_MS for why.
 +    private long currentIntervalMs = 1000L;
++    // VolunteerOps patch (v3.337.0): best fix of each window. See
++    // handleLocationBatch(). 0 = the old one-fix-per-interval request.
++    private long currentSampleMs = 0L;
++    private boolean currentFullTracking = false;
++    private final java.util.ArrayList<android.location.Location> sampleWindow = new java.util.ArrayList<>();
++    private long lastSentAtElapsedMs = 0L;
++    private long lastSentFixElapsedMs = 0L;
++    private final VopsGnssMonitor gnss = new VopsGnssMonitor();
      private PowerManager.WakeLock wakeLock;
  
      // When set (via the "url" start option), each location is also POSTed to
@@ -975,16 +1104,28 @@ index 85f2a02..9017ad4 100644
 +            if ("pause".equals(instruction)) service.pauseTracking();
 +            else if ("track".equals(instruction)) service.resumeTracking();
 +            else if ("stop".equals(instruction)) service.stopTracking("server_stop");
++            // v3.337.0, from AlertPoller: the server no longer accepts this
++            // service's token (revoked because the phone changed hands, see
++            // mobile-token-check.php). Every fix and alert poll would be a
++            // 401 from now on; the page starts it again with a valid one.
++            else if ("token_revoked".equals(instruction)) service.stopTracking("token_revoked");
 +        });
++    }
++
++    // VolunteerOps patch (v3.337.0): location updates and the GNSS status
++    // listener always start and stop together.
++    private void removeLocationUpdates() {
++        if (client != null && locationCallback != null) {
++            client.removeLocationUpdates(locationCallback);
++        }
++        gnss.stop();
 +    }
 +
 +    private void pauseTracking() {
 +        Context context = getApplicationContext();
 +        if (LocationStore.isPaused(context)) return;
 +        LocationStore.setPaused(context, true);
-+        if (client != null && locationCallback != null) {
-+            client.removeLocationUpdates(locationCallback);
-+        }
++        removeLocationUpdates();
 +        // No fixes are expected now, so no "no fix arrived" reports either.
 +        stopWatchdog();
 +        VopsGpsHealth.clear();
@@ -1022,9 +1163,7 @@ index 85f2a02..9017ad4 100644
 +        // Must stop with the service: LocationStore.clear() above wipes the
 +        // token, so every later poll would be a guaranteed 401.
 +        stopAlertPolling();
-+        if (client != null && locationCallback != null) {
-+            client.removeLocationUpdates(locationCallback);
-+        }
++        removeLocationUpdates();
 +        stopForeground(true);
 +        stopSelf();
 +        releaseMediaPlayer();
@@ -1035,16 +1174,18 @@ index 85f2a02..9017ad4 100644
      // Some devices allow a foreground service to outlive the application's main
      // activity, leading to nasty crashes as reported in issue #59. If we learn
      // that the application has been killed, all watchers are stopped and the
-@@ -78,7 +194,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -77,9 +211,7 @@ public class BackgroundGeolocationService extends Service {
+         if (LocationStore.isEnabled(getApplicationContext())) {
              return false;
          }
-         if (client != null && locationCallback != null) {
+-        if (client != null && locationCallback != null) {
 -            client.removeUpdates(locationCallback);
-+            client.removeLocationUpdates(locationCallback);
-         }
+-        }
++        removeLocationUpdates();
          releaseMediaPlayer();
          releaseWakeLock();
-@@ -104,37 +220,68 @@ public class BackgroundGeolocationService extends Service {
+         stopWatchdog();
+@@ -104,37 +236,68 @@ public class BackgroundGeolocationService extends Service {
      @Override
      public int onStartCommand(Intent intent, int flags, int startId) {
          Context context = getApplicationContext();
@@ -1084,6 +1225,8 @@ index 85f2a02..9017ad4 100644
 +            client = LocationServices.getFusedLocationProviderClient(context);
              currentDistanceFilter = LocationStore.getDistanceFilter(context);
 +            currentIntervalMs = LocationStore.getIntervalMs(context);
++            currentSampleMs = LocationStore.getSampleMs(context);
++            currentFullTracking = LocationStore.getFullTracking(context);
              locationCallback = createLocationListener(this);
 -            requestLocationUpdates();
 -            startWatchdog();
@@ -1105,13 +1248,12 @@ index 85f2a02..9017ad4 100644
  
      @Override
      public void onDestroy() {
+-        if (client != null && locationCallback != null) {
+-            client.removeUpdates(locationCallback);
 +        if (vopsInstance == this) {
 +            vopsInstance = null;
-+        }
-         if (client != null && locationCallback != null) {
--            client.removeUpdates(locationCallback);
-+            client.removeLocationUpdates(locationCallback);
          }
++        removeLocationUpdates();
          super.onDestroy();
          releaseMediaPlayer();
          releaseWakeLock();
@@ -1123,7 +1265,7 @@ index 85f2a02..9017ad4 100644
      }
  
      private void releaseMediaPlayer() {
-@@ -183,10 +330,18 @@ public class BackgroundGeolocationService extends Service {
+@@ -183,10 +346,18 @@ public class BackgroundGeolocationService extends Service {
  
      private void restartLocationUpdates() {
          Logger.debug("Location watchdog timed out, restarting updates");
@@ -1139,11 +1281,11 @@ index 85f2a02..9017ad4 100644
              return;
          }
 -        client.removeUpdates(locationCallback);
-+        client.removeLocationUpdates(locationCallback);
++        removeLocationUpdates();
          if (restartRunnable != null) {
              watchdogHandler.removeCallbacks(restartRunnable);
          }
-@@ -194,11 +349,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -194,11 +365,7 @@ public class BackgroundGeolocationService extends Service {
              if (client == null || locationCallback == null) {
                  return;
              }
@@ -1156,7 +1298,7 @@ index 85f2a02..9017ad4 100644
              startWatchdog();
          };
          watchdogHandler.postDelayed(restartRunnable, 10000);
-@@ -209,7 +360,17 @@ public class BackgroundGeolocationService extends Service {
+@@ -209,7 +376,17 @@ public class BackgroundGeolocationService extends Service {
          if (watchdogRunnable == null) {
              watchdogRunnable = this::restartLocationUpdates;
          }
@@ -1175,10 +1317,11 @@ index 85f2a02..9017ad4 100644
      }
  
      private void stopWatchdog() {
-@@ -221,8 +382,52 @@ public class BackgroundGeolocationService extends Service {
+@@ -221,8 +398,127 @@ public class BackgroundGeolocationService extends Service {
          }
      }
  
+-    private void handleLocationChanged(android.location.Location location) {
 +    // VolunteerOps addition — see AlertPoller. Rides this service's existing
 +    // handler rather than starting anything of its own: the service is already
 +    // alive and holding a wake lock with the screen off, which is the whole
@@ -1213,22 +1356,97 @@ index 85f2a02..9017ad4 100644
 +        }
 +    }
 +
-     private void handleLocationChanged(android.location.Location location) {
++    // ── VolunteerOps patch (v3.337.0): the best fix of each window ──────────
++    // Before this the service asked Android for one fix per cadence and sent
++    // whatever came. Measured on a real Xiaomi over five trips (25-26/09/2026,
++    // 15 s cadence): median ±4 m, but 18% of fixes worse than ±20 m and half
++    // of those single bad fixes between two good ones — the send simply
++    // landed on a bad moment. Now, when the page asks for sampling
++    // (sampleMs), Android is asked for a fix every sampleMs, delivered in one
++    // batch per cadence where the phone can batch, and one fix per cadence is
++    // sent: the newest, unless an earlier one in the window is clearly more
++    // accurate (see bestOfWindow()). Asking every second also keeps the
++    // receiver tracking between sends instead of powering down and waking to
++    // a weak first fix. The chosen fix carries its own age (fix_age_ms, see
++    // VopsFixBuffer), so the server stores it at the moment it was taken.
++    private boolean sampling() {
++        return currentSampleMs > 0 && currentSampleMs < currentIntervalMs;
++    }
++
++    private static long elapsedMsOf(android.location.Location location) {
++        return location.getElapsedRealtimeNanos() / 1000000L;
++    }
++
++    private void resetSampling() {
++        sampleWindow.clear();
++        lastSentAtElapsedMs = 0L;
++        lastSentFixElapsedMs = 0L;
++    }
++
++    private void handleLocationBatch(java.util.List<android.location.Location> locations) {
++        if (locations == null || locations.isEmpty()) {
++            return;
++        }
 +        // A fix already on its way when the pause arrived: not sent.
 +        if (nativePostUrl != null && LocationStore.isPaused(getApplicationContext())) {
 +            return;
 +        }
          startWatchdog();
 +        VopsGpsHealth.clear();
-+        DebugLog.log(
-+            getApplicationContext(),
-+            "location_received",
-+            location.getLatitude() + "," + location.getLongitude() + " acc=" + location.getAccuracy()
-+        );
++        if (!sampling()) {
++            handleLocationChanged(locations.get(locations.size() - 1));
++            return;
++        }
++        for (android.location.Location l : locations) {
++            if (l != null && elapsedMsOf(l) > lastSentFixElapsedMs) {
++                sampleWindow.add(l);
++            }
++        }
++        // Bounded however the batches arrive: a window never needs more than
++        // a few cadences' worth of one-second fixes.
++        while (sampleWindow.size() > 600) {
++            sampleWindow.remove(0);
++        }
++        long now = android.os.SystemClock.elapsedRealtime();
++        // Batches do not land exactly on the cadence; a little slack keeps a
++        // batch that arrives a moment early from waiting a whole extra cadence.
++        long due = currentIntervalMs - Math.min(1500L, currentIntervalMs / 10);
++        if (lastSentAtElapsedMs != 0L && now - lastSentAtElapsedMs < due) {
++            return;
++        }
++        android.location.Location chosen = bestOfWindow();
++        sampleWindow.clear();
++        if (chosen == null) {
++            return;
++        }
++        lastSentAtElapsedMs = now;
++        lastSentFixElapsedMs = elapsedMsOf(chosen);
++        handleLocationChanged(chosen);
++    }
++
++    // The newest fix, unless an earlier one is clearly more accurate — the
++    // rule itself is VopsFixPicker.pick(), unit-tested there.
++    private android.location.Location bestOfWindow() {
++        int n = sampleWindow.size();
++        long[] times = new long[n];
++        float[] accuracies = new float[n];
++        for (int i = 0; i < n; i++) {
++            android.location.Location l = sampleWindow.get(i);
++            times[i] = elapsedMsOf(l);
++            accuracies[i] = l.hasAccuracy() ? l.getAccuracy() : -1f;
++        }
++        int chosen = VopsFixPicker.pick(times, accuracies);
++        return chosen < 0 ? null : sampleWindow.get(chosen);
++    }
++
++    private void handleLocationChanged(android.location.Location location) {
++        // v3.337.0: no longer logged to mobile-debug-log.php — that was one
++        // extra HTTPS request per fix, carrying its coordinates, on top of
++        // the ping that already stores it.
          if (nativePostUrl != null) {
              postLocationNatively(location);
          }
-@@ -242,22 +447,22 @@ public class BackgroundGeolocationService extends Service {
+@@ -242,22 +538,26 @@ public class BackgroundGeolocationService extends Service {
  
      // Delivers a location to the configured URL from native code, so it works
      // even when the WebView/JavaScript layer no longer exists.
@@ -1254,7 +1472,11 @@ index 85f2a02..9017ad4 100644
 -                Logger.error("Native location POST failed", e);
 -            }
 -        });
-+        VopsFixBuffer.add(context, locationToJson(location, context), location.getElapsedRealtimeNanos() / 1000000L);
++        JSONObject payload = locationToJson(location, context);
++        // v3.337.0: satellites, signal strength and second frequency at the
++        // moment of this fix (VopsGnssMonitor).
++        gnss.annotate(payload, elapsedMsOf(location));
++        VopsFixBuffer.add(context, payload, elapsedMsOf(location));
 +        VopsFixBuffer.drainAsync(context);
      }
  
@@ -1263,7 +1485,7 @@ index 85f2a02..9017ad4 100644
          JSONObject obj = new JSONObject();
          try {
              obj.put("latitude", location.getLatitude());
-@@ -276,38 +481,92 @@ public class BackgroundGeolocationService extends Service {
+@@ -276,38 +576,111 @@ public class BackgroundGeolocationService extends Service {
              // Lets the server distinguish native-delivered updates from those
              // forwarded by the JavaScript callback.
              obj.put("source", "native");
@@ -1318,10 +1540,9 @@ index 85f2a02..9017ad4 100644
              @Override
 -            public void onProviderEnabled(String provider) {}
 +            public void onLocationResult(LocationResult locationResult) {
-+                android.location.Location location = locationResult.getLastLocation();
-+                if (location != null) {
-+                    service.handleLocationChanged(location);
-+                }
++                // v3.337.0: every fix of a batch, not only the last — the
++                // window picks among them (handleLocationBatch()).
++                service.handleLocationBatch(locationResult.getLocations());
 +            }
  
 +            // VolunteerOps patch: Play Services says right away when it can no
@@ -1348,20 +1569,40 @@ index 85f2a02..9017ad4 100644
          try {
 -            client.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, currentDistanceFilter, locationCallback);
 -        } catch (SecurityException ignore) {
-+            LocationRequest request = new LocationRequest.Builder(currentIntervalMs)
-+                .setMinUpdateIntervalMillis(currentIntervalMs)
++            resetSampling();
++            LocationRequest.Builder builder;
++            if (sampling()) {
++                // v3.337.0: a fix every sampleMs, handed over in one batch per
++                // cadence where the phone supports batching (it delivers them
++                // as they come where it does not; both work, see
++                // handleLocationBatch()).
++                builder = new LocationRequest.Builder(currentSampleMs)
++                    .setMinUpdateIntervalMillis(currentSampleMs)
++                    .setMaxUpdateDelayMillis(currentIntervalMs)
++                    .setMaxUpdateAgeMillis(Math.min(currentSampleMs, 5000L));
++            } else {
++                builder = new LocationRequest.Builder(currentIntervalMs)
++                    .setMinUpdateIntervalMillis(currentIntervalMs)
++                    // VolunteerOps patch: by default the first answer to a new
++                    // request may be a cached location as old as one interval
++                    // (up to 3 minutes at the default cadence). Cap it at 5s.
++                    .setMaxUpdateAgeMillis(Math.min(currentIntervalMs, 5000L));
++            }
++            LocationRequest request = builder
 +                .setMinUpdateDistanceMeters(currentDistanceFilter)
 +                .setPriority(Priority.PRIORITY_HIGH_ACCURACY)
-+                // VolunteerOps patch: by default the first answer to a new
-+                // request may be a cached location as old as one interval
-+                // (up to 3 minutes at the default cadence). Cap it at 5s, and
-+                // let the first fix wait briefly for GNSS instead of handing
++                // Let the first fix wait briefly for GNSS instead of handing
 +                // over the coarse network fix that exists before lock.
-+                .setMaxUpdateAgeMillis(Math.min(currentIntervalMs, 5000L))
 +                .setWaitForAccurateLocation(true)
 +                .build();
 +            client.requestLocationUpdates(request, locationCallback, Looper.getMainLooper());
-+            DebugLog.log(getApplicationContext(), "request_updates_ok", "intervalMs=" + currentIntervalMs);
++            gnss.start(getApplicationContext(), currentFullTracking);
++            DebugLog.log(
++                getApplicationContext(),
++                "request_updates_ok",
++                "intervalMs=" + currentIntervalMs + " sampleMs=" + (sampling() ? currentSampleMs : 0)
++                    + " fullTracking=" + gnss.fullTrackingActive()
++            );
 +        } catch (SecurityException e) {
              // According to Android Studio, this method can throw a Security Exception if
              // permissions are not yet granted. Rather than check the permissions, which is fiddly,
@@ -1370,14 +1611,16 @@ index 85f2a02..9017ad4 100644
          }
      }
  
-@@ -344,37 +603,39 @@ public class BackgroundGeolocationService extends Service {
+@@ -344,37 +717,45 @@ public class BackgroundGeolocationService extends Service {
              final String notificationTitle,
              final String notificationMessage,
              float distanceFilter,
 -            final String url
 +            final String url,
 +            long intervalMs,
-+            final String authToken
++            final String authToken,
++            long sampleMs,
++            boolean fullTracking
          ) {
              releaseMediaPlayer();
              acquireWakeLock();
@@ -1386,10 +1629,14 @@ index 85f2a02..9017ad4 100644
              callbackId = id;
              currentDistanceFilter = distanceFilter;
 +            currentIntervalMs = intervalMs;
++            currentSampleMs = Math.max(0L, sampleMs);
++            currentFullTracking = fullTracking;
  
              nativePostUrl = (url == null || url.isEmpty()) ? null : url;
 -            LocationStore.saveSetup(getApplicationContext(), nativePostUrl, notificationTitle, notificationMessage, distanceFilter);
 +            LocationStore.saveSetup(getApplicationContext(), nativePostUrl, notificationTitle, notificationMessage, distanceFilter, intervalMs, authToken);
++            // After saveSetup, which clears everything when there is no URL.
++            LocationStore.saveSampling(getApplicationContext(), currentSampleMs, currentFullTracking);
 +            // VolunteerOps (v3.330.0): the page only starts tracking for
 +            // somebody who has the GPS tick, so a start is never paused.
 +            LocationStore.setPaused(getApplicationContext(), false);
@@ -1399,7 +1646,7 @@ index 85f2a02..9017ad4 100644
              // restart), so drop any previous listener before registering a new one.
              if (locationCallback != null) {
 -                client.removeUpdates(locationCallback);
-+                client.removeLocationUpdates(locationCallback);
++                removeLocationUpdates();
              }
              locationCallback = createLocationListener(BackgroundGeolocationService.this);
              requestLocationUpdates();
@@ -1423,7 +1670,7 @@ index 85f2a02..9017ad4 100644
          }
  
          void setPlannedRoute(String filePath, double[][] routeCoordinates, float distance) {
-@@ -453,6 +714,32 @@ public class BackgroundGeolocationService extends Service {
+@@ -453,6 +834,32 @@ public class BackgroundGeolocationService extends Service {
              );
          }
  
@@ -1456,7 +1703,7 @@ index 85f2a02..9017ad4 100644
          // Set the Channel ID for Android O.
          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
              builder.setChannelId(BackgroundGeolocationService.class.getPackage().getName());
-@@ -462,7 +749,9 @@ public class BackgroundGeolocationService extends Service {
+@@ -462,7 +869,9 @@ public class BackgroundGeolocationService extends Service {
      }
  
      // Gets the identifier of the app's resource by name, returning 0 if not found.
@@ -1548,7 +1795,7 @@ index 0000000..9c0c750
 +    }
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java
-index 2e19afe..28ccfac 100644
+index 2e19afe..41e84ed 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java
 @@ -22,6 +22,27 @@ final class LocationStore {
@@ -1599,7 +1846,32 @@ index 2e19afe..28ccfac 100644
          }
          editor.apply();
      }
-@@ -70,25 +93,122 @@ final class LocationStore {
+@@ -49,6 +72,24 @@ final class LocationStore {
+         prefs(context).edit().clear().apply();
+     }
+ 
++    // VolunteerOps patch (v3.337.0): the best-fix-per-window sampling rate
++    // (0 = off) and GNSS full tracking, persisted like the interval so a
++    // sticky restart comes back the way the page started it.
++    private static final String KEY_SAMPLE_MS = "vopsSampleMs";
++    private static final String KEY_FULL_TRACKING = "vopsFullTracking";
++
++    static void saveSampling(Context context, long sampleMs, boolean fullTracking) {
++        prefs(context).edit().putLong(KEY_SAMPLE_MS, sampleMs).putBoolean(KEY_FULL_TRACKING, fullTracking).apply();
++    }
++
++    static long getSampleMs(Context context) {
++        return prefs(context).getLong(KEY_SAMPLE_MS, 0L);
++    }
++
++    static boolean getFullTracking(Context context) {
++        return prefs(context).getBoolean(KEY_FULL_TRACKING, false);
++    }
++
+     static boolean isEnabled(Context context) {
+         SharedPreferences prefs = prefs(context);
+         return prefs.getBoolean(KEY_ENABLED, false) && prefs.getString(KEY_URL, null) != null;
+@@ -70,25 +111,122 @@ final class LocationStore {
          return prefs(context).getFloat(KEY_DISTANCE_FILTER, 0f);
      }
  
@@ -1726,7 +1998,7 @@ index 2e19afe..28ccfac 100644
              try (OutputStream outputStream = connection.getOutputStream()) {
                  outputStream.write(body);
              }
-@@ -97,6 +217,15 @@ final class LocationStore {
+@@ -97,6 +235,15 @@ final class LocationStore {
              if (responseCode < HttpURLConnection.HTTP_OK || responseCode >= HttpURLConnection.HTTP_MULT_CHOICE) {
                  throw new IOException("Location POST failed with response code: " + responseCode);
              }
@@ -1744,10 +2016,10 @@ index 2e19afe..28ccfac 100644
                  connection.disconnect();
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixBuffer.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixBuffer.java
 new file mode 100644
-index 0000000..44e391b
+index 0000000..0e8760e
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixBuffer.java
-@@ -0,0 +1,204 @@
+@@ -0,0 +1,227 @@
 +package com.capgo.capacitor_background_geolocation;
 +
 +import android.content.Context;
@@ -1818,8 +2090,28 @@ index 0000000..44e391b
 +        prefs(context).edit().putString(KEY_ENTRIES, entries.toString()).apply();
 +    }
 +
-+    /** Drops what can no longer be delivered: too old, from before a reboot, or over the cap. */
-+    private static JSONArray prune(JSONArray entries) {
++    /**
++     * v3.337.0: which account and shift a kept fix belongs to — a hash of the
++     * ping URL (it carries the shift) and the token it was taken under. A fix
++     * is only ever sent under the same one. Before this, a backlog kept while
++     * one person carried the phone was sent by the NEXT person's service,
++     * with their token, and stored as the next person's route. Entries from
++     * older builds carry no tag and are sent as before.
++     */
++    private static String currentTag(Context context) {
++        String url = LocationStore.getUrl(context);
++        if (url == null || url.isEmpty()) {
++            // Not tracking right now (stopped, or between a stop and the
++            // next start): nothing to compare against, so nothing is dropped
++            // for it — the same account starting again still sends them.
++            return null;
++        }
++        String token = LocationStore.getAuthToken(context);
++        return Integer.toHexString((url + "|" + (token == null ? "" : token)).hashCode());
++    }
++
++    /** Drops what can no longer be delivered: too old, from before a reboot, another account's, or over the cap. */
++    private static JSONArray prune(JSONArray entries, String tag) {
 +        long now = SystemClock.elapsedRealtime();
 +        JSONArray kept = new JSONArray();
 +        for (int i = 0; i < entries.length(); i++) {
@@ -1827,6 +2119,7 @@ index 0000000..44e391b
 +            // A damaged entry would sit at the head forever and block every
 +            // fix behind it, so it goes here rather than at send time.
 +            if (e == null || !e.has("i") || !e.has("e") || e.optJSONObject("p") == null) continue;
++            if (tag != null && e.has("t") && !e.optString("t").equals(tag)) continue;
 +            long age = now - e.optLong("e", Long.MIN_VALUE / 2);
 +            if (age >= 0 && age <= MAX_AGE_MS) kept.put(e);
 +        }
@@ -1846,16 +2139,18 @@ index 0000000..44e391b
 +            entry.put("i", seq);
 +            entry.put("e", fixElapsedMs);
 +            entry.put("p", payload);
++            String tag = currentTag(context);
++            if (tag != null) entry.put("t", tag);
 +            JSONArray entries = load(context);
 +            entries.put(entry);
-+            save(context, prune(entries));
++            save(context, prune(entries, currentTag(context)));
 +        } catch (Exception e) {
 +            Logger.error("Could not keep a fix", e);
 +        }
 +    }
 +
 +    static synchronized int size(Context context) {
-+        return prune(load(context)).length();
++        return prune(load(context), currentTag(context)).length();
 +    }
 +
 +    /** Removes every kept fix with a sequence number up to and including $lastSeq. */
@@ -1866,12 +2161,12 @@ index 0000000..44e391b
 +            JSONObject e = entries.optJSONObject(i);
 +            if (e != null && e.optLong("i") > lastSeq) kept.put(e);
 +        }
-+        save(context, prune(kept));
++        save(context, prune(kept, currentTag(context)));
 +    }
 +
 +    /** The oldest $max fixes, each stamped with its age as of now. */
 +    private static synchronized JSONObject[] oldest(Context context, int max) {
-+        JSONArray entries = prune(load(context));
++        JSONArray entries = prune(load(context), currentTag(context));
 +        save(context, entries);
 +        int n = Math.min(max, entries.length());
 +        JSONObject[] out = new JSONObject[n];
@@ -1952,12 +2247,261 @@ index 0000000..44e391b
 +        }
 +    }
 +}
+diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixPicker.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixPicker.java
+new file mode 100644
+index 0000000..c5eb810
+--- /dev/null
++++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixPicker.java
+@@ -0,0 +1,42 @@
++package com.capgo.capacitor_background_geolocation;
++
++/**
++ * VolunteerOps addition (not upstream, v3.337.0).
++ *
++ * Which fix of a window to send (BackgroundGeolocationService.bestOfWindow()):
++ * the newest, unless an earlier one is clearly more accurate — within
++ * max(2 m, 25%) of the best, the newer wins, because a fresher position is
++ * worth a metre or two. A fix with no accuracy is never "the best", but may
++ * be the newest. Plain arrays so it can be unit-tested off the device.
++ */
++final class VopsFixPicker {
++
++    private VopsFixPicker() {}
++
++    /**
++     * @param elapsedMs each fix's time (monotonic clock)
++     * @param accuracyM each fix's accuracy in metres, negative when unknown
++     * @return the index to send, or -1 for an empty window
++     */
++    static int pick(long[] elapsedMs, float[] accuracyM) {
++        int newest = -1;
++        int best = -1;
++        for (int i = 0; i < elapsedMs.length; i++) {
++            if (newest < 0 || elapsedMs[i] >= elapsedMs[newest]) {
++                newest = i;
++            }
++            if (accuracyM[i] < 0) {
++                continue;
++            }
++            if (best < 0 || accuracyM[i] < accuracyM[best]
++                || (accuracyM[i] == accuracyM[best] && elapsedMs[i] > elapsedMs[best])) {
++                best = i;
++            }
++        }
++        if (best < 0 || newest < 0 || accuracyM[newest] < 0) {
++            return best >= 0 ? best : newest;
++        }
++        float margin = Math.max(2f, 0.25f * accuracyM[best]);
++        return accuracyM[newest] <= accuracyM[best] + margin ? newest : best;
++    }
++}
+diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGnssMonitor.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGnssMonitor.java
+new file mode 100644
+index 0000000..79ad098
+--- /dev/null
++++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGnssMonitor.java
+@@ -0,0 +1,195 @@
++package com.capgo.capacitor_background_geolocation;
++
++import android.content.Context;
++import android.location.GnssMeasurementRequest;
++import android.location.GnssMeasurementsEvent;
++import android.location.GnssStatus;
++import android.location.LocationManager;
++import android.os.Build;
++import android.os.Handler;
++import android.os.Looper;
++import android.os.SystemClock;
++import java.util.Arrays;
++import java.util.concurrent.Executor;
++import org.json.JSONObject;
++
++/**
++ * VolunteerOps addition (not upstream, v3.337.0).
++ *
++ * What the GPS receiver itself saw when each fix was taken: how many
++ * satellites went into it, how strong the four strongest of those were
++ * (C/N0, dB-Hz), and whether a second frequency (L5 / E5a / B2a) was among
++ * them. A fix only says "±20 m"; these say why. A phone in a pocket or under
++ * a roof reads 20-25 dB-Hz, one in open sky 35-45; "used 0" means Android
++ * handed over a Wi-Fi/cell position while the receiver had nothing. Sent with
++ * every fix (gnss_used, gnss_cn0, gnss_dual) and read by the GPS quality
++ * report, so "bad phone" and "bad place to carry it" stop looking alike.
++ *
++ * Android reports satellite status about once a second, and only while the
++ * receiver is running. Each report is kept in a short ring, and a fix is
++ * matched to the report nearest to it in time, within MATCH_MS. No match (the
++ * receiver was not running) leaves the fields out: unknown, not zero.
++ *
++ * Optionally "full tracking" (Android 12+): asks the receiver for raw
++ * measurements with full tracking on, which keeps it from duty-cycling
++ * between fixes. That is the only effect wanted — the measurements themselves
++ * are thrown away. Costs battery, so it is a setting, off by default.
++ */
++final class VopsGnssMonitor {
++
++    private static final int RING = 64;
++    private static final long MATCH_MS = 3000L;
++
++    private final long[] at = new long[RING];
++    private final int[] used = new int[RING];
++    private final float[] cn0 = new float[RING];
++    private final boolean[] dual = new boolean[RING];
++    // Signal strength and second band over every VISIBLE satellite, for a
++    // receiver that never marks any as used (see sawUsedFlag).
++    private final float[] cn0Visible = new float[RING];
++    private final boolean[] dualVisible = new boolean[RING];
++    private int next = 0;
++    private int count = 0;
++    // Not every receiver fills in "used in fix" — the Android emulator's
++    // never does, and a phone whose chip leaves it out would otherwise read
++    // "0 satellites" on every fix and look as if it never had GPS at all.
++    // Until the receiver has marked at least one satellite as used, the
++    // satellite count is not reported and the signal strength is taken over
++    // the visible satellites instead.
++    private boolean sawUsedFlag = false;
++
++    private LocationManager locationManager;
++    private GnssStatus.Callback statusCallback;
++    private Object measurementsCallback;
++    private final Handler handler = new Handler(Looper.getMainLooper());
++    private final Executor mainExecutor = handler::post;
++
++    void start(Context context, boolean fullTracking) {
++        stop();
++        try {
++            locationManager = (LocationManager) context.getApplicationContext().getSystemService(Context.LOCATION_SERVICE);
++            if (locationManager == null) return;
++            statusCallback = new GnssStatus.Callback() {
++                @Override
++                public void onSatelliteStatusChanged(GnssStatus status) {
++                    record(status);
++                }
++            };
++            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
++                locationManager.registerGnssStatusCallback(mainExecutor, statusCallback);
++            } else {
++                locationManager.registerGnssStatusCallback(statusCallback, handler);
++            }
++            if (fullTracking && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
++                GnssMeasurementsEvent.Callback cb = new GnssMeasurementsEvent.Callback() {
++                    @Override
++                    public void onGnssMeasurementsReceived(GnssMeasurementsEvent event) {
++                        // Discarded: requesting them with full tracking is the point.
++                    }
++                };
++                GnssMeasurementRequest request = new GnssMeasurementRequest.Builder().setFullTracking(true).build();
++                if (locationManager.registerGnssMeasurementsCallback(request, mainExecutor, cb)) {
++                    measurementsCallback = cb;
++                }
++            }
++        } catch (SecurityException e) {
++            // No precise-location permission: nothing to report, tracking unaffected.
++            statusCallback = null;
++        } catch (Exception e) {
++            statusCallback = null;
++        }
++    }
++
++    void stop() {
++        try {
++            if (locationManager != null && statusCallback != null) {
++                locationManager.unregisterGnssStatusCallback(statusCallback);
++            }
++            if (locationManager != null && measurementsCallback != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
++                locationManager.unregisterGnssMeasurementsCallback((GnssMeasurementsEvent.Callback) measurementsCallback);
++            }
++        } catch (Exception ignored) {}
++        statusCallback = null;
++        measurementsCallback = null;
++    }
++
++    boolean fullTrackingActive() {
++        return measurementsCallback != null;
++    }
++
++    private synchronized void record(GnssStatus status) {
++        int n = status.getSatelliteCount();
++        float[] strengths = new float[n];
++        float[] visibleStrengths = new float[n];
++        int k = 0;
++        int v = 0;
++        boolean second = false;
++        boolean secondVisible = false;
++        for (int i = 0; i < n; i++) {
++            float c = status.getCn0DbHz(i);
++            // Every GNSS "L1" signal sits between 1559 and 1610 MHz; anything
++            // under 1.3 GHz is a second band (L5, E5a, B2a, E5b...).
++            boolean band2 = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
++                && status.hasCarrierFrequencyHz(i)
++                && status.getCarrierFrequencyHz(i) < 1.3e9f;
++            if (c > 0) {
++                visibleStrengths[v++] = c;
++                if (band2) secondVisible = true;
++            }
++            if (!status.usedInFix(i)) continue;
++            strengths[k++] = c;
++            if (band2) second = true;
++        }
++        if (k > 0) sawUsedFlag = true;
++        at[next] = SystemClock.elapsedRealtime();
++        used[next] = k;
++        cn0[next] = topMean(strengths, k);
++        dual[next] = second;
++        cn0Visible[next] = topMean(visibleStrengths, v);
++        dualVisible[next] = secondVisible;
++        next = (next + 1) % RING;
++        if (count < RING) count++;
++    }
++
++    /** Mean of the four largest of the first $k values; 0 when there are none. */
++    private static float topMean(float[] values, int k) {
++        Arrays.sort(values, 0, k);
++        int top = Math.min(4, k);
++        float sum = 0f;
++        for (int j = k - top; j < k; j++) sum += values[j];
++        return top > 0 ? sum / top : 0f;
++    }
++
++    /** Adds gnss_used / gnss_cn0 / gnss_dual for the report nearest $fixElapsedMs, if one is close enough. */
++    synchronized void annotate(JSONObject payload, long fixElapsedMs) {
++        int bestIdx = -1;
++        long bestGap = Long.MAX_VALUE;
++        for (int c = 0; c < count; c++) {
++            int i = (next - 1 - c + RING) % RING;
++            long gap = Math.abs(at[i] - fixElapsedMs);
++            if (gap < bestGap) {
++                bestGap = gap;
++                bestIdx = i;
++            }
++        }
++        if (bestIdx < 0 || bestGap > MATCH_MS) return;
++        try {
++            if (sawUsedFlag) {
++                payload.put("gnss_used", used[bestIdx]);
++                if (used[bestIdx] > 0) {
++                    payload.put("gnss_cn0", Math.round(cn0[bestIdx] * 10f) / 10.0);
++                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
++                        payload.put("gnss_dual", dual[bestIdx] ? 1 : 0);
++                    }
++                }
++            } else if (cn0Visible[bestIdx] > 0) {
++                // A receiver that does not say which satellites it used: the
++                // count stays unknown, the sky's strength is still worth having.
++                payload.put("gnss_cn0", Math.round(cn0Visible[bestIdx] * 10f) / 10.0);
++                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
++                    payload.put("gnss_dual", dualVisible[bestIdx] ? 1 : 0);
++                }
++            }
++        } catch (Exception ignored) {}
++    }
++}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGpsHealth.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGpsHealth.java
 new file mode 100644
-index 0000000..60ef0e6
+index 0000000..1f8d1cb
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGpsHealth.java
-@@ -0,0 +1,204 @@
+@@ -0,0 +1,217 @@
 +package com.capgo.capacitor_background_geolocation;
 +
 +import android.Manifest;
@@ -2092,7 +2636,20 @@ index 0000000..60ef0e6
 +        o.put("powerSaveCutsGps", powerSaveCutsGps(context));
 +        o.put("ignoringBatteryOptimizations", ignoringBatteryOptimizations(context));
 +        o.put("device", deviceLabel());
++        // v3.337.0: whether this maker keeps its own autostart / background
++        // launch switch on top of Android's battery setting — the page then
++        // offers a button to it (BackgroundGeolocation.vopsOpenAutostartSettings).
++        o.put("autostart", hasOemAutostartScreen());
 +        return o;
++    }
++
++    static boolean hasOemAutostartScreen() {
++        String maker = Build.MANUFACTURER == null ? "" : Build.MANUFACTURER.trim().toLowerCase();
++        String brand = Build.BRAND == null ? "" : Build.BRAND.trim().toLowerCase();
++        for (String m : new String[] { "xiaomi", "redmi", "poco", "huawei", "honor", "oppo", "realme", "oneplus", "vivo", "iqoo", "asus" }) {
++            if (maker.contains(m) || brand.contains(m)) return true;
++        }
++        return false;
 +    }
 +
 +    /**
@@ -2160,5 +2717,77 @@ index 0000000..60ef0e6
 +                if (connection != null) connection.disconnect();
 +            }
 +        });
++    }
++}
+diff --git a/node_modules/@capgo/background-geolocation/android/src/test/java/com/capgo/capacitor_background_geolocation/VopsFixPickerTest.java b/node_modules/@capgo/background-geolocation/android/src/test/java/com/capgo/capacitor_background_geolocation/VopsFixPickerTest.java
+new file mode 100644
+index 0000000..159069a
+--- /dev/null
++++ b/node_modules/@capgo/background-geolocation/android/src/test/java/com/capgo/capacitor_background_geolocation/VopsFixPickerTest.java
+@@ -0,0 +1,66 @@
++package com.capgo.capacitor_background_geolocation;
++
++import static org.junit.Assert.assertEquals;
++
++import org.junit.Test;
++
++/** VolunteerOps (v3.337.0): the best-fix-of-the-window rule. */
++public class VopsFixPickerTest {
++
++    private static long[] seconds(int n) {
++        long[] t = new long[n];
++        for (int i = 0; i < n; i++) t[i] = 1000L * i;
++        return t;
++    }
++
++    @Test
++    public void anEmptyWindowSendsNothing() {
++        assertEquals(-1, VopsFixPicker.pick(new long[0], new float[0]));
++    }
++
++    @Test
++    public void allGoodSendsTheNewest() {
++        assertEquals(4, VopsFixPicker.pick(seconds(5), new float[] { 4f, 3.8f, 4.2f, 4f, 4.1f }));
++    }
++
++    @Test
++    public void aBadMomentAtSendTimeIsReplacedByTheGoodFixJustBeforeIt() {
++        // The real pattern: ±4 m for most of the window, ±25 m on the last second.
++        assertEquals(3, VopsFixPicker.pick(seconds(5), new float[] { 4.5f, 4.2f, 4.4f, 4.0f, 25f }));
++    }
++
++    @Test
++    public void aSlightlyWorseNewestFixStillWinsForBeingFresher() {
++        // Within max(2 m, 25%) of the best: the newer one is sent.
++        assertEquals(4, VopsFixPicker.pick(seconds(5), new float[] { 3f, 3f, 3f, 3f, 5f }));
++        assertEquals(4, VopsFixPicker.pick(seconds(5), new float[] { 20f, 20f, 20f, 20f, 25f }));
++    }
++
++    @Test
++    public void justPastTheMarginTheMoreAccurateEarlierFixWins() {
++        assertEquals(0, VopsFixPicker.pick(seconds(3), new float[] { 3f, 9f, 5.1f }));
++    }
++
++    @Test
++    public void aNewestFixWithNoAccuracyLosesToOneThatHasIt() {
++        assertEquals(1, VopsFixPicker.pick(seconds(3), new float[] { 8f, 6f, -1f }));
++    }
++
++    @Test
++    public void withNoAccuracyAnywhereTheNewestIsSent() {
++        assertEquals(2, VopsFixPicker.pick(seconds(3), new float[] { -1f, -1f, -1f }));
++    }
++
++    @Test
++    public void betweenEqualBestFixesTheLaterIsPreferred() {
++        assertEquals(2, VopsFixPicker.pick(seconds(4), new float[] { 3f, 9f, 3f, 20f }));
++    }
++
++    @Test
++    public void orderOfArrivalDoesNotMatterOnlyTheFixTimes() {
++        long[] t = { 3000L, 1000L, 4000L, 2000L };
++        float[] a = { 4f, 4f, 30f, 4f };
++        // Newest (t=4000) is bad; best is the latest of the ±4 m ones (t=3000).
++        assertEquals(0, VopsFixPicker.pick(t, a));
 +    }
 +}

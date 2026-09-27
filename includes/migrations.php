@@ -7257,6 +7257,28 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 170,
+            'description' => "What the GPS receiver saw for each fix from the Android app (v3.337.0, VopsGnssMonitor): gnss_used = satellites used in the fix, gnss_cn0 = mean signal strength (C/N0, dB-Hz) of the four strongest of them, gnss_dual = 1 when a second frequency (L5/E5a/B2a) was among them. A fix only says ±N m; these say why — a phone in a pocket or under a roof, a weak receiver, or Android handing over a Wi-Fi/cell position with no satellite at all (gnss_used = 0). NULL = not reported (browsers, older apps, receiver not running). Added at the END of the table so the ALTER stays instant on a large production table.",
+            'up' => function () {
+                $have = array_column(dbFetchAll(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'volunteer_pings'
+                        AND COLUMN_NAME IN ('gnss_used', 'gnss_cn0', 'gnss_dual')"
+                ), 'COLUMN_NAME');
+                $add = [
+                    'gnss_used' => "TINYINT UNSIGNED NULL COMMENT 'Satellites used in the fix (Android app); NULL = not reported'",
+                    'gnss_cn0'  => "DECIMAL(4, 1) NULL COMMENT 'Mean C/N0 (dB-Hz) of the 4 strongest satellites used'",
+                    'gnss_dual' => "TINYINT(1) NULL COMMENT '1 = a second frequency (L5/E5a/B2a) was used'",
+                ];
+                foreach ($add as $col => $def) {
+                    if (!in_array($col, $have, true)) {
+                        dbExecute("ALTER TABLE volunteer_pings ADD COLUMN {$col} {$def}");
+                    }
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

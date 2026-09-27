@@ -304,6 +304,58 @@ final class GpsFixIntegrityTest extends TestCase
         $this->assertSame(2, $this->pingCount());
     }
 
+    // ── What the receiver saw (v3.337.0) ────────────────────────────────────
+
+    public function testTheAppsSatelliteReadingIsStoredWithTheFix(): void
+    {
+        $fix = $this->nativeFix(0, 500) + ['gnss_used' => 11, 'gnss_cn0' => 34.56, 'gnss_dual' => 1];
+        $result = recordNativePingFromJson($this->user(), $this->shiftId, $fix);
+        $this->assertTrue($result['ok'], $result['error'] ?? '');
+        $row = dbFetchOne(
+            "SELECT gnss_used, gnss_cn0, gnss_dual FROM volunteer_pings WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+            [$this->volunteerId]
+        );
+        $this->assertSame(11, (int) $row['gnss_used']);
+        $this->assertEqualsWithDelta(34.6, (float) $row['gnss_cn0'], 0.001);
+        $this->assertSame(1, (int) $row['gnss_dual']);
+    }
+
+    public function testAFixWithoutSatelliteFieldsStoresThemAsUnknown(): void
+    {
+        $this->assertTrue(recordNativePingFromJson($this->user(), $this->shiftId, $this->nativeFix(0, 500))['ok']);
+        $row = dbFetchOne(
+            "SELECT gnss_used, gnss_cn0, gnss_dual FROM volunteer_pings WHERE user_id = ? ORDER BY id DESC LIMIT 1",
+            [$this->volunteerId]
+        );
+        $this->assertNull($row['gnss_used']);
+        $this->assertNull($row['gnss_cn0']);
+        $this->assertNull($row['gnss_dual']);
+    }
+
+    public function testGarbledSatelliteFieldsAreReadAsUnknownNotAsZero(): void
+    {
+        $this->assertSame(['used' => null, 'cn0' => null, 'dual' => null],
+            parseGnssFields(['gnss_used' => 'x', 'gnss_cn0' => -3, 'gnss_dual' => 7]));
+        $this->assertSame(['used' => 0, 'cn0' => null, 'dual' => null], parseGnssFields(['gnss_used' => 0]));
+    }
+
+    public function testTheGpsQualityReportSummarisesSatellitesAndSignal(): void
+    {
+        require_once __DIR__ . '/../includes/functions-gps-quality.php';
+        foreach ([[9, 31.0, 1], [11, 35.0, 0], [0, null, null]] as $i => [$used, $cn0, $dual]) {
+            $fix = $this->nativeFix($i * 2, (3 - $i) * 15000) + array_filter(
+                ['gnss_used' => $used, 'gnss_cn0' => $cn0, 'gnss_dual' => $dual], fn($v) => $v !== null
+            );
+            $this->assertTrue(recordNativePingFromJson($this->user(), $this->shiftId, $fix)['ok']);
+        }
+        $me = array_values(array_filter(loadMissionGpsQuality($this->missionId), fn($p) => $p['user_id'] === $this->volunteerId))[0];
+        $this->assertSame(3, $me['sats_reported']);
+        $this->assertEquals(9, $me['sats_median']);
+        $this->assertEquals(31.0, $me['cn0_median']);
+        $this->assertSame(50, $me['dual_pct']);
+        $this->assertSame(1, $me['no_sat']);
+    }
+
     public function testAManualTapDoesNotLetThePagesNextAutomaticFixThrough(): void
     {
         // v3.336.4: the manual tap is the newest row and says 'browser'; the
