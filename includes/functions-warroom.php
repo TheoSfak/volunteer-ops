@@ -1287,13 +1287,17 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
                 p.departed_at, du.name AS departed_by_name,
                 p.arrived_at, au.name AS arrived_by_name, p.arrived_distance_m, p.arrived_accuracy_m,
                 p.completed_at, cu2.name AS completed_by_name,
-                p.skipped_at, su.name AS skipped_by_name, p.skip_reason, p.note, p.out_of_sequence
+                p.skipped_at, su.name AS skipped_by_name, p.skip_reason, p.note, p.out_of_sequence,
+                p.cant_at, p.cant_reason, p.cant_note, ctu.name AS cant_by_name,
+                p.unlocked_at, ulu.name AS unlocked_by_name
          FROM mission_route_waypoints w
          LEFT JOIN mission_route_progress p ON p.waypoint_id = w.id
          LEFT JOIN users du ON du.id = p.departed_by
          LEFT JOIN users au ON au.id = p.arrived_by
          LEFT JOIN users cu2 ON cu2.id = p.completed_by
          LEFT JOIN users su ON su.id = p.skipped_by
+         LEFT JOIN users ctu ON ctu.id = p.cant_by
+         LEFT JOIN users ulu ON ulu.id = p.unlocked_by
          WHERE w.route_id IN ($placeholders)
          ORDER BY w.route_id, w.seq",
         $routeIds
@@ -1396,6 +1400,11 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
             'completed_at'          => $w['completed_at'] ? date('c', strtotime($w['completed_at'])) : null,
             'completed_at_display'  => $w['completed_at'] ? date('H:i', strtotime($w['completed_at'])) : null,
             'completed_by_name'     => $w['completed_by_name'],
+            // Every screen tests wp.skipped_at to tell a closed point from an
+            // open one, and until v3.350.0 only the _display twin was sent:
+            // a point command skipped stayed the team's "current" point, with
+            // buttons the server then refused.
+            'skipped_at'            => $w['skipped_at'] ? date('c', strtotime($w['skipped_at'])) : null,
             'skipped_at_display'    => $w['skipped_at'] ? date('H:i', strtotime($w['skipped_at'])) : null,
             'skipped_by_name'       => $w['skipped_by_name'],
             'skip_reason'           => $w['skip_reason'],
@@ -1403,6 +1412,18 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
             'out_of_sequence'       => (bool) $w['out_of_sequence'],
             'photo'                 => $photosByWaypoint[$waypointId] ?? null,
             'video'                 => $videosByWaypoint[$waypointId] ?? null,
+            // «Δεν μπορώ» at this point, and command's «Ξεκλείδωμα» (v3.350.0).
+            // The reason is a code; the page translates it.
+            'cant'                  => $w['cant_at'] ? [
+                'reason' => $w['cant_reason'],
+                'note'   => $w['cant_note'],
+                'by'     => $w['cant_by_name'],
+                'at'     => date('H:i', strtotime($w['cant_at'])),
+            ] : null,
+            'unlocked'              => $w['unlocked_at'] ? [
+                'by' => $w['unlocked_by_name'],
+                'at' => date('H:i', strtotime($w['unlocked_at'])),
+            ] : null,
         ];
     }
 
@@ -2229,7 +2250,8 @@ function loadAckTrackerCardsForMission(int $missionId): array {
             $pointRows = dbFetchAll(
                 "SELECT w.route_id, w.seq, w.label,
                         UNIX_TIMESTAMP(p.departed_at) AS departed, UNIX_TIMESTAMP(p.arrived_at) AS arrived,
-                        UNIX_TIMESTAMP(p.completed_at) AS completed, UNIX_TIMESTAMP(p.skipped_at) AS skipped
+                        UNIX_TIMESTAMP(p.completed_at) AS completed, UNIX_TIMESTAMP(p.skipped_at) AS skipped,
+                        UNIX_TIMESTAMP(p.cant_at) AS cant, UNIX_TIMESTAMP(p.unlocked_at) AS unlocked
                  FROM mission_route_waypoints w
                  LEFT JOIN mission_route_progress p ON p.waypoint_id = w.id
                  WHERE w.route_id IN ({$routePlaceholders})
@@ -2247,6 +2269,9 @@ function loadAckTrackerCardsForMission(int $missionId): array {
                     'arrived'   => $asTs($row['arrived']),
                     'completed' => $asTs($row['completed']),
                     'skipped'   => $asTs($row['skipped']),
+                    // «Δεν μπορώ» at the point, and command's «Ξεκλείδωμα».
+                    'cant'      => $asTs($row['cant']),
+                    'unlocked'  => $asTs($row['unlocked']),
                 ];
             }
         }
@@ -3367,6 +3392,11 @@ function notificationPopupRef($data): ?array {
         // just «Κατάλαβα» (route cancelled, route point skipped, a dispatch or
         // sector taken back — notifyOrdersWithdrawn()).
         $ref = ['kind' => 'info', 'info' => (string) $data['popupInfo'], 'id' => (int) ($data['routeId'] ?? 0)];
+        // A team asking to be let past a route point (v3.350.0): which point,
+        // for the popup's «Ξεκλείδωμα».
+        if (!empty($data['waypointId'])) {
+            $ref['waypointId'] = (int) $data['waypointId'];
+        }
         // A notice about a place (the Συντονιστικό moved, v3.346.0) carries
         // the spot, for the popup's map and directions.
         if (isset($data['popupLat'], $data['popupLng']) && is_numeric($data['popupLat']) && is_numeric($data['popupLng'])) {
@@ -3749,6 +3779,7 @@ function loadWaypointForAction(int $waypointId, int $missionId, int $userId): ?a
                 w.require_photo, w.require_video, w.require_note,
                 r.mission_id, r.team_id, r.completed_at AS route_completed_at, r.cancelled_at AS route_cancelled_at,
                 p.departed_at, p.arrived_at, p.completed_at, p.skipped_at, p.out_of_sequence, p.note,
+                p.cant_at, p.unlocked_at,
                 EXISTS (SELECT 1 FROM mission_route_members rm WHERE rm.route_id = r.id AND rm.user_id = ?) AS is_route_member
          FROM mission_route_waypoints w
          JOIN mission_routes r ON r.id = w.route_id
@@ -3769,6 +3800,321 @@ function currentWaypointSeq(int $routeId): ?int {
         [$routeId]
     );
     return ($seq !== false && $seq !== null) ? (int) $seq : null;
+}
+
+// ── A route point's photo, video and note (v3.350.0) ────────────────────────
+//
+// A point can ask for a photo, a video and a note, and «Ολοκληρώθηκε» is
+// refused while any is missing. Until v3.350.0 that left a team with no honest
+// way on when the photo could not be taken — a dead phone, a place where
+// filming is not allowed — except «Μετάβαση» to a later point, which quietly
+// closed the stuck point as "completed" with nothing on record. Now:
+//
+//   · the team presses «Δεν μπορώ» at the point, with a reason
+//     (reportRouteWaypointCant()), and command is alerted and asked;
+//   · command presses «Ξεκλείδωμα» (unlockRouteWaypoint()): the point closes
+//     as completed without what was missing, marked as unlocked and by whom,
+//     and the team is told to go on to the next point;
+//   · «Μετάβαση» may no longer close a point whose deliverables are missing
+//     (routeJumpBlocker()) — that is command's call, by «Ξεκλείδωμα» or
+//     «Παράλειψη».
+//
+// The helpers below that used to be page-local in mission-route.php
+// (missingRouteDeliverables, notifyRouteTeam, maybeCompleteRoute) moved here
+// so the unlock can share them and the tests can reach them.
+
+const ROUTE_CANT_REASONS = ['unsafe', 'device', 'not_allowed', 'other'];
+const ROUTE_CANT_NOTE_MAX = 500;
+
+/**
+ * The translation keys of what $wp asks for and does not have yet — photo,
+ * video, note — checked against what is on record (an earlier upload, a saved
+ * note) or, for the note, $submittedNote when one arrives in the same request.
+ * Keys rather than words, so a caller telling other people can say it in each
+ * reader's language. $wp needs id, require_photo/video/note and note.
+ */
+function routeWaypointMissingKeys(array $wp, ?string $submittedNote): array {
+    $missing = [];
+    if (!empty($wp['require_photo']) && !dbFetchValue(
+        "SELECT 1 FROM mission_photos WHERE route_waypoint_id = ? AND media_type = 'photo' LIMIT 1", [$wp['id']]
+    )) {
+        $missing[] = 'route.deliverable_photo';
+    }
+    if (!empty($wp['require_video']) && !dbFetchValue(
+        "SELECT 1 FROM mission_photos WHERE route_waypoint_id = ? AND media_type = 'video' LIMIT 1", [$wp['id']]
+    )) {
+        $missing[] = 'route.deliverable_video';
+    }
+    if (!empty($wp['require_note'])) {
+        $effectiveNote = $submittedNote !== null ? $submittedNote : ($wp['note'] ?? null);
+        if ($effectiveNote === null || trim($effectiveNote) === '') {
+            $missing[] = 'route.deliverable_note';
+        }
+    }
+    return $missing;
+}
+
+/**
+ * The same, in words. «Ολοκληρώθηκε» is a hard block on these, not a UI hint:
+ * the offline queue replays "complete" later with nobody there to see a
+ * client-side warning, so the request that tries to store completed_at is the
+ * one place it can be enforced (mission-route.php).
+ */
+function missingRouteDeliverables(array $wp, ?string $submittedNote, ?string $lang = null): array {
+    return array_map(fn($key) => t($key, [], $lang), routeWaypointMissingKeys($wp, $submittedNote));
+}
+
+/**
+ * How a point is named to people: "2 «Γέφυρα»", or just "2" when command gave
+ * it no name. Language-neutral on purpose — it goes into notifications whose
+ * words are translated per reader around it.
+ */
+function routeWaypointRef(array $wp): string {
+    $label = trim((string) ($wp['label'] ?? ''));
+    return (string) (int) $wp['seq'] . ($label !== '' ? ' «' . $label . '»' : '');
+}
+
+/**
+ * «Μετάβαση» to the point at $targetSeq closes every earlier point still open
+ * (mission-route.php's depart). It may not close one whose photo, video or
+ * note is missing: that would record it as completed with nothing to show, and
+ * it is command's call, by «Ξεκλείδωμα» or «Παράλειψη». Returns the first such
+ * point — ['waypoint' => row, 'missing' => keys] — or null when the way is clear.
+ */
+function routeJumpBlocker(int $routeId, int $targetSeq): ?array {
+    $rows = dbFetchAll(
+        "SELECT w.id, w.seq, w.label, w.require_photo, w.require_video, w.require_note, p.note
+         FROM mission_route_waypoints w
+         LEFT JOIN mission_route_progress p ON p.waypoint_id = w.id
+         WHERE w.route_id = ? AND w.seq < ? AND p.completed_at IS NULL AND p.skipped_at IS NULL
+           AND (w.require_photo = 1 OR w.require_video = 1 OR w.require_note = 1)
+         ORDER BY w.seq",
+        [$routeId, $targetSeq]
+    );
+    foreach ($rows as $row) {
+        $missing = routeWaypointMissingKeys($row, null);
+        if ($missing) {
+            return ['waypoint' => $row, 'missing' => $missing];
+        }
+    }
+    return null;
+}
+
+/**
+ * «Δεν μπορώ» at a route point: the team cannot send the photo, video or note
+ * it asks for, and asks command to let them go on. $wp is a
+ * loadWaypointForAction() row for $userId. The first press answers for the
+ * team — progress is team state — so a second press finds the request already
+ * made and is not an error. Returns null on success, else the error to show.
+ */
+function reportRouteWaypointCant(array $mission, array $wp, int $userId, string $userName, string $reason, ?string $note): ?string {
+    if (!in_array($reason, ROUTE_CANT_REASONS, true)) {
+        return t('decline.pick_reason');
+    }
+    $note = trim((string) $note);
+    $note = $note !== '' ? mb_substr($note, 0, ROUTE_CANT_NOTE_MAX) : null;
+    if ($reason === 'other' && $note === null) {
+        return t('decline.other_needs_note');
+    }
+    if (empty($wp['is_route_member'])) {
+        return t('dispatch.not_your_team');
+    }
+    if ($wp['route_cancelled_at'] || $wp['route_completed_at']) {
+        return t('route.already_closed');
+    }
+    if ($wp['completed_at'] || $wp['skipped_at']) {
+        return t('route.waypoint_already_closed');
+    }
+    $missing = routeWaypointMissingKeys($wp, null);
+    if (!$missing) {
+        return t('route.cant.nothing_missing');
+    }
+
+    $rows = dbExecute(
+        "UPDATE mission_route_progress SET cant_at = NOW(), cant_by = ?, cant_reason = ?, cant_note = ?
+         WHERE waypoint_id = ? AND cant_at IS NULL AND completed_at IS NULL AND skipped_at IS NULL",
+        [$userId, $reason, $note, $wp['id']]
+    );
+    if ($rows <= 0) {
+        return null;
+    }
+    logAudit('route_waypoint_cant', 'mission_route_waypoints', (int) $wp['id'], null, [
+        'mission_id' => (int) $mission['id'], 'reason' => $reason, 'missing' => $missing,
+    ]);
+    notifyRouteUnlockRequest($mission, $wp, $userId, $userName, $reason, $note, $missing);
+    return null;
+}
+
+/**
+ * Tells command staff a team is stuck at a point and waiting to be let on —
+ * loud (banner, sound, the app's urgent channel) and as a popup carrying the
+ * «Ξεκλείδωμα» button itself. Its code is deliberately not registered in
+ * notification_settings, like «Δεν μπορώ» on an order: a team waiting in the
+ * field for an answer is not something a coordinator gets to mute.
+ */
+function notifyRouteUnlockRequest(array $mission, array $wp, int $actorId, string $actorName, string $reason, ?string $note, array $missingKeys): void {
+    $missionId = (int) $mission['id'];
+    $teamLbl = null;
+    if (!empty($wp['team_id'])) {
+        $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$wp['team_id']]);
+        $teamLbl = $teamRow ? teamLabel($teamRow['codename'], $teamRow['team_number']) : null;
+    }
+    $staffIds = getMissionCommandStaffIds($missionId, $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $actorId);
+    $langs = getUserLanguages($staffIds);
+    foreach ($staffIds as $recipientId) {
+        $lang = $langs[$recipientId] ?? DEFAULT_LANGUAGE;
+        $vars = [
+            'who'     => $teamLbl !== null ? t('decline.who_team', ['team' => $teamLbl, 'name' => $actorName], $lang) : $actorName,
+            'items'   => implode(', ', array_map(fn($key) => t($key, [], $lang), $missingKeys)),
+            'point'   => routeWaypointRef($wp),
+            'reason'  => t('route.cant.reason.' . $reason, [], $lang),
+            'note'    => $note !== null ? t('decline.note_part', ['note' => $note], $lang) : '',
+            'mission' => $mission['title'],
+        ];
+        sendNotification(
+            $recipientId,
+            t('route.notify_unlock_request_title', $vars, $lang),
+            t('route.notify_unlock_request_message', $vars, $lang),
+            'warning',
+            'mission_route_unlock_request',
+            [
+                'url'           => rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId,
+                'tag'           => 'route-unlock-request-mission-' . $missionId . '-wp-' . (int) $wp['id'],
+                'bannerMission' => $missionId,
+                'popupInfo'     => 'mission_route_unlock_request',
+                'routeId'       => (int) $wp['route_id'],
+                'waypointId'    => (int) $wp['id'],
+            ]
+        );
+    }
+}
+
+/**
+ * «Ξεκλείδωμα»: command lets the team on past a point whose photo, video or
+ * note it could not send. The point closes as completed — by command, marked
+ * unlocked — the route moves to its next point, and the team is told to go on.
+ * Offered when the team asked, or when it is standing at the point with
+ * something missing (a request by radio needs no press on the phone). $wp is a
+ * loadWaypointForAction() row. Returns null on success, else the error to show.
+ */
+function unlockRouteWaypoint(array $mission, array $wp, int $userId): ?string {
+    if ($wp['route_cancelled_at'] || $wp['route_completed_at']) {
+        return t('route.already_closed');
+    }
+    if ($wp['completed_at'] || $wp['skipped_at']) {
+        return t('route.waypoint_already_closed');
+    }
+    if (empty($wp['cant_at']) && !routeWaypointMissingKeys($wp, null)) {
+        return t('route.unlock.nothing_to_unlock');
+    }
+
+    // AND completed_at IS NULL: the team's own «Ολοκληρώθηκε» may land in the
+    // same instant; exactly one of the two closes the point.
+    $rows = dbExecute(
+        "UPDATE mission_route_progress
+         SET completed_at = NOW(), completed_by = ?, unlocked_at = NOW(), unlocked_by = ?, reported_at = NOW()
+         WHERE waypoint_id = ? AND completed_at IS NULL AND skipped_at IS NULL",
+        [$userId, $userId, $wp['id']]
+    );
+    if ($rows <= 0) {
+        return null;
+    }
+    $missionId = (int) $mission['id'];
+    logAudit('unlock_route_waypoint', 'mission_route_waypoints', (int) $wp['id'], null, ['mission_id' => $missionId]);
+
+    $next = dbFetchOne(
+        "SELECT w.seq, w.label FROM mission_route_waypoints w
+         LEFT JOIN mission_route_progress p ON p.waypoint_id = w.id
+         WHERE w.route_id = ? AND p.completed_at IS NULL AND p.skipped_at IS NULL
+         ORDER BY w.seq LIMIT 1",
+        [$wp['route_id']]
+    );
+    notifyRouteTeam(
+        $missionId, (int) $wp['route_id'], $userId, 'mission_route_unlocked', 'route.notify_unlocked_title', [],
+        $next ? 'route.notify_unlocked_message' : 'route.notify_unlocked_message_last',
+        ['point' => routeWaypointRef($wp), 'next' => $next ? routeWaypointRef($next) : '', 'mission' => $mission['title']]
+    );
+    maybeCompleteRoute((int) $wp['route_id'], $userId);
+    return null;
+}
+
+/**
+ * Notify every member actually assigned to a route about a route-level event
+ * — "point skipped", "point unlocked" and "route cancelled", the admin-initiated
+ * events the field team itself must be pushed (per the noise-reduction rule:
+ * push only on arrival/skip/cancel/route-completion, everything else rides
+ * the silent 5s poll). Keyed on route_id (mission_route_members), not
+ * team_id — a route may only involve a subset of its nominal team.
+ */
+function notifyRouteTeam(int $missionId, int $routeId, int $excludeUserId, string $code, string $titleKey, array $titleVars, string $messageKey, array $messageVars): void {
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $memberIds = array_values(array_diff(
+        array_map('intval', array_column(dbFetchAll("SELECT user_id FROM mission_route_members WHERE route_id = ?", [$routeId]), 'user_id')),
+        [$excludeUserId]
+    ));
+    $langByUserId = getUserLanguages($memberIds);
+    foreach ($memberIds as $memberId) {
+        $lang = $langByUserId[$memberId] ?? DEFAULT_LANGUAGE;
+        sendNotification($memberId, t($titleKey, $titleVars, $lang), t($messageKey, $messageVars, $lang), 'warning', $code, [
+            'url' => $warRoomUrl,
+            'tag' => 'route-' . $code . '-mission-' . $missionId,
+            'bannerMission' => $missionId,
+            // Opens as an order-popup notice («Κατάλαβα») rather than a ticker
+            // line: a cancelled route or a dropped point changes what the team
+            // is doing right now. See war-room.php's banners.
+            'popupInfo' => $code,
+            'routeId' => $routeId,
+        ]);
+    }
+}
+
+/**
+ * Whether every waypoint of $routeId is now closed (completed or skipped) —
+ * if so, the route itself is done: stamp mission_routes.completed_at and
+ * auto-fulfill the underlying mission_orders recipients (mirrors how a
+ * 'task' order is fulfilled, except a route fulfills itself the moment its
+ * last stop closes instead of waiting on a manual complete click).
+ */
+function maybeCompleteRoute(int $routeId, int $actorId): bool {
+    $remaining = (int) dbFetchValue(
+        "SELECT COUNT(*) FROM mission_route_waypoints w
+         LEFT JOIN mission_route_progress p ON p.waypoint_id = w.id
+         WHERE w.route_id = ? AND p.completed_at IS NULL AND p.skipped_at IS NULL",
+        [$routeId]
+    );
+    if ($remaining > 0) {
+        return false;
+    }
+    $route = dbFetchOne("SELECT id, mission_id, team_id, order_id, completed_at FROM mission_routes WHERE id = ?", [$routeId]);
+    if (!$route || $route['completed_at']) {
+        return false;
+    }
+
+    // AND completed_at IS NULL: this function is called from depart/arrive/
+    // complete/skip/unlock, so two waypoints of the same route closing within
+    // the same instant (or a live tap racing an offline-queue replay) can both
+    // reach here having both seen $route['completed_at'] as still null. The
+    // WHERE guard + rowCount() check ensures only one of them actually
+    // stamps the route complete and fires the "route completed"
+    // notification — without it, both would.
+    $rows = dbExecute("UPDATE mission_routes SET completed_at = NOW() WHERE id = ? AND completed_at IS NULL", [$routeId]);
+    if ($rows === 0) {
+        return false;
+    }
+    if ($route['order_id']) {
+        dbExecute("UPDATE mission_order_recipients SET fulfilled_at = NOW() WHERE order_id = ? AND fulfilled_at IS NULL", [$route['order_id']]);
+    }
+
+    $mission = dbFetchOne("SELECT title, responsible_user_id FROM missions WHERE id = ?", [$route['mission_id']]);
+    $teamRow = $route['team_id'] ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$route['team_id']]) : null;
+    $teamLbl = $teamRow ? teamLabel($teamRow['codename'], $teamRow['team_number']) : routeMixedTeamLabel($routeId);
+    notifyCommandStaffBanner(
+        (int) $route['mission_id'], $mission['title'] ?? '', $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $actorId,
+        'mission_route_completed', 'route.notify_completed_title', [],
+        'route.notify_completed_message', ['team' => $teamLbl, 'mission' => $mission['title'] ?? '']
+    );
+    logAudit('complete_mission_route', 'mission_routes', $routeId, null, ['mission_id' => $route['mission_id'], 'team_id' => $route['team_id']]);
+    return true;
 }
 
 /**
@@ -10101,8 +10447,10 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
     // within it, one row of mission_route_progress per waypoint.
     $routeProgressRows = dbFetchAll(
         "SELECT p.departed_at, p.arrived_at, p.completed_at, p.skipped_at, p.skip_reason, p.arrived_distance_m,
+                p.cant_at, p.cant_reason, p.cant_note, p.unlocked_at,
                 w.seq, w.label, r.team_id, mt.codename, mt.team_number,
-                du.name AS departed_by_name, au.name AS arrived_by_name, cu.name AS completed_by_name, su.name AS skipped_by_name
+                du.name AS departed_by_name, au.name AS arrived_by_name, cu.name AS completed_by_name, su.name AS skipped_by_name,
+                ctu.name AS cant_by_name
          FROM mission_route_progress p
          JOIN mission_route_waypoints w ON w.id = p.waypoint_id
          JOIN mission_routes r ON r.id = p.route_id
@@ -10111,6 +10459,7 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
          LEFT JOIN users au ON au.id = p.arrived_by
          LEFT JOIN users cu ON cu.id = p.completed_by
          LEFT JOIN users su ON su.id = p.skipped_by
+         LEFT JOIN users ctu ON ctu.id = p.cant_by
          WHERE r.mission_id = ?" . $routeScope,
         array_merge([$missionId], $routeBinds)
     );
@@ -10132,8 +10481,23 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
                 'ts'   => strtotime($row['arrived_at']),
             ];
         }
-        if ($row['completed_at']) {
+        // «Δεν μπορώ» at the point and command's «Ξεκλείδωμα» (v3.350.0). An
+        // unlocked point is completed by command, not by the team, and says so.
+        if ($row['cant_at']) {
             $events[] = [
+                'icon' => '✋',
+                'text' => 'Η ομάδα ' . h($teamLabel) . ' δήλωσε «Δεν μπορώ» στο «' . h($pointLabel) . '» — '
+                    . h(t('route.cant.reason.' . $row['cant_reason'])) . ($row['cant_note'] ? ' «' . h($row['cant_note']) . '»' : '')
+                    . ($row['cant_by_name'] ? ' (' . h($row['cant_by_name']) . ')' : ''),
+                'ts'   => strtotime($row['cant_at']),
+            ];
+        }
+        if ($row['completed_at']) {
+            $events[] = $row['unlocked_at'] ? [
+                'icon' => '🔓',
+                'text' => 'Ξεκλειδώθηκε το «' . h($pointLabel) . '» της ομάδας ' . h($teamLabel) . ' χωρίς όσα ζητούσε' . ($row['completed_by_name'] ? ' (' . h($row['completed_by_name']) . ')' : ''),
+                'ts'   => strtotime($row['completed_at']),
+            ] : [
                 'icon' => '✅',
                 'text' => 'Η ομάδα ' . h($teamLabel) . ' ολοκλήρωσε το «' . h($pointLabel) . '»' . ($row['completed_by_name'] ? ' (' . h($row['completed_by_name']) . ')' : ''),
                 'ts'   => strtotime($row['completed_at']),

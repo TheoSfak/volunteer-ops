@@ -2307,6 +2307,15 @@ CREATE TABLE IF NOT EXISTS `mission_route_progress` (
     `note` TEXT NULL,
     `out_of_sequence` TINYINT(1) NOT NULL DEFAULT 0,
     `reported_at` TIMESTAMP NULL,
+    -- «Δεν μπορώ» at the point (v3.350.0, migration 176): the team cannot
+    -- send the photo/video/note it asks for; first press answers for the team.
+    `cant_at` TIMESTAMP NULL DEFAULT NULL,
+    `cant_by` INT UNSIGNED NULL,
+    `cant_reason` ENUM('unsafe','device','not_allowed','other') NULL,
+    `cant_note` VARCHAR(500) NULL,
+    -- «Ξεκλείδωμα»: command closed the point without what was missing.
+    `unlocked_at` TIMESTAMP NULL DEFAULT NULL,
+    `unlocked_by` INT UNSIGNED NULL,
     UNIQUE KEY `uniq_waypoint` (`waypoint_id`),
     FOREIGN KEY (`waypoint_id`) REFERENCES `mission_route_waypoints`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`route_id`) REFERENCES `mission_routes`(`id`) ON DELETE CASCADE,
@@ -2315,6 +2324,8 @@ CREATE TABLE IF NOT EXISTS `mission_route_progress` (
     FOREIGN KEY (`arrived_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`completed_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`skipped_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    CONSTRAINT `fk_route_progress_cant_by` FOREIGN KEY (`cant_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    CONSTRAINT `fk_route_progress_unlocked_by` FOREIGN KEY (`unlocked_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     INDEX `idx_progress_route` (`route_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

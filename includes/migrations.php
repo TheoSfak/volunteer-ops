@@ -7443,6 +7443,38 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 176,
+            'description' => "«Δεν μπορώ» at a route point and command's «Ξεκλείδωμα» (v3.350.0). mission_route_progress gains cant_at/cant_by/cant_reason/cant_note — the team cannot send the photo, video or note the point asks for (unsafe | device | not_allowed | other, other with a note), first press answers for the team — and unlocked_at/unlocked_by: command let them on, and the point closed as completed without what was missing. Team state like the rest of the row. Separate ALTERs for the foreign keys: MariaDB will not take ADD COLUMN and a foreign key on that same column in one statement.",
+            'up' => function () {
+                $haveColumn = fn(string $column) => (bool) dbFetchValue(
+                    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_route_progress' AND COLUMN_NAME = ?",
+                    [$column]
+                );
+                if (!$haveColumn('cant_at')) {
+                    dbExecute("ALTER TABLE mission_route_progress
+                               ADD COLUMN cant_at TIMESTAMP NULL DEFAULT NULL COMMENT '«Δεν μπορώ»: the team cannot send what the point asks for',
+                               ADD COLUMN cant_by INT UNSIGNED NULL,
+                               ADD COLUMN cant_reason ENUM('unsafe','device','not_allowed','other') NULL,
+                               ADD COLUMN cant_note VARCHAR(500) NULL,
+                               ADD COLUMN unlocked_at TIMESTAMP NULL DEFAULT NULL COMMENT '«Ξεκλείδωμα»: command closed the point without what was missing',
+                               ADD COLUMN unlocked_by INT UNSIGNED NULL");
+                }
+                foreach (['cant_by' => 'fk_route_progress_cant_by', 'unlocked_by' => 'fk_route_progress_unlocked_by'] as $column => $name) {
+                    $haveKey = (bool) dbFetchValue(
+                        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+                          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_route_progress'
+                            AND COLUMN_NAME = ? AND REFERENCED_TABLE_NAME = 'users'",
+                        [$column]
+                    );
+                    if (!$haveKey) {
+                        dbExecute("ALTER TABLE mission_route_progress
+                                   ADD CONSTRAINT $name FOREIGN KEY ($column) REFERENCES users(id) ON DELETE SET NULL");
+                    }
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

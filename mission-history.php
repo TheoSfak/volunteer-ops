@@ -434,8 +434,10 @@ foreach ($declineRows as $row) {
 // THIS route.
 $routeProgressRows = dbFetchAll(
     "SELECT p.departed_at, p.arrived_at, p.completed_at, p.skipped_at, p.skip_reason, p.arrived_distance_m,
+            p.cant_at, p.cant_reason, p.cant_note, p.unlocked_at,
             w.seq, w.label, r.team_id, mt.codename, mt.team_number,
-            du.name AS departed_by_name, au.name AS arrived_by_name, cu.name AS completed_by_name, su.name AS skipped_by_name
+            du.name AS departed_by_name, au.name AS arrived_by_name, cu.name AS completed_by_name, su.name AS skipped_by_name,
+            ctu.name AS cant_by_name
      FROM mission_route_progress p
      JOIN mission_route_waypoints w ON w.id = p.waypoint_id
      JOIN mission_routes r ON r.id = p.route_id
@@ -444,6 +446,7 @@ $routeProgressRows = dbFetchAll(
      LEFT JOIN users au ON au.id = p.arrived_by
      LEFT JOIN users cu ON cu.id = p.completed_by
      LEFT JOIN users su ON su.id = p.skipped_by
+     LEFT JOIN users ctu ON ctu.id = p.cant_by
      WHERE r.mission_id = ? AND $routeScopeSql
      ORDER BY GREATEST(
          COALESCE(p.departed_at, '1970-01-01'), COALESCE(p.arrived_at, '1970-01-01'),
@@ -473,10 +476,21 @@ foreach ($routeProgressRows as $row) {
             'ts'   => strtotime($row['arrived_at']),
         ];
     }
+    // «Δεν μπορώ» at the point and command's «Ξεκλείδωμα» (v3.350.0). An
+    // unlocked point is completed by command, not by the team, and says so.
+    if ($row['cant_at']) {
+        $noteSuffix = $row['cant_note'] ? t('decline.note_part', ['note' => h($row['cant_note'])], $viewerLang) : '';
+        $events[] = [
+            'icon' => '✋',
+            'text' => t('history.route_cant', ['team' => h($teamLabel), 'label' => h($pointLabel), 'reason' => h(t('route.cant.reason.' . $row['cant_reason'], [], $viewerLang)), 'note' => $noteSuffix, 'actor' => h($row['cant_by_name'] ?? '')], $viewerLang),
+            'time' => date('d/m H:i', strtotime($row['cant_at'])),
+            'ts'   => strtotime($row['cant_at']),
+        ];
+    }
     if ($row['completed_at']) {
         $events[] = [
-            'icon' => '✅',
-            'text' => t('history.route_completed', ['team' => h($teamLabel), 'label' => h($pointLabel), 'actor' => h($row['completed_by_name'] ?? '')], $viewerLang),
+            'icon' => $row['unlocked_at'] ? '🔓' : '✅',
+            'text' => t($row['unlocked_at'] ? 'history.route_unlocked' : 'history.route_completed', ['team' => h($teamLabel), 'label' => h($pointLabel), 'actor' => h($row['completed_by_name'] ?? '')], $viewerLang),
             'time' => date('d/m H:i', strtotime($row['completed_at'])),
             'ts'   => strtotime($row['completed_at']),
         ];

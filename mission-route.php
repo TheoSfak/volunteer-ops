@@ -7,7 +7,9 @@
  * (order_type='route') purely to inherit push/banner/"Ελήφθη"/audit for free
  * — see includes/migrations.php v105 for the full rationale. GET polls for
  * the routes visible to the caller, POST creates/cancels a route or advances
- * a single waypoint (depart/arrive/complete/skip). AJAX only.
+ * a single waypoint (depart/arrive/complete/skip). AJAX only. Since v3.350.0
+ * also «Δεν μπορώ» at a point whose photo/video/note cannot be sent (cant)
+ * and command's answer to it, «Ξεκλείδωμα» (unlock).
  *
  * Safety rules baked into every action below (agreed with the mission owner
  * before building this):
@@ -35,118 +37,14 @@ header('Content-Type: application/json');
 // order.php's acknowledge action, for the Route/Task/Message "Ελήφθη" loud
 // banner) and needed to be shared and order-type-agnostic, not page-local.
 
-/**
- * Notify every member actually assigned to a route about a route-level event
- * — used for "point skipped" and "route cancelled", the two admin-initiated
- * events the field team itself must be pushed (per the noise-reduction rule:
- * push only on arrival/skip/cancel/route-completion, everything else rides
- * the silent 5s poll). Keyed on route_id (mission_route_members), not
- * team_id — a route may only involve a subset of its nominal team.
- */
-function notifyRouteTeam(int $missionId, int $routeId, int $excludeUserId, string $code, string $titleKey, array $titleVars, string $messageKey, array $messageVars): void {
-    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-    $memberIds = array_values(array_diff(
-        array_map('intval', array_column(dbFetchAll("SELECT user_id FROM mission_route_members WHERE route_id = ?", [$routeId]), 'user_id')),
-        [$excludeUserId]
-    ));
-    $langByUserId = getUserLanguages($memberIds);
-    foreach ($memberIds as $memberId) {
-        $lang = $langByUserId[$memberId] ?? DEFAULT_LANGUAGE;
-        sendNotification($memberId, t($titleKey, $titleVars, $lang), t($messageKey, $messageVars, $lang), 'warning', $code, [
-            'url' => $warRoomUrl,
-            'tag' => 'route-' . $code . '-mission-' . $missionId,
-            'bannerMission' => $missionId,
-            // Opens as an order-popup notice («Κατάλαβα») rather than a ticker
-            // line: a cancelled route or a dropped point changes what the team
-            // is doing right now. See war-room.php's banners.
-            'popupInfo' => $code,
-            'routeId' => $routeId,
-        ]);
-    }
-}
-
-/**
- * Whichever of require_photo/require_video/require_note the admin set for
- * this waypoint but which "complete" would otherwise leave unfulfilled —
- * checked against what's already on record (an earlier upload, an earlier
- * saved note) UNION what this exact request is submitting, since the note
- * textarea and "Complete" are one and the same tap in the field UI.
- * Returns translated labels, empty if nothing is missing.
- */
-function missingRouteDeliverables(array $wp, ?string $submittedNote): array {
-    $missing = [];
-    if ($wp['require_photo'] && !dbFetchValue(
-        "SELECT 1 FROM mission_photos WHERE route_waypoint_id = ? AND media_type = 'photo' LIMIT 1", [$wp['id']]
-    )) {
-        $missing[] = t('route.deliverable_photo');
-    }
-    if ($wp['require_video'] && !dbFetchValue(
-        "SELECT 1 FROM mission_photos WHERE route_waypoint_id = ? AND media_type = 'video' LIMIT 1", [$wp['id']]
-    )) {
-        $missing[] = t('route.deliverable_video');
-    }
-    if ($wp['require_note']) {
-        $effectiveNote = $submittedNote !== null ? $submittedNote : ($wp['note'] ?? null);
-        if ($effectiveNote === null || trim($effectiveNote) === '') {
-            $missing[] = t('route.deliverable_note');
-        }
-    }
-    return $missing;
-}
+// notifyRouteTeam(), missingRouteDeliverables() and maybeCompleteRoute() moved
+// to includes/functions-warroom.php in v3.350.0, beside the route point's
+// «Δεν μπορώ» / «Ξεκλείδωμα» that share them (and so the tests can reach them).
 
 // resolveEventTimestamp() — the offline-queue replay clock — now lives in
 // includes/functions-warroom.php, since volunteer-status.php (field status / SOS)
 // replays through the same queue and needs the identical rules. Behaviour
 // here is unchanged.
-
-/**
- * Whether every waypoint of $routeId is now closed (completed or skipped) —
- * if so, the route itself is done: stamp mission_routes.completed_at and
- * auto-fulfill the underlying mission_orders recipients (mirrors how a
- * 'task' order is fulfilled, except a route fulfills itself the moment its
- * last stop closes instead of waiting on a manual complete click).
- */
-function maybeCompleteRoute(int $routeId, int $actorId): bool {
-    $remaining = (int) dbFetchValue(
-        "SELECT COUNT(*) FROM mission_route_waypoints w
-         LEFT JOIN mission_route_progress p ON p.waypoint_id = w.id
-         WHERE w.route_id = ? AND p.completed_at IS NULL AND p.skipped_at IS NULL",
-        [$routeId]
-    );
-    if ($remaining > 0) {
-        return false;
-    }
-    $route = dbFetchOne("SELECT id, mission_id, team_id, order_id, completed_at FROM mission_routes WHERE id = ?", [$routeId]);
-    if (!$route || $route['completed_at']) {
-        return false;
-    }
-
-    // AND completed_at IS NULL: this function is called from depart/arrive/
-    // complete/skip, so two waypoints of the same route closing within the
-    // same instant (or a live tap racing an offline-queue replay) can both
-    // reach here having both seen $route['completed_at'] as still null. The
-    // WHERE guard + rowCount() check ensures only one of them actually
-    // stamps the route complete and fires the "route completed"
-    // notification — without it, both would.
-    $rows = dbExecute("UPDATE mission_routes SET completed_at = NOW() WHERE id = ? AND completed_at IS NULL", [$routeId]);
-    if ($rows === 0) {
-        return false;
-    }
-    if ($route['order_id']) {
-        dbExecute("UPDATE mission_order_recipients SET fulfilled_at = NOW() WHERE order_id = ? AND fulfilled_at IS NULL", [$route['order_id']]);
-    }
-
-    $mission = dbFetchOne("SELECT title, responsible_user_id FROM missions WHERE id = ?", [$route['mission_id']]);
-    $teamRow = $route['team_id'] ? dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$route['team_id']]) : null;
-    $teamLbl = $teamRow ? teamLabel($teamRow['codename'], $teamRow['team_number']) : routeMixedTeamLabel($routeId);
-    notifyCommandStaffBanner(
-        (int) $route['mission_id'], $mission['title'] ?? '', $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $actorId,
-        'mission_route_completed', 'route.notify_completed_title', [],
-        'route.notify_completed_message', ['team' => $teamLbl, 'mission' => $mission['title'] ?? '']
-    );
-    logAudit('complete_mission_route', 'mission_routes', $routeId, null, ['mission_id' => $route['mission_id'], 'team_id' => $route['team_id']]);
-    return true;
-}
 
 $userId = getCurrentUserId();
 $user = getCurrentUser();
@@ -532,6 +430,26 @@ if ($action === 'depart' || $action === 'arrive' || $action === 'complete') {
         exit;
     }
 
+    // Leaving a point behind closes it (see "depart" below), and a point whose
+    // photo, video or note is missing is not the team's to close: «Δεν μπορώ»
+    // there, then command's «Ξεκλείδωμα» or «Παράλειψη» (v3.350.0). Asked
+    // before the out-of-sequence confirmation, so nobody confirms a jump only
+    // to be refused it.
+    if ($action === 'depart') {
+        $blocker = routeJumpBlocker((int) $wp['route_id'], (int) $wp['seq']);
+        if ($blocker) {
+            echo json_encode([
+                'ok' => false,
+                'jump_blocked' => true,
+                'error' => t('route.jump_blocked', [
+                    'point' => routeWaypointRef($blocker['waypoint']),
+                    'items' => implode(', ', array_map(fn($key) => t($key), $blocker['missing'])),
+                ]),
+            ]);
+            exit;
+        }
+    }
+
     $currentSeq = currentWaypointSeq((int) $wp['route_id']);
     $alreadyFlagged = (bool) $wp['out_of_sequence'];
     $isOutOfSequence = $currentSeq !== null && (int) $wp['seq'] > $currentSeq;
@@ -706,6 +624,50 @@ if ($action === 'skip') {
 
     maybeCompleteRoute((int) $wp['route_id'], $userId);
 
+    echo json_encode(['ok' => true, 'routes' => loadRoutesForUser($missionId, $userId, $canManageWarRoom)]);
+    exit;
+}
+
+// «Δεν μπορώ» at a route point (v3.350.0): the team cannot send the photo,
+// video or note the point asks for, and asks command to let them go on. Any
+// route member, like depart/arrive/complete — admin rights do not stand in.
+if ($action === 'cant') {
+    if (!$isApprovedParticipant) {
+        echo json_encode(['ok' => false, 'error' => t('route.only_approved_can_report')]);
+        exit;
+    }
+    $wp = loadWaypointForAction((int) post('id'), $missionId, $userId);
+    if (!$wp) {
+        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
+        exit;
+    }
+    $error = reportRouteWaypointCant($mission, $wp, (int) $userId, $user['name'] ?? '', (string) post('reason'), (string) post('note'));
+    if ($error !== null) {
+        echo json_encode(['ok' => false, 'error' => $error]);
+        exit;
+    }
+    echo json_encode(['ok' => true, 'routes' => loadRoutesForUser($missionId, $userId, $canManageWarRoom)]);
+    exit;
+}
+
+// «Ξεκλείδωμα» (v3.350.0): command lets the team on past the point. It closes
+// as completed without what was missing, marked unlocked, and the team is
+// told to go on to the next point.
+if ($action === 'unlock') {
+    if (!$canManageWarRoom) {
+        echo json_encode(['ok' => false, 'error' => t('dispatch.no_manage_permission')]);
+        exit;
+    }
+    $wp = loadWaypointForAction((int) post('id'), $missionId, $userId);
+    if (!$wp) {
+        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
+        exit;
+    }
+    $error = unlockRouteWaypoint($mission, $wp, (int) $userId);
+    if ($error !== null) {
+        echo json_encode(['ok' => false, 'error' => $error]);
+        exit;
+    }
     echo json_encode(['ok' => true, 'routes' => loadRoutesForUser($missionId, $userId, $canManageWarRoom)]);
     exit;
 }

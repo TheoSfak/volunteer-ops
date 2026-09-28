@@ -12999,6 +12999,15 @@ function opRememberLater(keys) {
 
 function orderPopupSync(entries) {
     opInfo.forEach((m, key) => {
+        // A request to unlock a route point (v3.350.0): still waiting, or
+        // closed meanwhile? Kept, not dropped — the coordinator may not have
+        // seen it yet — but it offers «Κατάλαβα» instead of «Ξεκλείδωμα».
+        if (m.type === 'unlock_request') {
+            const open = routeWaypointIsOpen(findRouteWaypointById(m.waypointId));
+            m.unlockOpen = open;
+            m.hint = open ? '' : t('popup.unlock_resolved');
+            return;
+        }
         if (m.kind !== 'arrive') return;
         const where = opArriveTarget(m.target_kind, m.id);
         if (!where.open) opInfo.delete(key);
@@ -13250,12 +13259,37 @@ function opModelFromNotice(key, b) {
             hint: '', speakText: '', target: null, card: null, cardLabel: '',
         };
     }
+    // Command's side of «Δεν μπορώ» at a route point (v3.350.0): the team is
+    // standing there waiting, and the popup carries «Ξεκλείδωμα» itself, with
+    // the point on its small map. unlockOpen is refreshed from every poll
+    // (refreshUnlockNotices()), so a point closed meanwhile — the photo came
+    // after all, or another coordinator answered — offers «Κατάλαβα» instead.
+    if (b.popup.info === 'mission_route_unlock_request') {
+        const route = (routes || []).find(r => String(r.id) === String(b.popup.id));
+        const wp = b.popup.waypointId ? findRouteWaypointById(b.popup.waypointId) : null;
+        const open = routeWaypointIsOpen(wp);
+        return {
+            key: key, kind: 'info', id: b.popup.id, type: 'unlock_request',
+            waypointId: b.popup.waypointId || null, unlockOpen: open,
+            cat: 'task', icon: 'bi-unlock-fill',
+            title: t('popup.type.route_unlock_request'),
+            text: b.message,
+            meta: route ? [route.team_label, route.title || t('route.default_title')].filter(Boolean).join(' · ') : '',
+            acked: false, outstanding: true, steps: [t('popup.step.seen')], step: 0, stepTimes: {},
+            hint: open ? '' : t('popup.unlock_resolved'), speakText: '',
+            target: wp ? {kind: 'point', lat: wp.lat, lng: wp.lng, nav: {lat: wp.lat, lng: wp.lng}} : null,
+            card: 'teamRoutesAdminCard', cardLabel: t('popup.btn.show_route'),
+        };
+    }
     const cancelled = b.popup.info === 'mission_route_cancelled';
+    // The team's side: command let them on past a point — the next one is
+    // theirs now (v3.350.0).
+    const unlocked = b.popup.info === 'mission_route_unlocked';
     const route = (routes || []).find(r => String(r.id) === String(b.popup.id));
     return {
-        key: key, kind: 'info', id: b.popup.id, type: cancelled ? 'route_cancelled' : 'route_skipped',
-        cat: cancelled ? 'task' : 'info', icon: cancelled ? 'bi-sign-stop-fill' : 'bi-skip-forward-fill',
-        title: t(cancelled ? 'popup.type.route_cancelled' : 'popup.type.route_skipped'),
+        key: key, kind: 'info', id: b.popup.id, type: cancelled ? 'route_cancelled' : (unlocked ? 'route_unlocked' : 'route_skipped'),
+        cat: cancelled ? 'task' : 'info', icon: cancelled ? 'bi-sign-stop-fill' : (unlocked ? 'bi-unlock-fill' : 'bi-skip-forward-fill'),
+        title: t(cancelled ? 'popup.type.route_cancelled' : (unlocked ? 'popup.type.route_unlocked' : 'popup.type.route_skipped')),
         text: b.message,
         meta: route ? (route.title || t('route.default_title')) : '',
         acked: false, outstanding: true, steps: [t('popup.step.seen')], step: 0, stepTimes: {},
@@ -13507,6 +13541,7 @@ function opCompassBtnHtml(m) {
 // by doing so, received it.
 function opGoAction(m) {
     const mapLess = !map || !m.target;
+    if (m.type === 'unlock_request' && m.unlockOpen) return ['unlock', 'bi-unlock-fill', t('route.unlock.btn')];
     if (m.kind === 'info' || m.kind === 'team') return ['dismiss', 'bi-check2', t('popup.btn.got_it')];
     if (m.kind === 'arrive') return ['arrived', 'bi-geo-alt-fill', t('popup.btn.arrived')];
     switch (m.type) {
@@ -13661,7 +13696,11 @@ function opMiniHtml(m) {
     const nav = m.target.nav;
     const dist = opDistanceText(m);
     // A notice's own action is «Κατάλαβα»; its map, tapped, means "show me".
-    const [op, , label] = m.type === 'command_post' ? ['cpmap', '', t('popup.btn.show_command_post')] : opGoAction(m);
+    // So does an unlock request's: «Ξεκλείδωμα» closes a point for good, and
+    // is pressed on its button, never on a map someone was only looking at.
+    const [op, , label] = m.type === 'command_post' ? ['cpmap', '', t('popup.btn.show_command_post')]
+        : m.type === 'unlock_request' ? ['wpmap', '', t('popup.btn.show_point')]
+        : opGoAction(m);
     return `<div class="wr-op-mini" data-op="${op}" role="button" aria-label="${escapeHtml(label)}">
         <div id="wrOpMiniMap" style="position:absolute;inset:0;"></div>
         ${dist ? `<span class="wr-op-mini-chip wr-op-mini-dist">${escapeHtml(dist)}</span>` : ''}
@@ -14046,6 +14085,20 @@ function opAcknowledge(m, btn) {
 function opAct(op, m, btn) {
     if (op === 'replay') { speakAnnouncement(m.speakText); return; }
     if (op === 'dismiss') { opDismissNotice(m); return; }
+    // «Ξεκλείδωμα» from the request's own popup (v3.350.0): answered, so it
+    // goes, like a notice acknowledged.
+    if (op === 'unlock') {
+        routeUnlock(m.waypointId, btn).then(ok => {
+            if (!ok) return;
+            opDismissNotice(m);
+            opArrival = opArrival.filter(key => key !== m.key);
+            orderPopupRender();
+        });
+        return;
+    }
+    // Its small map, tapped: the point on the big map. Still unanswered, so
+    // it waits in the strip rather than going away.
+    if (op === 'wpmap') { opMinimize(); opGotoMap(m); return; }
     // The command post notice's «Δες το στον χάρτη»: seen, and shown — on
     // where it is now, which a later move may have changed since.
     if (op === 'cpmap') {
@@ -14473,6 +14526,15 @@ function routeAcknowledge(routeId, orderId, btn) {
 }
 
 function routeDepart(waypointId, confirmed) {
+    // Leaving a point behind closes it; one with its photo, video or note
+    // missing waits for command (routeJumpBlockerJs()). Checked here as well as
+    // in routeJump(), for every other way a depart can start.
+    const blocker = routeJumpBlockerJs(waypointId);
+    if (blocker) {
+        routeJumpBlockedAlert(blocker);
+        document.querySelectorAll(`.route-depart-btn[data-id="${waypointId}"]`).forEach(b => { b.disabled = false; });
+        return;
+    }
     postRouteActionQueueable('depart', waypointId, confirmed ? {confirm_out_of_sequence: '1'} : {})
         .then(result => handleRouteActionResult(result, () => routeDepart(waypointId, true)));
 }
@@ -14610,6 +14672,177 @@ function routeDwellCountdownHtml(wp) {
 // re-runs every second for as long as the countdown element stays on screen.
 const routeOverdueAlerted = new Set();
 
+// ── «Δεν μπορώ» at a route point, and «Ξεκλείδωμα» (v3.350.0) ──────────────
+// A point can ask for a photo, a video and a note, and «Ολοκληρώθηκε» waits
+// for all of them. When one cannot be had, the team says so at the point,
+// with a reason, and command lets them on to the next point with
+// «Ξεκλείδωμα» — reportRouteWaypointCant() / unlockRouteWaypoint() in
+// includes/functions-warroom.php. «Μετάβαση» past such a point is refused:
+// that is command's call now, not a quiet way round the photo.
+const ROUTE_CANT_REASONS = ['unsafe', 'device', 'not_allowed', 'other'];
+// Which point's reason picker is open, and what has been picked and typed.
+// Kept here rather than in the DOM because the same point is drawn twice —
+// the card and its map popup — and the poll redraws both.
+let routeCantUi = {wpId: null, reason: null, note: ''};
+
+function routeWaypointMissing(wp) {
+    return missingRouteDeliverablesClientSide(wp, '');
+}
+// "2 «Γέφυρα»", or "2" for a point with no name — the server's
+// routeWaypointRef(), so both sides name a point the same way.
+function routeWaypointRefJs(wp) {
+    return wp.seq + (wp.label ? ' «' + wp.label + '»' : '');
+}
+function routeWaypointIsOpen(wp) {
+    return !!wp && !wp.completed_at && !wp.skipped_at;
+}
+// Command's «Ξεκλείδωμα» is offered when the team asked, or when it is at the
+// point with something missing (asked by radio, nobody pressed anything).
+function routeCanUnlock(wp) {
+    return routeWaypointIsOpen(wp) && (!!wp.cant || (!!wp.arrived_at && routeWaypointMissing(wp).length > 0));
+}
+function routeUnlockedText(wp) {
+    const missing = routeWaypointMissing(wp);
+    const name = (wp.unlocked && wp.unlocked.by) || '';
+    return missing.length
+        ? t('route.unlocked_without', {items: missing.join(', '), name: name})
+        : t('route.unlocked_plain', {name: name});
+}
+
+// The team's side, at the point: waiting for command, or the way to ask.
+function routeCantPendingHtml(wp) {
+    const reason = t('route.cant.reason.' + wp.cant.reason);
+    return `<div class="alert alert-warning py-1 px-2 small mt-2 mb-0">
+        <i class="bi bi-hourglass-split me-1"></i>${escapeHtml(t('route.cant.pending', {reason: reason}))}${wp.cant.note ? ' — «' + escapeHtml(wp.cant.note) + '»' : ''}
+        <div class="text-muted">${escapeHtml(wp.cant.by || '')} · ${escapeHtml(wp.cant.at || '')}</div>
+    </div>`;
+}
+function routeCantPickerHtml(wp, missing) {
+    const open = String(routeCantUi.wpId) === String(wp.id);
+    const reasons = ROUTE_CANT_REASONS.map(r => {
+        const on = open && routeCantUi.reason === r;
+        return `<button type="button" class="btn btn-sm ${on ? 'btn-danger' : 'btn-outline-danger'} route-cant-reason" data-id="${wp.id}" data-reason="${r}" aria-pressed="${on ? 'true' : 'false'}">${escapeHtml(t('route.cant.reason.' + r))}</button>`;
+    }).join('');
+    // Last and quietest, like «Δεν μπορώ» on an order: the picker it opens is
+    // the real confirmation.
+    return `<button type="button" class="btn btn-link btn-sm text-danger w-100 mt-1 route-cant-open${open ? ' d-none' : ''}" data-id="${wp.id}"><i class="bi bi-x-octagon me-1"></i>${escapeHtml(t('route.cant.btn', {items: missing.join(', ')}))}</button>
+        <div class="route-cant-box border border-danger rounded p-2 mt-2${open ? '' : ' d-none'}" data-id="${wp.id}">
+            <div class="small mb-2">${escapeHtml(t('route.cant.question'))}</div>
+            <div class="d-flex flex-wrap gap-1">${reasons}</div>
+            <textarea class="form-control form-control-sm mt-2 route-cant-note" data-id="${wp.id}" rows="2" maxlength="500" placeholder="${escapeHtml(t('route.cant.note_placeholder'))}">${open ? escapeHtml(routeCantUi.note) : ''}</textarea>
+            <button type="button" class="btn btn-sm wr-touch-btn btn-danger w-100 mt-2 route-cant-send" data-id="${wp.id}"${open && routeCantUi.reason ? '' : ' disabled'}><i class="bi bi-send-fill me-1"></i>${escapeHtml(t('route.cant.send_btn'))}</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary w-100 mt-1 route-cant-back" data-id="${wp.id}">${escapeHtml(t('decline.back_btn'))}</button>
+        </div>`;
+}
+// Opening, picking and going back change the DOM in place — both copies of
+// the point, card and popup — instead of redrawing: a redraw would wipe a
+// note the volunteer is typing in the point's own note box above.
+function routeCantSyncDom() {
+    document.querySelectorAll('.route-cant-open').forEach(btn => {
+        btn.classList.toggle('d-none', String(routeCantUi.wpId) === btn.dataset.id);
+    });
+    document.querySelectorAll('.route-cant-box').forEach(box => {
+        const open = String(routeCantUi.wpId) === box.dataset.id;
+        box.classList.toggle('d-none', !open);
+        box.querySelectorAll('.route-cant-reason').forEach(b => {
+            const on = open && routeCantUi.reason === b.dataset.reason;
+            b.classList.toggle('btn-danger', on);
+            b.classList.toggle('btn-outline-danger', !on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+        const note = box.querySelector('.route-cant-note');
+        if (note && document.activeElement !== note) note.value = open ? routeCantUi.note : '';
+        const send = box.querySelector('.route-cant-send');
+        if (send) send.disabled = !(open && routeCantUi.reason);
+    });
+}
+function routeCantSend(waypointId, btn) {
+    const reason = routeCantUi.reason;
+    const note = (routeCantUi.note || '').trim();
+    if (!reason) return;
+    if (reason === 'other' && !note) { alert(t('decline.other_needs_note')); return; }
+    if (btn) btn.disabled = true;
+    // Not queued offline: it asks a person for an answer, and a request that
+    // sits in the phone until the signal returns would look sent and not be.
+    postRouteAction('cant', waypointId, {reason: reason, note: note}).then(result => {
+        if (result && result.ok) {
+            routeCantUi = {wpId: null, reason: null, note: ''};
+            routeCantSyncDom();
+            opToast(t('route.cant.sent_toast'));
+        } else {
+            if (btn) btn.disabled = false;
+            alert((result && result.error) || t('common.failed'));
+        }
+    });
+}
+
+// Command's side. Resolves true once the point is unlocked, false otherwise
+// (cancelled at the question, or refused).
+function routeUnlock(waypointId, btn) {
+    const wp = findRouteWaypointById(waypointId);
+    const missing = wp ? routeWaypointMissing(wp) : [];
+    if (!confirm(t('route.unlock.confirm', {point: wp ? routeWaypointRefJs(wp) : '', items: missing.join(', ') || '—'}))) {
+        return Promise.resolve(false);
+    }
+    if (btn) btn.disabled = true;
+    return postRouteAction('unlock', waypointId, {}).then(result => {
+        if (result && result.ok) { opToast(t('route.unlock.done_toast')); return true; }
+        if (btn) btn.disabled = false;
+        alert((result && result.error) || t('common.failed'));
+        return false;
+    });
+}
+
+// The first earlier point still open with something missing — the one
+// «Μετάβαση» to waypointId would close. The server's routeJumpBlocker(), run
+// on the routes already on the page so it answers offline too.
+function routeJumpBlockerJs(waypointId) {
+    for (const route of (routes || [])) {
+        const target = route.waypoints.find(w => String(w.id) === String(waypointId));
+        if (!target) continue;
+        for (const w of route.waypoints) {
+            if (w.seq >= target.seq || !routeWaypointIsOpen(w)) continue;
+            const missing = routeWaypointMissing(w);
+            if (missing.length) return {wp: w, missing: missing};
+        }
+        return null;
+    }
+    return null;
+}
+function routeJumpBlockedAlert(blocker) {
+    alert(t('route.jump_blocked', {point: routeWaypointRefJs(blocker.wp), items: blocker.missing.join(', ')}));
+}
+// «Μετάβαση»: refused before the out-of-sequence question, so nobody confirms
+// a jump only to be told they cannot make it.
+function routeJump(waypointId) {
+    const blocker = routeJumpBlockerJs(waypointId);
+    if (blocker) { routeJumpBlockedAlert(blocker); return; }
+    if (confirm(t('route.confirm_out_of_sequence'))) routeDepart(waypointId, true);
+}
+
+// Delegated: the buttons live in the card, in map popups (which Leaflet builds
+// afresh on every open) and in the command side's route list.
+document.addEventListener('click', e => {
+    const el = e.target.closest('.route-cant-open, .route-cant-reason, .route-cant-back, .route-cant-send, .route-unlock-btn');
+    if (!el || el.disabled) return;
+    const id = el.dataset.id;
+    if (el.classList.contains('route-unlock-btn')) { e.stopPropagation(); routeUnlock(id, el); return; }
+    if (el.classList.contains('route-cant-open')) routeCantUi = {wpId: id, reason: null, note: ''};
+    else if (el.classList.contains('route-cant-back')) routeCantUi = {wpId: null, reason: null, note: ''};
+    else if (el.classList.contains('route-cant-reason')) { routeCantUi.wpId = id; routeCantUi.reason = el.dataset.reason; }
+    else if (el.classList.contains('route-cant-send')) { routeCantSend(id, el); return; }
+    routeCantSyncDom();
+});
+document.addEventListener('input', e => {
+    const el = e.target;
+    if (!el.classList || !el.classList.contains('route-cant-note')) return;
+    routeCantUi.note = el.value;
+    // The other copy of the same point (card or popup) keeps up.
+    document.querySelectorAll(`.route-cant-note[data-id="${el.dataset.id}"]`).forEach(other => {
+        if (other !== el) other.value = el.value;
+    });
+});
+
 function renderRouteWaypointCurrent(wp) {
     const label = wp.label ? escapeHtml(wp.label) : t('route.waypoint_fallback_label', {seq: wp.seq});
     let statusLine, actionHtml = '';
@@ -14641,7 +14874,13 @@ function renderRouteWaypointCurrent(wp) {
         const noteHtml = wp.require_note
             ? `<textarea class="form-control form-control-sm route-note-input mt-2" data-id="${wp.id}" rows="2" maxlength="2000" placeholder="${escapeHtml(t('route.note_placeholder'))}">${wp.note ? escapeHtml(wp.note) : ''}</textarea><div class="small text-muted">${t('route.note_hint')}</div>`
             : '';
-        actionHtml = deliverablesHtml + noteHtml + `<button type="button" class="btn btn-sm wr-touch-btn btn-success w-100 mt-2 route-complete-btn" data-id="${wp.id}"><i class="bi bi-check-lg me-1"></i>${t('route.complete_btn')}</button>`;
+        // «Δεν μπορώ» for what is still missing, or the wait for command once
+        // asked. The photo buttons stay: a teammate's phone may still manage it.
+        const missing = routeWaypointMissing(wp);
+        actionHtml = deliverablesHtml + noteHtml
+            + (wp.cant ? routeCantPendingHtml(wp) : '')
+            + `<button type="button" class="btn btn-sm wr-touch-btn btn-success w-100 mt-2 route-complete-btn" data-id="${wp.id}"><i class="bi bi-check-lg me-1"></i>${t('route.complete_btn')}</button>`
+            + (!wp.cant && missing.length ? routeCantPickerHtml(wp, missing) : '');
     }
     return `<div class="border rounded p-2 mb-2 border-primary">
         <div class="d-flex justify-content-between align-items-start">
@@ -14680,8 +14919,13 @@ function renderRouteWaypointClosed(wp) {
           </div>`
         : '';
     const distanceHtml = routeDistanceBadgeHtml(wp);
+    // Closed by command's «Ξεκλείδωμα», not by the team: says so, and why.
+    const unlockedHtml = wp.unlocked
+        ? `<div class="small text-warning-emphasis mt-1"><i class="bi bi-unlock-fill me-1"></i>${escapeHtml(routeUnlockedText(wp))}${wp.cant ? ' — ' + escapeHtml(t('route.cant.reason.' + wp.cant.reason)) : ''}</div>`
+        : '';
     return `<div class="border rounded p-2 mb-2 bg-light">
         <div class="small text-muted"><i class="bi bi-check-circle-fill text-success me-1"></i>${wp.seq}. ${label} — ${t('route.completed_at_prefix', {time: wp.completed_at_display})}</div>
+        ${unlockedHtml}
         ${distanceHtml ? `<div class="small mt-1">${distanceHtml}</div>` : ''}
         ${wp.note ? `<div class="small fst-italic mt-1">"${escapeHtml(wp.note)}"</div>` : ''}
         ${mediaHtml}
@@ -14761,9 +15005,7 @@ function renderMyRoutes(allRoutes) {
     list.querySelectorAll('.route-depart-btn').forEach(btn => btn.addEventListener('click', () => { btn.disabled = true; routeDepart(btn.dataset.id, false); }));
     list.querySelectorAll('.route-arrive-btn').forEach(btn => btn.addEventListener('click', () => { btn.disabled = true; routeArrive(btn.dataset.id, false); }));
     list.querySelectorAll('.route-complete-btn').forEach(btn => btn.addEventListener('click', () => { btn.disabled = true; routeComplete(btn.dataset.id, false, list); }));
-    list.querySelectorAll('.route-jump-btn').forEach(btn => btn.addEventListener('click', () => {
-        if (confirm(t('route.confirm_out_of_sequence'))) routeDepart(btn.dataset.id, true);
-    }));
+    list.querySelectorAll('.route-jump-btn').forEach(btn => btn.addEventListener('click', () => routeJump(btn.dataset.id)));
     list.querySelectorAll('.route-media-btn').forEach(btn => btn.addEventListener('click', () => {
         const statusEl = btn.closest('.d-flex').nextElementSibling;
         triggerWaypointUpload(btn.dataset.id, btn.dataset.mediaType, statusEl);
@@ -21733,14 +21975,18 @@ function ackStageRows(card) {
             // icon already says which; the full history is in the tooltip,
             // because three times side by side squeeze the point's name out
             // of a 296px card.
+            // «Δεν μπορώ» and «Ξεκλείδωμα» (v3.350.0) take their place in the
+            // same line: waiting on command is where the team has got to.
             const history = [
                 p.departed ? t('dispatch.progress_departed', {time: ackTimeLabel(p.departed)}) : '',
                 p.arrived ? t('dispatch.progress_arrived', {time: ackTimeLabel(p.arrived)}) : '',
-                p.completed ? t('dispatch.progress_completed', {time: ackTimeLabel(p.completed)}) : '',
+                p.cant ? t('acktracker.stage_cant', {time: ackTimeLabel(p.cant)}) : '',
+                p.unlocked ? t('acktracker.stage_unlocked', {time: ackTimeLabel(p.unlocked)})
+                    : p.completed ? t('dispatch.progress_completed', {time: ackTimeLabel(p.completed)}) : '',
                 p.skipped ? t('acktracker.stage_skipped', {time: ackTimeLabel(p.skipped)}) : '',
             ].filter(Boolean);
-            const level = p.skipped ? 'skipped' : p.completed ? 'completed' : p.arrived ? 'arrived' : p.departed ? 'departed' : '';
-            const icon = {skipped: '⏭', completed: '✅', arrived: '📍', departed: '🚶', '': '○'}[level];
+            const level = p.skipped ? 'skipped' : p.completed ? 'completed' : p.cant ? 'cant' : p.arrived ? 'arrived' : p.departed ? 'departed' : '';
+            const icon = {skipped: '⏭', completed: p.unlocked ? '🔓' : '✅', cant: '✋', arrived: '📍', departed: '🚶', '': '○'}[level];
             return {
                 id: 'p' + p.seq, level, icon,
                 label: p.seq + '. ' + p.label,
@@ -21819,6 +22065,7 @@ function ackStageSummary(card) {
         if (card.route.completed) return t('acktracker.stage_route_completed', {time: ackTimeLabel(card.route.completed)});
         const points = card.route.points;
         const current = points.findIndex(p => !p.completed && !p.skipped);
+        if (current >= 0 && points[current].cant) return t('acktracker.stage_route_unlock', {n: current + 1, total: points.length});
         return current >= 0 ? t('acktracker.stage_route_point', {n: current + 1, total: points.length}) : '';
     }
     if (card.sector) {
@@ -22412,7 +22659,10 @@ function teamBoardItems(team) {
         const wps = r.waypoints || [];
         const done = wps.filter(w => w.completed_at || w.skipped_at).length;
         const moving = wps.some(w => w.departed_at || w.arrived_at || w.completed_at || w.skipped_at);
+        // Standing at a point, waiting for «Ξεκλείδωμα» (v3.350.0).
+        const waiting = wps.find(w => w.cant && !w.completed_at && !w.skipped_at);
         const s = r.declined ? teamBoardDeclinedState(r.declined)
+            : waiting ? {state: t('teamboard.state.route_unlock', {n: waiting.seq}), tone: 'bad'}
             : {state: t('teamboard.state.route', {n: Math.min(done + 1, wps.length), total: wps.length}), tone: moving ? 'go' : 'new'};
         items.push(Object.assign({ref: 'route:' + r.id, kind: 'route', detail: r.title || t('route.default_title'), all: false}, s));
     });
@@ -24727,9 +24977,19 @@ function renderRouteLayer(allRoutes) {
                     : wp.departed_at ? t('route.enroute_since_prefix', {time: wp.departed_at_display})
                     : '';
                 const label = wp.label ? escapeHtml(wp.label) : t('route.waypoint_fallback_label', {seq: wp.seq});
+                // The team's «Δεν μπορώ» here, with command's «Ξεκλείδωμα»
+                // right under it; and a point closed that way says so.
+                const waitingHtml = routeWaypointIsOpen(wp) && wp.cant
+                    ? `<br><span class="small text-danger fw-semibold"><i class="bi bi-lock-fill me-1"></i>${escapeHtml(t('route.unlock.status_waiting', {reason: t('route.cant.reason.' + wp.cant.reason)}))}${wp.cant.note ? ' — «' + escapeHtml(wp.cant.note) + '»' : ''}</span>`
+                    : '';
+                const unlockHtml = route.can_manage && routeCanUnlock(wp)
+                    ? `<button type="button" class="btn btn-sm btn-success w-100 mt-1 route-unlock-btn" data-id="${wp.id}"><i class="bi bi-unlock-fill me-1"></i>${escapeHtml(t('route.unlock.btn'))}</button>`
+                    : '';
                 popupHtml = `<strong>${escapeHtml(route.team_label || '')} — ${wp.seq}. ${label}</strong>` +
                     (wp.instructions ? `<br><span class="small">${escapeHtml(wp.instructions)}</span>` : '') +
                     (statusText ? `<br><span class="small text-muted">${statusText}</span>` : '') +
+                    (wp.unlocked ? `<br><span class="small text-warning-emphasis"><i class="bi bi-unlock-fill me-1"></i>${escapeHtml(routeUnlockedText(wp))}</span>` : '') +
+                    waitingHtml + unlockHtml +
                     '<br>' + navigationPairHtml(wp.lat, wp.lng, 'inline');
             }
             const marker = L.marker([wp.lat, wp.lng], {icon}).addTo(routeLayer).bindPopup(popupHtml, {minWidth: 220});
@@ -24769,11 +25029,14 @@ routeLayer.on('popupopen', event => {
     const completeBtn = popupEl.querySelector('.route-complete-btn');
     if (completeBtn) completeBtn.addEventListener('click', () => { completeBtn.disabled = true; routeComplete(completeBtn.dataset.id, false, popupEl); });
     const jumpBtn = popupEl.querySelector('.route-jump-btn');
-    if (jumpBtn) jumpBtn.addEventListener('click', () => { if (confirm(t('route.confirm_out_of_sequence'))) routeDepart(jumpBtn.dataset.id, true); });
+    if (jumpBtn) jumpBtn.addEventListener('click', () => routeJump(jumpBtn.dataset.id));
     popupEl.querySelectorAll('.route-media-btn').forEach(btn => btn.addEventListener('click', () => {
         const statusEl = btn.closest('.d-flex').nextElementSibling;
         triggerWaypointUpload(btn.dataset.id, btn.dataset.mediaType, statusEl);
     }));
+    // Leaflet builds the popup afresh from its HTML on every open: put back an
+    // open «Δεν μπορώ» picker and what was typed in it.
+    routeCantSyncDom();
 });
 
 // ── Route Order admin sidebar list (every team's routes, cancel/skip) ───────
@@ -24795,7 +25058,17 @@ function routeAdminWaypointStatusHtml(wp) {
     const distanceHtml = wp.arrived_at ? routeDistanceBadgeHtml(wp) : '';
     const distanceSuffix = distanceHtml ? ` · ${distanceHtml}` : '';
     if (wp.skipped_at) return `<span class="text-warning">${t('route.skipped_prefix')}</span>`;
-    if (wp.completed_at) return `<span class="text-success">${t('route.completed_at_prefix', {time: wp.completed_at_display})}</span>${distanceSuffix}`;
+    if (wp.completed_at) {
+        return `<span class="text-success">${t('route.completed_at_prefix', {time: wp.completed_at_display})}</span>${distanceSuffix}`
+            + (wp.unlocked ? `<br><span class="text-warning-emphasis"><i class="bi bi-unlock-fill me-1"></i>${escapeHtml(routeUnlockedText(wp))}</span>` : '');
+    }
+    // Asked to be let on (v3.350.0): first, above where the team is.
+    const waiting = wp.cant
+        ? `<span class="text-danger fw-semibold"><i class="bi bi-lock-fill me-1"></i>${escapeHtml(t('route.unlock.status_waiting', {reason: t('route.cant.reason.' + wp.cant.reason)}))}</span><br>`
+        : '';
+    return waiting + routeAdminWaypointOpenStatusHtml(wp, distanceSuffix);
+}
+function routeAdminWaypointOpenStatusHtml(wp, distanceSuffix) {
     if (wp.arrived_at) {
         // Passive visibility for command staff — no sound here (that's the
         // field volunteer's own card, see updateRouteCountdowns()), just
@@ -24806,6 +25079,21 @@ function routeAdminWaypointStatusHtml(wp) {
     }
     if (wp.departed_at) return `<span class="text-warning">${t('route.enroute_since_prefix', {time: wp.departed_at_display})}</span>`;
     return `<span class="text-muted">${t('route.status_pending')}</span>`;
+}
+
+// A team asking to be let on past a point (v3.350.0), on the route's card
+// itself rather than inside it: nobody should have to expand a route to find
+// out its team is standing still waiting for an answer.
+function routeUnlockRequestsHtml(route) {
+    return route.waypoints.filter(w => w.cant && routeWaypointIsOpen(w)).map(w => {
+        const missing = routeWaypointMissing(w);
+        return `<div class="px-2 pb-2"><div class="alert alert-danger py-1 px-2 small mb-0 d-flex align-items-center gap-2">
+            <i class="bi bi-lock-fill"></i>
+            <div class="flex-grow-1">${escapeHtml(t('route.unlock.request_line', {point: routeWaypointRefJs(w), items: missing.join(', ') || '—', reason: t('route.cant.reason.' + w.cant.reason)}))}${w.cant.note ? ' — «' + escapeHtml(w.cant.note) + '»' : ''}
+                <div class="text-muted">${escapeHtml(w.cant.by || '')} · ${escapeHtml(w.cant.at || '')}</div></div>
+            <button type="button" class="btn btn-sm btn-success text-nowrap route-unlock-btn" data-id="${w.id}"><i class="bi bi-unlock-fill me-1"></i>${escapeHtml(t('route.unlock.btn'))}</button>
+        </div></div>`;
+    }).join('');
 }
 
 function renderRouteAdminWaypointsList(route) {
@@ -24825,6 +25113,7 @@ function renderRouteAdminWaypointsList(route) {
                 <div class="d-flex gap-1">
                     ${navigationPairHtml(wp.lat, wp.lng, 'icon')}
                     ${route.status === 'active' ? `<button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1 route-edit-btn" data-id="${wp.id}" title="${t('common.edit')}"><i class="bi bi-pencil"></i></button>` : ''}
+                    ${isOpen && routeCanUnlock(wp) ? `<button type="button" class="btn btn-sm btn-success py-0 px-1 route-unlock-btn" data-id="${wp.id}" title="${escapeHtml(t('route.unlock.btn'))}"><i class="bi bi-unlock-fill"></i></button>` : ''}
                     ${isOpen ? `<button type="button" class="btn btn-sm btn-outline-warning py-0 px-1 route-skip-btn" data-id="${wp.id}" title="${t('route.skip_btn')}"><i class="bi bi-skip-forward-fill"></i></button>` : ''}
                 </div>
             </div>
@@ -24896,6 +25185,7 @@ function renderRoutesAdmin(allRoutes) {
                 </div>
             </div>
             ${route.status === 'active' && route.declined ? `<div class="px-2 pb-2">${declineNoticeHtml('route', route.id, route.declined, !!route.can_decline)}</div>` : ''}
+            ${route.status === 'active' ? routeUnlockRequestsHtml(route) : ''}
             ${isExpanded ? `<div class="border-top p-2">${renderRouteAdminWaypointsList(route)}</div>` : ''}
         </div>`;
     };
