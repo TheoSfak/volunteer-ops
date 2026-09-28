@@ -3419,6 +3419,10 @@ include __DIR__ . '/includes/header.php';
     .triage-count { border-radius: 8px; padding: 6px 4px; text-align: center; line-height: 1.15; }
     .triage-count .n { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
     .triage-count .l { font-size: .75rem; }
+    /* The same four numbers, small, beside the card's title: they are what a
+       closed card still has to say. A white rim keeps red on red visible. */
+    .triage-head-counts { display: inline-flex; gap: 3px; white-space: nowrap; }
+    .triage-head-count { min-width: 1.7em; padding: 1px 5px; border-radius: 6px; border: 1px solid rgba(255,255,255,.9); font-size: .8rem; font-weight: 700; line-height: 1.35; text-align: center; font-variant-numeric: tabular-nums; }
     .triage-row { border-bottom: 1px solid #e9ecef; padding: 6px 0; }
     .triage-row.is-gone { opacity: .55; }
     .triage-row summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
@@ -3938,8 +3942,17 @@ include __DIR__ . '/includes/header.php';
     <div class="col-12">
         <div class="card shadow-sm border-danger<?= ($canManageWarRoom || !empty($triage['active'])) ? '' : ' d-none' ?>" id="triageCard" data-card-id="triageCard">
             <div class="card-header bg-danger text-white d-flex flex-column align-items-start gap-2">
-                <h5 class="mb-0"><i class="bi bi-clipboard2-pulse me-1"></i><?= t('triage.card_title') ?>
-                    <span class="badge bg-light text-danger ms-1 align-middle d-none" id="triageMciBadge"><?= t('triage.mci_badge') ?></span></h5>
+                <!-- The title opens and closes the card; it starts closed
+                     (triageCardCollapse() remembers this viewer's choice).
+                     Only the title: the switch and the handover button below
+                     it stay one tap away with the card closed, and the counts
+                     beside the title say what is inside. -->
+                <h5 class="mb-0 w-100 d-flex align-items-center gap-2 wr-collapsible-header collapsed" id="triageCardToggle" data-bs-toggle="collapse" data-bs-target="#triageCardBody" role="button" aria-expanded="false" aria-controls="triageCardBody">
+                    <span><i class="bi bi-clipboard2-pulse me-1"></i><?= t('triage.card_title') ?>
+                        <span class="badge bg-light text-danger ms-1 align-middle d-none" id="triageMciBadge"><?= t('triage.mci_badge') ?></span></span>
+                    <span class="triage-head-counts" id="triageHeadCounts"></span>
+                    <i class="bi bi-chevron-down wr-collapsible-chevron ms-auto"></i>
+                </h5>
                 <?php if ($canManageWarRoom): ?>
                 <div class="d-flex gap-1 flex-wrap">
                     <button type="button" class="btn btn-sm btn-light" id="triageMciToggle"></button>
@@ -3947,6 +3960,7 @@ include __DIR__ . '/includes/header.php';
                 </div>
                 <?php endif; ?>
             </div>
+            <div class="collapse" id="triageCardBody">
             <div class="card-body">
                 <div id="triageStatusLine" class="small mb-2"></div>
                 <?php if ($isApprovedParticipant): ?>
@@ -3974,6 +3988,7 @@ include __DIR__ . '/includes/header.php';
                 </div>
                 <?php endif; ?>
                 <div id="triageBoard"></div>
+            </div>
             </div>
         </div>
     </div>
@@ -15047,6 +15062,17 @@ function renderTriage(state) {
         heroBtn.dataset.active = active ? '1' : '0';
     }
     document.getElementById('triageHandoverBtn')?.classList.toggle('d-none', !(state && state.victims && state.victims.length));
+    // The four numbers beside the title, so the card says what matters while
+    // it is closed. Nothing until there is somebody to count.
+    const headCounts = document.getElementById('triageHeadCounts');
+    if (headCounts) {
+        const c = state && state.counts;
+        const walking = (state && state.walking) || 0;
+        const any = !!c && (c.red + c.yellow + c.green + c.black + walking) > 0;
+        headCounts.innerHTML = any ? TRIAGE_CATEGORY_ORDER.map(cat =>
+            `<span class="triage-head-count triage-bg-${cat}" title="${escapeHtml(t('triage.cat_tile.' + cat))}">${c[cat] + (cat === 'green' ? walking : 0)}</span>`
+        ).join('') : '';
+    }
     document.getElementById('triageFieldControls')?.classList.toggle('d-none', !active);
     // The first scan in a dead zone must not depend on a download, so the
     // fallback decoder is fetched (and cached by the service worker) the
@@ -15233,11 +15259,14 @@ function triageSetMci(turnOn, btn) {
         }
     });
 }
-// The card may be on another tab (tabbed view) or far down the console.
+// The card may be on another tab (tabbed view) or far down the console, and
+// closed: whoever is sent to it is sent to what is inside it.
 function triageGoToCard() {
     document.dispatchEvent(new CustomEvent('wr-goto-tab', {detail: {tab: 'me'}}));
     const card = document.getElementById('triageCard');
     if (!card) return;
+    const body = document.getElementById('triageCardBody');
+    if (body && !body.classList.contains('show')) bootstrap.Collapse.getOrCreateInstance(body, {toggle: false}).show();
     setTimeout(() => {
         card.scrollIntoView({behavior: 'smooth', block: 'start'});
         card.classList.remove('assistant-flash');
@@ -15252,6 +15281,31 @@ document.getElementById('mciHeroBtn')?.addEventListener('click', e => {
     if (e.currentTarget.dataset.active === '1') triageGoToCard();
     else triageSetMci(true, e.currentTarget);
 });
+
+// The card starts closed, for everyone. Opening it is remembered on this
+// device for this mission (a per-viewer convenience, so a reload in the middle
+// of an incident does not fold it away again); closing it forgets.
+(function triageCardCollapse() {
+    const body = document.getElementById('triageCardBody');
+    const toggle = document.getElementById('triageCardToggle');
+    if (!body || !toggle) return;
+    const key = 'wr_triage_open_' + TRIAGE_MISSION_ID;
+    let open = false;
+    try { open = localStorage.getItem(key) === '1'; } catch (e) {}
+    if (open) {
+        body.classList.add('show');
+        toggle.classList.remove('collapsed');
+        toggle.setAttribute('aria-expanded', 'true');
+    }
+    body.addEventListener('shown.bs.collapse', e => {
+        if (e.target !== body) return;
+        try { localStorage.setItem(key, '1'); } catch (_) {}
+    });
+    body.addEventListener('hidden.bs.collapse', e => {
+        if (e.target !== body) return;
+        try { localStorage.removeItem(key); } catch (_) {}
+    });
+})();
 
 // ── Map ─────────────────────────────────────────────────────────────────────
 // Its own layer, deliberately NOT the shared marker cluster the incidents and
