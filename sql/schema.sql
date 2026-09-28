@@ -3129,23 +3129,35 @@ CREATE TABLE IF NOT EXISTS `mission_command_posts` (
     `last_action` ENUM('set','moved') NOT NULL DEFAULT 'set' COMMENT 'How it got to where it is now',
     `placed_at` DATETIME NOT NULL COMMENT 'When it got to where it is now',
     `placed_by` INT UNSIGNED NULL,
+    `follow_user_id` INT UNSIGNED NULL COMMENT 'Follows this participant''s GPS; NULL = a fixed point (v3.347.0, migration 175)',
+    `fix_at` DATETIME NULL COMMENT 'Time of the last fix taken from that device',
+    `anchor_lat` DECIMAL(10, 8) NULL COMMENT 'Where everybody was last told it is',
+    `anchor_lng` DECIMAL(11, 8) NULL,
+    `cand_lat` DECIMAL(10, 8) NULL COMMENT 'Where the device has stood still since cand_since',
+    `cand_lng` DECIMAL(11, 8) NULL,
+    `cand_since` DATETIME NULL,
+    INDEX `idx_cp_follow_user` (`follow_user_id`),
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
-    FOREIGN KEY (`placed_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+    FOREIGN KEY (`placed_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    CONSTRAINT `fk_cp_follow_user` FOREIGN KEY (`follow_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `mission_command_post_log` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `mission_id` INT UNSIGNED NOT NULL,
-    `action` ENUM('set','moved','note','cleared') NOT NULL,
+    `action` ENUM('set','moved','note','cleared','follow','unfollow') NOT NULL,
     `lat` DECIMAL(10, 8) NULL,
     `lng` DECIMAL(11, 8) NULL,
     `moved_m` INT UNSIGNED NULL COMMENT 'How far a move took it',
     `note` VARCHAR(255) NULL,
     `user_id` INT UNSIGNED NULL,
     `created_at` DATETIME NOT NULL,
+    `via` ENUM('hand','follow') NULL COMMENT 'A move: by command, or arrived with the followed device',
+    `followed_user_id` INT UNSIGNED NULL COMMENT 'follow/unfollow, and a move with the device: whose device',
     INDEX `idx_cp_log_mission` (`mission_id`, `created_at`),
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
-    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    CONSTRAINT `fk_cp_log_followed` FOREIGN KEY (`followed_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

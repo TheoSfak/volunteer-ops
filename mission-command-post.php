@@ -6,11 +6,13 @@
  * post, and reads it from the Action Room's own poll (war-room.php, key
  * `commandPost`).
  *
- *   set    place it, or move it (lat, lng). The first placement, and any move
- *          of COMMAND_POST_NOTIFY_MIN_M or more, is announced to every
- *          participant — see notifyCommandPostPlaced().
- *   note   how to find it on the spot («Λευκό βαν ΕΚΑΒ»); blank clears it
- *   clear  take it off the map
+ *   set       place it, or move it (lat, lng). The first placement, and any
+ *             move of COMMAND_POST_NOTIFY_MIN_M or more, is announced to every
+ *             participant — see notifyCommandPostPlaced(). Stops following.
+ *   follow    follow a participant's device (user_id), v3.347.0
+ *   unfollow  stay where it is, as a fixed point
+ *   note      how to find it on the spot («Λευκό βαν ΕΚΑΒ»); blank clears it
+ *   clear     take it off the map
  *
  * Every answer carries the command post as it now is, for the page to adopt.
  */
@@ -80,6 +82,38 @@ if ($action === 'set') {
         'notified' => $notified,
         'commandPost' => loadMissionCommandPost($missionId),
     ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// Follow a participant's device (v3.347.0): the command post goes to its
+// latest fix now — announced like any placement or move — and moves with it
+// from then on. user_id 0 is the same as unfollow.
+if ($action === 'follow' && (int) post('user_id') > 0) {
+    $result = startCommandPostFollow($missionId, (int) post('user_id'), $userId);
+    if (!$result['ok']) {
+        echo json_encode(['ok' => false, 'error' => t($result['error'], $result['vars'] ?? [])]);
+        exit;
+    }
+    $notified = 0;
+    $announced = commandPostChangeIsNews($result);
+    logAudit('command_post_follow', 'missions', $missionId, null, ['user_id' => (int) post('user_id'), 'moved_m' => $result['moved_m']]);
+    if ($announced) {
+        $current = loadMissionCommandPost($missionId);
+        $notified = notifyCommandPostPlaced($mission, $result, $result['lat'], $result['lng'], $current['note'] ?? null, $userId);
+    }
+    echo json_encode([
+        'ok' => true, 'changed' => $result['changed'], 'action' => $result['action'],
+        'announced' => $announced, 'notified' => $notified,
+        'commandPost' => loadMissionCommandPost($missionId),
+    ], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($action === 'unfollow' || $action === 'follow') {
+    if (stopCommandPostFollow($missionId, $userId)) {
+        logAudit('command_post_unfollow', 'missions', $missionId);
+    }
+    echo json_encode(['ok' => true, 'commandPost' => loadMissionCommandPost($missionId)], JSON_UNESCAPED_UNICODE);
     exit;
 }
 

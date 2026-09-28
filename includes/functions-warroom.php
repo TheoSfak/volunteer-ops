@@ -4734,6 +4734,18 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
         // Non-critical — the ping itself already succeeded.
     }
 
+    // The Συντονιστικό, when it follows this device (v3.347.0): the pin moves
+    // with the fix, and a stop somewhere new is announced once. From the
+    // smoothed estimate, like «Έφτασες;» above, and just as best-effort.
+    try {
+        commandPostFollowFix(
+            (int) $pr['mission_id'], $userId,
+            (float) $estimate['lat'], (float) $estimate['lng'], $fixAgeSeconds
+        );
+    } catch (Throwable $e) {
+        // Non-critical — the ping itself already succeeded.
+    }
+
     // Auto-captured pings (passive, every few minutes while Action Room is open,
     // or from the native app's background plugin) stay quiet — only a manual
     // tap should trigger the loud command-staff alert.

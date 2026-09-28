@@ -7396,6 +7396,53 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 175,
+            'description' => "Let the Συντονιστικό follow a device (v3.347.0). mission_command_posts.follow_user_id: the Action Room participant whose GPS it follows — a phone or tablet in the command vehicle — NULL = a fixed point. fix_at is the time of the last fix it took; anchor_* the spot everybody was last told about; cand_* a spot the device has stood still at since cand_since, which becomes the new announced spot once it has stayed there long enough (a vehicle driving past, or waiting at a junction, is not the command post moving). mission_command_post_log gains 'follow'/'unfollow' (appended last, so no stored value is renumbered), via (hand = moved by command, follow = arrived with the device) and followed_user_id. Separate ALTERs: MariaDB will not take ADD COLUMN and a foreign key on that same column in one statement.",
+            'up' => function () {
+                $haveColumn = fn(string $table, string $column) => (bool) dbFetchValue(
+                    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+                    [$table, $column]
+                );
+                if (!$haveColumn('mission_command_posts', 'follow_user_id')) {
+                    dbExecute("ALTER TABLE mission_command_posts
+                               ADD COLUMN follow_user_id INT UNSIGNED NULL COMMENT 'Follows this participant''s GPS; NULL = a fixed point',
+                               ADD COLUMN fix_at DATETIME NULL COMMENT 'Time of the last fix taken from that device',
+                               ADD COLUMN anchor_lat DECIMAL(10, 8) NULL COMMENT 'Where everybody was last told it is',
+                               ADD COLUMN anchor_lng DECIMAL(11, 8) NULL,
+                               ADD COLUMN cand_lat DECIMAL(10, 8) NULL COMMENT 'Where the device has stood still since cand_since',
+                               ADD COLUMN cand_lng DECIMAL(11, 8) NULL,
+                               ADD COLUMN cand_since DATETIME NULL,
+                               ADD INDEX idx_cp_follow_user (follow_user_id)");
+                }
+                $haveKey = (bool) dbFetchValue(
+                    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+                      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_command_posts'
+                        AND COLUMN_NAME = 'follow_user_id' AND REFERENCED_TABLE_NAME = 'users'"
+                );
+                if (!$haveKey) {
+                    dbExecute("ALTER TABLE mission_command_posts
+                               ADD CONSTRAINT fk_cp_follow_user FOREIGN KEY (follow_user_id) REFERENCES users(id) ON DELETE SET NULL");
+                }
+                dbExecute("ALTER TABLE mission_command_post_log
+                           MODIFY COLUMN action ENUM('set','moved','note','cleared','follow','unfollow') NOT NULL");
+                if (!$haveColumn('mission_command_post_log', 'via')) {
+                    dbExecute("ALTER TABLE mission_command_post_log
+                               ADD COLUMN via ENUM('hand','follow') NULL COMMENT 'A move: by command, or arrived with the followed device',
+                               ADD COLUMN followed_user_id INT UNSIGNED NULL COMMENT 'follow/unfollow, and a move with the device: whose device'");
+                }
+                $haveLogKey = (bool) dbFetchValue(
+                    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE
+                      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_command_post_log'
+                        AND COLUMN_NAME = 'followed_user_id' AND REFERENCED_TABLE_NAME = 'users'"
+                );
+                if (!$haveLogKey) {
+                    dbExecute("ALTER TABLE mission_command_post_log
+                               ADD CONSTRAINT fk_cp_log_followed FOREIGN KEY (followed_user_id) REFERENCES users(id) ON DELETE SET NULL");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

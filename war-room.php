@@ -3464,6 +3464,15 @@ include __DIR__ . '/includes/header.php';
     .wr-cp-marker .bi { color: #fbbf24; font-size: 14px; }
     .wr-cp-marker::after { content: ''; position: absolute; left: 50%; bottom: -9px; transform: translateX(-50%); border: 7px solid transparent; border-top-color: #fbbf24; border-bottom: 0; }
     .leaflet-marker-draggable .wr-cp-marker { cursor: move; }
+    /* Following a device: a signal that pulses. The device gone quiet: grey
+       and dashed, so a place it may have left does not read as current. */
+    .wr-cp-marker .wr-cp-signal { font-size: 12px; animation: wrCpSignal 1.6s ease-in-out infinite; }
+    @keyframes wrCpSignal { 50% { opacity: .3; } }
+    .wr-cp-marker.is-stale { background: #475569; border: 2px dashed #cbd5e1; }
+    .wr-cp-marker.is-stale::after { border-top-color: #cbd5e1; }
+    .wr-cp-marker.is-stale .bi { color: #e2e8f0; animation: none; }
+    .wr-cp-follow-line { color: #b45309; }
+    @media (prefers-reduced-motion: reduce) { .wr-cp-marker .wr-cp-signal { animation: none; } }
     /* Its button, under the zoom buttons. Wider with a word while command
        has not placed it yet. */
     /* Specific enough to beat Leaflet's own .leaflet-touch .leaflet-bar a,
@@ -6444,6 +6453,11 @@ let commandPost = <?= json_encode($commandPost, JSON_UNESCAPED_UNICODE) ?>;
 const CP_CAN_MANAGE = <?= json_encode($canManageWarRoom) ?>;
 // A move shorter than this is announced to nobody (COMMAND_POST_NOTIFY_MIN_M).
 const CP_NOTIFY_MIN_M = <?= (int) COMMAND_POST_NOTIFY_MIN_M ?>;
+// Following a device: past this the device's last fix counts as old — the
+// app's own definition of a stale position, the one every pin uses.
+const CP_FOLLOW_STALE_S = <?= (int) warRoomPingStaleThresholdSeconds() ?>;
+// How long it must stand still somewhere new before everybody is told.
+const CP_FOLLOW_SETTLE_MIN = <?= (int) round(COMMAND_POST_FOLLOW_SETTLE_S / 60) ?>;
 // Shown in its popup: the channel command listens on, set with the briefing.
 const MISSION_RADIO_CHANNEL = <?= json_encode(trim((string) ($mission['radio_channel'] ?? '')), JSON_UNESCAPED_UNICODE) ?>;
 let pointsOfInterest = <?= json_encode($pointsOfInterest) ?>;
@@ -10463,18 +10477,36 @@ function cpDistanceText(metres) {
 
 // A label with a point under it, anchored at the tip — the spot itself, which
 // is what a drag moves. popupAnchor lifts the popup clear of the label.
-function cpIcon() {
+// Following a device it carries a signal icon, and once that device has gone
+// quiet it greys out: a place it may long have left must not look current.
+function cpIcon(following, stale) {
     return L.divIcon({
         className: 'wr-cp-icon',
-        html: `<div class="wr-cp-marker"><i class="bi bi-house-gear-fill"></i><span>${escapeHtml(t('cp.label'))}</span></div>`,
+        html: `<div class="wr-cp-marker${following ? ' is-following' : ''}${stale ? ' is-stale' : ''}"><i class="bi bi-house-gear-fill"></i><span>${escapeHtml(t('cp.label'))}</span>${following ? '<i class="bi bi-broadcast wr-cp-signal"></i>' : ''}</div>`,
         iconSize: [0, 0], iconAnchor: [0, 0], popupAnchor: [0, -36],
     });
+}
+
+// How old the followed device's last fix is, in seconds, by the server's
+// clock; null when it follows nothing.
+function cpFollowAgeS() {
+    const f = commandPost && commandPost.follow;
+    if (!f || !f.ts) return null;
+    return Math.floor(Date.now() / 1000) + TRIAGE_CLOCK_OFFSET_S - f.ts;
+}
+function cpIsStale() {
+    const age = cpFollowAgeS();
+    return age !== null && age > CP_FOLLOW_STALE_S;
 }
 
 function renderCommandPost(cp) {
     commandPost = cp || null;
     cpSyncButton();
-    const sig = JSON.stringify(commandPost);
+    const following = !!(commandPost && commandPost.follow);
+    const stale = cpIsStale();
+    // Staleness is part of it: a device that goes quiet changes nothing in the
+    // payload, and the pin must still grey out on the next poll.
+    const sig = JSON.stringify([commandPost, stale]);
     // A poll landing mid-drag must not snap the marker back under the pointer;
     // the drag's own answer redraws it.
     if (sig === commandPostRenderedSig || cpDragging || !map) return;
@@ -10484,11 +10516,13 @@ function renderCommandPost(cp) {
         return;
     }
     const ll = [commandPost.lat, commandPost.lng];
+    const title = following ? t('cp.label') + ' — ' + t('cp.follow_line', {name: commandPost.follow.name}) : t('cp.label');
     if (!commandPostMarker) {
         commandPostMarker = L.marker(ll, {
-            icon: cpIcon(), zIndexOffset: 3000, draggable: CP_CAN_MANAGE, title: t('cp.label'),
+            icon: cpIcon(following, stale), zIndexOffset: 3000, draggable: CP_CAN_MANAGE, title: title,
         // Top-left padding keeps the popup out from under the zoom buttons.
         }).bindPopup(() => cpPopupContent(), {minWidth: 230, maxWidth: 300, autoPanPaddingTopLeft: [52, 12]}).addTo(map);
+        commandPostMarker._wrCpState = following + '/' + stale;
         if (CP_CAN_MANAGE) {
             commandPostMarker.on('dragstart', () => { cpDragging = true; commandPostMarker.closePopup(); });
             commandPostMarker.on('dragend', cpDragEnd);
@@ -10496,6 +10530,13 @@ function renderCommandPost(cp) {
         return;
     }
     commandPostMarker.setLatLng(ll);
+    // Only when the look changes: a new icon is a new element, and doing it on
+    // every fix of a moving vehicle would drop a click landing on it.
+    if (commandPostMarker._wrCpState !== following + '/' + stale) {
+        commandPostMarker._wrCpState = following + '/' + stale;
+        commandPostMarker.setIcon(cpIcon(following, stale));
+        commandPostMarker.getElement()?.setAttribute('title', title);
+    }
     // Someone else moved it or rewrote the note while this popup was open.
     // Not while command is typing a note into it.
     const popupEl = commandPostMarker.isPopupOpen() ? commandPostMarker.getPopup().getElement() : null;
@@ -10512,12 +10553,41 @@ function cpDragEnd() {
     const metres = L.latLng(commandPost.lat, commandPost.lng).distanceTo(to);
     if (metres < 1) { back(); return; }
     const question = t('cp.drag_confirm', {distance: cpDistanceText(metres)})
-        + (metres >= CP_NOTIFY_MIN_M ? '\n' + t('cp.drag_confirm_notify') : '');
+        + (metres >= CP_NOTIFY_MIN_M ? '\n' + t('cp.drag_confirm_notify') : '')
+        + (commandPost.follow ? '\n' + t('cp.drag_confirm_unfollow') : '');
     if (!confirm(question)) { back(); return; }
     cpPost({action: 'set', lat: to.lat, lng: to.lng}).then(res => {
         cpDragging = false;
         if (!res || !res.ok) back();
     });
+}
+
+// Command's choice of device to follow: everyone with a position on the map
+// (the people whose GPS reaches it), by name, and whoever it follows now even
+// if their pin has dropped off. «Σταθερό εδώ» is the one-tap way back to a
+// fixed point, for the moment the phone walks away from the vehicle.
+function cpFollowControlsHtml(cp) {
+    const seen = new Set();
+    const people = [];
+    (pins || []).forEach(p => {
+        const id = Number(p.user_id);
+        if (!id || seen.has(id)) return;
+        seen.add(id);
+        people.push({id: id, name: p.name + (p.team_label ? ' · ' + p.team_label : '')});
+    });
+    if (cp.follow && !seen.has(cp.follow.user_id)) people.push({id: cp.follow.user_id, name: cp.follow.name});
+    people.sort((a, b) => a.name.localeCompare(b.name, jsLocale));
+    const followed = cp.follow ? cp.follow.user_id : 0;
+    return `
+        <label class="form-label small fw-semibold mb-1 mt-2">${escapeHtml(t('cp.follow_label'))}</label>
+        <select class="form-select form-select-sm" data-cp-follow>
+            <option value="0">${escapeHtml(t('cp.follow_none'))}</option>
+            ${people.map(p => `<option value="${p.id}"${p.id === followed ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('')}
+        </select>
+        ${people.length ? '' : `<div class="small text-muted">${escapeHtml(t('cp.follow_nobody'))}</div>`}
+        ${cp.follow ? `
+        <div class="small text-muted mt-1">${escapeHtml(t('cp.follow_hint', {min: CP_FOLLOW_SETTLE_MIN}))}</div>
+        <button type="button" class="btn btn-sm btn-outline-secondary w-100 mt-1" data-cp="unfollow"><i class="bi bi-pin-angle-fill me-1"></i>${escapeHtml(t('cp.unfollow_btn'))}</button>` : ''}`;
 }
 
 function cpPopupContent() {
@@ -10528,9 +10598,17 @@ function cpPopupContent() {
     const me = typeof opMyPosition === 'function' ? opMyPosition() : null;
     const metres = me ? L.latLng(me.lat, me.lng).distanceTo(L.latLng(cp.lat, cp.lng)) : null;
     const when = t(cp.action === 'moved' ? 'cp.moved_line' : 'cp.set_line', {time: cp.at}) + (cp.by ? t('cp.by', {name: cp.by}) : '');
+    // Following a device: whose, how fresh its position is, and a plain
+    // warning instead once it has gone quiet.
+    const followHtml = cp.follow ? `
+        <div class="small fw-semibold wr-cp-follow-line"><i class="bi bi-broadcast me-1"></i>${escapeHtml(t('cp.follow_line', {name: cp.follow.name}))}</div>
+        ${cp.follow.at ? (cpIsStale()
+            ? `<div class="small text-danger fw-semibold">${escapeHtml(t('cp.follow_stale', {time: cp.follow.at}))}</div>`
+            : `<div class="small text-muted">${escapeHtml(t('cp.follow_fix', {time: cp.follow.at}))}</div>`) : ''}` : '';
     div.innerHTML = `
         <div class="fw-semibold mb-1"><i class="bi bi-house-gear-fill me-1 wr-cp-flag"></i>${escapeHtml(t('cp.label'))}</div>
         ${cp.note ? `<div class="fst-italic mb-1">${escapeHtml(cp.note)}</div>` : ''}
+        ${followHtml}
         <div class="small text-muted">${escapeHtml(when)}</div>
         ${MISSION_RADIO_CHANNEL ? `<div class="small"><i class="bi bi-broadcast me-1"></i>${escapeHtml(t('cp.radio', {channel: MISSION_RADIO_CHANNEL}))}</div>` : ''}
         ${metres !== null && metres >= 10 ? `<div class="small">${escapeHtml(t('cp.distance_from_you', {distance: cpDistanceText(metres)}))}</div>` : ''}
@@ -10542,6 +10620,7 @@ function cpPopupContent() {
             <input type="text" class="form-control" data-cp-note maxlength="255" placeholder="${escapeHtml(t('cp.note_placeholder'))}" value="${escapeHtml(cp.note || '')}">
             <button type="button" class="btn btn-outline-primary" data-cp="note">${escapeHtml(t('cp.note_save'))}</button>
         </div>
+        ${cpFollowControlsHtml(cp)}
         <div class="d-flex gap-1 mt-2">
             <button type="button" class="btn btn-sm btn-outline-primary flex-grow-1" data-cp="move"><i class="bi bi-arrows-move me-1"></i>${escapeHtml(t('cp.move_btn'))}</button>
             <button type="button" class="btn btn-sm btn-outline-danger" data-cp="clear"><i class="bi bi-trash3 me-1"></i>${escapeHtml(t('cp.clear_btn'))}</button>
@@ -10557,10 +10636,25 @@ function cpPopupContent() {
         });
     };
     noteInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); saveNote(null); } });
+    div.querySelector('[data-cp-follow]')?.addEventListener('change', e => {
+        const id = Number(e.target.value);
+        e.target.disabled = true;
+        cpPost(id ? {action: 'follow', user_id: id} : {action: 'unfollow'}).then(res => {
+            e.target.disabled = false;
+            if (!res || !res.ok) return;
+            if (!id) { opToast(t('cp.toast_unfollow')); return; }
+            opToast(t('cp.toast_follow', {name: (res.commandPost && res.commandPost.follow && res.commandPost.follow.name) || ''})
+                + (res.announced ? ' ' + cpSavedToastText(res) : ''));
+        });
+    });
     div.addEventListener('click', e => {
         const btn = e.target.closest('[data-cp]');
         if (!btn) return;
         if (btn.dataset.cp === 'note') saveNote(btn);
+        else if (btn.dataset.cp === 'unfollow') {
+            btn.disabled = true;
+            cpPost({action: 'unfollow'}).then(res => { if (res && res.ok) opToast(t('cp.toast_unfollow')); });
+        }
         else if (btn.dataset.cp === 'move') cpStartPick('move');
         else if (btn.dataset.cp === 'clear' && confirm(t('cp.clear_confirm'))) {
             map.closePopup();

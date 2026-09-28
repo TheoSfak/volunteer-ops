@@ -280,6 +280,190 @@ final class CommandPostTest extends TestCase
         $this->assertSame('~13 χλμ.', commandPostDistanceText(12900, 'el'));
     }
 
+    // ── Following a device (v3.347.0) ───────────────────────────────────────
+
+    /** A fix already stored for the device, $ageS seconds old. */
+    private function storedFix(int $userId, float $lat, float $lng, int $ageS = 0): void
+    {
+        dbInsert(
+            "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, accuracy_meters, source, via, created_at)
+             VALUES (?, ?, ?, ?, 8, 'auto', 'native', DATE_SUB(NOW(), INTERVAL ? SECOND))",
+            [$userId, $this->shiftId, $lat, $lng, $ageS]
+        );
+    }
+
+    /**
+     * How old the device's first fix is, in seconds. It must still count as
+     * fresh (startCommandPostFollow() refuses a stale one), and every later
+     * fix in a test must be newer than it — so the tests' timelines are laid
+     * out below this, and need room for a stop of COMMAND_POST_FOLLOW_SETTLE_S.
+     */
+    private function base(): int
+    {
+        $base = min(530, warRoomPingStaleThresholdSeconds() - 10);
+        if ($base < COMMAND_POST_FOLLOW_SETTLE_S + 260) {
+            $this->markTestSkipped('war_room_auto_ping_seconds is set too low here for these timelines.');
+        }
+        return $base;
+    }
+
+    /** Place it at the base point and make it follow the teammate's device, standing there. */
+    private function followTeammateFromBase(): void
+    {
+        $this->place(self::LAT, self::LNG);
+        $this->storedFix($this->teammate, self::LAT, self::LNG, $this->base());
+        $result = startCommandPostFollow($this->missionId, $this->teammate, $this->adminId);
+        $this->assertTrue($result['ok']);
+        $this->assertFalse($result['changed'], 'The device stands on the pin: nothing moved.');
+    }
+
+    public function testOnlyAParticipantWithAPositionCanBeFollowed(): void
+    {
+        $this->place(self::LAT, self::LNG);
+        $this->assertSame('cp.err_follow_not_participant',
+            startCommandPostFollow($this->missionId, $this->notInActionRoom, $this->adminId)['error']);
+        $this->assertSame('cp.err_follow_no_fix',
+            startCommandPostFollow($this->missionId, $this->teammate, $this->adminId)['error'], 'No fix yet, nowhere to go.');
+        $this->assertNull(loadMissionCommandPost($this->missionId)['follow']);
+    }
+
+    public function testADeviceThatHasGoneQuietCannotBeFollowed(): void
+    {
+        $this->place(self::LAT, self::LNG);
+        $this->storedFix($this->teammate, $this->north(5000), self::LNG, warRoomPingStaleThresholdSeconds() + 60);
+        $result = startCommandPostFollow($this->missionId, $this->teammate, $this->adminId);
+        $this->assertSame('cp.err_follow_stale_fix', $result['error'], 'The pin would jump to where it was, not where it is.');
+        $this->assertMatchesRegularExpression('/\d\d:\d\d/', $result['vars']['time']);
+        $cp = loadMissionCommandPost($this->missionId);
+        $this->assertNull($cp['follow']);
+        $this->assertEqualsWithDelta(self::LAT, $cp['lat'], 1e-6);
+    }
+
+    public function testFollowingGoesToTheDeviceAndSaysWhoseItIs(): void
+    {
+        $this->place(self::LAT, self::LNG);
+        $this->storedFix($this->teammate, $this->north(800), self::LNG, 30);
+        $result = startCommandPostFollow($this->missionId, $this->teammate, $this->adminId);
+        $this->assertTrue($result['changed']);
+        $this->assertSame('moved', $result['action']);
+        $this->assertEqualsWithDelta(800, $result['moved_m'], 3);
+        $this->assertTrue(commandPostChangeIsNews($result), 'The endpoint announces it like any move.');
+
+        $cp = loadMissionCommandPost($this->missionId);
+        $this->assertEqualsWithDelta($this->north(800), $cp['lat'], 1e-6);
+        $this->assertSame($this->teammate, $cp['follow']['user_id']);
+        $this->assertSame('Γιώργος Γ.', $cp['follow']['name']);
+        $this->assertEqualsWithDelta(time() - 30, $cp['follow']['ts'], 3, 'The fix time, from the stored fix.');
+        $this->assertSame(['set', 'follow', 'moved'], $this->logActions());
+    }
+
+    public function testTheDriveIsNotAnnouncedOnlyTheStop(): void
+    {
+        $this->followTeammateFromBase();
+        $before = count($this->noticesFor($this->member));
+
+        $t = $this->base();
+        // On the road: the pin follows every fix, nobody is told.
+        $this->assertNull(commandPostFollowFix($this->missionId, $this->teammate, $this->north(500), self::LNG, $t - 30));
+        $this->assertEqualsWithDelta($this->north(500), loadMissionCommandPost($this->missionId)['lat'], 1e-6, 'Live on the map.');
+        $this->assertNull(commandPostFollowFix($this->missionId, $this->teammate, $this->north(1000), self::LNG, $t - 80));
+        // Pulled up; a few metres of GPS wander, not long enough yet.
+        $this->assertNull(commandPostFollowFix($this->missionId, $this->teammate, $this->north(1010), self::LNG, $t - 130));
+        $this->assertCount($before, $this->noticesFor($this->member), 'Nothing while it drives or has only just stopped.');
+
+        // Over four minutes at the same spot: that is where the command post is now.
+        $settled = commandPostFollowFix($this->missionId, $this->teammate, $this->north(1005), self::LNG, $t - 330);
+        $this->assertNotNull($settled);
+        $this->assertEqualsWithDelta(1000, $settled['moved_m'], 3);
+        $notices = $this->noticesFor($this->member);
+        $this->assertCount($before + 1, $notices, 'Told once.');
+        $this->assertStringContainsString('σταμάτησε σε νέο σημείο', $notices[$before]['message']);
+        $this->assertSame([], array_filter($this->noticesFor($this->teammate), fn($n) => str_contains($n['message'], 'σταμάτησε')),
+            'Not the person holding the device: they were in the vehicle.');
+
+        $cp = loadMissionCommandPost($this->missionId);
+        $this->assertSame('moved', $cp['action']);
+        $this->assertSame('Γιώργος Γ.', $cp['by']);
+
+        // Staying there is not news again.
+        $this->assertNull(commandPostFollowFix($this->missionId, $this->teammate, $this->north(1003), self::LNG, $t - 430));
+        $this->assertCount($before + 1, $this->noticesFor($this->member));
+    }
+
+    public function testComingBackToWhereItWasIsNotNews(): void
+    {
+        $this->followTeammateFromBase();
+        $before = count($this->noticesFor($this->member));
+        commandPostFollowFix($this->missionId, $this->teammate, $this->north(600), self::LNG, $this->base() - 30);
+        commandPostFollowFix($this->missionId, $this->teammate, $this->north(20), self::LNG, $this->base() - 230);
+        $this->assertNull(commandPostFollowFix($this->missionId, $this->teammate, $this->north(15), self::LNG, 0));
+        $this->assertCount($before, $this->noticesFor($this->member), 'A drive round the block and back.');
+        $this->assertNull(dbFetchValue("SELECT cand_lat FROM mission_command_posts WHERE mission_id = ?", [$this->missionId]));
+    }
+
+    public function testAFixOlderThanThePinsIsIgnored(): void
+    {
+        $this->followTeammateFromBase();
+        commandPostFollowFix($this->missionId, $this->teammate, $this->north(300), self::LNG, 100);
+        commandPostFollowFix($this->missionId, $this->teammate, $this->north(900), self::LNG, 400);
+        $this->assertEqualsWithDelta($this->north(300), loadMissionCommandPost($this->missionId)['lat'], 1e-6,
+            'A queued fix from a dead zone must not drag the pin back in time.');
+    }
+
+    public function testAnotherPersonsFixDoesNothing(): void
+    {
+        $this->followTeammateFromBase();
+        $this->assertNull(commandPostFollowFix($this->missionId, $this->member, $this->north(900), self::LNG, 0));
+        $this->assertEqualsWithDelta(self::LAT, loadMissionCommandPost($this->missionId)['lat'], 1e-6);
+    }
+
+    public function testMovingItByHandStopsFollowingAndSaysSo(): void
+    {
+        $this->followTeammateFromBase();
+        setMissionCommandPost($this->missionId, $this->north(300), self::LNG, $this->adminId);
+        $this->assertNull(loadMissionCommandPost($this->missionId)['follow'], 'Or the next fix would carry it straight back.');
+        $this->assertSame(['set', 'follow', 'unfollow', 'moved'], $this->logActions());
+        $this->assertNull(commandPostFollowFix($this->missionId, $this->teammate, $this->north(900), self::LNG, 0));
+        $this->assertEqualsWithDelta($this->north(300), loadMissionCommandPost($this->missionId)['lat'], 1e-6);
+    }
+
+    public function testKeepItHereStaysWhereTheDeviceLeftIt(): void
+    {
+        $this->followTeammateFromBase();
+        commandPostFollowFix($this->missionId, $this->teammate, $this->north(250), self::LNG, 60);
+        $this->assertTrue(stopCommandPostFollow($this->missionId, $this->adminId));
+        $this->assertFalse(stopCommandPostFollow($this->missionId, $this->adminId), 'Nothing left to stop.');
+        $cp = loadMissionCommandPost($this->missionId);
+        $this->assertNull($cp['follow']);
+        $this->assertEqualsWithDelta($this->north(250), $cp['lat'], 1e-6);
+    }
+
+    public function testAFixThroughTheRealPingPathMovesThePin(): void
+    {
+        $this->followTeammateFromBase();
+        dbExecute("DELETE FROM volunteer_pings WHERE user_id = ?", [$this->teammate]);
+        $device = dbFetchOne("SELECT id, name, language FROM users WHERE id = ?", [$this->teammate]);
+        $result = recordVolunteerPing($device, $this->shiftId, $this->north(400), self::LNG, 8.0, null, 'auto', 'native', 0);
+        $this->assertTrue($result['ok'], $result['error'] ?? '');
+        $this->assertEqualsWithDelta(400, gpsDistanceMeters(self::LAT, self::LNG, loadMissionCommandPost($this->missionId)['lat'], self::LNG), 5);
+    }
+
+    public function testTheTimelineSaysWhoseDeviceItFollowed(): void
+    {
+        $this->followTeammateFromBase();
+        commandPostFollowFix($this->missionId, $this->teammate, $this->north(700), self::LNG, $this->base() - 30);
+        commandPostFollowFix($this->missionId, $this->teammate, $this->north(700), self::LNG, 0);
+        stopCommandPostFollow($this->missionId, $this->adminId);
+
+        $lines = array_map(fn($e) => commandPostActivityText($e, 'el'), loadCommandPostActivityEvents($this->missionId));
+        $this->assertSame([
+            'Συντονιστής Τεστ όρισε το Συντονιστικό στον χάρτη',
+            'Συντονιστής Τεστ έβαλε το Συντονιστικό να ακολουθεί τη συσκευή: Γιώργος Γ.',
+            'Το Συντονιστικό μετακινήθηκε κατά ~700 μ. μαζί με τη συσκευή: Γιώργος Γ.',
+            'Συντονιστής Τεστ σταμάτησε την παρακολούθηση της συσκευής (Γιώργος Γ.) — το Συντονιστικό μένει σταθερό',
+        ], $lines);
+    }
+
     public function testOnlyARealPointIsAccepted(): void
     {
         $this->assertTrue(commandPostValidLatLng('35.13', '24.9'));
