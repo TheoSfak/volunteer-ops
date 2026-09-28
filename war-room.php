@@ -3188,6 +3188,80 @@ include __DIR__ . '/includes/header.php';
         .ack-tracker.ack-moved { width: calc(100vw - 16px); }
     }
 
+    /* ── «Εντολές ομάδων» ─────────────────────────────────────────────────
+       The acknowledgement panel's twin, top-left: same look, same layer,
+       same top line (--wr-acktracker-top clears the clock, navbar and a top
+       ticker). Its left edge is the content's, not the screen's, so it does
+       not sit on the sidebar — measured at runtime (syncTeamBoardLeft()), and
+       beside the zoom buttons inside the fullscreen map. */
+    .team-board {
+        position: fixed;
+        left: var(--wr-teamboard-left, 12px);
+        top: var(--wr-acktracker-top, 84px);
+        z-index: 1150;
+        width: 300px;
+        max-width: calc(100vw - 24px);
+        max-height: calc(100vh - var(--wr-acktracker-top, 84px) - 160px);
+        display: flex; flex-direction: column;
+        background: #0f172a; color: #e2e8f0;
+        border: 1px solid #1e3a5f; border-radius: 10px;
+        box-shadow: 0 8px 28px rgba(0,0,0,.45);
+        overflow: hidden;
+    }
+    .team-board[hidden] { display: none; }
+    .team-board-bar {
+        display: flex; align-items: center;
+        padding: .4rem .45rem .4rem .55rem;
+        background: #172554; border-bottom: 1px solid #1e3a5f; flex-shrink: 0;
+        cursor: grab; touch-action: none;
+    }
+    .team-board-toggle {
+        flex: 1; min-width: 0; display: flex; align-items: center; gap: .45rem;
+        background: transparent; border: none; color: #e2e8f0;
+        font-size: .78rem; font-weight: 700; text-align: left; padding: .1rem .15rem;
+        cursor: grab; touch-action: none;
+    }
+    .team-board-toggle > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .team-board-chevron { font-size: .7rem; transition: transform .15s ease; flex-shrink: 0; }
+    .team-board.tb-collapsed .team-board-chevron { transform: rotate(-90deg); }
+    .team-board.tb-collapsed .team-board-list { display: none; }
+    .team-board.tb-dragging { opacity: .93; box-shadow: 0 14px 34px rgba(0,0,0,.6); }
+    .team-board.tb-dragging .team-board-bar, .team-board.tb-dragging .team-board-toggle { cursor: grabbing; }
+    /* Some team has nothing to do: the bar says so in amber even minimized. */
+    .team-board.tb-has-idle .team-board-bar { background: #3b2a08; }
+    .team-board-list { overflow-y: auto; padding: .35rem; display: flex; flex-direction: column; gap: .3rem; }
+    .team-board-team { border: 1px solid #1e3a5f; border-radius: 7px; background: #111c33; padding: .3rem .4rem; }
+    .team-board-name { display: flex; align-items: center; gap: .4rem; font-size: .78rem; font-weight: 700; color: #f1f5f9; }
+    .team-board-swatch { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; border: 1px solid rgba(255,255,255,.5); }
+    /* One open order. The left border is how far it has got, so the column
+       reads before a word of it does: amber sent, blue under way, green
+       there, red «Δεν μπορώ» or a recheck. */
+    .team-board-item {
+        display: block; width: 100%; text-align: left; margin-top: .2rem;
+        background: #0b1426; color: #cbd5e1; border: none; border-left: 3px solid #f59e0b; border-radius: 4px;
+        padding: .15rem .35rem; font-size: .72rem; line-height: 1.3; cursor: pointer;
+    }
+    .team-board-item:hover { background: #16213b; }
+    .team-board-item.tb-go { border-left-color: #60a5fa; }
+    .team-board-item.tb-on { border-left-color: #22c55e; }
+    .team-board-item.tb-bad { border-left-color: #f87171; }
+    .team-board-kind { font-weight: 700; color: #e2e8f0; }
+    .team-board-detail { color: #cbd5e1; overflow-wrap: anywhere; }
+    .team-board-state { display: block; font-size: .68rem; font-weight: 700; color: #fbbf24; }
+    .team-board-item.tb-go .team-board-state { color: #93c5fd; }
+    .team-board-item.tb-on .team-board-state { color: #86efac; }
+    .team-board-item.tb-bad .team-board-state { color: #fca5a5; }
+    .team-board-idle { margin-top: .15rem; font-size: .72rem; font-weight: 700; color: #fbbf24; }
+    .team-board-more { margin-top: .15rem; font-size: .66rem; color: #94a3b8; }
+    @media (prefers-reduced-motion: reduce) { .team-board-chevron { transition: none; } }
+    /* Phone: along the top, full width less the gutters; the acknowledgement
+       panel has the bottom. Starts minimized there (initTeamBoard()), and the
+       list scrolls inside a short cap so the page is still the page. */
+    @media (max-width: 767.98px) {
+        .team-board { left: 8px; width: calc(100vw - 16px); max-width: none; }
+        .team-board-list { max-height: 40vh; }
+    }
+
     /* One row per finding. The left border is the severity, so a coordinator
        reads the shape of the list before reading a single word of it. */
     .assistant-item {
@@ -3627,6 +3701,23 @@ include __DIR__ . '/includes/header.php';
      clipped by. The layer itself is pointer-events:none so it never steals a
      click from the map underneath it; only the cards in it are clickable. -->
 <div id="ackTrackerFloat" class="ack-tracker-float"></div>
+<!-- «Εντολές ομάδων» (v3.349.0): the acknowledgement panel's twin in the
+     top-left corner, answering the other question command keeps asking — what
+     is each team doing right now, and which team has nothing to do. One line
+     per team: its open orders (a point, an area or an incident to go to, a
+     sector to check, a route) with how far each has got, or «Σε αναμονή
+     εντολής». Built entirely by renderTeamBoard() from the dispatches, sectors
+     and routes the page already has; nothing extra rides the poll. -->
+<div id="teamBoard" class="team-board" hidden>
+    <div class="team-board-bar" title="<?= t('teamboard.drag_hint') ?>">
+        <button type="button" id="teamBoardToggle" class="team-board-toggle" aria-expanded="true" aria-controls="teamBoardList">
+            <i class="bi bi-people-fill"></i>
+            <span id="teamBoardBarLabel"><?= t('teamboard.title') ?></span>
+            <i class="bi bi-chevron-down team-board-chevron"></i>
+        </button>
+    </div>
+    <div id="teamBoardList" class="team-board-list"></div>
+</div>
 <?php endif; ?>
 
 <?php if ($canManageWarRoom): ?>
@@ -12740,6 +12831,10 @@ function myOrderEntriesFromSectors(items) {
 // card has its own below.
 function refreshMyOrdersCard() {
     renderMyTasks(myTasks);
+    // Command's «Εντολές ομάδων» reads the same three lists, and every one of
+    // their renderers comes through here (renderTeamBoard() only exists on
+    // command's page).
+    if (typeof renderTeamBoard === 'function') renderTeamBoard();
 }
 
 // Same whole-list-JSON signature technique as renderDispatches/renderMyRoutes,
@@ -12881,6 +12976,8 @@ const WR_TEAMS_AT_LOAD = <?= json_encode(array_values(array_map(fn($team) => [
     'id' => (int) $team['id'],
     'codename' => $team['codename'],
     'team_number' => $team['team_number'],
+    // For the «Εντολές ομάδων» panel's colour swatch (renderTeamBoard()).
+    'color' => $team['color'] ?? null,
     'leader_id' => $team['leader_id'],
     'leader_name' => $team['leader_name'],
     'members' => array_map(fn($m) => ['user_id' => (int) $m['user_id'], 'name' => $m['name']], $team['members']),
@@ -18150,6 +18247,9 @@ function syncTickerSpacing() {
     document.body.classList.toggle('wr-ticker-bottom', wrTickerPos === 'bottom');
     // A bottom ticker coming or going moves the order popup's strip too.
     orderPopupLayout();
+    // «Εντολές ομάδων» (command only): its left edge follows the content, or
+    // the zoom buttons inside the fullscreen map.
+    if (typeof syncTeamBoardLeft === 'function') syncTeamBoardLeft();
 
     // Guarded here rather than at the top of the function: the offsets above
     // must still be published on a page with no .content-wrapper.
@@ -18196,7 +18296,7 @@ function syncMapFullscreenOffset() {
     const x = active ? mapCardEl.scrollLeft : 0;
     const y = active ? mapCardEl.scrollTop : 0;
     const value = (x || y) ? `translate(${x}px, ${y}px)` : '';
-    ['ackTracker', 'ackTrackerFloat', 'orderPopupRoot', 'appClock'].forEach(id => {
+    ['ackTracker', 'ackTrackerFloat', 'teamBoard', 'orderPopupRoot', 'appClock'].forEach(id => {
         const el = document.getElementById(id);
         if (el && el.style.transform !== value) el.style.transform = value;
     });
@@ -18444,7 +18544,7 @@ function hideWarRoomBannerRow(id) {
     // The order popup rides along for the same reason: an order that arrives
     // while a volunteer has the map fullscreen must still be seen. So does the
     // Athens clock strip; the card's padding-top leaves its band free.
-    const ackNodes = ['ackTracker', 'ackTrackerFloat', 'orderPopupRoot', 'appClock']
+    const ackNodes = ['ackTracker', 'ackTrackerFloat', 'teamBoard', 'orderPopupRoot', 'appClock']
         .map(id => document.getElementById(id))
         .filter(Boolean)
         .map(el => ({el: el, parent: el.parentNode, next: el.nextSibling}));
@@ -22115,6 +22215,275 @@ document.getElementById('ackTrackerToggle')?.addEventListener('click', () => {
 })();
 
 renderAckTracker(ackTrackerCards);
+
+// ── «Εντολές ομάδων» (v3.349.0) ─────────────────────────────────────────────
+// What each team is doing right now, and which one has nothing to do — the
+// question the acknowledgement panel on the right cannot answer, because it
+// is built from orders and a team with no order has none to show. This one is
+// built from the teams: every team gets a line, its open orders under it with
+// how far each has got, or «Σε αναμονή εντολής».
+//
+// Nothing new rides the poll: dispatches, sectors and routes are already on
+// this page, whole, for command. The board is rebuilt whenever one of their
+// renderers runs (refreshMyOrdersCard()), which covers the poll and command's
+// own actions alike, and whenever the rosters change (wr-teams-updated).
+//
+// Open means not finished by that team: a point/area/incident until the team
+// presses «Ολοκληρώθηκε», a sector until it is completed, a route until it is
+// completed or cancelled. A «Δεν μπορώ» stays listed, in red — that team is
+// not doing it, and command has to see that as much as an idle team.
+//
+// var, not let, and a ready flag: the renderers that call renderTeamBoard()
+// already run while the page's script is still being read, long before this
+// point, and anything declared with let here would throw at them.
+var teamBoardReady = false;
+var teamBoardTeams = null;       // [{id, label, color}], in the Teams card's order
+var teamBoardRenderedSig = null;
+var teamBoardPos = null;         // {x, y} once moved by its bar; per device
+var teamBoardDragEndedAt = 0;
+var TEAM_BOARD_POS_KEY = 'wr-team-board-pos';
+var TEAM_BOARD_COLLAPSED_KEY = 'wr-team-board-collapsed';
+var TEAM_BOARD_MAX_ITEMS = 3;
+
+// By team number, then name: Alpha 1, Bravo 2, Charlie 3 — the order a
+// coordinator counts them in, whatever order they were created in.
+function teamBoardTeamsFrom(list) {
+    return (list || [])
+        .map(tm => ({id: Number(tm.id), label: teamLabel(tm.codename, tm.team_number), color: tm.color || null,
+                     n: Number(tm.team_number) || 0}))
+        .sort((a, b) => (a.n - b.n) || a.label.localeCompare(b.label, jsLocale))
+        .map(({id, label, color}) => ({id, label, color}));
+}
+
+function teamBoardDeclinedState(declined) {
+    return {state: t('teamboard.state.declined', {time: declined.at || ''}), tone: 'bad'};
+}
+
+// One team's open orders: [{ref, kind, detail, all, state, tone}].
+function teamBoardItems(team) {
+    const items = [];
+    (dispatches || []).forEach(d => {
+        const toAll = d.team_id === null || d.team_id === undefined;
+        if (!toAll && Number(d.team_id) !== team.id) return;
+        // Progress and «Δεν μπορώ» are kept per team, by its label.
+        const prog = (d.progress || []).find(p => p.label === team.label);
+        if (prog && prog.completed) return;
+        const declined = (d.declines || []).find(x => x.team === team.label);
+        let s;
+        if (declined) s = teamBoardDeclinedState(declined);
+        else if (prog && prog.arrived) s = {state: t('teamboard.state.arrived', {time: prog.arrived}), tone: 'on'};
+        else if (prog && prog.departed) s = {state: t('teamboard.state.en_route', {time: prog.departed}), tone: 'go'};
+        else s = {state: t('teamboard.state.sent'), tone: 'new'};
+        items.push(Object.assign({
+            ref: 'dispatch:' + d.id,
+            kind: d.incident ? 'dispatch_incident' : (d.type === 'point' ? 'dispatch_point' : 'dispatch_area'),
+            detail: d.incident ? incidentShortText(d.incident) : (d.label || ''),
+            all: toAll,
+        }, s));
+    });
+    (sectors || []).forEach(sec => {
+        if (Number(sec.team_id) !== team.id || sec.status === 'completed' || sec.status === 'not_started') return;
+        let s;
+        if (sec.declined) s = teamBoardDeclinedState(sec.declined);
+        else if (sec.status === 'assigned') s = sec.acknowledged_at
+            ? {state: t('teamboard.state.received'), tone: 'go'}
+            : {state: t('teamboard.state.sent'), tone: 'new'};
+        else s = {state: sec.status_label, tone: sec.status === 'needs_recheck' ? 'bad' : 'go'};
+        const area = (areas || []).find(a => a.id === sec.area_id);
+        items.push(Object.assign({ref: 'sector:' + sec.id, kind: 'sector', detail: sec.label + (area ? ' — ' + area.label : ''), all: false}, s));
+    });
+    (routes || []).forEach(r => {
+        if (Number(r.team_id) !== team.id || r.status !== 'active') return;
+        const wps = r.waypoints || [];
+        const done = wps.filter(w => w.completed_at || w.skipped_at).length;
+        const moving = wps.some(w => w.departed_at || w.arrived_at || w.completed_at || w.skipped_at);
+        const s = r.declined ? teamBoardDeclinedState(r.declined)
+            : {state: t('teamboard.state.route', {n: Math.min(done + 1, wps.length), total: wps.length}), tone: moving ? 'go' : 'new'};
+        items.push(Object.assign({ref: 'route:' + r.id, kind: 'route', detail: r.title || t('route.default_title'), all: false}, s));
+    });
+    return items;
+}
+
+function renderTeamBoard() {
+    if (!teamBoardReady) return;
+    const panel = document.getElementById('teamBoard');
+    const list = document.getElementById('teamBoardList');
+    if (!panel || !list) return;
+    const model = teamBoardTeams.map(team => ({id: team.id, label: team.label, color: team.color, items: teamBoardItems(team)}));
+    const sig = JSON.stringify(model);
+    if (sig === teamBoardRenderedSig) return;
+    teamBoardRenderedSig = sig;
+    // No teams, nothing to say: the panel only appears once there are some.
+    panel.hidden = !model.length;
+    if (!model.length) return;
+    const busy = model.filter(team => team.items.length).length;
+    document.getElementById('teamBoardBarLabel').textContent = t('teamboard.bar', {busy: busy, total: model.length});
+    panel.classList.toggle('tb-has-idle', busy < model.length);
+    list.innerHTML = model.map(team => {
+        const bg = teamBadgeColorsJs(team.color)[0];
+        const items = team.items.slice(0, TEAM_BOARD_MAX_ITEMS).map(it => `
+            <button type="button" class="team-board-item tb-${it.tone}" data-tb-ref="${escapeHtml(it.ref)}" title="${escapeHtml(t('teamboard.show_on_map'))}">
+                <span class="team-board-kind">${escapeHtml(t('teamboard.kind.' + it.kind))}</span>${it.detail ? ` <span class="team-board-detail">«${escapeHtml(it.detail)}»</span>` : ''}${it.all ? ` <span class="team-board-detail">${escapeHtml(t('teamboard.all_teams'))}</span>` : ''}
+                <span class="team-board-state">${escapeHtml(it.state)}</span>
+            </button>`).join('');
+        const more = team.items.length > TEAM_BOARD_MAX_ITEMS
+            ? `<div class="team-board-more">${escapeHtml(t('teamboard.more', {n: team.items.length - TEAM_BOARD_MAX_ITEMS}))}</div>` : '';
+        return `<div class="team-board-team">
+            <div class="team-board-name"><span class="team-board-swatch" style="background:${escapeHtml(bg)}"></span>${escapeHtml(team.label)}</div>
+            ${team.items.length ? items + more : `<div class="team-board-idle"><i class="bi bi-hourglass-split me-1"></i>${escapeHtml(t('teamboard.waiting'))}</div>`}
+        </div>`;
+    }).join('');
+    placeTeamBoard();
+}
+
+// A tap on an order shows it on the map — the dispatch with its popup open,
+// the sector or the route framed — the same way the order popup does.
+function teamBoardTarget(ref) {
+    const [type, rawId] = String(ref).split(':');
+    const id = Number(rawId);
+    if (type === 'dispatch') {
+        const d = (dispatches || []).find(x => x.id === id);
+        if (!d) return null;
+        const nav = dispatchNavPoint(d);
+        return {kind: 'dispatch', id: d.id, card: null, target: d.type === 'point'
+            ? {kind: 'point', lat: nav.lat, lng: nav.lng, nav: nav}
+            : {kind: 'polygon', pts: d.geo, nav: nav}};
+    }
+    if (type === 'sector') {
+        const sec = (sectors || []).find(x => x.id === id);
+        if (!sec || !Array.isArray(sec.geo) || sec.geo.length < 3) return null;
+        return {kind: 'sector', id: sec.id, card: null, target: {kind: 'polygon', pts: sec.geo, nav: polygonNavTarget(sec.geo)}};
+    }
+    if (type === 'route') {
+        const r = (routes || []).find(x => x.id === id);
+        const pts = r ? (r.waypoints || []).map(w => [w.lat, w.lng]) : [];
+        if (!pts.length) return null;
+        return {kind: 'route', id: r.id, card: null, target: {kind: 'line', pts: pts, nav: {lat: pts[0][0], lng: pts[0][1]}}};
+    }
+    return null;
+}
+document.getElementById('teamBoardList')?.addEventListener('click', e => {
+    const btn = e.target.closest('[data-tb-ref]');
+    if (!btn) return;
+    const m = teamBoardTarget(btn.dataset.tbRef);
+    if (!m) return;
+    // Out of the way of what it was asked to show: on anything narrower than
+    // a wide desktop the open panel covers most of the map. Folded to its bar
+    // for now, not remembered — one tap brings it back.
+    applyTeamBoardCollapsed(true);
+    opGotoMap(m);
+});
+
+// Its left edge is the content's (right of the sidebar), measured because the
+// sidebar can be folded; inside the fullscreen map there is no sidebar, and it
+// stands beside Leaflet's zoom buttons rather than on them. Called from
+// syncTickerSpacing(), which every resize and fullscreen toggle already runs.
+function syncTeamBoardLeft() {
+    const panel = document.getElementById('teamBoard');
+    if (!panel) return;
+    let left = 12;
+    if (panel.closest('#mapCard')) {
+        left = 56;
+    } else {
+        const content = document.querySelector('.content-wrapper');
+        if (content) left = Math.max(12, Math.round(content.getBoundingClientRect().left) + 12);
+    }
+    document.documentElement.style.setProperty('--wr-teamboard-left', left + 'px');
+}
+
+// Where it was dragged to, kept on screen for its current size and never
+// written back (the acknowledgement panel's placeAckPanel(), for this one).
+function placeTeamBoard() {
+    const panel = document.getElementById('teamBoard');
+    if (!panel) return;
+    if (!teamBoardPos) {
+        panel.style.left = panel.style.top = '';
+        return;
+    }
+    if (panel.hidden) return;
+    const pos = clampAckPos(teamBoardPos.x, teamBoardPos.y, panel.offsetWidth, panel.offsetHeight);
+    panel.style.left = pos.x + 'px';
+    panel.style.top = pos.y + 'px';
+}
+
+function applyTeamBoardCollapsed(collapsed) {
+    document.getElementById('teamBoard')?.classList.toggle('tb-collapsed', collapsed);
+    document.getElementById('teamBoardToggle')?.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+}
+
+(function initTeamBoard() {
+    const panel = document.getElementById('teamBoard');
+    if (!panel) return;
+    try {
+        const stored = JSON.parse(localStorage.getItem(TEAM_BOARD_POS_KEY) || 'null');
+        if (stored && typeof stored.x === 'number' && typeof stored.y === 'number') teamBoardPos = stored;
+    } catch (e) { /* blocked storage — it starts in its corner */ }
+    // Open on a desktop; minimized to its bar on a phone, where it would
+    // otherwise sit across the top of the page. A remembered choice wins.
+    let stored = null;
+    try { stored = localStorage.getItem(TEAM_BOARD_COLLAPSED_KEY); } catch (e) {}
+    applyTeamBoardCollapsed(stored !== null ? stored === '1' : window.matchMedia('(max-width: 767.98px)').matches);
+
+    document.getElementById('teamBoardToggle')?.addEventListener('click', () => {
+        // The end of a drag by the bar, not a click on it.
+        if (performance.now() - teamBoardDragEndedAt < 400) return;
+        const collapsed = !panel.classList.contains('tb-collapsed');
+        applyTeamBoardCollapsed(collapsed);
+        try { localStorage.setItem(TEAM_BOARD_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch (e) {}
+    });
+
+    // Dragged by its bar, like the acknowledgement panel: nothing happens
+    // until the pointer has travelled 5px, so a tap stays a tap.
+    let pending = null;
+    let dragging = false;
+    panel.querySelector('.team-board-bar').addEventListener('pointerdown', e => {
+        if (e.button !== undefined && e.button !== 0) return;
+        const r = panel.getBoundingClientRect();
+        pending = {x: e.clientX, y: e.clientY, dx: e.clientX - r.left, dy: e.clientY - r.top, w: r.width, h: r.height};
+    });
+    document.addEventListener('pointermove', e => {
+        if (!pending) return;
+        if (!dragging) {
+            if (Math.hypot(e.clientX - pending.x, e.clientY - pending.y) < 5) return;
+            dragging = true;
+            panel.classList.add('tb-dragging');
+            document.body.style.userSelect = 'none';
+        }
+        teamBoardPos = clampAckPos(e.clientX - pending.dx, e.clientY - pending.dy, pending.w, pending.h);
+        placeTeamBoard();
+        e.preventDefault();
+    }, {passive: false});
+    const endDrag = () => {
+        if (dragging) {
+            panel.classList.remove('tb-dragging');
+            document.body.style.userSelect = '';
+            try { localStorage.setItem(TEAM_BOARD_POS_KEY, JSON.stringify(teamBoardPos)); } catch (e) {}
+            teamBoardDragEndedAt = performance.now();
+        }
+        pending = null;
+        dragging = false;
+    };
+    document.addEventListener('pointerup', endDrag);
+    document.addEventListener('pointercancel', endDrag);
+    window.addEventListener('resize', placeTeamBoard);
+    if (window.ResizeObserver) {
+        new ResizeObserver(() => placeTeamBoard()).observe(panel);
+        // The sidebar folding moves the content's left edge without a resize.
+        const content = document.querySelector('.content-wrapper');
+        if (content) new ResizeObserver(() => syncTeamBoardLeft()).observe(content);
+    }
+
+    document.addEventListener('wr-teams-updated', e => {
+        if (!e.detail || !Array.isArray(e.detail.teams)) return;
+        teamBoardTeams = teamBoardTeamsFrom(e.detail.teams);
+        renderTeamBoard();
+    });
+
+    teamBoardTeams = teamBoardTeamsFrom(WR_TEAMS_AT_LOAD);
+    teamBoardReady = true;
+    syncTeamBoardLeft();
+    renderTeamBoard();
+})();
 <?php endif; ?>
 
 // Named (not the previous inline arrow passed straight to setInterval) so
