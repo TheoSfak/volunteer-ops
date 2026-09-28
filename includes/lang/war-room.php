@@ -631,6 +631,12 @@ return [
         'request.speak.send_all' => 'Εκφώνηση σε όλους ({count})',
         'request.speak.send_selected' => 'Εκφώνηση στους επιλεγμένους',
         'request.speak.no_support' => 'Αυτό το πρόγραμμα περιήγησης δεν έχει φωνητική σύνθεση — η ανακοίνωση θα φτάσει ως κείμενο, χωρίς εκφώνηση.',
+        'speech.app_update' => 'Για να ακούγονται οι φωνητικές ανακοινώσεις, εγκαταστήστε τη νέα έκδοση της εφαρμογής (μενού πάνω δεξιά → Εφαρμογή Android).',
+        'speech.open_in_browser' => 'Εδώ οι φωνητικές ανακοινώσεις δεν ακούγονται. Ανοίξτε τη σελίδα στο Chrome ή στην εφαρμογή.',
+        'speech.no_engine' => 'Το κινητό δεν έχει μηχανή ομιλίας. Εγκαταστήστε τις «Υπηρεσίες ομιλίας από την Google» από το Play Store.',
+        'speech.no_greek_voice' => 'Λείπει η ελληνική φωνή από το κινητό: Ρυθμίσεις → Γλώσσες → Μετατροπή κειμένου σε ομιλία → εγκαταστήστε τα Ελληνικά.',
+        'speech.no_voice' => 'Λείπει η φωνή αυτής της γλώσσας από το κινητό: Ρυθμίσεις → Γλώσσες → Μετατροπή κειμένου σε ομιλία.',
+        'speech.failed' => 'Η ανακοίνωση δεν μπόρεσε να εκφωνηθεί — διαβάστε την στην οθόνη.',
 
         // Activity
         'activity.panel_title' => 'Δραστηριότητα',
@@ -2980,6 +2986,12 @@ return [
         'request.speak.send_all' => 'Announce to all ({count})',
         'request.speak.send_selected' => 'Announce to selected',
         'request.speak.no_support' => 'This browser has no speech synthesis — the announcement will arrive as text, without being read aloud.',
+        'speech.app_update' => 'To hear voice announcements, install the new version of the app (top-right menu → Android app).',
+        'speech.open_in_browser' => 'Voice announcements cannot play here. Open the page in Chrome or in the app.',
+        'speech.no_engine' => 'This phone has no speech engine. Install “Speech Services by Google” from the Play Store.',
+        'speech.no_greek_voice' => 'The Greek voice is missing on this phone: Settings → Languages → Text-to-speech output → install Greek.',
+        'speech.no_voice' => 'The voice for this language is missing on this phone: Settings → Languages → Text-to-speech output.',
+        'speech.failed' => 'The announcement could not be read aloud — read it on the screen.',
 
         'activity.panel_title' => 'Activity',
         'activity.export_btn' => 'Export Excel',

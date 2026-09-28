@@ -17692,8 +17692,116 @@ const SPEECH_RETRYABLE_ERRORS = ['network', 'synthesis-failed', 'synthesis-unava
 // clearing the keep-alive timer that now belongs to that newer message.
 let speechGeneration = 0;
 
+// ── Inside the Android app ──────────────────────────────────────────────────
+// The APK shows this page in an Android WebView, and a WebView has no Web
+// Speech API at all: window.speechSynthesis and SpeechSynthesisUtterance are
+// both undefined (checked on WebView 124). Chrome on the same phone speaks
+// because Chrome carries its own bridge to Android's speech engine; the
+// WebView does not. SPEECH_SUPPORTED was therefore false in the app and
+// speakAnnouncement() returned before doing anything — which is why an
+// announcement reached the app as text and stayed silent, replay button
+// included, with nothing on screen to say so.
+//
+// So inside the app the page speaks through Android's own TextToSpeech, via
+// the @capacitor-community/text-to-speech plugin (raw bridge, no bundler —
+// same as BackgroundGeolocation). It drives the phone's default engine, the
+// same one Chrome uses: a phone that speaks Greek in Chrome speaks it here.
+function inAndroidWebView() {
+    const cap = window.Capacitor;
+    if (cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform()) return true;
+    // The bridge can land seconds after this script runs (see the bounded
+    // poll in the GPS hook); the WebView's own UA token says where we are
+    // before it does. Also true for a link opened inside Viber or Messenger —
+    // the same WebView, just as mute.
+    return /;\s*wv\)/.test(navigator.userAgent || '');
+}
+function nativeTtsPlugin() {
+    const cap = window.Capacitor;
+    return (cap && cap.Plugins && cap.Plugins.TextToSpeech) || null;
+}
+// Resolves to the plugin, or to null once it is plain there is none. Never
+// rejects: the caller's only question is which message to show.
+function waitForNativeTts(maxMs) {
+    return new Promise(resolve => {
+        const started = Date.now();
+        const look = () => {
+            const tts = nativeTtsPlugin();
+            if (tts) { resolve(tts); return; }
+            // The bridge is up and the plugin is not in it: an APK from before
+            // the plugin shipped. Waiting longer cannot change that.
+            const cap = window.Capacitor;
+            if (cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform()) { resolve(null); return; }
+            if (Date.now() - started >= maxMs) { resolve(null); return; }
+            setTimeout(look, 250);
+        };
+        look();
+    });
+}
+
+function speakAnnouncementNative(text) {
+    // Supersedes whatever the web engine or an earlier native call was doing:
+    // the plugin's own queueStrategy 0 (flush) stops the old utterance, and
+    // the generation guard stops the old call's promise reacting to that.
+    const generation = ++speechGeneration;
+    stopSpeechKeepAlive();
+    const lang = announcementLang(text);
+
+    waitForNativeTts(5000).then(tts => {
+        if (generation !== speechGeneration) return;
+        if (!tts) {
+            // No native engine. Before calling it silent, give the WebView's
+            // own engine its chance, should a future WebView ship one that
+            // actually lists voices.
+            if (SPEECH_SUPPORTED && (window.speechSynthesis.getVoices() || []).length) {
+                speakAnnouncementWeb(text, false);
+                return;
+            }
+            speechDebugLog('error', {engine: 'android', why: 'no-plugin', bridge: !!window.Capacitor});
+            opToast(t(window.Capacitor ? 'speech.app_update' : 'speech.open_in_browser'), {warn: true, ms: 9000});
+            return;
+        }
+
+        // Not chunked like the web path: Android's engine takes up to 4000
+        // characters in one utterance and has neither of Chrome's cut-offs,
+        // and a single call has a single promise to answer for the message.
+        const attempt = (retriesLeft) => {
+            const startedAt = Date.now();
+            speechDebugLog('speak', {engine: 'android', chars: text.length, lang: lang});
+            tts.speak({text: text, lang: lang, rate: 0.95, pitch: 1.0, volume: 1.0, queueStrategy: 0})
+                .then(() => {
+                    if (generation === speechGeneration) speechDebugLog('piece', {engine: 'android', why: 'end', ms: Date.now() - startedAt});
+                })
+                .catch(err => {
+                    if (generation !== speechGeneration) return;
+                    const code = (err && err.code) || '';
+                    const msg = String((err && err.message) || err || '');
+                    speechDebugLog('error', {engine: 'android', code: code, msg: msg});
+                    // Android binds its speech engine asynchronously when the
+                    // app starts, so the very first announcement after a cold
+                    // start can find it not ready yet.
+                    if (code === 'UNAVAILABLE' && retriesLeft > 0) {
+                        setTimeout(() => { if (generation === speechGeneration) attempt(retriesLeft - 1); }, 1500);
+                        return;
+                    }
+                    let key = 'speech.failed';
+                    if (code === 'UNAVAILABLE') key = 'speech.no_engine';
+                    else if (/not supported/i.test(msg)) key = lang === 'el-GR' ? 'speech.no_greek_voice' : 'speech.no_voice';
+                    opToast(t(key), {warn: true, ms: 10000});
+                });
+        };
+        attempt(2);
+    });
+    return true;
+}
+
 function speakAnnouncement(text, localOnly) {
     text = String(text || '').trim();
+    if (!text) return false;
+    if (inAndroidWebView()) return speakAnnouncementNative(text);
+    return speakAnnouncementWeb(text, localOnly);
+}
+
+function speakAnnouncementWeb(text, localOnly) {
     if (!SPEECH_SUPPORTED || !text) return false;
     const synth = window.speechSynthesis;
     try {
@@ -17788,7 +17896,7 @@ function speakAnnouncement(text, localOnly) {
                     // message — a second failure is the engine, not the voice.
                     retried = true;
                     halt('retry-local');
-                    speakAnnouncement(pieces.slice(index).join(' '), true);
+                    speakAnnouncementWeb(pieces.slice(index).join(' '), true);
                     return;
                 }
                 // This voice failed on this piece. Do not drag the rest of the
@@ -17823,7 +17931,8 @@ function speakAnnouncement(text, localOnly) {
     const btn = document.getElementById('speakPreviewBtn');
     const box = document.getElementById('speakText');
     if (!btn || !box) return;
-    if (!SPEECH_SUPPORTED) {
+    // In the Android app it is Android's engine that speaks, not the page's.
+    if (!SPEECH_SUPPORTED && !inAndroidWebView()) {
         // Sent from a browser with no speech engine, the announcement still
         // reaches the field and is still read aloud there — it is the recipient's
         // device that speaks, not this one. So the notice says what is actually
@@ -20905,14 +21014,20 @@ document.getElementById('assistantAskBtn')?.addEventListener('click', () => assi
 let assistantVoiceOn = false;
 
 function assistantVoiceStop() {
-    if (!SPEECH_SUPPORTED) return;
+    // Inside the Android app the voice is Android's own engine, not the
+    // WebView's (see speakAnnouncementNative), and only it can be silenced.
+    const tts = nativeTtsPlugin();
+    if (!SPEECH_SUPPORTED && !tts) return;
     // The generation moves BEFORE the cancel, never after. cancel() delivers
     // an error event to the utterance it stops, and an utterance that still
     // believes it is the current one treats that as a failure worth retrying —
     // which would restart, out loud, the very line being silenced.
     speechGeneration++;
     stopSpeechKeepAlive();
-    try { window.speechSynthesis.cancel(); } catch (e) { /* engine already gone */ }
+    if (tts) { try { tts.stop().catch(() => {}); } catch (e) { /* bridge gone */ } }
+    if (SPEECH_SUPPORTED) {
+        try { window.speechSynthesis.cancel(); } catch (e) { /* engine already gone */ }
+    }
 }
 
 // Shared with the dictation below, which wrote it first: one transient line
@@ -20928,7 +21043,7 @@ function assistantSayVoiceMsg(text, cls) {
 
 (function () {
     const btn = document.getElementById('assistantSpeakBtn');
-    if (!btn || !SPEECH_SUPPORTED) return;
+    if (!btn || (!SPEECH_SUPPORTED && !inAndroidWebView())) return;
     btn.classList.remove('d-none');
 
     // Per browser and per device, and nowhere near the server: whether you
