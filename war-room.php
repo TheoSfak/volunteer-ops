@@ -1564,6 +1564,9 @@ if (get('ajax') === '1') {
     // Mass-casualty triage board. Null on a mission that never had a Μαζικό
     // Συμβάν, so an ordinary mission's poll carries one null and nothing else.
     $triage = ($canManageWarRoom || $isApprovedParticipant) ? loadTriageStateForMission($missionId, $canManageWarRoom, (int) $user['id']) : null;
+    // The Συντονιστικό. Null until command places it, so the page reads the
+    // key with `in`, like triage.
+    $commandPost = ($canManageWarRoom || $isApprovedParticipant) ? loadMissionCommandPost($missionId) : null;
     $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
     // Command staff only, same as $sosAlerts: a volunteer's tab must not
     // carry other people's voice messages, and has nothing to do with them.
@@ -1639,6 +1642,7 @@ if (get('ajax') === '1') {
         'shortageReports' => $shortageReports,
         'incidents' => $incidents,
         'triage' => $triage,
+        'commandPost' => $commandPost,
         'sosAlerts' => $sosAlerts,
         'voiceMessages' => $voiceMessages,
         'pointsOfInterest' => $pointsOfInterest,
@@ -1776,6 +1780,8 @@ $routes = loadRoutesForUser($missionId, (int)$user['id'], $canManageWarRoom);
 $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
 $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom, (int) $user['id']) : [];
 $triage = ($canManageWarRoom || $isApprovedParticipant) ? loadTriageStateForMission($missionId, $canManageWarRoom, (int) $user['id']) : null;
+// The Συντονιστικό: everybody on the operation sees it (null until placed).
+$commandPost = ($canManageWarRoom || $isApprovedParticipant) ? loadMissionCommandPost($missionId) : null;
 $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
 $voiceMessages = $canManageWarRoom ? loadUnacknowledgedVoiceMessagesForMission($missionId) : [];
 $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
@@ -3451,6 +3457,27 @@ include __DIR__ . '/includes/header.php';
     .triage-scanner-close { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); }
     .triage-marker { color: #fff; font: 700 11px/1 SFMono-Regular, Consolas, monospace; padding: 3px 5px; border-radius: 6px; border: 2px solid #fff; box-shadow: 0 1px 4px #0008; white-space: nowrap; }
     .triage-marker.is-gone { opacity: .45; }
+    /* Συντονιστικό: a dark label with an amber rim and a point under it. The
+       tip is the spot (the icon is 0x0 at the coordinate), so a drag moves the
+       spot, not the label. Dark on amber reads on street, topo and satellite. */
+    .wr-cp-marker { position: absolute; left: 0; top: 0; transform: translate(-50%, calc(-100% - 7px)); display: inline-flex; align-items: center; gap: 4px; background: #0f172a; color: #fff; font: 700 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 5px 8px; border-radius: 8px; border: 2px solid #fbbf24; box-shadow: 0 2px 6px rgba(0,0,0,.55); white-space: nowrap; cursor: pointer; }
+    .wr-cp-marker .bi { color: #fbbf24; font-size: 14px; }
+    .wr-cp-marker::after { content: ''; position: absolute; left: 50%; bottom: -9px; transform: translateX(-50%); border: 7px solid transparent; border-top-color: #fbbf24; border-bottom: 0; }
+    .leaflet-marker-draggable .wr-cp-marker { cursor: move; }
+    /* Its button, under the zoom buttons. Wider with a word while command
+       has not placed it yet. */
+    /* Specific enough to beat Leaflet's own .leaflet-touch .leaflet-bar a,
+       which fixes every bar button at 30px wide. */
+    .leaflet-bar.wr-cp-control a, .leaflet-touch .leaflet-bar.wr-cp-control a { display: flex; align-items: center; justify-content: center; gap: 5px; width: auto; min-width: 30px; padding: 0 7px; color: #0f172a; font: 600 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif; white-space: nowrap; }
+    .wr-cp-control a .bi { color: #d97706; font-size: 15px; }
+    .leaflet-bar.wr-cp-control.is-unset a { background: #fffbeb; }
+    .leaflet-bar.wr-cp-control.is-unset a:hover { background: #fef3c7; }
+    .wr-cp-flag { color: #d97706; }
+    /* Its own colours: the theme leaves .alert without a background, which
+       over a busy map made the hint unreadable. And no entrance animation:
+       the theme's fadeInUp animates transform, so the hint slid in off-centre
+       and jumped into place at the end. */
+    .wr-cp-pick-hint { position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 1000; text-align: center; max-width: calc(100% - 16px); background: #fffbeb; color: #1f2937; border: 2px solid #f59e0b; box-shadow: 0 2px 8px rgba(0,0,0,.35); animation: none; }
 </style>
 
 <div class="war-room-hero p-4 mb-4 shadow-sm">
@@ -6410,6 +6437,15 @@ const TRIAGE_MISSION_ID = <?= $missionId ?>;
 const TRIAGE_CLOCK_OFFSET_S = <?= time() ?> - Math.floor(Date.now() / 1000);
 let sosAlerts = <?= json_encode($sosAlerts) ?>;
 let voiceMessages = <?= json_encode($voiceMessages, JSON_UNESCAPED_UNICODE) ?>;
+// The Συντονιστικό (null until command places it). See renderCommandPost().
+let commandPost = <?= json_encode($commandPost, JSON_UNESCAPED_UNICODE) ?>;
+// Its own copy of canManageWarRoom: CAN_MANAGE_WAR_ROOM is declared further
+// down than the map code that first draws the command post.
+const CP_CAN_MANAGE = <?= json_encode($canManageWarRoom) ?>;
+// A move shorter than this is announced to nobody (COMMAND_POST_NOTIFY_MIN_M).
+const CP_NOTIFY_MIN_M = <?= (int) COMMAND_POST_NOTIFY_MIN_M ?>;
+// Shown in its popup: the channel command listens on, set with the briefing.
+const MISSION_RADIO_CHANNEL = <?= json_encode(trim((string) ($mission['radio_channel'] ?? '')), JSON_UNESCAPED_UNICODE) ?>;
 let pointsOfInterest = <?= json_encode($pointsOfInterest) ?>;
 let missingPerson = <?= json_encode($missingPerson) ?>;
 // weather can be non-null purely because exposureUrgencyOn fetched it for the
@@ -9594,6 +9630,8 @@ function mapGesturePoint(e) {
     });
     (missionIncidents || []).forEach(r => consider(r.lat, r.lng, incidentShortText(r), {incident: r}));
     if (missionLocation.lat) consider(missionLocation.lat, missionLocation.lng, t('map.mission_point_label'));
+    // «Ποια ομάδα είναι πιο κοντά» to the command post, measured from it.
+    if (commandPost) consider(commandPost.lat, commandPost.lng, t('cp.label'));
     return best || {lat: e.latlng.lat, lng: e.latlng.lng, label: null};
 }
 
@@ -9634,6 +9672,7 @@ function openMapContextMenu(point, touch) {
             document.getElementById('routeComposerModal') ? item('cmd-route', 'bi-signpost-split', t('measure.cmd_route')) : '',
             document.getElementById('mapIncidentModal') ? item('cmd-incident', 'bi-heart-pulse-fill', t('measure.cmd_incident')) : '',
             item('cmd-note', 'bi-fonts', t('measure.cmd_note')),
+            item('cmd-cp', 'bi-house-gear-fill', t(commandPost ? 'cp.ctx_move' : 'cp.ctx_set')),
         ].join('')
         : '';
     const sectorLines = mapSectorsAt(point.lat, point.lng)
@@ -9668,6 +9707,7 @@ function openMapContextMenu(point, touch) {
         else if (action === 'cmd-route') mapCommandRoute(point);
         else if (action === 'cmd-incident') mapCommandIncident(point);
         else if (action === 'cmd-note') openTextAnnotationPopup(L.latLng(point.lat, point.lng));
+        else if (action === 'cmd-cp') cpPlace(point.lat, point.lng);
     });
     // The height fills in when it arrives, and the line simply goes away if
     // it cannot be had — it is a detail of the point, not worth an error.
@@ -10368,7 +10408,7 @@ function mapCommandIncident(point) {
 })();
 
 map.on('contextmenu', e => {
-    if (activeTool || triagePickKind || addingBuildingToSectorId !== null) return;
+    if (activeTool || triagePickKind || cpPickMode || addingBuildingToSectorId !== null) return;
     const ev = e.originalEvent;
     if (ev && ev.target && ev.target.closest && ev.target.closest('.leaflet-popup, .leaflet-control')) return;
     const touch = mapGestureIsTouch(ev);
@@ -10384,9 +10424,281 @@ document.addEventListener('keydown', e => {
 // sends everyone — so it gets directions like any other destination. The
 // briefing sheet (briefing-view.php) has always offered them here; the live
 // map was the one place that did not.
-if (missionLocation.lat) L.marker([missionLocation.lat, missionLocation.lng]).addTo(map).bindPopup(
-    '<strong>' + t('map.mission_point_label') + '</strong><br><?= h(addslashes($mission['title'])) ?><br>'
-    + navigationBtnHtml(missionLocation.lat, missionLocation.lng));
+// Built when opened, so command is offered «Το Συντονιστικό είναι εδώ» only
+// while there is no command post yet.
+if (missionLocation.lat) L.marker([missionLocation.lat, missionLocation.lng]).addTo(map).bindPopup(() => {
+    const div = document.createElement('div');
+    div.innerHTML = '<strong>' + t('map.mission_point_label') + '</strong><br><?= h(addslashes($mission['title'])) ?><br>'
+        + navigationBtnHtml(missionLocation.lat, missionLocation.lng)
+        + (CP_CAN_MANAGE && !commandPost
+            ? `<button type="button" class="btn btn-sm btn-outline-dark w-100 mt-2" data-cp-here><i class="bi bi-house-gear-fill me-1"></i>${escapeHtml(t('cp.mission_point_btn'))}</button>`
+            : '');
+    div.querySelector('[data-cp-here]')?.addEventListener('click', () => {
+        map.closePopup();
+        cpPlace(missionLocation.lat, missionLocation.lng);
+    });
+    return div;
+});
+
+// ── Συντονιστικό (the command post) ──────────────────────────────────────────
+// One point per mission, placed by command and moved whenever the command post
+// itself moves — it is often a vehicle. Everybody on the operation sees it,
+// with directions, and is told (a notice in the order popup) when it is set
+// up or moves CP_NOTIFY_MIN_M or more. Command places it from the map
+// header's button, the right-click menu, or the mission point's popup, and
+// moves it from its popup («Μετακίνηση»), the right-click menu, or by dragging
+// it — the one of the three that can happen by accident, so it alone asks
+// first. Server side: includes/functions-command-post.php.
+let commandPostMarker = null;
+let commandPostRenderedSig = null;
+let cpDragging = false;
+let cpPickMode = null;      // 'set' | 'move' while waiting for the tap
+let cpPickHandler = null;
+
+function cpDistanceText(metres) {
+    if (metres < 1000) return t('cp.distance_m', {n: Math.round(metres / 10) * 10});
+    const km = metres / 1000;
+    return t('cp.distance_km', {n: km.toLocaleString(jsLocale, {maximumFractionDigits: km < 10 ? 1 : 0})});
+}
+
+// A label with a point under it, anchored at the tip — the spot itself, which
+// is what a drag moves. popupAnchor lifts the popup clear of the label.
+function cpIcon() {
+    return L.divIcon({
+        className: 'wr-cp-icon',
+        html: `<div class="wr-cp-marker"><i class="bi bi-house-gear-fill"></i><span>${escapeHtml(t('cp.label'))}</span></div>`,
+        iconSize: [0, 0], iconAnchor: [0, 0], popupAnchor: [0, -36],
+    });
+}
+
+function renderCommandPost(cp) {
+    commandPost = cp || null;
+    cpSyncButton();
+    const sig = JSON.stringify(commandPost);
+    // A poll landing mid-drag must not snap the marker back under the pointer;
+    // the drag's own answer redraws it.
+    if (sig === commandPostRenderedSig || cpDragging || !map) return;
+    commandPostRenderedSig = sig;
+    if (!commandPost) {
+        if (commandPostMarker) { commandPostMarker.remove(); commandPostMarker = null; }
+        return;
+    }
+    const ll = [commandPost.lat, commandPost.lng];
+    if (!commandPostMarker) {
+        commandPostMarker = L.marker(ll, {
+            icon: cpIcon(), zIndexOffset: 3000, draggable: CP_CAN_MANAGE, title: t('cp.label'),
+        // Top-left padding keeps the popup out from under the zoom buttons.
+        }).bindPopup(() => cpPopupContent(), {minWidth: 230, maxWidth: 300, autoPanPaddingTopLeft: [52, 12]}).addTo(map);
+        if (CP_CAN_MANAGE) {
+            commandPostMarker.on('dragstart', () => { cpDragging = true; commandPostMarker.closePopup(); });
+            commandPostMarker.on('dragend', cpDragEnd);
+        }
+        return;
+    }
+    commandPostMarker.setLatLng(ll);
+    // Someone else moved it or rewrote the note while this popup was open.
+    // Not while command is typing a note into it.
+    const popupEl = commandPostMarker.isPopupOpen() ? commandPostMarker.getPopup().getElement() : null;
+    if (popupEl && !popupEl.contains(document.activeElement)) commandPostMarker.getPopup().update();
+}
+
+function cpDragEnd() {
+    const to = commandPostMarker.getLatLng();
+    const back = () => {
+        cpDragging = false;
+        if (commandPost) commandPostMarker.setLatLng([commandPost.lat, commandPost.lng]);
+    };
+    if (!commandPost) { back(); return; }
+    const metres = L.latLng(commandPost.lat, commandPost.lng).distanceTo(to);
+    if (metres < 1) { back(); return; }
+    const question = t('cp.drag_confirm', {distance: cpDistanceText(metres)})
+        + (metres >= CP_NOTIFY_MIN_M ? '\n' + t('cp.drag_confirm_notify') : '');
+    if (!confirm(question)) { back(); return; }
+    cpPost({action: 'set', lat: to.lat, lng: to.lng}).then(res => {
+        cpDragging = false;
+        if (!res || !res.ok) back();
+    });
+}
+
+function cpPopupContent() {
+    const cp = commandPost;
+    const div = document.createElement('div');
+    div.className = 'wr-cp-popup';
+    if (!cp) return div;
+    const me = typeof opMyPosition === 'function' ? opMyPosition() : null;
+    const metres = me ? L.latLng(me.lat, me.lng).distanceTo(L.latLng(cp.lat, cp.lng)) : null;
+    const when = t(cp.action === 'moved' ? 'cp.moved_line' : 'cp.set_line', {time: cp.at}) + (cp.by ? t('cp.by', {name: cp.by}) : '');
+    div.innerHTML = `
+        <div class="fw-semibold mb-1"><i class="bi bi-house-gear-fill me-1 wr-cp-flag"></i>${escapeHtml(t('cp.label'))}</div>
+        ${cp.note ? `<div class="fst-italic mb-1">${escapeHtml(cp.note)}</div>` : ''}
+        <div class="small text-muted">${escapeHtml(when)}</div>
+        ${MISSION_RADIO_CHANNEL ? `<div class="small"><i class="bi bi-broadcast me-1"></i>${escapeHtml(t('cp.radio', {channel: MISSION_RADIO_CHANNEL}))}</div>` : ''}
+        ${metres !== null && metres >= 10 ? `<div class="small">${escapeHtml(t('cp.distance_from_you', {distance: cpDistanceText(metres)}))}</div>` : ''}
+        ${navigationBtnHtml(cp.lat, cp.lng, {block: true})}
+        ${CP_CAN_MANAGE ? `
+        <hr class="my-2">
+        <label class="form-label small fw-semibold mb-1">${escapeHtml(t('cp.note_label'))}</label>
+        <div class="input-group input-group-sm">
+            <input type="text" class="form-control" data-cp-note maxlength="255" placeholder="${escapeHtml(t('cp.note_placeholder'))}" value="${escapeHtml(cp.note || '')}">
+            <button type="button" class="btn btn-outline-primary" data-cp="note">${escapeHtml(t('cp.note_save'))}</button>
+        </div>
+        <div class="d-flex gap-1 mt-2">
+            <button type="button" class="btn btn-sm btn-outline-primary flex-grow-1" data-cp="move"><i class="bi bi-arrows-move me-1"></i>${escapeHtml(t('cp.move_btn'))}</button>
+            <button type="button" class="btn btn-sm btn-outline-danger" data-cp="clear"><i class="bi bi-trash3 me-1"></i>${escapeHtml(t('cp.clear_btn'))}</button>
+        </div>
+        <div class="small text-muted mt-1">${escapeHtml(t('cp.drag_hint'))}</div>` : ''}`;
+    if (!CP_CAN_MANAGE) return div;
+    const noteInput = div.querySelector('[data-cp-note]');
+    const saveNote = btn => {
+        if (btn) btn.disabled = true;
+        cpPost({action: 'note', note: noteInput.value}).then(res => {
+            if (btn) btn.disabled = false;
+            if (res && res.ok) opToast(t('cp.toast_saved'));
+        });
+    };
+    noteInput.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); saveNote(null); } });
+    div.addEventListener('click', e => {
+        const btn = e.target.closest('[data-cp]');
+        if (!btn) return;
+        if (btn.dataset.cp === 'note') saveNote(btn);
+        else if (btn.dataset.cp === 'move') cpStartPick('move');
+        else if (btn.dataset.cp === 'clear' && confirm(t('cp.clear_confirm'))) {
+            map.closePopup();
+            cpPost({action: 'clear'});
+        }
+    });
+    return div;
+}
+
+// Every change goes through here, and the page adopts the command post the
+// server answers with.
+function cpPost(fields) {
+    const body = new URLSearchParams(Object.assign({csrf_token: csrfToken, mission_id: '<?= $missionId ?>'}, fields));
+    return fetchWithTimeout('mission-command-post.php', {method: 'POST', body}, FIELD_POST_TIMEOUT_MS)
+        .then(r => { if (!checkSessionAlive(r)) return null; return r.json(); })
+        .then(res => {
+            if (!res) return null;
+            if (!res.ok) { alert(res.error || t('common.failed')); return res; }
+            // The marker may sit where the drag left it, which the signature
+            // alone would call unchanged.
+            commandPostRenderedSig = null;
+            renderCommandPost(res.commandPost);
+            if (fields.action === 'set') opToast(cpSavedToastText(res));
+            return res;
+        })
+        .catch(() => { alert(t('common.send_failed')); return null; });
+}
+
+function cpSavedToastText(res) {
+    if (res.changed && res.action === 'moved' && !res.announced) return t('cp.toast_small_move');
+    if (res.notified === 1) return t('cp.toast_notified_one');
+    if (res.notified > 1) return t('cp.toast_notified_many', {n: res.notified});
+    return t('cp.toast_saved');
+}
+
+function cpPlace(lat, lng) {
+    return cpPost({action: 'set', lat: lat, lng: lng});
+}
+
+// A button on the map itself, under the zoom buttons: for everybody once
+// there is a command post, the way to it; for command before that, the way to
+// place it. On the map rather than in the card header, which has no room left
+// on a phone, and so it is there in fullscreen too.
+const CommandPostControl = L.Control.extend({
+    options: {position: 'topleft'},
+    onAdd: function () {
+        const bar = L.DomUtil.create('div', 'leaflet-bar leaflet-control wr-cp-control');
+        const a = L.DomUtil.create('a', '', bar);
+        a.id = 'mapCommandPostBtn';
+        a.href = '#';
+        a.setAttribute('role', 'button');
+        L.DomEvent.disableClickPropagation(bar);
+        L.DomEvent.on(a, 'click', e => {
+            L.DomEvent.preventDefault(e);
+            if (commandPost) cpFocus(true);
+            else if (CP_CAN_MANAGE) cpStartPick('set');
+        });
+        return bar;
+    },
+});
+if (map) new CommandPostControl().addTo(map);
+function cpSyncButton() {
+    const btn = document.getElementById('mapCommandPostBtn');
+    if (!btn) return;
+    btn.parentElement.classList.toggle('d-none', !commandPost && !CP_CAN_MANAGE);
+    const label = t(commandPost ? 'cp.btn_show' : 'cp.btn_place');
+    btn.title = label;
+    btn.setAttribute('aria-label', label);
+    // Not yet placed: command sees the word, not only an icon, until it is.
+    btn.parentElement.classList.toggle('is-unset', !commandPost);
+    btn.innerHTML = '<i class="bi bi-house-gear-fill"></i>'
+        + (commandPost ? '' : `<span>${escapeHtml(t('cp.label'))}</span>`);
+}
+
+// Take the map to the command post and open it. fromMap: asked from the map
+// itself, which is already on screen.
+function cpFocus(fromMap) {
+    if (!map || !commandPost) return;
+    const mapCardEl = document.getElementById('mapCard');
+    if (!fromMap && !(mapCardEl && mapCardEl.classList.contains('map-fullscreen-active'))) {
+        if (document.body.classList.contains('wr-tabs-ready')) opGotoTab('map');
+        else scrollToCard('mapCard');
+    }
+    // After a tab switch has shown the map: measured while hidden, Leaflet
+    // frames a 0x0 box (the same wait opGotoMap() makes).
+    setTimeout(() => {
+        map.invalidateSize();
+        map.setView([commandPost.lat, commandPost.lng], Math.max(map.getZoom(), 16));
+        setTimeout(() => { if (commandPostMarker) commandPostMarker.openPopup(); }, 350);
+    }, fromMap ? 0 : 200);
+}
+
+// Placing or moving it with one tap on the map, like the collection point
+// (triageStartPick). On a phone there is no Esc, so the hint has «Άκυρο»;
+// placing it for the first time also offers the mission's own point.
+function cpStopPick() {
+    if (map && cpPickHandler) map.off('click', cpPickHandler);
+    cpPickHandler = null;
+    cpPickMode = null;
+    document.getElementById('mapCard')?.classList.remove('wr-draw-active');
+    document.getElementById('cpPickHint')?.remove();
+}
+function cpStartPick(mode) {
+    if (!map) return;
+    if (typeof triageStopPick === 'function') triageStopPick();
+    cpStopPick();
+    cpPickMode = mode;
+    map.closePopup();
+    document.dispatchEvent(new CustomEvent('wr-goto-tab', {detail: {tab: 'map'}}));
+    document.getElementById('mapCard')?.classList.add('wr-draw-active');
+    const hint = document.createElement('div');
+    hint.id = 'cpPickHint';
+    hint.className = 'wr-cp-pick-hint alert alert-warning py-1 px-2 small m-2';
+    hint.innerHTML = `<div><i class="bi bi-house-gear-fill me-1"></i>${escapeHtml(t(mode === 'move' ? 'cp.pick_hint_move' : 'cp.pick_hint_set'))}</div>
+        <div class="d-flex gap-1 mt-1 justify-content-center flex-wrap">
+            ${mode === 'set' && missionLocation.lat ? `<button type="button" class="btn btn-sm btn-warning py-0" data-cp-pick="mission">${escapeHtml(t('cp.pick_mission_point'))}</button>` : ''}
+            <button type="button" class="btn btn-sm btn-outline-secondary py-0" data-cp-pick="cancel">${escapeHtml(t('cp.pick_cancel'))}</button>
+        </div>`;
+    hint.addEventListener('click', e => {
+        const b = e.target.closest('[data-cp-pick]');
+        if (!b) return;
+        cpStopPick();
+        if (b.dataset.cpPick === 'mission') cpPlace(missionLocation.lat, missionLocation.lng);
+    });
+    document.getElementById('warRoomMap')?.parentElement?.appendChild(hint);
+    setTimeout(() => { if (map) map.invalidateSize(); }, 80);
+    cpPickHandler = e => {
+        if (cpPickMode !== mode) return;
+        cpStopPick();
+        cpPlace(e.latlng.lat, e.latlng.lng);
+    };
+    map.on('click', cpPickHandler);
+}
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && cpPickMode) cpStopPick();
+});
+
+renderCommandPost(commandPost);
 
 function updateMissingPersonLocationPreview() {
     // Guards every lookup, not just the first — none of these ids exist in
@@ -12610,6 +12922,16 @@ function orderPopupTakeBanner(b) {
     if (!b.popup || !document.getElementById('orderPopupRoot')) return false;
     if (b.popup.kind === 'info') {
         const key = 'info:' + b.id;
+        // Only where the command post is NOW matters: an older «moved»
+        // notice still waiting for «Κατάλαβα» would point at a spot it has
+        // already left.
+        if (b.popup.info === 'mission_command_post') {
+            Array.from(opInfo.entries()).forEach(([k, m]) => {
+                if (m.type !== 'command_post') return;
+                opInfo.delete(k);
+                opArrival = opArrival.filter(x => x !== k);
+            });
+        }
         opInfo.set(key, opModelFromNotice(key, b));
         refreshMyOrdersCard();
         opArrive(key, b);
@@ -12679,6 +13001,23 @@ function opArrive(key, b) {
 // sector command has taken back. The text is the notification's own, already
 // in this person's language.
 function opModelFromNotice(key, b) {
+    // The Συντονιστικό was set up or has moved (v3.346.0). The spot comes with
+    // the notice rather than from the page's commandPost, which the same poll
+    // may not have delivered yet: small map, distance, directions, compass.
+    if (b.popup.info === 'mission_command_post') {
+        const hasSpot = b.popup.lat !== null && b.popup.lat !== undefined && b.popup.lng !== null && b.popup.lng !== undefined;
+        const spot = hasSpot ? {lat: Number(b.popup.lat), lng: Number(b.popup.lng)} : null;
+        return {
+            key: key, kind: 'info', id: 0, type: 'command_post',
+            cat: 'info', icon: 'bi-house-gear-fill',
+            title: t('popup.type.command_post'),
+            text: b.message, meta: '',
+            acked: false, outstanding: true, steps: [t('popup.step.seen')], step: 0, stepTimes: {},
+            hint: '', speakText: '',
+            target: spot ? {kind: 'point', lat: spot.lat, lng: spot.lng, nav: spot} : null,
+            card: null, cardLabel: '',
+        };
+    }
     // The incident this person's team was sent to has been closed by command
     // (v3.344.0), with how it ended. Their order stays: they still press
     // «Ολοκληρώθηκε» when they are done there.
@@ -13040,6 +13379,7 @@ function opReviewCardHtml(m, i, n) {
 function opNoticeCardBtnHtml(m) {
     // An arrival question's other answer: not yet — it is not asked again.
     if (m.kind === 'arrive') return opBtn('dismiss', 'bi-x-lg', t('popup.btn.not_yet'), 'btn-outline-secondary');
+    if (m.type === 'command_post') return map && m.target ? opBtn('cpmap', 'bi-map', t('popup.btn.show_command_post'), 'btn-outline-primary') : '';
     return (m.kind === 'info' || m.kind === 'team') && m.card
         ? opBtn('card', 'bi-box-arrow-up-right', m.cardLabel, 'btn-outline-primary')
         : '';
@@ -13114,7 +13454,9 @@ function opDistanceText(m) {
 function opMiniHtml(m) {
     const nav = m.target.nav;
     const dist = opDistanceText(m);
-    return `<div class="wr-op-mini" data-op="${opGoAction(m)[0]}" role="button" aria-label="${escapeHtml(opGoAction(m)[2])}">
+    // A notice's own action is «Κατάλαβα»; its map, tapped, means "show me".
+    const [op, , label] = m.type === 'command_post' ? ['cpmap', '', t('popup.btn.show_command_post')] : opGoAction(m);
+    return `<div class="wr-op-mini" data-op="${op}" role="button" aria-label="${escapeHtml(label)}">
         <div id="wrOpMiniMap" style="position:absolute;inset:0;"></div>
         ${dist ? `<span class="wr-op-mini-chip wr-op-mini-dist">${escapeHtml(dist)}</span>` : ''}
         ${nav ? navigationPairHtml(nav.lat, nav.lng, 'chip') : ''}
@@ -13498,6 +13840,16 @@ function opAcknowledge(m, btn) {
 function opAct(op, m, btn) {
     if (op === 'replay') { speakAnnouncement(m.speakText); return; }
     if (op === 'dismiss') { opDismissNotice(m); return; }
+    // The command post notice's «Δες το στον χάρτη»: seen, and shown — on
+    // where it is now, which a later move may have changed since.
+    if (op === 'cpmap') {
+        opDismissNotice(m);
+        opArrival = opArrival.filter(key => key !== m.key);
+        opMode = 'closed';
+        orderPopupRender();
+        if (commandPost) cpFocus(false); else opGotoMap(m);
+        return;
+    }
     // «Δεν μπορώ» — before the «Ελήφθη» below: saying you cannot do an order
     // is not receiving it.
     if (op === 'decline') { opDecline = {key: m.key, reason: null, note: ''}; orderPopupRender(); return; }
@@ -21734,6 +22086,8 @@ function pollWarRoomData() {
         // `in`, not a truthy check: null is this key's normal value on a
         // mission that has never had a Μαζικό Συμβάν.
         if ('triage' in data) renderTriage(data.triage);
+        // `in` as well: null means command has not placed it, or took it off.
+        if ('commandPost' in data) renderCommandPost(data.commandPost);
         if (data.sosAlerts) {
             renderSosAlerts(sosAlerts = data.sosAlerts);
             updateSosAlarmState(sosAlerts);

@@ -108,6 +108,10 @@ define('WAR_ROOM_ACTION_SCRIPTS', [
     // right-click or long-press) is used from the same long-open tab and the
     // same phones, partner-org guests included.
     'mission-measure.php',
+    // mission-command-post.php (the Συντονιστικό on the live map, v3.346.0) is
+    // moved from the same long-open tab, often from a tablet in the vehicle
+    // the command post is in.
+    'mission-command-post.php',
 ]);
 
 function initSession() {

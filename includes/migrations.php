@@ -7352,6 +7352,50 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 174,
+            'description' => "Add the mission's command post («Συντονιστικό») on the live map (v3.346.0). mission_command_posts is where it is now — one row per mission, placed by command and moved whenever the command post itself moves (it is often a vehicle), with an optional note on how to find it; the row is deleted when command takes it off the map. mission_command_post_log keeps every placement, move (with how far), note change and removal for the activity timelines. Both use DATETIME, not TIMESTAMP, so no MariaDB adds an ON UPDATE clause. Also registers the notification code mission_command_post (every participant is told when it is set up or moves 50 m or more).",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_command_posts (
+                    mission_id INT UNSIGNED NOT NULL PRIMARY KEY,
+                    lat DECIMAL(10, 8) NOT NULL,
+                    lng DECIMAL(11, 8) NOT NULL,
+                    note VARCHAR(255) NULL COMMENT 'How to find it on the spot, e.g. which vehicle',
+                    last_action ENUM('set','moved') NOT NULL DEFAULT 'set' COMMENT 'How it got to where it is now',
+                    placed_at DATETIME NOT NULL COMMENT 'When it got to where it is now',
+                    placed_by INT UNSIGNED NULL,
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (placed_by) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_command_post_log (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    action ENUM('set','moved','note','cleared') NOT NULL,
+                    lat DECIMAL(10, 8) NULL,
+                    lng DECIMAL(11, 8) NULL,
+                    moved_m INT UNSIGNED NULL COMMENT 'How far a move took it',
+                    note VARCHAR(255) NULL,
+                    user_id INT UNSIGNED NULL,
+                    created_at DATETIME NOT NULL,
+                    INDEX idx_cp_log_mission (mission_id, created_at),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                $ns = dbFetchOne("SELECT id FROM notification_settings WHERE code = 'mission_command_post'");
+                if (!$ns) {
+                    dbInsert(
+                        "INSERT INTO notification_settings (code, name, description, email_enabled, email_template_id)
+                         VALUES (?, ?, ?, 1, NULL)",
+                        [
+                            'mission_command_post',
+                            'Συντονιστικό Action Room',
+                            'Το Συντονιστικό της αποστολής στήθηκε ή μετακινήθηκε σε νέο σημείο (μόνο push/εντός εφαρμογής, όχι email)',
+                        ]
+                    );
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

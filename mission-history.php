@@ -701,6 +701,18 @@ foreach (loadTriageActivityEvents($missionId) as $e) {
     ];
 }
 
+// ── the Συντονιστικό: placed, moved, noted, removed ───────────────────────
+// Everybody on the operation sees it on the map, so everybody sees where it
+// went. Same loader and wording as the report's timeline.
+foreach (loadCommandPostActivityEvents($missionId) as $e) {
+    $events[] = [
+        'icon' => commandPostActivityIcon($e),
+        'text' => h(commandPostActivityText($e, $viewerLang)),
+        'time' => date('d/m H:i', $e['ts']),
+        'ts'   => $e['ts'],
+    ];
+}
+
 // ── points of interest: reported (per photo) / checked (per POI group) ─────
 // Visible to every approved participant, same policy as incidents above — a
 // physical clue found during a search is not team-private. One "reported"

@@ -3114,4 +3114,38 @@ CREATE TABLE IF NOT EXISTS `mission_place_cache` (
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- =============================================
+-- MISSION COMMAND POST (v3.346.0, migration 174)
+-- The mission's command post («Συντονιστικό») on the live map: where it is
+-- now (one row per mission, moved whenever the command post itself moves —
+-- it is often a vehicle), and every placement, move, note change and
+-- removal for the activity timelines.
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_command_posts` (
+    `mission_id` INT UNSIGNED NOT NULL PRIMARY KEY,
+    `lat` DECIMAL(10, 8) NOT NULL,
+    `lng` DECIMAL(11, 8) NOT NULL,
+    `note` VARCHAR(255) NULL COMMENT 'How to find it on the spot, e.g. which vehicle',
+    `last_action` ENUM('set','moved') NOT NULL DEFAULT 'set' COMMENT 'How it got to where it is now',
+    `placed_at` DATETIME NOT NULL COMMENT 'When it got to where it is now',
+    `placed_by` INT UNSIGNED NULL,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`placed_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `mission_command_post_log` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `action` ENUM('set','moved','note','cleared') NOT NULL,
+    `lat` DECIMAL(10, 8) NULL,
+    `lng` DECIMAL(11, 8) NULL,
+    `moved_m` INT UNSIGNED NULL COMMENT 'How far a move took it',
+    `note` VARCHAR(255) NULL,
+    `user_id` INT UNSIGNED NULL,
+    `created_at` DATETIME NOT NULL,
+    INDEX `idx_cp_log_mission` (`mission_id`, `created_at`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

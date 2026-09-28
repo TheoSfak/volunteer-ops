@@ -3366,7 +3366,14 @@ function notificationPopupRef($data): ?array {
         // A notice rather than an order: nothing to acknowledge server-side,
         // just «Κατάλαβα» (route cancelled, route point skipped, a dispatch or
         // sector taken back — notifyOrdersWithdrawn()).
-        return ['kind' => 'info', 'info' => (string) $data['popupInfo'], 'id' => (int) ($data['routeId'] ?? 0)];
+        $ref = ['kind' => 'info', 'info' => (string) $data['popupInfo'], 'id' => (int) ($data['routeId'] ?? 0)];
+        // A notice about a place (the Συντονιστικό moved, v3.346.0) carries
+        // the spot, for the popup's map and directions.
+        if (isset($data['popupLat'], $data['popupLng']) && is_numeric($data['popupLat']) && is_numeric($data['popupLng'])) {
+            $ref['lat'] = (float) $data['popupLat'];
+            $ref['lng'] = (float) $data['popupLng'];
+        }
+        return $ref;
     }
     return null;
 }
@@ -10247,6 +10254,13 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
                  'bulk_green' => '🚶', 'status' => '🚑'][$e['kind']]
             ?? ['red' => '🔴', 'yellow' => '🟡', 'green' => '🟢', 'black' => '⚫'][$e['category'] ?? ''] ?? '🏷️';
         $events[] = ['icon' => $icon, 'text' => h(triageActivityText($e, 'el')), 'ts' => $e['ts']];
+    }
+
+    // The Συντονιστικό — placed, moved, noted, removed. Same loader and
+    // wording as the live tab, in Greek like the rest of this archive, and
+    // unscoped: it is on everybody's map.
+    foreach (loadCommandPostActivityEvents($missionId) as $e) {
+        $events[] = ['icon' => commandPostActivityIcon($e), 'text' => h(commandPostActivityText($e, 'el')), 'ts' => $e['ts']];
     }
 
     // Points of interest: one "reported" event per photo (independent
