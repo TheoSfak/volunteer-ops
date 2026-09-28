@@ -15,7 +15,8 @@ if (!$id) {
 $shift = dbFetchOne(
     "SELECT s.*, m.title as mission_title, m.status as mission_status, m.department_id,
             m.description, m.location, m.end_datetime as mission_end_datetime,
-            m.mission_type_id, m.responsible_user_id, m.is_locked as mission_is_locked
+            m.mission_type_id, m.responsible_user_id, m.is_locked as mission_is_locked,
+            m.latitude as mission_latitude, m.longitude as mission_longitude
      FROM shifts s
      JOIN missions m ON s.mission_id = m.id
      WHERE s.id = ?",
@@ -647,6 +648,8 @@ if ($qrEnabled && $canManage && empty($shift['qr_token'])) {
     $shift['qr_token'] = $token;
 }
 
+// the clock strip names the mission's prefecture (includes/clock-place.php)
+$clockMission = ['id' => $shift['mission_id'], 'latitude' => $shift['mission_latitude'], 'longitude' => $shift['mission_longitude']];
 include __DIR__ . '/includes/header.php';
 ?>
 

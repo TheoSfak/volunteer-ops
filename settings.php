@@ -5,6 +5,7 @@
 
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/sidebar-theme.php';
+require_once __DIR__ . '/includes/clock-place.php';
 requireLogin();
 requireRole([ROLE_SYSTEM_ADMIN]);
 
@@ -73,6 +74,9 @@ $defaults = [
     'developer_email' => '',
     'timezone' => 'Europe/Athens',
     'date_format' => 'd/m/Y',
+    // Prefecture named on the clock strip on pages about no one mission; a
+    // key of clockPlaces() (includes/clock-place.php), '' = name none.
+    'clock_default_place' => '',
     'points_per_hour' => '10',
     'weekend_multiplier' => '1.5',
     'night_multiplier' => '1.5',
@@ -631,6 +635,12 @@ if (isPost()) {
                         $value = 'top';
                     }
 
+                    // Same closed-list reasoning: the clock prints this on every
+                    // page, so only a prefecture the <select> offers is stored.
+                    if ($field === 'clock_default_place' && !array_key_exists($value, clockPlaces())) {
+                        $value = '';
+                    }
+
                     // Don't overwrite API key if form was submitted empty (acts like a "keep existing" field)
                     if ($field === 'openweathermap_api_key' && empty($value) && !empty($settings['openweathermap_api_key'] ?? '')) {
                         continue;
@@ -790,7 +800,7 @@ if (isPost()) {
         // Save general settings
         $fieldsToUpdate = [
             'app_name', 'app_description', 'org_name', 'org_president_name', 'org_secretary_name', 'org_contact_phone', 'org_contact_email', 'org_contact_address', 'cert_signature_font_size',
-            'admin_email', 'developer_email', 'timezone', 'date_format',
+            'admin_email', 'developer_email', 'timezone', 'date_format', 'clock_default_place',
             'points_per_hour', 'weekend_multiplier', 'night_multiplier', 'medical_multiplier',
             'achievements_enabled', 'points_enabled',
             'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode',
@@ -1544,6 +1554,26 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                                 <option value="d.m.Y" <?= $settings['date_format'] === 'd.m.Y' ? 'selected' : '' ?>>31.12.2024</option>
                             </select>
                         </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Πόλη στο ρολόι</label>
+                        <select class="form-select" name="clock_default_place">
+                            <option value="">— Καμία —</option>
+                            <?php
+                            // One entry per name: the four Athens sectors are all «Αθήνα».
+                            $clockPlaceOptions = [];
+                            foreach (clockPlaces() as $placeKey => $placeNames) {
+                                $clockPlaceOptions[$placeNames[0]] ??= $placeKey;
+                            }
+                            // Alphabetical without the intl extension: accents off, so
+                            // «Άρτα» sorts under Α rather than ahead of the whole list.
+                            uksort($clockPlaceOptions, fn($a, $b) => strcmp(clockPlaceMatchKey($a), clockPlaceMatchKey($b)));
+                            $currentPlaceName = clockPlaceName($settings['clock_default_place'], 'el');
+                            foreach ($clockPlaceOptions as $placeName => $placeKey): ?>
+                            <option value="<?= h($placeKey) ?>" <?= $settings['clock_default_place'] !== '' && $currentPlaceName === $placeName ? 'selected' : '' ?>><?= h($placeName) ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <small class="text-muted">Γράφεται δίπλα στην ώρα, στη λωρίδα στην κορυφή κάθε σελίδας: «Δευτέρα 28/09/2026 - 00:14:05 Ηράκλειο». Στις σελίδες μιας αποστολής (Action Room, προβολή αποστολής κ.ά.) γράφεται αντί γι' αυτήν ο νομός όπου βρίσκεται το σημείο της αποστολής στον χάρτη.</small>
                     </div>
                     <hr>
                     <h6 class="mb-2">Στοιχεία Οργανισμού (για Πιστοποιητικά/Εκτυπώσεις)</h6>

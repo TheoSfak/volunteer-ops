@@ -124,6 +124,7 @@ $episodeIcon  = ['tachycardia' => 'bi-heart-pulse-fill', 'bradycardia' => 'bi-ar
 $episodeCls   = ['tachycardia' => 'crit', 'bradycardia' => 'low', 'strain' => 'elev'];
 
 $pageTitle = 'Αναφορά Παλμών: ' . $mission['title'];
+$clockMission = $mission; // the clock strip names its prefecture (includes/clock-place.php)
 include __DIR__ . '/includes/header.php';
 ?>
 

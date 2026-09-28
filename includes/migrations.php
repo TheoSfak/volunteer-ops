@@ -7336,6 +7336,22 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 173,
+            'description' => "Add mission_place_cache: the prefecture (Περιφερειακή Ενότητα) a mission's map pin is in, as OpenStreetMap names it (v3.345.0). The clock strip at the top of every page now reads «Δευτέρα 28/09/2026 - 00:14:05 Ηράκλειο» — the place where the mission is, not «Ώρα Αθήνας», which named the time zone. Looked up once per pin (lat/lng are the pin it was looked up for, so moving the pin looks it up again); county NULL = no answer, retried after an hour. looked_up_at is DATETIME, not TIMESTAMP, so no MariaDB gives it an ON UPDATE clause. Pages about no one mission name the prefecture picked in Settings (setting clock_default_place, empty until an admin picks one).",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_place_cache (
+                    mission_id INT UNSIGNED NOT NULL PRIMARY KEY,
+                    lat DECIMAL(10, 8) NOT NULL COMMENT 'The pin this was looked up for',
+                    lng DECIMAL(11, 8) NOT NULL,
+                    county VARCHAR(150) NULL COMMENT 'OSM name, e.g. Περιφερειακή Ενότητα Ηρακλείου; NULL = no answer',
+                    county_en VARCHAR(150) NULL,
+                    looked_up_at DATETIME NOT NULL,
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

@@ -122,6 +122,7 @@ $form = $shift ?: [
     'notes' => '',
 ];
 
+$clockMission = $mission; // the clock strip names its prefecture (includes/clock-place.php)
 include __DIR__ . '/includes/header.php';
 ?>
 

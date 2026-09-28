@@ -81,6 +81,7 @@ if (isPost()) {
 }
 
 $pageTitle = ($isEdit ? t('guest_debrief.page_title_edit') : t('guest_debrief.page_title_new')) . ' — ' . $mission['title'];
+$clockMission = $mission; // the clock strip names its prefecture (includes/clock-place.php)
 include __DIR__ . '/includes/header.php';
 ?>
 

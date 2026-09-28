@@ -1974,6 +1974,7 @@ $warRoomLayout = ($canManageWarRoom && !$volunteerTabs)
 
 $pageTitle = 'Action Room — ' . $mission['title'];
 $currentPage = 'war-room';
+$clockMission = $mission; // the clock strip names its prefecture (includes/clock-place.php)
 include __DIR__ . '/includes/header.php';
 ?>
 

@@ -572,6 +572,7 @@ if (isPost()) {
 $isOverdue = in_array($mission['status'], [STATUS_OPEN, STATUS_CLOSED]) 
     && strtotime($mission['end_datetime']) < time();
 
+$clockMission = $mission; // the clock strip names its prefecture (includes/clock-place.php)
 include __DIR__ . '/includes/header.php';
 ?>
 

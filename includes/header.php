@@ -8,9 +8,15 @@ if (!defined('VOLUNTEEROPS')) {
 }
 
 require_once __DIR__ . '/sidebar-theme.php';
+require_once __DIR__ . '/clock-place.php';
 
 $currentUser = getCurrentUser();
 $currentPage = basename($_SERVER['PHP_SELF'], '.php');
+$clockLang = ($currentUser['language'] ?? DEFAULT_LANGUAGE) === 'en' ? 'en' : 'el';
+// A page about one mission sets $clockMission (its row, with latitude and
+// longitude) before including this file, and the clock names the
+// prefecture that mission is in; every other page names the default.
+$clockPlace = clockPlaceLabel(isset($clockMission) && is_array($clockMission) ? $clockMission : null, $clockLang);
 
 // Get app settings for header
 $appName = getSetting('app_name', 'VolunteerOps');
@@ -104,7 +110,7 @@ if (isLoggedIn()) {
     <style>
         :root {
             --sidebar-width: 260px;
-            /* Height of the Athens clock strip pinned to the top of every
+            /* Height of the clock strip pinned to the top of every
                page (#appClock below). Everything else that is fixed or sticky
                to the top of the viewport starts this far down instead of at 0,
                so the clock never covers anything and nothing covers it. */
@@ -1347,16 +1353,19 @@ if (isLoggedIn()) {
             .vitals-zone-critical { animation: none; }
         }
 
-        /* Athens clock strip. Its own band across the full width, above the
-           sidebar and the navbar, rather than a chip inside the navbar: the
-           Action Room's top ticker covers the navbar outright and its
-           fullscreen map covers everything, and the clock has to survive
-           both. The top of the viewport simply starts var(--app-clock-h)
-           lower for everything else (the spacer below, the sidebar, the
-           sticky navbar, modals, and the Action Room's fixed layers), so the
-           highest z-index on the page never sits on top of anything.
-           Inter with tabular figures: the seconds tick without the digits
-           shifting sideways. */
+        /* Clock strip: «Δευτέρα 28/09/2026 - 00:14:05 Ηράκλειο», the same
+           on a phone as on a desktop. Its own band across the full width,
+           above the sidebar and the navbar, rather than a chip inside the
+           navbar: the Action Room's top ticker covers the navbar outright
+           and its fullscreen map covers everything, and the clock has to
+           survive both. The top of the viewport simply starts
+           var(--app-clock-h) lower for everything else (the spacer below,
+           the sidebar, the sticky navbar, modals, and the Action Room's
+           fixed layers), so the highest z-index on the page never sits on
+           top of anything. Inter with tabular figures: the seconds tick
+           without the digits shifting sideways. On a narrow phone a long
+           place name («Αιτωλοακαρνανία») is what gives way, never the date
+           or the time. */
         .app-clock {
             position: fixed;
             top: 0;
@@ -1378,12 +1387,13 @@ if (isLoggedIn()) {
             overflow: hidden;
             user-select: none;
         }
+        .app-clock > span { flex: 0 0 auto; }
         .app-clock-time { color: #fff; font-weight: 700; font-size: 13px; letter-spacing: .02em; }
-        .app-clock-short { display: none; }
+        .app-clock > .app-clock-place { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
         .app-clock-spacer { height: var(--app-clock-h); }
-        @media (max-width: 575.98px) {
-            .app-clock-long { display: none; }
-            .app-clock-short { display: inline; }
+        @media (max-width: 359.98px) {
+            .app-clock { font-size: 11px; gap: .3em; padding: 0 4px; }
+            .app-clock-time { font-size: 12px; }
         }
         /* Bootstrap pins .modal to top:0 of the viewport; a fullscreen modal
            (the Action Room has seven) would otherwise start under the clock. */
@@ -1395,13 +1405,13 @@ if (isLoggedIn()) {
     </style>
 </head>
 <body>
-<div id="appClock" class="app-clock" role="timer" aria-live="off" aria-label="<?= h(t('clock.athens_time')) ?>">
-    <span class="app-clock-long" data-clock="date"></span>
-    <span class="app-clock-long" aria-hidden="true">·</span>
+<div id="appClock" class="app-clock" role="timer" aria-live="off" aria-label="<?= h(t('clock.label')) ?>" title="<?= h(t('clock.greece_time')) ?> (GMT+<?= intdiv((int) date('Z'), 3600) ?>)">
+    <span data-clock="date"></span>
+    <span aria-hidden="true">-</span>
     <span class="app-clock-time" data-clock="time"><?= date('H:i:s') ?></span>
-    <span aria-hidden="true">·</span>
-    <span class="app-clock-long"><?= h(t('clock.athens_time')) ?> (<span data-clock="offset">GMT+<?= intdiv((int) date('Z'), 3600) ?></span>)</span>
-    <span class="app-clock-short"><?= h(t('clock.athens_short')) ?></span>
+<?php if ($clockPlace !== ''): ?>
+    <span class="app-clock-place"><?= h($clockPlace) ?></span>
+<?php endif; ?>
 </div>
 <div class="app-clock-spacer" aria-hidden="true"></div>
 <script>
@@ -1414,31 +1424,35 @@ if (isLoggedIn()) {
     // page took to arrive.
     var skew = <?= (int) round(microtime(true) * 1000) ?> - Date.now();
     if (Math.abs(skew) < 3000) skew = 0;
-    var tz = 'Europe/Athens', locale = <?= json_encode(($currentUser['language'] ?? DEFAULT_LANGUAGE) === 'en' ? 'en-GB' : 'el-GR') ?>;
-    var fmtTime, fmtDate, fmtParts;
+    var tz = 'Europe/Athens', locale = <?= json_encode($clockLang === 'en' ? 'en-GB' : 'el-GR') ?>;
+    var tzName = <?= json_encode(t('clock.greece_time'), JSON_UNESCAPED_UNICODE) ?>;
+    var fmtTime, fmtWeekday, fmtParts;
     try {
         fmtTime = new Intl.DateTimeFormat(locale, {timeZone: tz, hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'});
-        fmtDate = new Intl.DateTimeFormat(locale, {timeZone: tz, weekday: 'short', day: 'numeric', month: 'short'});
+        fmtWeekday = new Intl.DateTimeFormat(locale, {timeZone: tz, weekday: 'long'});
         fmtParts = new Intl.DateTimeFormat('en-US', {timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric', hourCycle: 'h23'});
     } catch (e) { return; }
     var timeEl = el.querySelector('[data-clock="time"]');
     var dateEl = el.querySelector('[data-clock="date"]');
-    var offEl = el.querySelector('[data-clock="offset"]');
-    // GMT+3 in summer, GMT+2 in winter: read off the date itself rather than
-    // hardcoded, so the October and March changeovers need nobody.
-    function offsetLabel(d) {
-        var p = {};
-        fmtParts.formatToParts(d).forEach(function (x) { p[x.type] = +x.value; });
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    // GMT+3 in summer, GMT+2 in winter, for the strip's tooltip: read off
+    // the date itself rather than hardcoded, so the October and March
+    // changeovers need nobody.
+    function offsetLabel(d, p) {
         var asUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
         var mins = Math.round((asUtc - Math.floor(d.getTime() / 1000) * 1000) / 60000);
         var h = Math.floor(Math.abs(mins) / 60), m = Math.abs(mins) % 60;
-        return 'GMT' + (mins < 0 ? '-' : '+') + h + (m ? ':' + (m < 10 ? '0' : '') + m : '');
+        return 'GMT' + (mins < 0 ? '-' : '+') + h + (m ? ':' + pad(m) : '');
     }
     function tick() {
-        var d = new Date(Date.now() + skew);
+        var d = new Date(Date.now() + skew), p = {};
+        fmtParts.formatToParts(d).forEach(function (x) { p[x.type] = +x.value; });
         timeEl.textContent = fmtTime.format(d);
-        dateEl.textContent = fmtDate.format(d);
-        offEl.textContent = offsetLabel(d);
+        // «Δευτέρα 28/09/2026»: the day and month always two digits, in this
+        // order in both languages, rather than whatever a locale prefers.
+        dateEl.textContent = fmtWeekday.format(d) + ' ' + pad(p.day) + '/' + pad(p.month) + '/' + p.year;
+        var title = tzName + ' (' + offsetLabel(d, p) + ')';
+        if (el.title !== title) el.title = title;
         // Lands just after each whole second, so the seconds never skip.
         setTimeout(tick, 1000 - ((Date.now() + skew) % 1000) + 20);
     }

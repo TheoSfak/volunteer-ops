@@ -3098,4 +3098,20 @@ CREATE TABLE IF NOT EXISTS `mission_order_declines` (
     FOREIGN KEY (`resolved_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- =============================================
+-- MISSION PLACE CACHE (v3.345.0, migration 173)
+-- The prefecture a mission's map pin is in, named on the clock strip
+-- («Δευτέρα 28/09/2026 - 00:14:05 Ηράκλειο»). Looked up once per pin from
+-- OpenStreetMap; county NULL = no answer, retried after an hour.
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_place_cache` (
+    `mission_id` INT UNSIGNED NOT NULL PRIMARY KEY,
+    `lat` DECIMAL(10, 8) NOT NULL COMMENT 'The pin this was looked up for',
+    `lng` DECIMAL(11, 8) NOT NULL,
+    `county` VARCHAR(150) NULL COMMENT 'OSM name, e.g. Περιφερειακή Ενότητα Ηρακλείου; NULL = no answer',
+    `county_en` VARCHAR(150) NULL,
+    `looked_up_at` DATETIME NOT NULL,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

@@ -96,6 +96,7 @@ $duration = fn(int $s) => $s >= 3600
     : sprintf('%d′%02d″', intdiv($s, 60), $s % 60);
 
 $pageTitle = 'Ποιότητα GPS: ' . $mission['title'];
+$clockMission = $mission; // the clock strip names its prefecture (includes/clock-place.php)
 include __DIR__ . '/includes/header.php';
 ?>
 
