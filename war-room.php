@@ -1112,6 +1112,12 @@ $gpsParticipationSig = (function () use ($canManageWarRoom, $iTakePartInActionRo
 $continuousFieldMinutesByVolunteerId = computeContinuousFieldMinutesByVolunteerId($missionId);
 $warRoomMaxShiftMinutes = (int) getSetting('war_room_max_shift_minutes', '480');
 $warRoomCriticalShiftMinutes = (int) round($warRoomMaxShiftMinutes * 1.5);
+// Settings → «Κυλιόμενα Κείμενα Action Room»: 'scroll' (the default), 'static'
+// (the same text, standing still and wrapping) or 'hidden' (only the rows about
+// someone in danger). Re-checked against the closed list here as well as on
+// save, because the CSS block and WR_TICKER_MODE below branch on it verbatim.
+$wrTickerMode = getSetting('war_room_ticker_mode', 'scroll');
+if (!in_array($wrTickerMode, ['scroll', 'static', 'hidden'], true)) $wrTickerMode = 'scroll';
 // last_ping_at was a correlated MAX(vp.created_at) per participant. created_at
 // is not in any index that also covers user_id+shift_id, so each participant
 // meant reading every one of their own ping rows off the table: 147ms on a
@@ -2719,6 +2725,22 @@ include __DIR__ . '/includes/header.php';
            Value comes from Settings (war_room_banner_font_size), not hardcoded. */
         .war-room-banner-track { font-size: <?= (float) getSetting('war_room_banner_font_size', '1.35') ?>rem; }
     }
+<?php if ($wrTickerMode === 'static'): ?>
+    /* Settings: «Ακίνητα». Every marquee on this page — the bar and the three
+       full-screen takeovers (SOS, hazard zone, return to base) — shows its
+       whole text standing still, wrapped onto as many lines as it needs. The
+       track's fixed 1.6em/1.3em height existed only to hold one scrolling
+       line; with wrapping it has to grow, and the bar's own max-height:40vh
+       + overflow-y:auto already covers a very long one.
+       The `body` prefix is load-bearing: the takeovers' own marquee rules sit
+       further down this stylesheet with the same specificity, so without it
+       they would win and keep scrolling. */
+    body .war-room-banner-track, body .sos-overlay-marquee, body .rtb-marquee-track { height: auto; white-space: normal; overflow: visible; }
+    body .war-room-banner-track span, body .sos-overlay-marquee span, body .rtb-marquee-track span {
+        position: static; display: block; padding-left: 0; white-space: normal; overflow-wrap: anywhere; animation: none;
+    }
+    body .sos-overlay-marquee, body .rtb-marquee-track { text-align: center; padding: 0 16px; }
+<?php endif; ?>
     @keyframes warRoomPulseRed { 0%, 100% { box-shadow: 0 0 0 0 rgba(220,53,69,0); } 50% { box-shadow: 0 0 0 10px rgba(220,53,69,0.4); } }
     /* Map pin for a volunteer in tachycardia or bradycardia: the position dot
        becomes a heart (buildPinMarker()). Same box as the dot it replaces, so
@@ -17445,6 +17467,14 @@ let bannerAfterId = <?= $bannerSinceId ?>;
 // concurrent alerts each get their own row/timer instead of one message
 // overwriting another that's still scrolling.
 const activeBannerRows = new Map();
+// Settings → «Κυλιόμενα Κείμενα Action Room». 'static' is pure CSS (see the
+// block after the banner font size); only 'hidden' changes what gets drawn.
+const WR_TICKER_MODE = <?= json_encode($wrTickerMode) ?>;
+// Persistent rows that stay up even when the ticker is set to hidden: each one
+// means somebody may be in danger right now — an SOS, a hazard-zone breach, an
+// unheard push-to-talk voice message. None of them has a close button either,
+// for the same reason.
+const TICKER_ROWS_KEPT_WHEN_HIDDEN = ['sos-status', 'ra-status', 'voice-waiting'];
 
 // Loud alert sound for incoming War Room banners (orders, dispatches, global messages).
 // Browsers block audio until the page has seen a user gesture, so we lazily create/resume
@@ -18675,13 +18705,22 @@ document.getElementById('mapCard')?.addEventListener('scroll', syncMapFullscreen
 // understood should be closable. See updateAssistantOverdueAlarm() for what
 // "closed" means there — it is not "gone for good".
 function upsertPersistentBannerRow(id, text, icon, onClose) {
+    // Ticker set to hidden: anything that is not about someone in danger is
+    // drawn as if its condition had cleared.
+    if (WR_TICKER_MODE === 'hidden' && !TICKER_ROWS_KEPT_WHEN_HIDDEN.includes(id)) text = '';
     const existing = activeBannerRows.get(id);
     if (!text) {
         if (existing) hideWarRoomBannerRow(id);
         return;
     }
     if (existing) {
-        existing.el.querySelector('.war-room-banner-track span').textContent = text;
+        const span = existing.el.querySelector('.war-room-banner-track span');
+        if (span.textContent !== text) {
+            span.textContent = text;
+            // A still ('static') row wraps, so new text can change its height
+            // and with it the padding the page keeps clear for the bar.
+            syncTickerSpacing();
+        }
         return;
     }
     const row = document.createElement('div');
@@ -18704,6 +18743,16 @@ function upsertPersistentBannerRow(id, text, icon, onClose) {
 
 function showWarRoomBanner(id, text, orderId, alarmStyle) {
     if (activeBannerRows.has(id)) return;
+    // Ticker set to hidden: no line and no beep for news and FYI copies. Two
+    // things still get through. One is an order addressed to this person
+    // (orderId): it only lands here when the order popup could not take it,
+    // the fallback that exists so an order is never lost, and it carries the
+    // «Ελήφθη» button. The other is the return-to-base takeover, which is not
+    // a ticker line at all.
+    if (WR_TICKER_MODE === 'hidden' && !orderId) {
+        if (alarmStyle === 'return_to_base') triggerReturnToBaseAlarm(text);
+        return;
+    }
     playWarRoomAlertSound();
     if (alarmStyle === 'return_to_base') triggerReturnToBaseAlarm(text);
     // Spoken only for the people it was actually addressed to. A bystander
@@ -20887,8 +20936,9 @@ function updateAssistantOverdueAlarm(data) {
     // Unchanged in spirit — one beep when the number rises, never on the way
     // down and never on every poll — but a rise that is still under the
     // dismissed threshold must stay silent too, or closing the row would buy
-    // visual quiet and leave the sound behind.
-    if (n > assistantOverdueLastCount && !suppressed) playWarRoomAlertSound();
+    // visual quiet and leave the sound behind. A ticker set to hidden in
+    // Settings never draws the row, so by the same rule it never beeps.
+    if (n > assistantOverdueLastCount && !suppressed && WR_TICKER_MODE !== 'hidden') playWarRoomAlertSound();
     assistantOverdueLastCount = n;
 }
 

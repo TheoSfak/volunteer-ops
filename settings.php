@@ -43,6 +43,7 @@ $defaults = [
     'cert_signature_font_size' => '7',
     'war_room_banner_font_size' => '1.35',
     'war_room_ticker_position' => 'top',
+    'war_room_ticker_mode' => 'scroll',
     'war_room_auto_ping_seconds' => '180',
     'war_room_auto_ping_high_accuracy' => '1',
     'war_room_native_sampling' => '1',
@@ -496,7 +497,7 @@ function runHealthChecks() {
 // none of these appear in the general form any more — a key in both lists
 // would be wiped by whichever tab was saved last.
 $actionRoomFields = [
-    'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_area_unit',
+    'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_ticker_mode', 'war_room_area_unit',
     'war_room_grid_max_size_m', 'war_room_grid_max_cells',
     'war_room_auto_ping_seconds', 'war_room_auto_ping_high_accuracy',
     'war_room_native_sampling', 'war_room_native_full_tracking',
@@ -633,6 +634,11 @@ if (isPost()) {
                     // third value.
                     if ($field === 'war_room_ticker_position' && !in_array($value, ['top', 'bottom'], true)) {
                         $value = 'top';
+                    }
+                    // Same closed list: war-room.php branches on exactly these
+                    // three, and anything else falls back to today's behaviour.
+                    if ($field === 'war_room_ticker_mode' && !in_array($value, ['scroll', 'static', 'hidden'], true)) {
+                        $value = 'scroll';
                     }
 
                     // Same closed-list reasoning: the clock prints this on every
@@ -2389,6 +2395,15 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                             <option value="bottom" <?= $settings['war_room_ticker_position'] === 'bottom' ? 'selected' : '' ?>>Κάτω στη σελίδα</option>
                         </select>
                         <small class="text-muted">Η μπάρα (SOS/απαγορευμένη ζώνη ενεργά, ανακοινώσεις &amp; εντολές) μένει πάντα ορατή στην οθόνη, ό,τι tab ή σημείο της σελίδας κι αν βρίσκεται ο χρήστης — αυτό επιλέγει αν κάθεται πάνω ή κάτω.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Κυλιόμενα Κείμενα Action Room</label>
+                        <select class="form-select" style="max-width:320px;" name="war_room_ticker_mode">
+                            <option value="scroll" <?= ($settings['war_room_ticker_mode'] ?? 'scroll') === 'scroll' ? 'selected' : '' ?>>Κυλιόμενα (όπως πάντα)</option>
+                            <option value="static" <?= ($settings['war_room_ticker_mode'] ?? 'scroll') === 'static' ? 'selected' : '' ?>>Ακίνητα — το κείμενο δεν κυλάει</option>
+                            <option value="hidden" <?= ($settings['war_room_ticker_mode'] ?? 'scroll') === 'hidden' ? 'selected' : '' ?>>Κρυφά — εκτός από SOS και επικίνδυνη ζώνη</option>
+                        </select>
+                        <small class="text-muted"><strong>Ακίνητα:</strong> τα μηνύματα εμφανίζονται κανονικά, αλλά στέκονται και αναδιπλώνονται σε όσες γραμμές χρειάζεται, και στη μπάρα και στις οθόνες SOS / επικίνδυνης ζώνης / επιστροφής στη βάση. <strong>Κρυφά:</strong> οι γραμμές ανακοινώσεων και ενημερώσεων δεν εμφανίζονται ούτε ηχούν, ούτε η γραμμή «ΕΚΚΡΕΜΕΙ ΑΠΑΝΤΗΣΗ». Μένουν πάντα οι γραμμές SOS, επικίνδυνης ζώνης και φωνητικού μηνύματος, η οθόνη «Επιστροφή στη βάση», και μια εντολή προς τον ίδιο τον χρήστη αν δεν μπόρεσε να ανοίξει ως αναδυόμενο παράθυρο. Οι εντολές φτάνουν κανονικά με το αναδυόμενο παράθυρο και οι επιβεβαιώσεις με τον πίνακα «Επιβεβαιώσεις λήψης».</small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Μέγιστο Μέγεθος Τομέα Αυτόματου Πλέγματος (μ.)</label>
