@@ -7492,6 +7492,34 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 178,
+            'description' => "How a team moves (v3.357.0): mission_teams.transport = foot | motorbike | car, default foot. Chooses the team's icon on the live map, the speed a position may imply before it is refused as a glitch, and whether distances and arrival times are measured on foot or by road.",
+            'up' => function () {
+                $has = dbFetchValue(
+                    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_teams' AND COLUMN_NAME = 'transport'"
+                );
+                if (!$has) {
+                    dbExecute("ALTER TABLE mission_teams
+                        ADD COLUMN transport ENUM('foot','motorbike','car') NOT NULL DEFAULT 'foot'
+                        COMMENT 'How the team moves: foot, motorbike or car' AFTER color");
+                }
+                // The arrival-time cache has to know which way it was worked
+                // out: a team switched from car to foot must not keep the
+                // driving time it was given a minute ago.
+                $hasMode = dbFetchValue(
+                    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'dispatch_eta_cache' AND COLUMN_NAME = 'mode'"
+                );
+                if (!$hasMode) {
+                    dbExecute("ALTER TABLE dispatch_eta_cache
+                        MODIFY COLUMN source ENUM('osrm','google','straight_line') NOT NULL,
+                        ADD COLUMN mode ENUM('foot','vehicle') NOT NULL DEFAULT 'vehicle' AFTER source");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

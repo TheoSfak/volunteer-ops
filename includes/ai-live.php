@@ -327,6 +327,17 @@ function aiLiveMetresWords(float $metres): string {
 }
 
 /**
+ * How a team moves, as the words the digest uses (v3.357.0). Said in the
+ * digest only for a team that is not on foot — see where it is added.
+ */
+function aiLiveTransportWords($transport): string {
+    return [
+        'motorbike' => 'με μηχανή',
+        'car'       => 'με αμάξι',
+    ][normalizeTeamTransport($transport)] ?? 'με τα πόδια';
+}
+
+/**
  * How far somebody is from where they were sent, in words.
  *
  * ALWAYS leads with the straight line, and says that is what it is. In
@@ -346,7 +357,8 @@ function aiLiveDistanceToTargetWords(
     string $bearing,
     ?array $routed,
     bool $routingAttempted = false,
-    ?int $fixAgeMinutes = null
+    ?int $fixAgeMinutes = null,
+    string $transport = 'foot'
 ): string {
     $words = aiLiveMetresWords($straightMetres) . ' σε ευθεία ' . $bearing;
 
@@ -379,24 +391,35 @@ function aiLiveDistanceToTargetWords(
         return $routingAttempted ? $words . ' ' . AI_LIVE_ROUTE_NONE_NOTE : $words;
     }
 
-    // ON FOOT FIRST. It is the one that is true in this terrain, and by
+    // ON FOOT FIRST — for a team on foot, which is every team nobody said
+    // otherwise about. It is the one that is true in this terrain, and by
     // vehicle is the one that is faster when a road happens to go the right
     // way — the coordinator is choosing between them, so both are named.
+    //
+    // A team DECLARED as on a motorbike or in a car leads with the road figure
+    // instead (v3.357.0): that is the time it will actually take them, and
+    // reading the walking one first sent a coordinator to plan a car's arrival
+    // from a figure for somebody climbing. Both are still named.
+    $walkingWords = '';
     if ($walking !== null) {
-        $words .= ' — με τα πόδια ' . aiLiveMetresWords((float) $walking['meters']);
-        if (!empty($walking['minutes'])) $words .= ', ' . (int) $walking['minutes'] . ' λεπτά';
+        $walkingWords = ' — με τα πόδια ' . aiLiveMetresWords((float) $walking['meters']);
+        if (!empty($walking['minutes'])) $walkingWords .= ', ' . (int) $walking['minutes'] . ' λεπτά';
     }
+    $drivingWords = '';
     if ($driving !== null) {
-        $words .= ' — με αμάξι ' . aiLiveMetresWords((float) $driving['meters']);
-        if (!empty($driving['minutes'])) $words .= ', ' . (int) $driving['minutes'] . ' λεπτά';
+        $drivingWords = ' — με αμάξι ' . aiLiveMetresWords((float) $driving['meters']);
+        if (!empty($driving['minutes'])) $drivingWords .= ', ' . (int) $driving['minutes'] . ' λεπτά';
         // The detour warning belongs to the DRIVING figure: it is the road
         // that goes round the mountain, and on foot the long way round is not
         // what anybody would do anyway.
         if (aiLiveRouteIsDetour($straightMetres, (float) $driving['meters'])) {
-            $words .= ' ' . AI_LIVE_ROUTE_DETOUR_NOTE;
+            $drivingWords .= ' ' . AI_LIVE_ROUTE_DETOUR_NOTE;
         }
     }
-    if ($walking === null && !empty($routed['walk_tried'])) {
+    $words .= teamTransportIsVehicle($transport) ? $drivingWords . $walkingWords : $walkingWords . $drivingWords;
+    // A vehicle team is not looking for a walking route, so not finding one
+    // says nothing about it.
+    if ($walking === null && !empty($routed['walk_tried']) && !teamTransportIsVehicle($transport)) {
         // Marked rather than explained, and only when one was actually looked
         // for. The explanation goes once into the section note below: eight
         // copies of the same sentence is a paragraph of the digest spent
@@ -1228,7 +1251,7 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
 
     // ── teams, and where they are ────────────────────────────────────────
     $teamRows = dbFetchAll(
-        "SELECT t.id, t.codename, t.team_number, t.leader_id, u.name AS leader_name,
+        "SELECT t.id, t.codename, t.team_number, t.transport, t.leader_id, u.name AS leader_name,
                 (SELECT COUNT(*) FROM mission_team_members m WHERE m.team_id = t.id) AS members
          FROM mission_teams t
          LEFT JOIN users u ON u.id = t.leader_id
@@ -1278,6 +1301,12 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
             'θεση'                => aiLivePositionText($teamLat, $teamLng, $baseLat, $baseLng, AI_LIVE_POS_NO_FIX),
             'λεπτα_απο_τελευταιο_στιγμα' => $pos ? $ageMin($pos['ts']) : null,
         ];
+        // Only said for a team that is NOT on foot: no field means on foot,
+        // which is what every team is until somebody says otherwise, and a
+        // «πεζη» on every row is a few hundred tokens of nothing.
+        if (teamTransportIsVehicle($row['transport'] ?? 'foot')) {
+            $entry['μεσο_μετακινησης'] = aiLiveTransportWords($row['transport']);
+        }
         if (($d = $fromFocus($teamLat, $teamLng)) !== null) {
             $entry['αποσταση_απο_σημειο_εστιασης'] = $d;
         }
@@ -1304,6 +1333,7 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
                 'bearing' => aiLiveCompassLabel(aiLiveBearingDegrees($teamLat, $teamLng, $place['lat'], $place['lng'])),
                 'from'    => [$teamLat, $teamLng],
                 'ομαδα'   => $entry['ομαδα'],
+                'transport' => $row['transport'] ?? 'foot',
             ];
         }
         $teams[] = $entry;
@@ -1650,7 +1680,7 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
                 $row['αποσταση_ανα_ομαδα'] = [];
                 foreach ($legs as $tref => $leg) {
                     $row['αποσταση_ανα_ομαδα'][] = $leg['ομαδα'] . ': '
-                        . aiLiveDistanceToTargetWords($leg['metres'], $leg['bearing'], $routed[$tref] ?? null, isset($routed[$tref]));
+                        . aiLiveDistanceToTargetWords($leg['metres'], $leg['bearing'], $routed[$tref] ?? null, isset($routed[$tref]), null, $leg['transport']);
                 }
             }
             $placeRows[] = $row;
@@ -1952,7 +1982,7 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
     $onDutyRows = dbFetchAll(
         "SELECT pr.volunteer_id, u.name AS who,
                 UNIX_TIMESTAMP(lp.created_at) AS last_ping_ts, lp.lat, lp.lng,
-                mtm.team_id, mt.codename, mt.team_number
+                mtm.team_id, mt.codename, mt.team_number, mt.transport
          FROM participation_requests pr
          JOIN shifts s ON s.id = pr.shift_id
          JOIN users u ON u.id = pr.volunteer_id
@@ -2034,6 +2064,10 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
             'λεπτα_απο_τελευταιο_στιγμα' => $lastTs === null ? null : $ageMin($lastTs),
             'σιωπηλος'   => $lastTs !== null && ($now - $lastTs) >= $staleAfter,
         ];
+        $crewTransport = $row['transport'] ?? 'foot';
+        if (teamTransportIsVehicle($crewTransport)) {
+            $entry['μεσο_μετακινησης'] = aiLiveTransportWords($crewTransport);
+        }
         if (($d = $fromFocus($cLat, $cLng)) !== null) {
             $entry['αποσταση_απο_σημειο_εστιασης'] = $d;
         }
@@ -2063,7 +2097,7 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
             if ($cLat !== null && $cLng !== null) {
                 $metres  = gpsDistanceMeters($cLat, $cLng, $target['lat'], $target['lng']);
                 $bearing = aiLiveCompassLabel(aiLiveBearingDegrees($cLat, $cLng, $target['lat'], $target['lng']));
-                $goal['αποσταση'] = aiLiveDistanceToTargetWords($metres, $bearing, null, false, $staleFixAge);
+                $goal['αποσταση'] = aiLiveDistanceToTargetWords($metres, $bearing, null, false, $staleFixAge, $crewTransport);
                 // Only the newest target earns an outbound call. The others
                 // keep the straight line, which is free — eight legs across a
                 // whole roster does not survive being multiplied by three.
@@ -2077,6 +2111,7 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
                         // not "ΜΕΛΟΣ-7".
                         'asked'   => aiLiveQuestionNames($askedAbout, (string) $row['who']),
                         'stale_age' => $staleFixAge,
+                        'transport' => $crewTransport,
                     ];
                 }
             }
@@ -2115,7 +2150,7 @@ function buildLiveAiDigest(int $missionId, array $mission, array $missionShiftId
                 // the FIRST target, which is the one it was fetched for.
                 if (!isset($crew[$index]['στοχοι'][0]['αποσταση'])) continue;
                 $crew[$index]['στοχοι'][0]['αποσταση'] = aiLiveDistanceToTargetWords(
-                    $leg['metres'], $leg['bearing'], $routed[$index] ?? null, true, $leg['stale_age']
+                    $leg['metres'], $leg['bearing'], $routed[$index] ?? null, true, $leg['stale_age'], $leg['transport']
                 );
             }
         } catch (Throwable $e) {
@@ -2461,6 +2496,7 @@ function aiLiveSystemPrompt(): string {
 - Όλα αυτά είναι υπολογισμένα από τις πραγματικές συντεταγμένες. ΠΟΤΕ μην τα υπολογίσεις μόνος σου και ποτέ μην τα συμπληρώσεις όταν λείπουν: αν λείπουν, ή δεν του έχει ανατεθεί τίποτα ή δεν έχει σταλεί στίγμα — και αυτό ακριβώς είναι η απάντηση.
 - ΠΑΛΙΟ ΣΤΙΓΜΑ ΔΕΝ ΣΗΜΑΙΝΕΙ ΟΤΙ ΚΡΥΒΕΙΣ ΤΗΝ ΑΠΟΣΤΑΣΗ. Αν κάποιος είναι σιωπηλός, η απόσταση υπολογίζεται από την τελευταία γνωστή του θέση και το πεδίο το γράφει μέσα του, με την ηλικία της. Δώσε το νούμερο ΚΑΙ την ηλικία μαζί — «ήταν 1,5 χλμ έξω πριν σαράντα λεπτά» είναι κάτι που ο συντονιστής μπορεί να χρησιμοποιήσει· ένα «δεν μπορώ να πω» δεν είναι.
 - Η ευθεία γραμμή και η απόσταση διαδρομής ΔΕΝ είναι το ίδιο πράγμα. Στο βουνό η διαδρομή είναι συχνά τριπλάσια από την ευθεία, γιατί ο δρόμος κάνει τον γύρο. Λέγε πάντα ποιο από τα δύο αναφέρεις, με τα ίδια λόγια που τα λέει το πεδίο.
+- Αν μια ομάδα ή ένα άτομο έχει πεδίο «μεσο_μετακινησης» («με μηχανή» ή «με αμάξι»), κινείται με όχημα και ο χρόνος της είναι ο οδικός — ο «με αμάξι», που στη φράση της απόστασης δίνεται πρώτος. Βάλε ΠΡΩΤΟΝ αυτόν στην απάντηση και πες ότι είναι με όχημα· τον πεζό χρόνο ανάφερέ τον δεύτερο, μόνο ως πληροφορία. Αν το πεδίο ΛΕΙΠΕΙ, η ομάδα είναι με τα πόδια και ισχύει ο «με τα πόδια». Ο οδικός χρόνος είναι για αυτοκίνητο· για μηχανή είναι προσέγγιση, πες το.
 - Το πεδίο δίνει ΚΑΙ ΤΟΥΣ ΔΥΟ χρόνους όπου υπάρχουν: «με τα πόδια» και «με αμάξι». Ανάφερε και τους δύο όταν ρωτιέται απόσταση ή χρόνος άφιξης — ο συντονιστής επιλέγει ανάμεσά τους και η επιλογή είναι η απόφαση που παίρνει. Αν λείπει ο ένας, πες ποιος λείπει και γιατί, μην παρουσιάσεις τον άλλον σαν να είναι όλη η απάντηση.
 - Δεν βλέπεις χάρτη, αλλά οι σχέσεις είναι υπολογισμένες για σένα: το «γειτονικοι» κάθε τομέα λέει ποιοι ακουμπάνε, και το «τομεας» σε περιστατικά, SOS και σημεία ενδιαφέροντος λέει σε ποιο έδαφος έπεσαν. Χρησιμοποίησέ τα αυτούσια — μην συμπεραίνεις γειτνίαση από ονόματα ή αριθμούς τομέων.
 - Αν ο συντονιστής ανέφερε τοπωνύμιο (στάδιο, νοσοκομείο, χωριό, μοναστήρι), θα το βρεις έτοιμο στο «τοποθεσιες_απο_ερωτηση» με τις αποστάσεις κάθε ομάδας από αυτό. ΑΝΑΦΕΡΕ ΠΑΝΤΑ ΤΟ «βρεθηκε_ως» μαζί με το νούμερο — ο γεωκωδικοποιητής κάνει λάθη με σιγουριά, και ο συντονιστής είναι ο μόνος που μπορεί να δει ότι μετρήθηκε λάθος σημείο. Αν η εγγραφή έχει «προβλημα», πες το πρόβλημα και ΜΗΝ δώσεις απόσταση. Αν έχει «χωρις_αριθμο», η απόσταση αφορά ΤΟΝ ΔΡΟΜΟ και όχι τον αριθμό — πες το, γιατί ένας δρόμος πόλης έχει μήκος ενός ή δύο χιλιομέτρων. Αν έχει «προσοχη_απλοποιηση», η διεύθυνση δεν βρέθηκε όπως δόθηκε και μπορεί να πρόκειται για άλλο μέρος — πες το ΠΡΙΝ από την απόσταση, όχι μετά.

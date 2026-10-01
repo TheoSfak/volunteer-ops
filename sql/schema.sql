@@ -2058,6 +2058,7 @@ CREATE TABLE IF NOT EXISTS `mission_teams` (
     `codename` VARCHAR(20) NOT NULL,
     `team_number` TINYINT UNSIGNED NULL,
     `color` VARCHAR(7) NULL,
+    `transport` ENUM('foot','motorbike','car') NOT NULL DEFAULT 'foot' COMMENT 'How the team moves: foot, motorbike or car',
     `briefing_token` CHAR(64) NULL,
     `leader_id` INT UNSIGNED NULL,
     `created_by` INT UNSIGNED NOT NULL,
@@ -2131,7 +2132,8 @@ ALTER TABLE `mission_dispatch_points` ADD COLUMN `ring_index` TINYINT UNSIGNED N
 CREATE TABLE IF NOT EXISTS `dispatch_eta_cache` (
     `dispatch_id` INT UNSIGNED NOT NULL PRIMARY KEY,
     `minutes` SMALLINT UNSIGNED NOT NULL,
-    `source` ENUM('osrm','straight_line') NOT NULL,
+    `source` ENUM('osrm','google','straight_line') NOT NULL,
+    `mode` ENUM('foot','vehicle') NOT NULL DEFAULT 'vehicle' COMMENT 'Worked out for a team on foot or in a vehicle (v3.357.0)',
     `ping_lat` DECIMAL(10, 8) NOT NULL,
     `ping_lng` DECIMAL(11, 8) NOT NULL,
     -- DATETIME, not TIMESTAMP: this must hold exactly the value we insert

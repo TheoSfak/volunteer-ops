@@ -596,9 +596,11 @@ if (isPost()) {
             } else {
                 db()->beginTransaction();
                 try {
+                    // How the team moves; anything the form did not say is on foot.
+                    $teamTransport = normalizeTeamTransport(post('transport'));
                     $teamId = dbInsert(
-                        "INSERT INTO mission_teams (mission_id, codename, team_number, color, leader_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
-                        [$missionId, $codename, $teamNumber, $teamColor, $leaderId, $user['id']]
+                        "INSERT INTO mission_teams (mission_id, codename, team_number, color, transport, leader_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
+                        [$missionId, $codename, $teamNumber, $teamColor, $teamTransport, $leaderId, $user['id']]
                     );
                     if (!empty($movedIds)) {
                         $movePlaceholders = implode(',', array_fill(0, count($movedIds), '?'));
@@ -627,6 +629,7 @@ if (isPost()) {
                     'mission_id' => $missionId,
                     'member_ids' => $memberIds,
                     'leader_id'  => $leaderId,
+                    'transport'  => $teamTransport,
                     'gps_ids'    => $gpsIds,
                     'moved_from' => array_map(fn($id) => ['user_id' => $id, 'team' => $otherAssignments[$id]['label']], $movedIds),
                 ]);
@@ -708,7 +711,13 @@ if (isPost()) {
                         [$teamId, $missionId, $memberId]
                     );
                 }
-                dbExecute("UPDATE mission_teams SET leader_id = ?, updated_at = NOW() WHERE id = ?", [$leaderId, $teamId]);
+                // A form that did not carry the field (an old tab left open
+                // across the upgrade) keeps what the team has, instead of
+                // quietly turning a car back into somebody on foot.
+                $newTransport = isset($_POST['transport'])
+                    ? normalizeTeamTransport(post('transport'))
+                    : normalizeTeamTransport($team['transport'] ?? 'foot');
+                dbExecute("UPDATE mission_teams SET leader_id = ?, transport = ?, updated_at = NOW() WHERE id = ?", [$leaderId, $newTransport, $teamId]);
                 applyTeamActionRoomTicks($missionId, $memberIds, $gpsIds, (int) $user['id']);
                 db()->commit();
             } catch (Throwable $e) {
@@ -716,9 +725,10 @@ if (isPost()) {
                 throw $e;
             }
             forgetActionRoomParticipantIds($missionId);
-            logAudit('update_mission_team', 'mission_teams', $teamId, ['member_ids' => $oldMemberIds, 'gps_ids' => $oldGpsIds], [
+            logAudit('update_mission_team', 'mission_teams', $teamId, ['member_ids' => $oldMemberIds, 'gps_ids' => $oldGpsIds, 'transport' => normalizeTeamTransport($team['transport'] ?? 'foot')], [
                 'member_ids' => $memberIds,
                 'leader_id'  => $leaderId,
+                'transport'  => $newTransport,
                 'gps_ids'    => $gpsIds,
                 // Who was taken and from where — without this the audit trail
                 // shows a team gaining a member and says nothing about the
@@ -1262,7 +1272,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                 SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.accuracy_meters, vp.battery_level, vp.via, vp.speed_mps, vp.created_at, u.name,
                         u.is_external, u.guest_org_name, u.guest_country_code,
                         COALESCE(ht.name, mvt.label) AS home_team_name, COALESCE(ht.color, mvt.color) AS home_team_color,
-                        mt.color AS team_color, mt.codename, mt.team_number{$field},
+                        mt.color AS team_color, mt.transport AS team_transport, mt.codename, mt.team_number{$field},
                         pvp.lat AS prev_lat, pvp.lng AS prev_lng,
                         pvp.accuracy_meters AS prev_accuracy_meters, pvp.created_at AS prev_created_at,
                         ROW_NUMBER() OVER (PARTITION BY vp.user_id, vp.shift_id ORDER BY vp.id DESC) AS rn
@@ -1376,6 +1386,9 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                 'user_id' => (int) $pin['user_id'],
                 'lat' => (float) $pin['lat'], 'lng' => (float) $pin['lng'], 'name' => $pin['name'],
                 'status' => $pin['field_status'], 'team_color' => $pin['team_color'],
+                // foot | motorbike | car — picks the icon. Somebody on no team
+                // is on foot, like every team that was never set otherwise.
+                'transport' => normalizeTeamTransport($pin['team_transport']),
                 'team_label' => $pin['codename'] ? teamLabel($pin['codename'], $pin['team_number']) : null,
                 'is_external' => (bool) $pin['is_external'], 'guest_org_name' => $pin['guest_org_name'],
                 'home_team_name' => $pin['home_team_name'], 'home_team_color_bg' => $homeBg, 'home_team_color_fg' => $homeFg,
@@ -4553,7 +4566,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 <div class="list-group-item<?= $isMyTeam ? ' wr-my-team' : '' ?>" data-team-id="<?= $team['id'] ?>">
                     <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
                         <div class="wr-team-roster">
-                            <span class="badge fs-6 me-2" style="background:<?= h($teamBg) ?>;color:<?= h($teamFg) ?>;"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></span>
+                            <span class="badge fs-6 me-2" style="background:<?= h($teamBg) ?>;color:<?= h($teamFg) ?>;"><?= teamTransportIconSvg($team['transport'], 16) ?> <?= h(teamLabel($team['codename'], $team['team_number'])) ?></span>
                             <?php if ($isMyTeam): ?><span class="badge bg-success me-2"><i class="bi bi-person-check-fill me-1"></i><?= t('teams.my_team_badge') ?></span><?php endif; ?>
                             <?php if ($team['leader_name']): ?>
                             <span class="small text-muted"><i class="bi bi-star-fill text-warning me-1"></i><?= h($team['leader_name']) ?></span>
@@ -5673,6 +5686,20 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
     return ob_get_clean();
 };
 ?>
+<?php
+    // The "how does this team move" choice, shared by the create and edit
+    // windows so the two cannot offer different things.
+    $transportPicker = function (string $idPrefix, string $selected): string {
+        $html = '<label class="form-label small fw-semibold">' . h(t('teams.transport_label')) . '</label>'
+              . '<div class="btn-group w-100 mb-3" role="group" aria-label="' . h(t('teams.transport_label')) . '">';
+        foreach (TEAM_TRANSPORTS as $tr) {
+            $id = $idPrefix . '-' . $tr;
+            $html .= '<input type="radio" class="btn-check" name="transport" id="' . h($id) . '" value="' . $tr . '"' . ($tr === $selected ? ' checked' : '') . '>'
+                   . '<label class="btn btn-outline-primary" for="' . h($id) . '">' . teamTransportIconSvg($tr, 20) . ' ' . h(t('teams.transport.' . $tr)) . '</label>';
+        }
+        return $html . '</div>';
+    };
+?>
 <div class="modal fade" id="createTeamModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -5707,6 +5734,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                     <?php endif; ?>
                     <label class="form-label small fw-semibold"><?= t('teams.custom_name_label') ?></label>
                     <input type="text" class="form-control mb-3" name="custom_codename" maxlength="20" placeholder="<?= t('teams.custom_name_placeholder') ?>">
+                    <?= $transportPicker('createTeamTransport', 'foot') ?>
                     <label class="form-label small fw-semibold"><?= t('teams.leader_label') ?></label>
                     <select class="form-select team-leader-select" name="leader_id" id="createTeamLeader" required>
                         <option value=""><?= t('teams.select_members_first') ?></option>
@@ -5756,6 +5784,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                     <?php if (count($teams) > 1): ?>
                     <p class="small text-muted"><i class="bi bi-info-circle me-1"></i><?= t('teams.move_note') ?></p>
                     <?php endif; ?>
+                    <?= $transportPicker('editTeamTransport-' . $team['id'], $team['transport']) ?>
                     <label class="form-label small fw-semibold"><?= t('teams.leader_label') ?></label>
                     <select class="form-select team-leader-select" name="leader_id" id="editTeamLeader-<?= $team['id'] ?>" required data-current="<?= $team['leader_id'] ?>"></select>
                 </div>
@@ -8314,6 +8343,14 @@ function teamBadgeColorsJs(color) {
     if (!color) return ['#212529', '#fff'];
     return [color, TEAM_COLOR_TEXT[color] || '#000'];
 }
+// «🚗 ETA ~12 λεπτά» for a team on a road, «🚶 ETA …» for one on foot — the
+// server worked the figure out the same way (computeDispatchEta()), so the
+// symbol is the claim of how it was measured, not decoration.
+function dispatchEtaText(eta) {
+    const foot = eta.mode === 'foot';
+    if (eta.minutes < 1) return t(foot ? 'dispatch.eta_lt_1min_foot' : 'dispatch.eta_lt_1min');
+    return t(foot ? 'dispatch.eta_minutes_foot' : 'dispatch.eta_minutes', {n: eta.minutes});
+}
 function teamLabel(codename, teamNumber) {
     if (!codename) return '';
     return (teamNumber !== null && teamNumber !== undefined && teamNumber !== '') ? (codename + ' ' + teamNumber) : codename;
@@ -8336,7 +8373,10 @@ function teamIsMine(team) {
 }
 function teamRosterHtml(team) {
     const [teamBg, teamFg] = teamBadgeColorsJs(team.color);
-    let html = `<span class="badge fs-6 me-2" style="background:${teamBg};color:${teamFg};">${escapeHtml(teamLabel(team.codename, team.team_number))}</span>`;
+    // Mirrors teamTransportIconSvg() in the PHP render, same markup so the
+    // first poll does not change the badge.
+    const transportIcon = transportGlyphSvg(team.transport, 16, 'currentColor').replace('style="display:block"', 'aria-hidden="true" style="vertical-align:-0.2em"');
+    let html = `<span class="badge fs-6 me-2" style="background:${teamBg};color:${teamFg};">${transportIcon} ${escapeHtml(teamLabel(team.codename, team.team_number))}</span>`;
     // Mirrors the PHP render of this card exactly - without it, the first
     // poll after any roster change would quietly wipe the "Η ομάδα μου" pill
     // off a server-rendered row.
@@ -8553,7 +8593,7 @@ function renderDispatches(items) {
         // doesn't apply here, or the team hasn't sent a single GPS ping yet,
         // in which case this silently shows nothing rather than a fake "0".
         const etaHtml = item.eta
-            ? `<div class="small mt-1">${escapeHtml(item.eta.minutes < 1 ? t('dispatch.eta_lt_1min') : t('dispatch.eta_minutes', {n: item.eta.minutes}))}` +
+            ? `<div class="small mt-1">${escapeHtml(dispatchEtaText(item.eta))}` +
               `${item.eta.source === 'straight_line' ? ' ' + escapeHtml(t('dispatch.eta_straight_line_suffix')) : ''}` +
               `${item.eta.is_stale ? ' ' + escapeHtml(t('dispatch.eta_stale_suffix')) : ''}</div>`
             : '';
@@ -10768,6 +10808,9 @@ function measureNearestCandidates(point) {
             lat: Number(p.lat), lng: Number(p.lng), straight,
             label: p.team_label ? `${p.team_label} · ${p.name}` : p.name,
             stale: !!p.is_stale, time: p.time,
+            // How the team moves: it decides which of the two routed times is
+            // ITS time, and so who is quickest.
+            transport: p.transport || 'foot',
         });
     });
     return [...best.values()].sort((a, b) => a.straight - b.straight).slice(0, MEASURE_NEAREST_MAX);
@@ -10843,19 +10886,35 @@ function measureNearestSelect(index) {
 function measureRenderNearest(s) {
     // Nearest is not always first to arrive: a team 2 km away across a gorge
     // can be slower than one 4 km away on a road. The list stays in the order
-    // asked for, and the quickest — on foot or by car, whichever is less — is
-    // marked, since that is the one a coordinator is actually choosing.
-    const bestMinutes = r => Math.min(...[r && r.walking, r && r.driving].filter(Boolean).map(x => x.minutes));
-    const timed = (!s.loading && s.routing && s.results) ? s.results.map(bestMinutes) : [];
+    // asked for, and the quickest is marked, since that is the one a
+    // coordinator is actually choosing.
+    //
+    // Quickest by each team's OWN way of moving (v3.357.0): a car team's time
+    // is the road time, a team on foot's is the walking time. Taking whichever
+    // of the two was smaller used to rank a team on foot by a road it cannot
+    // drive. Where no walking route exists (nothing free routes on foot, and
+    // Google finds no path on a ridge) the walking time is the straight line
+    // at 4 km/h — only for this ranking, never shown as a figure.
+    const WALK_METRES_PER_MINUTE = 4000 / 60;
+    const ownMinutes = (c, r) => {
+        if (c.transport !== 'foot') return r && r.driving ? r.driving.minutes : NaN;
+        return r && r.walking ? r.walking.minutes : c.straight / WALK_METRES_PER_MINUTE;
+    };
+    const timed = (!s.loading && s.routing && s.results) ? s.candidates.map((c, i) => ownMinutes(c, s.results[i])) : [];
     const fastest = timed.filter(isFinite).length > 1 ? timed.indexOf(Math.min(...timed.filter(isFinite))) : -1;
     const rows = s.candidates.map((c, i) => {
         const r = s.results && s.results[i];
         let routes = '';
         if (s.loading) routes = `<span class="text-muted">${escapeHtml(t('measure.loading'))}</span>`;
         else if (r && s.routing) {
+            // Both figures stay — a team on foot may be picked up by a car and
+            // a car team may be sent on foot — but the one that is THIS team's
+            // own way of moving is in bold.
+            const own = c.transport !== 'foot' ? 'driving' : 'walking';
+            const bold = (mode, html) => (html && own === mode) ? `<span class="fw-bold">${html}</span>` : html;
             routes = [
-                MEASURE_WALK_AVAILABLE ? measureRouteFigure(r.walking, 'bi-person-walking', MEASURE_ROUTE_COLOURS.walking) : null,
-                measureRouteFigure(r.driving, 'bi-car-front-fill', MEASURE_ROUTE_COLOURS.driving),
+                MEASURE_WALK_AVAILABLE ? bold('walking', measureRouteFigure(r.walking, 'bi-person-walking', MEASURE_ROUTE_COLOURS.walking)) : null,
+                bold('driving', measureRouteFigure(r.driving, 'bi-car-front-fill', MEASURE_ROUTE_COLOURS.driving)),
             ].filter(Boolean).join(' &nbsp; ');
             if ((r.walking && r.walking.detour) || (r.driving && r.driving.detour)) {
                 routes += ` <i class="bi bi-exclamation-triangle-fill text-danger" title="${escapeHtml(t('measure.detour'))}"></i>`;
@@ -10869,7 +10928,7 @@ function measureRenderNearest(s) {
         // teams on a phone would otherwise fill the map they are drawn on.
         return `<div class="wr-nearest-row${i === s.selected ? ' active' : ''}" data-nearest="${i}" role="button" tabindex="0">
             <div class="d-flex justify-content-between gap-2">
-                <span class="fw-semibold text-truncate" style="min-width:0" title="${escapeHtml(c.label)}"><span class="wr-nearest-num">${i + 1}</span> ${escapeHtml(c.label)}</span>
+                <span class="fw-semibold text-truncate" style="min-width:0" title="${escapeHtml(c.label)}"><span class="wr-nearest-num">${i + 1}</span> ${c.transport !== 'foot' ? transportGlyphSvg(c.transport, 14, 'currentColor').replace('style="display:block"', 'style="display:inline-block;vertical-align:-2px"') + ' ' : ''}${escapeHtml(c.label)}</span>
                 <span class="text-nowrap">${escapeHtml(formatDistanceMeters(c.straight))} ${escapeHtml(dir)}</span>
             </div>
             ${routes ? `<div class="small">${routes}</div>` : ''}
@@ -11926,6 +11985,18 @@ const CHARGE_ALERT_THRESHOLD_PCT = <?= CHARGE_ALERT_THRESHOLD_PCT ?>;
 // renders, never trusted as the real gate.
 const CAN_MANAGE_WAR_ROOM = <?= json_encode($canManageWarRoom) ?>;
 
+// How a team moves, drawn (v3.357.0). The same list the server prints into the
+// team forms (teamTransportIconPaths() in functions-warroom.php), so the map
+// and the forms can never show different pictures for the same choice.
+const TEAM_TRANSPORT_ICONS = <?= json_encode(teamTransportIconPaths()) ?>;
+// Diameter of a position's marker. It was a 16px dot while it only had to say
+// "here"; it now has to say on foot, motorbike or car.
+const PIN_MARKER_PX = 28;
+function transportGlyphSvg(transport, px, stroke) {
+    const inner = TEAM_TRANSPORT_ICONS[transport] || TEAM_TRANSPORT_ICONS.foot;
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 24 24" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block">${inner}</svg>`;
+}
+
 function buildPinMarker(pin, interactive = true) {
     const statusColors = {needs_help:'#dc2626', on_site:'#198754', on_way:'#f59e0b'};
     // Team color takes priority (the whole point is spotting which team a
@@ -11974,7 +12045,7 @@ function buildPinMarker(pin, interactive = true) {
     // and any difference would offset the arrow from the axis it turns on and
     // make the orbit visibly lopsided.
     const headingArrow = (pin.is_moving && pin.heading_deg !== null && pin.heading_deg !== undefined)
-        ? `<span style="position:absolute;left:50%;top:50%;width:0;height:0;transform:rotate(${pin.heading_deg}deg);"><span style="position:absolute;left:-6px;top:-21px;width:12px;text-align:center;color:${color};text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 3px #fff;font-size:11px;line-height:1;">▲</span></span>`
+        ? `<span style="position:absolute;left:50%;top:50%;width:0;height:0;transform:rotate(${pin.heading_deg}deg);"><span style="position:absolute;left:-6px;top:${-(PIN_MARKER_PX / 2 + 13)}px;width:12px;text-align:center;color:${color};text-shadow:0 0 2px #fff,0 0 2px #fff,0 0 3px #fff;font-size:11px;line-height:1;">▲</span></span>`
         : '';
     // Tachycardia or bradycardia turns the position dot itself into a beating
     // heart — red for too high, blue for too low. Deliberately a SHAPE change
@@ -12001,7 +12072,11 @@ function buildPinMarker(pin, interactive = true) {
     const hrAlarm = hrZone === 'critical' || hrZone === 'low';
     const icon = hrAlarm
         ? L.divIcon({className:'', html:`<span class="wr-pin-heart" style="color:${hrZone === 'critical' ? '#dc2626' : '#1d4ed8'};">&#9829;${headingArrow}</span>`, iconSize:[18,18], iconAnchor:[9,9]})
-        : L.divIcon({className:'', html:`<span style="position:relative;display:block;width:16px;height:16px;background:${color};${ring}${opacity}border-radius:50%;box-shadow:0 1px 4px #0008">${headingArrow}</span>`, iconSize:[16,16], iconAnchor:[8,8]});
+        // The team-coloured disc is still the mark (colour says WHICH team);
+        // what is drawn inside it says how the team moves. The glyph takes the
+        // same readable-on-this-colour text colour the team badges use, and
+        // white on the status colours of somebody with no team.
+        : L.divIcon({className:'', html:`<span style="position:relative;display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:${PIN_MARKER_PX}px;height:${PIN_MARKER_PX}px;background:${color};${ring}${opacity}border-radius:50%;box-shadow:0 1px 4px #0008">${transportGlyphSvg(pin.transport, Math.round(PIN_MARKER_PX * 0.64), pin.team_color ? teamBadgeColorsJs(pin.team_color)[1] : '#fff')}${headingArrow}</span>`, iconSize:[PIN_MARKER_PX, PIN_MARKER_PX], iconAnchor:[PIN_MARKER_PX / 2, PIN_MARKER_PX / 2]});
     const statusLine = pinStatusLabel(pin.status);
     const extraLine = pin.is_stale ? `<br><span class="text-muted small">${t('map.pin_stale')}</span>`
         : (pin.is_moving ? `<br><span class="text-info small">${t('map.pin_moving')}</span>` : '');
@@ -12029,7 +12104,12 @@ function buildPinMarker(pin, interactive = true) {
     const fatigueLine = (pin.continuous_field_minutes !== null && pin.continuous_field_minutes !== undefined && pin.continuous_field_minutes > WR_MAX_SHIFT_MINUTES)
         ? `<br><span class="${pin.continuous_field_minutes >= WR_CRITICAL_SHIFT_MINUTES ? 'text-danger' : 'text-warning'} small">⏱ ${t('fatigue.pin_line', fatigueHm(pin.continuous_field_minutes))}</span>`
         : '';
-    const teamLine = pin.team_label ? `<br>${escapeHtml(pin.team_label)}` : '';
+    // A vehicle is named beside the team; on foot is the unremarkable default
+    // and is left unsaid, like the other "all is normal" lines of this popup.
+    const transportWord = pin.transport && pin.transport !== 'foot'
+        ? ` · ${transportGlyphSvg(pin.transport, 14, 'currentColor').replace('style="display:block"', 'style="vertical-align:-2px"')} ${escapeHtml(t('teams.transport.' + pin.transport))}`
+        : '';
+    const teamLine = pin.team_label ? `<br>${escapeHtml(pin.team_label)}${transportWord}` : '';
     // Directly under the timestamp below, because the two qualify each other:
     // "20:57, ±120 m" is a different piece of information from "20:57".
     const accuracyLine = accuracyLineHtml(pin.accuracy_m);
@@ -12077,7 +12157,7 @@ function buildPinMarker(pin, interactive = true) {
     if (interactive && pin.team_label) {
         marker.bindTooltip(
             `<span style="display:inline-block;background:#fff;color:#1f2937;border:2px solid ${escapeHtml(pin.team_color || '#6c757d')};padding:0 6px;border-radius:10px;font-weight:700;font-size:.72rem;line-height:1.35;white-space:nowrap;box-shadow:0 1px 3px #0006;${opacity}">${escapeHtml(pin.team_label)}</span>`,
-            {permanent: true, direction: 'top', offset: [0, -22], className: 'wr-pin-team-label', interactive: false}
+            {permanent: true, direction: 'top', offset: [0, -(PIN_MARKER_PX / 2 + 14)], className: 'wr-pin-team-label', interactive: false}
         );
     }
     return marker;
@@ -12310,7 +12390,7 @@ function renderTrailUpTo(trails, cutoffTs) {
             if (isLast) {
                 const icon = trailAlarm
                     ? L.divIcon({className:'', html:`<span class="wr-pin-heart wr-pin-heart-trail" style="color:${alarmColor};">&#9829;</span>`, iconSize:[16,16], iconAnchor:[8,8]})
-                    : L.divIcon({className:'', html:`<span style="display:block;width:16px;height:16px;background:${color};border:2px solid white;border-radius:50%;box-shadow:0 1px 4px #0008"></span>`, iconSize:[16,16], iconAnchor:[8,8]});
+                    : L.divIcon({className:'', html:`<span style="display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:${PIN_MARKER_PX}px;height:${PIN_MARKER_PX}px;background:${color};border:2px solid white;border-radius:50%;box-shadow:0 1px 4px #0008">${transportGlyphSvg(trail.transport, Math.round(PIN_MARKER_PX * 0.64), trail.team_color ? teamBadgeColorsJs(trail.team_color)[1] : '#fff')}</span>`, iconSize:[PIN_MARKER_PX, PIN_MARKER_PX], iconAnchor:[PIN_MARKER_PX / 2, PIN_MARKER_PX / 2]});
                 marker = L.marker([point.lat, point.lng], {icon}).addTo(trailLayer);
             } else {
                 marker = L.circleMarker([point.lat, point.lng], {
@@ -14295,7 +14375,7 @@ function opDistanceText(m) {
     // Read live rather than kept in the model: the ETA moves every poll, and a
     // model that changed with it would rebuild the card, map and all, each time.
     const d = m.kind === 'dispatch' ? (dispatches || []).find(x => String(x.id) === String(m.id)) : null;
-    if (d && d.eta) parts.push(d.eta.minutes < 1 ? t('dispatch.eta_lt_1min') : t('dispatch.eta_minutes', {n: d.eta.minutes}));
+    if (d && d.eta) parts.push(dispatchEtaText(d.eta));
     return parts.join(' · ');
 }
 function opMiniHtml(m) {

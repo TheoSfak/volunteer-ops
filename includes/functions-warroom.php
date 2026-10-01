@@ -29,6 +29,90 @@ function getUserTeamIdForMission(int $missionId, int $userId): ?int {
 }
 
 /**
+ * How a team moves (v3.357.0). Chosen when the team is made and changeable in
+ * its edit window; every team is on foot until somebody says otherwise.
+ *
+ * It decides four things, and only these:
+ *   · the icon the team's positions wear on the live map;
+ *   · how fast a position may imply the team travelled before it is refused as
+ *     a glitch (recordVolunteerPing());
+ *   · whether the arrival time at a dispatch point is worked out on foot or by
+ *     road (computeDispatchEta());
+ *   · which of the two routed figures the assistant and «ποια ομάδα είναι πιο
+ *     κοντά» lead with.
+ * Nothing about the team's orders, members or permissions depends on it.
+ */
+const TEAM_TRANSPORTS = ['foot', 'motorbike', 'car'];
+
+/** Anything that is not one of the three known values is "on foot". */
+function normalizeTeamTransport($value): string {
+    return in_array($value, TEAM_TRANSPORTS, true) ? $value : 'foot';
+}
+
+/** A motorbike and a car are routed, timed and speed-checked the same way. */
+function teamTransportIsVehicle($transport): bool {
+    return normalizeTeamTransport($transport) !== 'foot';
+}
+
+/**
+ * How the team this person is on moves, or "foot" for somebody on no team —
+ * and for any failure to find out (a database that has not run migration 178
+ * yet must not make a position fail to be stored).
+ */
+function teamTransportForUser(int $missionId, int $userId): string {
+    try {
+        $value = dbFetchValue(
+            "SELECT mt.transport FROM mission_team_members mtm
+               JOIN mission_teams mt ON mt.id = mtm.team_id
+              WHERE mtm.mission_id = ? AND mtm.user_id = ? LIMIT 1",
+            [$missionId, $userId]
+        );
+    } catch (Throwable $e) {
+        return 'foot';
+    }
+    return normalizeTeamTransport($value);
+}
+
+/** Same, for the team itself. */
+function teamTransportForTeam(int $teamId): string {
+    try {
+        $value = dbFetchValue("SELECT transport FROM mission_teams WHERE id = ?", [$teamId]);
+    } catch (Throwable $e) {
+        return 'foot';
+    }
+    return normalizeTeamTransport($value);
+}
+
+/**
+ * The icons, Tabler outline (MIT) so the stroke style matches everywhere it is
+ * drawn: forms, the teams panel and the map all read this one list, and the
+ * page hands it to its script as JSON, so there is no second copy to drift.
+ * Each value is the inner markup of a 24x24 viewBox.
+ */
+function teamTransportIconPaths(): array {
+    return [
+        'foot' =>
+            '<path d="M13 4m-1 0a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/><path d="M7 21l3 -4"/>'
+            . '<path d="M16 21l-2 -4l-3 -3l1 -6"/><path d="M6 12l2 -3l4 -1l3 3l3 1"/>',
+        'motorbike' =>
+            '<path d="M5 16m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"/><path d="M19 16m-3 0a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"/>'
+            . '<path d="M7.5 14h5l4 -4h-10.5m1.5 4l4 -4"/><path d="M13 6h2l1.5 3l2 4"/>',
+        'car' =>
+            '<path d="M7 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M17 17m-2 0a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/>'
+            . '<path d="M5 17h-2v-6l2 -5h9l4 5h1a2 2 0 0 1 2 2v4h-2m-4 0h-6m-6 -6h15m-6 0v-5"/>',
+    ];
+}
+
+/** One icon as a ready <svg>, coloured by the surrounding text colour. */
+function teamTransportIconSvg($transport, int $size = 18): string {
+    $paths = teamTransportIconPaths();
+    $inner = $paths[normalizeTeamTransport($transport)];
+    return '<svg xmlns="http://www.w3.org/2000/svg" width="' . $size . '" height="' . $size . '" viewBox="0 0 24 24"'
+        . ' fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"'
+        . ' aria-hidden="true" style="vertical-align:-0.2em">' . $inner . '</svg>';
+}
+
+/**
  * Who actually takes part in the Action Room on this mission — the people
  * whose GPS is tracked, who appear in the coordinator's recipient lists, and
  * who count in the operational reports.
@@ -1509,10 +1593,10 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
     // trail while everyone else kept theirs in full, for no reason
     // connected to anything about their actual participation.
     $rows = dbFetchAll(
-        "SELECT user_id, lat, lng, accuracy_meters, created_at, source, via, raw_accuracy_m, gnss_used, gnss_cn0, name, team_id, team_color FROM (
+        "SELECT user_id, lat, lng, accuracy_meters, created_at, source, via, raw_accuracy_m, gnss_used, gnss_cn0, name, team_id, team_color, team_transport FROM (
             SELECT vp.user_id, vp.lat, vp.lng, vp.accuracy_meters, vp.created_at, vp.source,
                     vp.via, vp.raw_accuracy_m, vp.gnss_used, vp.gnss_cn0,
-                    u.name, mtm.team_id, mt.color AS team_color,
+                    u.name, mtm.team_id, mt.color AS team_color, mt.transport AS team_transport,
                     ROW_NUMBER() OVER (PARTITION BY vp.user_id ORDER BY vp.created_at DESC) AS rn
              FROM volunteer_pings vp
              JOIN shifts s ON s.id = vp.shift_id
@@ -1544,6 +1628,7 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
                 'user_id'    => $userId,
                 'name'       => $row['name'],
                 'team_color' => $row['team_color'],
+                'transport'  => normalizeTeamTransport($row['team_transport']),
                 'points'     => [],
             ];
         }
@@ -2909,7 +2994,7 @@ function homeTeamCornerBadgeHtml(?string $teamName, ?string $teamColor, bool $is
  */
 function loadMissionTeamsForMission(int $missionId): array {
     $teamRows = dbFetchAll(
-        "SELECT mt.id, mt.codename, mt.team_number, mt.color, mt.briefing_token, mt.leader_id, l.name AS leader_name,
+        "SELECT mt.id, mt.codename, mt.team_number, mt.color, mt.transport, mt.briefing_token, mt.leader_id, l.name AS leader_name,
                 l.is_external AS leader_is_external, l.guest_org_name AS leader_guest_org_name, l.guest_country_code AS leader_guest_country_code,
                 COALESCE(lht.name, lmvt.label) AS leader_home_team_name, COALESCE(lht.color, lmvt.color) AS leader_home_team_color,
                 mtm.user_id, u.name AS member_name, u.is_external AS member_is_external, u.guest_org_name AS member_guest_org_name, u.guest_country_code AS member_guest_country_code,
@@ -2935,6 +3020,7 @@ function loadMissionTeamsForMission(int $missionId): array {
                 'codename' => $row['codename'],
                 'team_number' => $row['team_number'],
                 'color' => $row['color'],
+                'transport' => normalizeTeamTransport($row['transport']),
                 'briefing_token' => $row['briefing_token'],
                 'leader_id' => $row['leader_id'] !== null ? (int) $row['leader_id'] : null,
                 'leader_name' => $row['leader_name'],
@@ -4932,6 +5018,18 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     $maxSpeedKmh = (float) getSetting('war_room_max_ping_speed_kmh', '25');
     if ($maxSpeedKmh > 0) {
         if ($prev) {
+            // A team that is declared as on a motorbike or in a car is judged
+            // against a road speed instead (v3.357.0). Everything said below
+            // about nobody having to declare themselves still holds for the
+            // default — and for a car or bike that was never declared — but a
+            // declared vehicle no longer has to lean on the Doppler exception
+            // and the staleness line to be recorded at all: at 25 km/h a car
+            // on a road implies 'impossible' on every single fix, and was
+            // stored once a minute or two while it drove. Never LOWER than
+            // the walking limit, so an org that set that high keeps it.
+            if (teamTransportIsVehicle(teamTransportForUser((int) $pr['mission_id'], $userId))) {
+                $maxSpeedKmh = max($maxSpeedKmh, (float) getSetting('war_room_max_ping_speed_kmh_vehicle', '140'));
+            }
             // Time between the two FIXES, not between their arrivals. Floored
             // at one second rather than skipped at zero: two fixes stamped in
             // the same second used to bypass this gate entirely, and a queue
@@ -6625,29 +6723,77 @@ function computeDispatchEta(int $dispatchId, int $teamId, float $destLat, float 
     $pingAgeSeconds = time() - strtotime($pingCreatedAt);
     $isStale = $pingAgeSeconds > warRoomPingStaleThresholdSeconds();
 
+    // How the team moves decides which time this is (v3.357.0). It used to be
+    // the road time for everybody, so a team walking up a slope was told it
+    // had «ETA ~4 λεπτά» to a point 3 km away because a road passes nearby.
+    $transport = teamTransportForTeam($teamId);
+    $mode = teamTransportIsVehicle($transport) ? 'vehicle' : 'foot';
+
     $cached = dbFetchOne(
-        "SELECT minutes, source, ping_created_at FROM dispatch_eta_cache WHERE dispatch_id = ?",
+        "SELECT minutes, source, mode, ping_created_at FROM dispatch_eta_cache WHERE dispatch_id = ?",
         [$dispatchId]
     );
-    if ($cached && $cached['ping_created_at'] === $pingCreatedAt) {
+    // A cached time worked out the other way (the team was switched between
+    // foot and a vehicle since) is not a time for this team any more.
+    if ($cached && $cached['ping_created_at'] === $pingCreatedAt && $cached['mode'] === $mode) {
         return [
-            'minutes' => (int) $cached['minutes'], 'source' => $cached['source'],
+            'minutes' => (int) $cached['minutes'], 'source' => $cached['source'], 'mode' => $mode,
+            'transport' => $transport,
             'ping_age_seconds' => $pingAgeSeconds, 'is_stale' => $isStale,
         ];
     }
 
-    $osrm = fetchOsrmEtaMinutes($pingLat, $pingLng, $destLat, $destLng);
-    [$minutes, $source] = $osrm ?? [straightLineEtaMinutes($pingLat, $pingLng, $destLat, $destLng), 'straight_line'];
+    [$minutes, $source] = $mode === 'vehicle'
+        ? (fetchOsrmEtaMinutes($pingLat, $pingLng, $destLat, $destLng)
+            ?? [straightLineEtaMinutes($pingLat, $pingLng, $destLat, $destLng), 'straight_line'])
+        : (fetchWalkingEtaMinutes($pingLat, $pingLng, $destLat, $destLng)
+            ?? [straightLineWalkingEtaMinutes($pingLat, $pingLng, $destLat, $destLng), 'straight_line']);
 
     dbExecute(
-        "INSERT INTO dispatch_eta_cache (dispatch_id, minutes, source, ping_lat, ping_lng, ping_created_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE minutes = VALUES(minutes), source = VALUES(source),
+        "INSERT INTO dispatch_eta_cache (dispatch_id, minutes, source, mode, ping_lat, ping_lng, ping_created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE minutes = VALUES(minutes), source = VALUES(source), mode = VALUES(mode),
              ping_lat = VALUES(ping_lat), ping_lng = VALUES(ping_lng), ping_created_at = VALUES(ping_created_at)",
-        [$dispatchId, $minutes, $source, $pingLat, $pingLng, $pingCreatedAt]
+        [$dispatchId, $minutes, $source, $mode, $pingLat, $pingLng, $pingCreatedAt]
     );
 
-    return ['minutes' => $minutes, 'source' => $source, 'ping_age_seconds' => $pingAgeSeconds, 'is_stale' => $isStale];
+    return [
+        'minutes' => $minutes, 'source' => $source, 'mode' => $mode, 'transport' => $transport,
+        'ping_age_seconds' => $pingAgeSeconds, 'is_stale' => $isStale,
+    ];
+}
+
+/**
+ * On foot, from Google's walking router — only when the organisation stored a
+ * key, because nothing free routes on foot (the OSRM demo is driving only).
+ * Same single short attempt as the road one and for the same reason: this runs
+ * inside the 5-second poll every open tab hits. Google answers 200 with an
+ * empty list where no path is mapped (a ridge), which is null here, so the
+ * caller's straight line takes over rather than the dispatch showing nothing.
+ */
+function fetchWalkingEtaMinutes(float $lat1, float $lng1, float $lat2, float $lng2): ?array {
+    if (!routeDistanceAvailable()) {
+        return null;
+    }
+    $google = routeDistanceProvider();
+    if ($google['name'] !== 'google') {
+        return null;
+    }
+    $routed = routeDistanceRunBatch($google, [0 => [$lat1, $lng1, $lat2, $lng2]]);
+    $minutes = $routed[0]['minutes'] ?? null;
+    return $minutes === null ? null : [max(1, (int) $minutes), 'google'];
+}
+
+/**
+ * The walking fallback: straight line at 4 km/h. Slower than the 5 km/h
+ * Naismith starts from because it is a straight line over the kind of ground
+ * this app's search teams cross, and a fallback that errs towards "later" is
+ * the safer one to plan a pickup around. Always tagged 'straight_line', so the
+ * map says it is an estimate.
+ */
+function straightLineWalkingEtaMinutes(float $lat1, float $lng1, float $lat2, float $lng2): int {
+    $meters = gpsDistanceMeters($lat1, $lng1, $lat2, $lng2);
+    return max(1, (int) round($meters / ((4 * 1000) / 60)));
 }
 
 /**
