@@ -11989,9 +11989,31 @@ const CAN_MANAGE_WAR_ROOM = <?= json_encode($canManageWarRoom) ?>;
 // team forms (teamTransportIconPaths() in functions-warroom.php), so the map
 // and the forms can never show different pictures for the same choice.
 const TEAM_TRANSPORT_ICONS = <?= json_encode(teamTransportIconPaths()) ?>;
-// Diameter of a position's marker. It was a 16px dot while it only had to say
-// "here"; it now has to say on foot, motorbike or car.
+// A position is a map pin (v3.357.1): a team-coloured teardrop whose point is
+// the position, with the way the team moves drawn in its round head. It was a
+// 16px dot while it only had to say "here"; it now has to say on foot,
+// motorbike or car as well.
+//
+// PIN_MARKER_PX is the head's diameter. The teardrop is a square with three
+// round corners turned 45 degrees, so its point sits 0.707 x the side below the
+// head's centre: that is where the map coordinate is, and every anchor below
+// (the icon, the popup, the team label) is measured from there.
 const PIN_MARKER_PX = 28;
+const PIN_TIP_PX = Math.round(PIN_MARKER_PX * Math.SQRT1_2);
+function pinMarkerIcon(color, border, glyphSvg, outerStyle = '', overlayHtml = '') {
+    const s = PIN_MARKER_PX;
+    // The head is turned, so the heading arrow and the stale fade live on the
+    // box around it — a turned arrow would point 45 degrees off.
+    return L.divIcon({
+        className: '',
+        html: `<span style="position:relative;display:block;width:${s}px;height:${s}px;${outerStyle}">`
+            + `<span style="display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:100%;height:100%;background:${color};${border}border-radius:50% 50% 50% 0;transform:rotate(-45deg);box-shadow:0 1px 4px #0008">`
+            + `<span style="display:flex;transform:rotate(45deg)">${glyphSvg}</span></span>${overlayHtml}</span>`,
+        iconSize: [s, s],
+        iconAnchor: [s / 2, s / 2 + PIN_TIP_PX],
+        popupAnchor: [0, -(PIN_TIP_PX + s / 2 + 4)],
+    });
+}
 function transportGlyphSvg(transport, px, stroke) {
     const inner = TEAM_TRANSPORT_ICONS[transport] || TEAM_TRANSPORT_ICONS.foot;
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 24 24" fill="none" stroke="${stroke}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:block">${inner}</svg>`;
@@ -12072,11 +12094,11 @@ function buildPinMarker(pin, interactive = true) {
     const hrAlarm = hrZone === 'critical' || hrZone === 'low';
     const icon = hrAlarm
         ? L.divIcon({className:'', html:`<span class="wr-pin-heart" style="color:${hrZone === 'critical' ? '#dc2626' : '#1d4ed8'};">&#9829;${headingArrow}</span>`, iconSize:[18,18], iconAnchor:[9,9]})
-        // The team-coloured disc is still the mark (colour says WHICH team);
-        // what is drawn inside it says how the team moves. The glyph takes the
-        // same readable-on-this-colour text colour the team badges use, and
-        // white on the status colours of somebody with no team.
-        : L.divIcon({className:'', html:`<span style="position:relative;display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:${PIN_MARKER_PX}px;height:${PIN_MARKER_PX}px;background:${color};${ring}${opacity}border-radius:50%;box-shadow:0 1px 4px #0008">${transportGlyphSvg(pin.transport, Math.round(PIN_MARKER_PX * 0.64), pin.team_color ? teamBadgeColorsJs(pin.team_color)[1] : '#fff')}${headingArrow}</span>`, iconSize:[PIN_MARKER_PX, PIN_MARKER_PX], iconAnchor:[PIN_MARKER_PX / 2, PIN_MARKER_PX / 2]});
+        // The team colour is still the mark (colour says WHICH team); what is
+        // drawn in the head says how the team moves. The glyph takes the same
+        // readable-on-this-colour text colour the team badges use, and white
+        // on the status colours of somebody with no team.
+        : pinMarkerIcon(color, ring, transportGlyphSvg(pin.transport, Math.round(PIN_MARKER_PX * 0.64), pin.team_color ? teamBadgeColorsJs(pin.team_color)[1] : '#fff'), opacity, headingArrow);
     const statusLine = pinStatusLabel(pin.status);
     const extraLine = pin.is_stale ? `<br><span class="text-muted small">${t('map.pin_stale')}</span>`
         : (pin.is_moving ? `<br><span class="text-info small">${t('map.pin_moving')}</span>` : '');
@@ -12157,7 +12179,7 @@ function buildPinMarker(pin, interactive = true) {
     if (interactive && pin.team_label) {
         marker.bindTooltip(
             `<span style="display:inline-block;background:#fff;color:#1f2937;border:2px solid ${escapeHtml(pin.team_color || '#6c757d')};padding:0 6px;border-radius:10px;font-weight:700;font-size:.72rem;line-height:1.35;white-space:nowrap;box-shadow:0 1px 3px #0006;${opacity}">${escapeHtml(pin.team_label)}</span>`,
-            {permanent: true, direction: 'top', offset: [0, -(PIN_MARKER_PX / 2 + 14)], className: 'wr-pin-team-label', interactive: false}
+            {permanent: true, direction: 'top', offset: [0, -(PIN_TIP_PX + PIN_MARKER_PX / 2 + 14)], className: 'wr-pin-team-label', interactive: false}
         );
     }
     return marker;
@@ -12390,7 +12412,7 @@ function renderTrailUpTo(trails, cutoffTs) {
             if (isLast) {
                 const icon = trailAlarm
                     ? L.divIcon({className:'', html:`<span class="wr-pin-heart wr-pin-heart-trail" style="color:${alarmColor};">&#9829;</span>`, iconSize:[16,16], iconAnchor:[8,8]})
-                    : L.divIcon({className:'', html:`<span style="display:flex;align-items:center;justify-content:center;box-sizing:border-box;width:${PIN_MARKER_PX}px;height:${PIN_MARKER_PX}px;background:${color};border:2px solid white;border-radius:50%;box-shadow:0 1px 4px #0008">${transportGlyphSvg(trail.transport, Math.round(PIN_MARKER_PX * 0.64), trail.team_color ? teamBadgeColorsJs(trail.team_color)[1] : '#fff')}</span>`, iconSize:[PIN_MARKER_PX, PIN_MARKER_PX], iconAnchor:[PIN_MARKER_PX / 2, PIN_MARKER_PX / 2]});
+                    : pinMarkerIcon(color, 'border:2px solid white;', transportGlyphSvg(trail.transport, Math.round(PIN_MARKER_PX * 0.64), trail.team_color ? teamBadgeColorsJs(trail.team_color)[1] : '#fff'));
                 marker = L.marker([point.lat, point.lng], {icon}).addTo(trailLayer);
             } else {
                 marker = L.circleMarker([point.lat, point.lng], {
