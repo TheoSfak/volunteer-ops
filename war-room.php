@@ -7619,15 +7619,15 @@ const OSM_ATTRIBUTION = '© OpenStreetMap contributors';
 const OSM_KEY_ON = 'wr_osm_on';
 const OSM_KEY_CATS = 'wr_osm_cats';
 const OSM_CATEGORIES = [
-    {key: 'paths',    icon: 'bi-bezier2',          color: '#d97706', group: 'paths',  minZoom: 14, kinds: ['path'],                                           on: true},
-    {key: 'tracks',   icon: 'bi-truck',            color: '#78716c', group: 'tracks', minZoom: 14, kinds: ['track'],                                          on: false},
-    {key: 'caves',    icon: 'bi-moon-fill',        color: '#6d28d9', group: 'points', minZoom: 13, kinds: ['cave'],                                           on: true},
-    {key: 'shelters', icon: 'bi-house-door-fill',  color: '#0f766e', group: 'points', minZoom: 13, kinds: ['hut', 'shelter'],                                 on: true},
-    {key: 'water',    icon: 'bi-droplet-fill',     color: '#0284c7', group: 'points', minZoom: 13, kinds: ['spring', 'water', 'well', 'tank'],                on: true},
-    {key: 'chapels',  icon: 'bi-plus-lg',          color: '#9333ea', group: 'points', minZoom: 13, kinds: ['chapel'],                                         on: true},
-    {key: 'peaks',    icon: 'bi-triangle-fill',    color: '#854d0e', group: 'points', minZoom: 13, kinds: ['peak', 'saddle'],                                 on: true},
-    {key: 'cliffs',   icon: 'bi-bar-chart-steps',  color: '#374151', group: 'cliffs', minZoom: 14, kinds: ['cliff'],                                          on: true},
-    {key: 'access',   icon: 'bi-info-circle-fill', color: '#dc2626', group: 'points', minZoom: 13, kinds: ['emergency', 'helipad', 'trailhead', 'guidepost'], on: true},
+    {key: 'paths',    icon: 'bi-bezier2',          color: '#d97706', group: 'paths',  minZoom: 13, kinds: ['path'],                                           on: true},
+    {key: 'tracks',   icon: 'bi-truck',            color: '#78716c', group: 'tracks', minZoom: 13, kinds: ['track'],                                          on: false},
+    {key: 'caves',    icon: 'bi-moon-fill',        color: '#6d28d9', group: 'points', minZoom: 12, kinds: ['cave'],                                           on: true},
+    {key: 'shelters', icon: 'bi-house-door-fill',  color: '#0f766e', group: 'points', minZoom: 12, kinds: ['hut', 'shelter'],                                 on: true},
+    {key: 'water',    icon: 'bi-droplet-fill',     color: '#0284c7', group: 'points', minZoom: 12, kinds: ['spring', 'water', 'well', 'tank'],                on: true},
+    {key: 'chapels',  icon: 'bi-plus-lg',          color: '#9333ea', group: 'points', minZoom: 12, kinds: ['chapel'],                                         on: true},
+    {key: 'peaks',    icon: 'bi-triangle-fill',    color: '#854d0e', group: 'points', minZoom: 12, kinds: ['peak', 'saddle'],                                 on: true},
+    {key: 'cliffs',   icon: 'bi-bar-chart-steps',  color: '#374151', group: 'cliffs', minZoom: 13, kinds: ['cliff'],                                          on: true},
+    {key: 'access',   icon: 'bi-info-circle-fill', color: '#dc2626', group: 'points', minZoom: 12, kinds: ['emergency', 'helipad', 'trailhead', 'guidepost'], on: true},
 ];
 const OSM_KIND_ICONS = {
     cave: 'bi-moon-fill', hut: 'bi-house-door-fill', shelter: 'bi-umbrella-fill', spring: 'bi-droplet-fill',
@@ -7676,6 +7676,7 @@ const osmDrawn = new Map();   // 'n123' -> the layer on the map for it
 const osmLoaded = new Set();  // 'row_col|group' the server has answered for
 const osmRetryAt = new Map(); // 'row_col|group' -> when to ask again after a failure
 let osmBusy = false, osmAgain = false, osmTimer = null, osmPartial = false, osmTooWide = false, osmGen = 0, osmAttributed = false;
+let osmSettled = false; // the last load of this view finished cleanly
 let osmChip = null;
 
 // A word from the language file, or the raw value when there is no translation.
@@ -7797,9 +7798,24 @@ function osmAddItems(items) {
     osmRender();
 }
 
-// What the map says to the viewer about the layer: too far out, loading, or
-// that part of it could not be fetched. One chip at the bottom left, gone
-// when there is nothing to say.
+// Whether anything the layer draws lies inside what the map is showing.
+function osmAnyInView() {
+    const b = map.getBounds();
+    for (const layer of osmDrawn.values()) {
+        if (layer.getLatLng ? b.contains(layer.getLatLng()) : b.intersects(layer.getBounds())) return true;
+    }
+    return false;
+}
+
+// The lowest zoom at which every ticked category can be drawn, or null.
+function osmMinZoomTicked() {
+    const zooms = OSM_CATEGORIES.filter(c => osmCatsOn.has(c.key)).map(c => c.minZoom);
+    return zooms.length ? Math.min(...zooms) : null;
+}
+
+// What the map says to the viewer about the layer: too far out, loading, that
+// part of it could not be fetched, or that there is nothing here. One chip at
+// the bottom left, gone when there is nothing to say.
 function osmUpdateChip() {
     if (!osmCluster) return;
     let text = '';
@@ -7811,6 +7827,10 @@ function osmUpdateChip() {
         else if (far.length) text = t('osm.zoom_in', {list: far.join(', ')});
         else if (osmBusy) text = t('osm.loading');
         else if (osmPartial) text = t('osm.partial');
+        // Loaded cleanly and still nothing in sight: say so, or "nothing
+        // appeared" reads as "it is broken". Often it only means nobody has
+        // mapped this stretch of ground.
+        else if (osmSettled && ticked && !osmAnyInView()) text = t('osm.empty');
     }
     if (!text) {
         if (osmChip) { osmChip.remove(); osmChip = null; }
@@ -7875,6 +7895,7 @@ async function osmLoadView() {
     if (osmBusy) { osmAgain = true; return; }
     if ((osmRetryAt.get('net') || 0) > Date.now()) { osmUpdateChip(); return; }
     osmBusy = true;
+    let failedPass = false;
     osmUpdateChip();
     try {
         do {
@@ -7909,16 +7930,18 @@ async function osmLoadView() {
             for (const job of jobs) {
                 if (osmAgain || !osmOn) break;
                 osmUpdateChip();
-                if (!(await osmRunJob(job))) { osmAgain = false; break; }
+                if (!(await osmRunJob(job))) { osmAgain = false; failedPass = true; break; }
             }
         } while (osmAgain && osmOn);
     } finally {
         osmBusy = false;
+        osmSettled = osmOn && !osmTooWide && !osmPartial && !failedPass;
         osmUpdateChip();
     }
 }
 
 function osmScheduleLoad() {
+    osmSettled = false; // the view just changed: whatever was true of the last one is not known of this
     clearTimeout(osmTimer);
     osmTimer = setTimeout(osmLoadView, 600);
 }
@@ -7941,6 +7964,11 @@ function osmScheduleLoad() {
         menu.appendChild(li);
     };
     addRow('data-osm-master', '1', 'bi-map', '', t('osm.master'), 'fw-semibold');
+    // Where the viewer is looking when they tick the box: say right there when
+    // the map is too far out to show anything yet.
+    const zoomHint = document.createElement('li');
+    zoomHint.innerHTML = '<div class="dropdown-item-text small wr-osm-note wr-osm-zoomhint d-none"></div>';
+    menu.appendChild(zoomHint);
     OSM_CATEGORIES.forEach(c => addRow('data-osm', c.key, c.icon, c.color, t('osm.cat_' + c.key), ''));
     const note = document.createElement('li');
     note.innerHTML = '<div class="dropdown-item-text small text-muted wr-osm-note"></div>';
@@ -7953,6 +7981,11 @@ function osmScheduleLoad() {
             input.checked = osmCatsOn.has(input.dataset.osm);
             input.disabled = !osmOn;
         });
+        const lowest = osmMinZoomTicked();
+        const hint = zoomHint.firstChild;
+        const tooFar = osmOn && lowest !== null && map.getZoom() < lowest;
+        hint.textContent = tooFar ? t('osm.zoom_in_all') : '';
+        hint.classList.toggle('d-none', !tooFar);
     };
     menu.addEventListener('change', e => {
         const master = e.target.closest('input[data-osm-master]');
@@ -7962,14 +7995,20 @@ function osmScheduleLoad() {
         else if (cat.checked) osmCatsOn.add(cat.dataset.osm);
         else osmCatsOn.delete(cat.dataset.osm);
         osmSavePrefs();
-        syncInputs();
+        // They just asked to see it: bring the map close enough to show it,
+        // rather than leave them looking at nothing. Only here, on a tick —
+        // never when the saved choice is restored on page load, which must not
+        // move the map by itself.
+        const asked = master ? (master.checked ? osmMinZoomTicked() : null) : (cat.checked ? OSM_CATEGORIES.find(c => c.key === cat.dataset.osm).minZoom : null);
+        if (osmOn && asked !== null && map.getZoom() < asked) map.setZoom(asked);
         osmAttach();
         osmRender();
-        osmUpdateChip();
         osmScheduleLoad();
+        osmUpdateChip();
+        syncInputs();
     });
     syncInputs();
-    map.on('moveend', () => { osmAttach(); osmUpdateChip(); osmScheduleLoad(); });
+    map.on('moveend', () => { osmAttach(); osmScheduleLoad(); osmUpdateChip(); syncInputs(); });
     osmAttach();
     osmScheduleLoad();
 })();

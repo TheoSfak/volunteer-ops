@@ -394,24 +394,34 @@ function osmCacheRetryLater(string $tileKey, string $group): void {
  * Returns [byGroup, state]: byGroup is [group => items] for every group of the
  * bundle, and state is 'fresh' (from the cache, or just fetched), 'stale' (an
  * old answer; the refresh failed or was held back), 'pending' (nothing known yet
- * and no fetch allowed now — the page should ask again) or 'failed' (nothing
- * known and Overpass did not answer). $budget is how many Overpass calls this
- * request may still make; it is spent here.
+ * and no fetch allowed now — the page should ask again) or 'failed' (Overpass
+ * did not answer: byGroup holds whatever was known, possibly nothing, and the
+ * page should ask again in a couple of minutes). $budget is how many Overpass
+ * calls this request may still make; it is spent here.
  */
 function osmTileBundle(string $tileKey, string $bundle, float $s, float $w, float $n, float $e, int &$budget): array {
     $groups = OSM_BUNDLES[$bundle];
     $held = [];
     $allFresh = true;
-    $anyRow = false;
+    $retrying = false;
     foreach ($groups as $group) {
         $row = osmCacheRead($tileKey, $group);
         $held[$group] = $row !== null ? $row[0] : [];
         if ($row === null || $row[1] >= OSM_CACHE_TTL) $allFresh = false;
-        if ($row !== null) $anyRow = true;
+        // A row aged into the last OSM_RETRY_AFTER seconds before its expiry is
+        // the "try again later" marker osmCacheRetryLater() leaves after a
+        // failed refresh (or the end of a real row's life): what it holds may be
+        // empty only because Overpass did not answer.
+        if ($row !== null && $row[1] >= OSM_CACHE_TTL - OSM_RETRY_AFTER && $row[1] < OSM_CACHE_TTL) $retrying = true;
     }
-    if ($allFresh) return [$held, 'fresh'];
+    // Served, but not called "fresh": the page would take an empty answer for a
+    // finished one and never ask again until it was reloaded.
+    if ($allFresh) return [$held, $retrying ? 'failed' : 'fresh'];
 
-    $notNow = [$held, $anyRow ? 'stale' : 'pending'];
+    // "Something known" means something to draw: a row that is only the empty
+    // marker of a failed refresh counts for nothing.
+    $anyData = (bool) array_filter($held);
+    $notNow = [$held, $anyData ? 'stale' : 'pending'];
     if ($budget <= 0) return $notNow;
 
     // One caller at a time per tile, so ten volunteers opening the same
@@ -424,7 +434,7 @@ function osmTileBundle(string $tileKey, string $bundle, float $s, float $w, floa
         $fetched = osmFetchBundle($bundle, $s, $w, $n, $e);
         if ($fetched === null) {
             foreach ($groups as $group) osmCacheRetryLater($tileKey, $group);
-            return [$held, $anyRow ? 'stale' : 'failed'];
+            return [$held, $anyData ? 'stale' : 'failed'];
         }
         foreach ($groups as $group) osmCacheWrite($tileKey, $group, $fetched[$group] ?? []);
         return [$fetched, 'fresh'];
