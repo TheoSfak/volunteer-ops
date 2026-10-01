@@ -6,6 +6,7 @@
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/sidebar-theme.php';
 require_once __DIR__ . '/includes/clock-place.php';
+require_once __DIR__ . '/includes/osm-bulk.php';
 requireLogin();
 requireRole([ROLE_SYSTEM_ADMIN]);
 
@@ -2516,11 +2517,144 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                             <strong>Μονοπάτια, σπηλιές, καταφύγια, πηγές και άλλα σημεία από το OpenStreetMap</strong>
                         </label>
                         <div class="form-text">
-                            Προαιρετικό στρώμα στο μενού επιπέδων του χάρτη, κλειστό από προεπιλογή. Τα δεδομένα είναι εθελοντικής χαρτογράφησης και <strong>δεν είναι πλήρη</strong>: μια σπηλιά ή ένα καταφύγιο που λείπει από τον χάρτη δεν σημαίνει ότι δεν υπάρχει. Ο server ζητά τα δεδομένα από δημόσιους servers Overpass και τα κρατά 30 ημέρες· προς τα έξω φεύγει μόνο το τετράγωνο του χάρτη που βλέπετε, χωρίς κανένα όνομα ή αναγνωριστικό.
+                            Προαιρετικό στρώμα στο μενού επιπέδων του χάρτη, κλειστό από προεπιλογή. Τα δεδομένα είναι εθελοντικής χαρτογράφησης και <strong>δεν είναι πλήρη</strong>: μια σπηλιά ή ένα καταφύγιο που λείπει από τον χάρτη δεν σημαίνει ότι δεν υπάρχει. Ο server ζητά τα δεδομένα από δημόσιους servers Overpass και τα κρατά μόνιμα (ανανεώνονται από το κουμπί παρακάτω)· προς τα έξω φεύγει μόνο το τετράγωνο του χάρτη που βλέπετε, χωρίς κανένα όνομα ή αναγνωριστικό.
                         </div>
                     </div>
                 </div>
             </div>
+
+            <!-- OpenStreetMap: all of Crete, downloaded once and refreshed by hand -->
+            <?php $osmBulk = osmBulkStatus(); ?>
+            <div class="card mb-4" id="osmBulkCard">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-cloud-download me-1"></i>Δεδομένα OpenStreetMap Κρήτης (μόνιμη αποθήκευση)</h5>
+                </div>
+                <div class="card-body">
+                    <p class="mb-2" id="osmBulkSummary"></p>
+                    <div class="progress mb-2 d-none" id="osmBulkBarWrap" style="height: 1.4rem;">
+                        <div class="progress-bar" id="osmBulkBar" role="progressbar" style="width: 0%"></div>
+                    </div>
+                    <div class="small text-muted mb-3" id="osmBulkLine"></div>
+                    <button type="button" class="btn btn-primary" id="osmBulkGo"></button>
+                    <button type="button" class="btn btn-outline-secondary d-none" id="osmBulkPause">Παύση</button>
+                    <div class="form-text mt-2">
+                        Κατεβάζει <strong>όλη την Κρήτη</strong> (σπηλιές, καταφύγια, νερό, παρεκκλήσια, κορυφές, μονοπάτια, γκρεμούς, σημεία έκτακτης ανάγκης) από το Overpass και την αποθηκεύει στον server, ώστε ο χάρτης να τη δείχνει αμέσως, χωρίς αναμονή. Θέλει <strong>λιγότερο από μία ώρα</strong> (περίπου 130 ερωτήματα, μόνο στη στεριά) και η σελίδα πρέπει να μείνει ανοιχτή· αν κλείσει, συνεχίζει από εκεί που έμεινε. Ξανά-πατήστε «Ενημέρωση» κάθε λίγους μήνες για να έρθουν τα νέα σημεία του OpenStreetMap· τα παλιά δεδομένα εξακολουθούν να εμφανίζονται όσο τρέχει. Οι χωματόδρομοι δεν περιλαμβάνονται (φορτώνονται όταν τους ζητήσει κάποιος).
+                    </div>
+                </div>
+            </div>
+            <script>
+            (function () {
+                var csrf = <?= json_encode(csrfToken()) ?>;
+                var state = <?= json_encode($osmBulk) ?>;
+                var go = document.getElementById('osmBulkGo');
+                var pauseBtn = document.getElementById('osmBulkPause');
+                var summary = document.getElementById('osmBulkSummary');
+                var barWrap = document.getElementById('osmBulkBarWrap');
+                var bar = document.getElementById('osmBulkBar');
+                var line = document.getElementById('osmBulkLine');
+                var running = false, failedNow = 0, lastWhy = '';
+                var onlyFailedLeft = false; // the pass reached the end and what remains are chunks Overpass did not answer
+
+                function fmtDate(ts) { return ts ? new Date(ts * 1000).toLocaleString('el-GR') : null; }
+                function inProgress() { return state.job_started && state.job_remaining > 0; }
+
+                function render() {
+                    var parts = [state.stored_tiles + ' από ' + state.total_tiles + ' τετράγωνα αποθηκευμένα'];
+                    if (state.last_completed) parts.push('τελευταία πλήρης ενημέρωση ' + fmtDate(state.last_completed));
+                    summary.textContent = parts.join(' · ');
+                    if (inProgress()) {
+                        go.textContent = onlyFailedLeft && !running ? 'Επανάληψη των αποτυχημένων (' + state.job_remaining + ')' : 'Συνέχεια ενημέρωσης (απομένουν ' + state.job_remaining + ' από ' + state.total_chunks + ')';
+                    } else {
+                        go.textContent = state.stored_tiles > 0 ? 'Ενημέρωση δεδομένων Κρήτης' : 'Λήψη δεδομένων Κρήτης';
+                    }
+                    go.disabled = running;
+                    if (!running) pauseBtn.disabled = false;
+                    pauseBtn.classList.toggle('d-none', !running);
+                }
+
+                function showProgress(startedAt) {
+                    var total = state.total_chunks, left = state.job_remaining;
+                    var done = total - left;
+                    barWrap.classList.remove('d-none');
+                    bar.style.width = Math.round(done / total * 100) + '%';
+                    bar.textContent = done + ' / ' + total;
+                    var text = '';
+                    if (startedAt && done > 0 && left > 0) {
+                        var perChunk = (Date.now() - startedAt) / Math.max(1, done - (state._doneAtStart || 0));
+                        text = 'απομένουν περίπου ' + Math.max(1, Math.round(perChunk * left / 60000)) + ' λεπτά';
+                    }
+                    if (failedNow > 0) text += (text ? ' · ' : '') + failedNow + ' τμήματα δεν απάντησε το Overpass (θα ξαναζητηθούν)' + (lastWhy ? ' — ' + lastWhy : '');
+                    line.textContent = text;
+                }
+
+                function call(action, extra) {
+                    var form = new URLSearchParams(Object.assign({csrf_token: csrf, action: action}, extra || {}));
+                    var ctrl = new AbortController();
+                    var timer = setTimeout(function () { ctrl.abort(); }, 120000);
+                    return fetch('osm-bulk.php', {method: 'POST', body: form, signal: ctrl.signal})
+                        .then(function (r) { return r.ok ? r.json() : {ok: false, error: 'HTTP ' + r.status}; })
+                        .catch(function () { return {ok: false, error: 'Δεν απάντησε ο server.', network: true}; })
+                        .then(function (res) { clearTimeout(timer); return res; });
+                }
+
+                async function run() {
+                    running = true; failedNow = 0; lastWhy = ''; onlyFailedLeft = false;
+                    render();
+                    if (!inProgress()) {
+                        if (state.stored_tiles > 0 && !confirm('Θα ξαναζητηθούν όλα τα δεδομένα της Κρήτης από το Overpass (λιγότερο από μία ώρα). Τα παλιά εξακολουθούν να εμφανίζονται μέχρι να αντικατασταθούν. Συνέχεια;')) {
+                            running = false; render(); return;
+                        }
+                        var started = await call('start');
+                        if (!started.ok) { line.textContent = started.error || 'Αποτυχία έναρξης.'; running = false; render(); return; }
+                        state = started;
+                    }
+                    state._doneAtStart = state.total_chunks - state.job_remaining;
+                    var startedAt = Date.now(), after = 0, retries = 0, inARow = 0;
+                    showProgress(startedAt);
+                    while (running) {
+                        var r = await call('step', {after: after});
+                        if (!r.ok) {
+                            if (r.network && retries++ < 3) { await new Promise(function (ok) { setTimeout(ok, 5000); }); continue; }
+                            line.textContent = (r.error || 'Σφάλμα') + ' Πατήστε το κουμπί για να συνεχίσει.';
+                            break;
+                        }
+                        retries = 0;
+                        state.job_remaining = r.remaining;
+                        if (r.finished) {
+                            if (r.remaining > 0) { failedNow = r.remaining; onlyFailedLeft = true; line.textContent = r.remaining + ' τμήματα δεν απάντησε το Overpass. Πατήστε «Επανάληψη των αποτυχημένων».'; }
+                            else { line.textContent = 'Ολοκληρώθηκε.'; failedNow = 0; }
+                            break;
+                        }
+                        if (r.failed) {
+                            failedNow++; inARow++; lastWhy = r.why || '';
+                            // Overpass (or this server's way to it) is not answering: going on
+                            // would only make a hundred more failed requests in a minute.
+                            if (inARow >= 5) {
+                                showProgress(startedAt);
+                                line.textContent = 'Το Overpass δεν απαντά (5 συνεχόμενες αποτυχίες)' + (lastWhy ? ' — ' + lastWhy : '') + '. Δοκιμάστε ξανά αργότερα· ό,τι έχει κατέβει μένει.';
+                                break;
+                            }
+                        } else {
+                            inARow = 0;
+                        }
+                        after = r.next;
+                        showProgress(startedAt);
+                    }
+                    running = false;
+                    var status = await call('status');
+                    var shownLine = line.textContent;
+                    if (status.ok) { var keep = failedNow; state = status; failedNow = keep; }
+                    showProgress(startedAt);
+                    if (inARow >= 5 || shownLine) line.textContent = shownLine; // keep the reason it stopped
+                    render();
+                }
+
+                go.addEventListener('click', run);
+                pauseBtn.addEventListener('click', function () { running = false; pauseBtn.disabled = true; });
+                if (inProgress()) showProgress(null);
+                render();
+            })();
+            </script>
 
             <!-- LPB Search Rings Settings -->
             <div class="card mb-4">

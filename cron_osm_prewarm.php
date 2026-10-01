@@ -7,7 +7,7 @@
  * somebody opens it. The first look at a stretch of ground otherwise waits for
  * one Overpass query per row of tiles — seconds each on the public server, a
  * minute or more for a full screen — and that wait lands on a coordinator in the
- * middle of an operation. A tile is kept 30 days, so after the first run this
+ * middle of an operation. A tile is kept a year (and all of Crete is downloaded from Settings), so this
  * only refreshes what has aged out.
  *
  * Polite by construction: one query at a time, a pause between them, and at most

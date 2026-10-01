@@ -11,9 +11,10 @@
  * kept in osm_feature_cache.
  *
  * The map is cut into tiles of 0.05° (about 5 km by 4.5 km in Crete). One
- * Overpass query per tile and per group of features, kept 30 days — a hillside
- * does not change between two searches — and served stale, however old, when
- * Overpass is down: an old map of the hillside is better than none at night.
+ * Overpass query per row of tiles, kept a year — a hillside does not change
+ * between two searches, and the whole of Crete is downloaded once and refreshed
+ * by an administrator on purpose (osm-bulk.php) — and served stale, however old,
+ * when Overpass is down: an old map of the hillside is better than none at night.
  *
  * WHAT LEAVES THIS BUILDING: a bounding box and nothing else, the same
  * exposure as the routers in route-distance.php. Overpass etiquette is kept:
@@ -40,7 +41,7 @@ const OSM_CHUNK_TILES = 4;
 const OSM_GROUPS = ['points', 'paths', 'tracks', 'cliffs'];
 
 /** How long an answer is trusted, and how soon a failed refresh is retried. */
-const OSM_CACHE_TTL = 2592000;   // 30 days
+const OSM_CACHE_TTL = 31536000;  // 365 days: a downloaded tile is kept, and refreshed by hand (osm-bulk.php)
 const OSM_RETRY_AFTER = 120;     // 2 minutes: Overpass itself asks for a pause of ~30 s after a 429/504
 
 /**
@@ -392,9 +393,9 @@ function osmCacheWrite(string $tileKey, string $group, array $items): void {
          ON DUPLICATE KEY UPDATE payload = VALUES(payload), element_count = VALUES(element_count), fetched_at = NOW()",
         [$tileKey, $group, json_encode($items, JSON_UNESCAPED_UNICODE), count($items)]
     );
-    // Rows nobody has looked at for a quarter of a year are not worth keeping.
+    // Rows older than the cache is trusted for, with a margin, are not worth keeping.
     if (mt_rand(1, 50) === 1) {
-        dbExecute("DELETE FROM osm_feature_cache WHERE fetched_at < DATE_SUB(NOW(), INTERVAL 90 DAY)");
+        dbExecute("DELETE FROM osm_feature_cache WHERE fetched_at < DATE_SUB(NOW(), INTERVAL 400 DAY)");
     }
 }
 
@@ -455,7 +456,7 @@ function osmSplitIntoTiles(array $byGroup, array $tileKeys): array {
  * refresh), or — when the tile needs fetching — the fallback if it cannot be
  * fetched now: 'stale' (something old to draw) or 'pending' (nothing known).
  */
-function osmTileRead(string $tileKey, string $bundle): array {
+function osmTileRead(string $tileKey, string $bundle, ?int $maxAge = null): array {
     $held = [];
     $allFresh = true;
     $retrying = false;
@@ -463,6 +464,9 @@ function osmTileRead(string $tileKey, string $bundle): array {
         $row = osmCacheRead($tileKey, $group);
         $held[$group] = $row !== null ? $row[0] : [];
         if ($row === null || $row[1] >= OSM_CACHE_TTL) $allFresh = false;
+        // A refresh by hand (osm-bulk.php) wants everything fetched since it
+        // began, whatever the cache would still have trusted.
+        if ($maxAge !== null && $row !== null && $row[1] > $maxAge) $allFresh = false;
         // A row aged into the last OSM_RETRY_AFTER seconds before its expiry is
         // the "try again later" marker osmCacheRetryLater() leaves after a
         // failed refresh (or the end of a real row's life): what it holds may be
@@ -491,16 +495,17 @@ function osmTileRead(string $tileKey, string $bundle): array {
  * nothing, and the page should ask again in a couple of minutes). $budget is how
  * many Overpass calls this request may still make; it is spent here. $why, when
  * given, is set to a short plain reason whenever a tile is 'failed' or a refresh
- * failed.
+ * failed. $maxAge, when given, makes any tile whose rows are older than that many
+ * seconds (or missing) need a fetch — the "update everything" of osm-bulk.php.
  */
-function osmChunkBundle(array $tiles, string $bundle, int &$budget, ?string &$why = null): array {
+function osmChunkBundle(array $tiles, string $bundle, int &$budget, ?string &$why = null, ?int $maxAge = null): array {
     $groups = OSM_BUNDLES[$bundle];
     $byTile = [];
     $states = [];
     $want = [];
     foreach ($tiles as $tile) {
         $key = $tile[0];
-        [$held, $needsFetch, $state] = osmTileRead($key, $bundle);
+        [$held, $needsFetch, $state] = osmTileRead($key, $bundle, $maxAge);
         $byTile[$key] = $held;
         $states[$key] = $state;
         if ($needsFetch) $want[$key] = $tile;
