@@ -529,6 +529,7 @@ return [
         'map.overlay_dispatch' => 'Αποστολές στίγματος/περιοχής',
         'map.overlay_routes' => 'Εντολές πορείας',
         'map.overlay_annotations' => 'Σχέδια στον χάρτη',
+        'map.pin_team_labels' => 'Όνομα ομάδας πάνω από τα στίγματα',
         // Στρώμα OpenStreetMap στον χάρτη (v3.352.0)
         'osm.header' => 'Δεδομένα OpenStreetMap',
         'osm.master' => 'Εμφάνιση δεδομένων OpenStreetMap',
@@ -2972,6 +2973,7 @@ return [
         'map.overlay_dispatch' => 'Point/area dispatches',
         'map.overlay_routes' => 'Route orders',
         'map.overlay_annotations' => 'Map sketches',
+        'map.pin_team_labels' => 'Team name above positions',
         // OpenStreetMap layer on the map (v3.352.0)
         'osm.header' => 'OpenStreetMap data',
         'osm.master' => 'Show OpenStreetMap data',

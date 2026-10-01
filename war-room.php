@@ -2317,6 +2317,14 @@ include __DIR__ . '/includes/header.php';
        pill (inline-styled per team in dispatchTeamLabelHtml()) shows through. */
     .dispatch-team-label { background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
     .dispatch-team-label::before { display: none !important; }
+    /* Team name above a live position dot (buildPinMarker()). White pill with a
+       team-coloured edge rather than a team-coloured fill: the pin only carries
+       the background colour, and a pale team colour would put pale text on it.
+       Switched off by a class on the map element, not by rebuilding the pins,
+       so the layers-menu tick takes effect at once. */
+    .wr-pin-team-label { background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
+    .wr-pin-team-label::before { display: none !important; }
+    #warRoomMap.wr-hide-pin-team-labels .wr-pin-team-label { display: none; }
     /* Search-area/sector/restricted-area polygon name labels — same
        box/arrow-stripping as dispatch-team-label above, but its own class
        rather than reusing that one: these are plain text (no inline-styled
@@ -7599,6 +7607,36 @@ try {
     JSON.parse(sessionStorage.getItem(MAP_OVERLAYS_KEY) || '[]').forEach(key => setMapOverlayShown(key, false));
 } catch (e) {}
 
+// ── Όνομα ομάδας πάνω από τα στίγματα ───────────────────────────────────────
+// A viewer's own preference (localStorage, one for every mission), ON unless
+// they turned it off. Deliberately not one of MAP_OVERLAYS: those are shapes
+// that bury the map and warn on screen while hidden; a name label hidden is
+// not a hazard nobody sees. The label itself is built in buildPinMarker().
+const PIN_TEAM_LABELS_KEY = 'wr_pin_team_labels';
+(function addPinTeamLabelToggle() {
+    const mapEl = document.getElementById('warRoomMap');
+    const btn = document.getElementById('mapSatelliteToggle');
+    const menu = btn?.parentNode.querySelector('.dropdown-menu');
+    if (!mapEl || !menu) return;
+    let on = true;
+    try { on = localStorage.getItem(PIN_TEAM_LABELS_KEY) !== '0'; } catch (e) {}
+    const li = document.createElement('li');
+    li.innerHTML = '<label class="dropdown-item wr-overlay-item"><input type="checkbox" class="form-check-input" data-pin-team-labels><i class="bi bi-tag-fill"></i><span></span></label>';
+    li.querySelector('span').textContent = t('map.pin_team_labels');
+    const input = li.querySelector('input');
+    const apply = () => {
+        input.checked = on;
+        mapEl.classList.toggle('wr-hide-pin-team-labels', !on);
+    };
+    input.addEventListener('change', () => {
+        on = input.checked;
+        try { localStorage.setItem(PIN_TEAM_LABELS_KEY, on ? '1' : '0'); } catch (e) {}
+        apply();
+    });
+    menu.appendChild(li);
+    apply();
+})();
+
 // ── OpenStreetMap layer (v3.352.0) ──────────────────────────────────────────
 // Paths, caves, huts, springs, chapels, cliffs, peaks and the like from
 // OpenStreetMap, for the people guessing where someone lost has gone. The page
@@ -12002,7 +12040,20 @@ function buildPinMarker(pin, interactive = true) {
     // (depends on which render*() happened to run last that poll tick). A
     // volunteer's own live position should never be the one that silently
     // disappears underneath another marker.
-    return L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}${k9BadgeHtml(pin.user_id)}${captainBadgeHtml(pin.user_id)}${liveBadgeHtml(pin.user_id)}</strong>${teamLine}${heartRateBlock}<br>${pin.time}${accuracyLine}${trackingLine}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${fatigueLine}${navLine}`);
+    const marker = L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}${k9BadgeHtml(pin.user_id)}${captainBadgeHtml(pin.user_id)}${liveBadgeHtml(pin.user_id)}</strong>${teamLine}${heartRateBlock}<br>${pin.time}${accuracyLine}${trackingLine}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${fatigueLine}${navLine}`);
+    // The team's name above the dot, so which team a position belongs to reads
+    // off the map without a click. Not on the read-only Route Order composer
+    // map (interactive=false), and a volunteer with no team has no name to
+    // show. Whether it is visible is the layers-menu tick (see
+    // addPinTeamLabelToggle()), a class on the map element, never a rebuild.
+    // The offset clears the heading arrow, which orbits the dot at ~21px.
+    if (interactive && pin.team_label) {
+        marker.bindTooltip(
+            `<span style="display:inline-block;background:#fff;color:#1f2937;border:2px solid ${escapeHtml(pin.team_color || '#6c757d')};padding:0 6px;border-radius:10px;font-weight:700;font-size:.72rem;line-height:1.35;white-space:nowrap;box-shadow:0 1px 3px #0006;${opacity}">${escapeHtml(pin.team_label)}</span>`,
+            {permanent: true, direction: 'top', offset: [0, -22], className: 'wr-pin-team-label', interactive: false}
+        );
+    }
+    return marker;
 }
 
 function renderPins(items) {
