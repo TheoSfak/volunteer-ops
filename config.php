@@ -11,7 +11,7 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.357.4');
+define('APP_VERSION', '3.357.5');
 define('DB_SCHEMA_VERSION', 178);
 
 // Android APK versionName, matching mobile-app/android/app/build.gradle.
@@ -57,9 +57,17 @@ if (!defined('BASE_URL')) {
     $host   = $_SERVER['HTTP_HOST'] ?? 'localhost';
     $docRoot = rtrim(str_replace('\\', '/', $_SERVER['DOCUMENT_ROOT'] ?? ''), '/');
     $appRoot = rtrim(str_replace('\\', '/', __DIR__), '/');
-    $subPath = ($docRoot && strpos($appRoot, $docRoot) === 0)
-        ? substr($appRoot, strlen($docRoot))
-        : '';
+    $subPath = '';
+    if ($docRoot && strpos($appRoot, $docRoot) === 0) {
+        $subPath = substr($appRoot, strlen($docRoot));
+    } elseif (!empty($_SERVER['SCRIPT_NAME'])) {
+        // Fallback for symlinks/junctions outside docRoot (e.g. XAMPP Desktop junction)
+        $scriptDir = trim(str_replace('\\', '/', dirname($_SERVER['SCRIPT_NAME'])), '/');
+        if ($scriptDir !== '' && $scriptDir !== '.') {
+            $parts = explode('/', $scriptDir);
+            $subPath = '/' . $parts[0];
+        }
+    }
     define('BASE_URL', $scheme . '://' . $host . $subPath);
 }
 

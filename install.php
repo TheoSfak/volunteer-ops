@@ -457,7 +457,7 @@ function installDemoData(PDO $pdo) {
     ];
     
     $missionIds = [];
-    $stmt = $pdo->prepare("INSERT INTO missions (title, description, location, department_id, status, start_date, end_date, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())");
+    $stmt = $pdo->prepare("INSERT INTO missions (title, description, location, department_id, status, start_datetime, end_datetime, created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())");
     foreach ($missions as $mission) {
         $stmt->execute([
             $mission['title'],
