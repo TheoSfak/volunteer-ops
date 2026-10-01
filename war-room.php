@@ -2497,6 +2497,11 @@ include __DIR__ . '/includes/header.php';
     .wr-overlays-hidden::after { content: ''; position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; border-radius: 50%; background: #dc3545; box-shadow: 0 0 0 2px #fff; }
     .wr-hidden-chip { background: #fff8e1; border: 1px solid #f59e0b; border-radius: 6px; padding: 4px 8px; font-size: .78rem; max-width: 240px; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
     .wr-hidden-chip button { border: 0; background: none; padding: 0; color: #0d6efd; text-decoration: underline; font-size: inherit; }
+    /* OpenStreetMap layer (v3.352.0): small round pins, one colour per kind. */
+    .wr-osm-pin-wrap { background: none; border: 0; }
+    .wr-osm-pin { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.5); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1; }
+    .wr-osm-popup { min-width: 170px; }
+    .wr-osm-note { white-space: normal; max-width: 260px; }
     /* The right-click / long-press menu and «Απόσταση από εδώ». On a phone a
        long press over the map IS the menu, so no callout and no word selected
        under the finger; popups keep both, so a coordinate can still be
@@ -7592,6 +7597,382 @@ function refreshMapOverlayUi() {
 try {
     JSON.parse(sessionStorage.getItem(MAP_OVERLAYS_KEY) || '[]').forEach(key => setMapOverlayShown(key, false));
 } catch (e) {}
+
+// ── OpenStreetMap layer (v3.352.0) ──────────────────────────────────────────
+// Paths, caves, huts, springs, chapels, cliffs, peaks and the like from
+// OpenStreetMap, for the people guessing where someone lost has gone. The page
+// asks mission-osm.php, which asks Overpass and keeps the answer (includes/osm.php).
+//
+// An extra the viewer asks for, so OFF by default and remembered per browser
+// (localStorage). Deliberately NOT one of MAP_OVERLAYS: that list is "shown
+// unless hidden" and warns when something is hidden, which would be a false
+// alarm for a layer that starts off. Lines take no click (osmPane sits above
+// the sector fills and must never swallow a click meant for one) and points
+// are plain markers, so none of it joins «Τι υπάρχει εδώ;» (markMapPickable).
+const OSM_LAYER_ENABLED = <?= json_encode(getSetting('osm_layer_enabled', '1') === '1') ?>;
+const OSM_TILE = 20;            // tiles of 0.05 degrees, the same cut as includes/osm.php
+const OSM_CHUNK_COLS = 4;       // tiles per request, in a row
+const OSM_MAX_VIEW_TILES = 60;  // a view wider than this is asked to zoom in
+const OSM_MAX_ITEMS = 15000;    // past this the layer starts over rather than grow
+const OSM_RETRY_MS = 130 * 1000;     // a tile the server could not get: its own retry pause is 2 min
+const OSM_ATTRIBUTION = '© OpenStreetMap contributors';
+const OSM_KEY_ON = 'wr_osm_on';
+const OSM_KEY_CATS = 'wr_osm_cats';
+const OSM_CATEGORIES = [
+    {key: 'paths',    icon: 'bi-bezier2',          color: '#d97706', group: 'paths',  minZoom: 14, kinds: ['path'],                                           on: true},
+    {key: 'tracks',   icon: 'bi-truck',            color: '#78716c', group: 'tracks', minZoom: 14, kinds: ['track'],                                          on: false},
+    {key: 'caves',    icon: 'bi-moon-fill',        color: '#6d28d9', group: 'points', minZoom: 13, kinds: ['cave'],                                           on: true},
+    {key: 'shelters', icon: 'bi-house-door-fill',  color: '#0f766e', group: 'points', minZoom: 13, kinds: ['hut', 'shelter'],                                 on: true},
+    {key: 'water',    icon: 'bi-droplet-fill',     color: '#0284c7', group: 'points', minZoom: 13, kinds: ['spring', 'water', 'well', 'tank'],                on: true},
+    {key: 'chapels',  icon: 'bi-plus-lg',          color: '#9333ea', group: 'points', minZoom: 13, kinds: ['chapel'],                                         on: true},
+    {key: 'peaks',    icon: 'bi-triangle-fill',    color: '#854d0e', group: 'points', minZoom: 13, kinds: ['peak', 'saddle'],                                 on: true},
+    {key: 'cliffs',   icon: 'bi-bar-chart-steps',  color: '#374151', group: 'cliffs', minZoom: 14, kinds: ['cliff'],                                          on: true},
+    {key: 'access',   icon: 'bi-info-circle-fill', color: '#dc2626', group: 'points', minZoom: 13, kinds: ['emergency', 'helipad', 'trailhead', 'guidepost'], on: true},
+];
+const OSM_KIND_ICONS = {
+    cave: 'bi-moon-fill', hut: 'bi-house-door-fill', shelter: 'bi-umbrella-fill', spring: 'bi-droplet-fill',
+    water: 'bi-droplet-fill', well: 'bi-droplet-half', tank: 'bi-droplet-half', chapel: 'bi-plus-lg',
+    peak: 'bi-triangle-fill', saddle: 'bi-triangle-half', emergency: 'bi-heart-pulse-fill',
+    helipad: 'bi-h-circle-fill', trailhead: 'bi-signpost-fill', guidepost: 'bi-signpost-fill',
+};
+const OSM_CAT_OF_KIND = {};
+OSM_CATEGORIES.forEach(c => c.kinds.forEach(kind => { OSM_CAT_OF_KIND[kind] = c.key; }));
+// Path colour by difficulty (sac_scale); untagged paths, most of them, get the plain one.
+const OSM_SAC_COLORS = {
+    hiking: '#d97706', mountain_hiking: '#ea580c', demanding_mountain_hiking: '#dc2626',
+    alpine_hiking: '#9f1239', demanding_alpine_hiking: '#7f1d1d', difficult_alpine_hiking: '#7f1d1d',
+};
+
+let osmOn = false;
+const osmCatsOn = new Set(OSM_CATEGORIES.filter(c => c.on).map(c => c.key));
+try {
+    osmOn = localStorage.getItem(OSM_KEY_ON) === '1';
+    const savedCats = JSON.parse(localStorage.getItem(OSM_KEY_CATS) || 'null');
+    if (Array.isArray(savedCats)) {
+        osmCatsOn.clear();
+        savedCats.forEach(key => { if (OSM_CATEGORIES.some(c => c.key === key)) osmCatsOn.add(key); });
+    }
+} catch (e) {}
+function osmSavePrefs() {
+    try {
+        localStorage.setItem(OSM_KEY_ON, osmOn ? '1' : '0');
+        localStorage.setItem(OSM_KEY_CATS, JSON.stringify([...osmCatsOn]));
+    } catch (e) {}
+}
+
+let osmLineLayer = null, osmCluster = null;
+if (OSM_LAYER_ENABLED && map) {
+    // Below the default overlayPane (400) and so under every pin; above the
+    // sector fills (350), which is why its lines are not interactive.
+    map.createPane('osmPane');
+    map.getPane('osmPane').style.zIndex = 380;
+    osmLineLayer = L.layerGroup();
+    // Its own cluster group: sharedMarkerCluster belongs to pins, incidents and
+    // POI, and trail mode and the pin toggles act on that one.
+    osmCluster = L.markerClusterGroup({chunkedLoading: true, showCoverageOnHover: false, maxClusterRadius: 40, disableClusteringAtZoom: 17});
+}
+const osmItems = new Map();   // 'n123' -> feature as the server sent it
+const osmDrawn = new Map();   // 'n123' -> the layer on the map for it
+const osmLoaded = new Set();  // 'row_col|group' the server has answered for
+const osmRetryAt = new Map(); // 'row_col|group' -> when to ask again after a failure
+let osmBusy = false, osmAgain = false, osmTimer = null, osmPartial = false, osmTooWide = false, osmGen = 0, osmAttributed = false;
+let osmChip = null;
+
+// A word from the language file, or the raw value when there is no translation.
+function osmWord(prefix, value) {
+    const text = t(prefix + value);
+    return text === prefix + value ? value : text;
+}
+
+function osmLineStyle(it) {
+    const base = {pane: 'osmPane', interactive: false, lineCap: 'round', lineJoin: 'round'};
+    if (it.c === 'track') return {...base, color: '#78716c', weight: 2, opacity: 0.85, dashArray: '2 6'};
+    if (it.c === 'cliff') return {...base, color: '#374151', weight: 3, opacity: 0.9, dashArray: '8 3 1 3'};
+    return {...base, color: OSM_SAC_COLORS[it.s] || '#b45309', weight: 3, opacity: 0.9, dashArray: '6 4'};
+}
+
+function osmExtraText(it) {
+    if (!it.x) return '';
+    if (it.c === 'spring' || it.c === 'well') {
+        if (it.x === 'yes') return t('osm.drinkable_yes');
+        if (it.x === 'no') return t('osm.drinkable_no');
+        return '';
+    }
+    if (it.c === 'emergency') return osmWord('osm.x_', it.x);
+    if (it.c === 'shelter') return it.x.replaceAll('_', ' ');
+    return '';
+}
+
+function osmPopupHtml(it) {
+    const rows = [];
+    if (it.n) rows.push('<div class="fw-semibold">' + escapeHtml(it.n) + '</div>');
+    if (it.e != null) rows.push('<div class="small text-muted">' + escapeHtml(t('osm.elevation', {m: it.e})) + '</div>');
+    const extra = osmExtraText(it);
+    if (extra) rows.push('<div class="small">' + escapeHtml(extra) + '</div>');
+    const osmType = {n: 'node', w: 'way', r: 'relation'}[it.t];
+    return '<div class="wr-osm-popup">'
+        + '<div class="small text-uppercase text-muted">' + escapeHtml(t('osm.kind_' + it.c)) + '</div>'
+        + rows.join('')
+        + '<div class="mt-1">' + navigationBtnHtml(it.lat, it.lng) + '</div>'
+        + '<div class="small mt-1"><a href="https://www.openstreetmap.org/' + osmType + '/' + it.id + '" target="_blank" rel="noopener">'
+        + escapeHtml(t('osm.open_in_osm')) + '</a> · <span class="text-muted">' + escapeHtml(t('osm.source_note')) + '</span></div>'
+        + '</div>';
+}
+
+function osmMakeLayer(it) {
+    const cat = OSM_CATEGORIES.find(c => c.key === OSM_CAT_OF_KIND[it.c]);
+    if (!cat) return null;
+    if (it.p) return L.polyline(it.p, osmLineStyle(it));
+    const icon = L.divIcon({
+        className: 'wr-osm-pin-wrap',
+        html: '<div class="wr-osm-pin" style="background:' + cat.color + '"><i class="bi ' + (OSM_KIND_ICONS[it.c] || cat.icon) + '"></i></div>',
+        iconSize: [22, 22], iconAnchor: [11, 11], popupAnchor: [0, -11],
+    });
+    // Under live pins, which sit at +1000 in the same pane.
+    const marker = L.marker([it.lat, it.lng], {icon, zIndexOffset: -500, keyboard: false});
+    marker.bindPopup(() => osmPopupHtml(it), {minWidth: 180});
+    return marker;
+}
+
+// Draws what is wanted and not yet drawn; takes off what is drawn and no longer wanted.
+function osmRender() {
+    if (!osmCluster) return;
+    const addPoints = [], addLines = [];
+    osmItems.forEach((it, key) => {
+        // Whether the layer is on at all is osmAttach()'s business (the groups
+        // are put on or taken off the map), so switching it off and on again
+        // does not rebuild thousands of markers.
+        const wanted = osmCatsOn.has(OSM_CAT_OF_KIND[it.c]);
+        const drawn = osmDrawn.get(key);
+        if (wanted && !drawn) {
+            const layer = osmMakeLayer(it);
+            if (!layer) return;
+            osmDrawn.set(key, layer);
+            (it.p ? addLines : addPoints).push(layer);
+        } else if (!wanted && drawn) {
+            osmDrawn.delete(key);
+            if (it.p) osmLineLayer.removeLayer(drawn); else osmCluster.removeLayer(drawn);
+        }
+    });
+    addLines.forEach(layer => osmLineLayer.addLayer(layer));
+    if (addPoints.length) osmCluster.addLayers(addPoints);
+}
+
+// The groups on the map: points while the layer is on, lines only close enough to read.
+function osmAttach() {
+    if (!osmCluster) return;
+    const setShown = (layer, shown) => {
+        if (shown && !map.hasLayer(layer)) layer.addTo(map);
+        else if (!shown && map.hasLayer(layer)) map.removeLayer(layer);
+    };
+    setShown(osmCluster, osmOn);
+    setShown(osmLineLayer, osmOn && map.getZoom() >= 13);
+    // Leaflet counts every addAttribution, so this runs on each move: only on a change.
+    if (map.attributionControl && osmAttributed !== osmOn) {
+        if (osmOn) map.attributionControl.addAttribution(OSM_ATTRIBUTION);
+        else map.attributionControl.removeAttribution(OSM_ATTRIBUTION);
+        osmAttributed = osmOn;
+    }
+}
+
+// Starts over: after the layer has grown past OSM_MAX_ITEMS, or never mind what
+// was loaded.
+function osmReset() {
+    osmGen++;
+    osmDrawn.forEach((layer, key) => {
+        if (osmItems.get(key)?.p) osmLineLayer.removeLayer(layer); else osmCluster.removeLayer(layer);
+    });
+    osmDrawn.clear();
+    osmItems.clear();
+    osmLoaded.clear();
+}
+
+function osmAddItems(items) {
+    if (!Array.isArray(items)) return;
+    if (osmItems.size + items.length > OSM_MAX_ITEMS) osmReset();
+    items.forEach(it => {
+        const key = it.t + it.id;
+        if (!osmItems.has(key)) osmItems.set(key, it);
+    });
+    osmRender();
+}
+
+// What the map says to the viewer about the layer: too far out, loading, or
+// that part of it could not be fetched. One chip at the bottom left, gone
+// when there is nothing to say.
+function osmUpdateChip() {
+    if (!osmCluster) return;
+    let text = '';
+    if (osmOn) {
+        const z = map.getZoom();
+        const far = OSM_CATEGORIES.filter(c => osmCatsOn.has(c.key) && c.minZoom > z).map(c => t('osm.cat_' + c.key));
+        const ticked = OSM_CATEGORIES.filter(c => osmCatsOn.has(c.key)).length;
+        if (osmTooWide || (far.length && far.length === ticked)) text = t('osm.zoom_in_all');
+        else if (far.length) text = t('osm.zoom_in', {list: far.join(', ')});
+        else if (osmBusy) text = t('osm.loading');
+        else if (osmPartial) text = t('osm.partial');
+    }
+    if (!text) {
+        if (osmChip) { osmChip.remove(); osmChip = null; }
+        return;
+    }
+    if (!osmChip) {
+        const Chip = L.Control.extend({
+            options: {position: 'bottomleft'},
+            onAdd: function () {
+                const div = L.DomUtil.create('div', 'leaflet-control wr-hidden-chip');
+                L.DomEvent.disableClickPropagation(div);
+                return div;
+            },
+        });
+        osmChip = new Chip().addTo(map);
+    }
+    osmChip.getContainer().textContent = text;
+}
+
+function osmRequest(body) {
+    const ctrl = new AbortController();
+    // Overpass can take half a minute or more and the server makes up to two
+    // calls per request: longer than the page's own default for a POST, so this
+    // one says so.
+    const timer = setTimeout(() => ctrl.abort(), 120000);
+    const form = new URLSearchParams({
+        csrf_token: csrfToken, mission_id: '<?= $missionId ?>',
+        south: body.south.toFixed(6), north: body.north.toFixed(6),
+        west: body.west.toFixed(6), east: body.east.toFixed(6), groups: body.group,
+    });
+    return fetch('mission-osm.php', {method: 'POST', body: form, signal: ctrl.signal})
+        .then(r => r.ok ? r.json() : null)
+        .finally(() => clearTimeout(timer));
+}
+
+// One request: a row of up to OSM_CHUNK_COLS tiles, one group. Asked again while
+// the server says some of it is still to be fetched. false = it failed.
+async function osmRunJob(job) {
+    const gen = osmGen;
+    const eps = 1e-6; // keeps the box inside its own tiles, off the neighbours' edge
+    const body = {
+        south: job.row / OSM_TILE + eps, north: (job.row + 1) / OSM_TILE - eps,
+        west: job.cols[0] / OSM_TILE + eps, east: (job.cols[job.cols.length - 1] + 1) / OSM_TILE - eps,
+        group: job.group,
+    };
+    for (let attempt = 0; attempt < 8; attempt++) {
+        let data = null;
+        try { data = await osmRequest(body); } catch (e) { data = null; }
+        if (gen !== osmGen || !osmOn) return true;
+        if (!data || !data.ok) { osmRetryAt.set('net', Date.now() + 30000); osmPartial = true; return false; }
+        osmAddItems(data.items);
+        (data.ready || []).forEach(id => osmLoaded.add(id));
+        (data.failed || []).forEach(id => { osmRetryAt.set(id, Date.now() + OSM_RETRY_MS); osmPartial = true; });
+        if (!(data.pending || []).length) return true;
+        await new Promise(resolve => setTimeout(resolve, 1200));
+    }
+    return true; // still being fetched after eight asks: the next move asks again
+}
+
+async function osmLoadView() {
+    if (!osmOn || !osmCluster) return;
+    if (osmBusy) { osmAgain = true; return; }
+    if ((osmRetryAt.get('net') || 0) > Date.now()) { osmUpdateChip(); return; }
+    osmBusy = true;
+    osmUpdateChip();
+    try {
+        do {
+            osmAgain = false;
+            osmPartial = false;
+            const z = map.getZoom();
+            const groups = new Set(OSM_CATEGORIES.filter(c => osmCatsOn.has(c.key) && c.minZoom <= z).map(c => c.group));
+            const b = map.getBounds();
+            const r0 = Math.floor(b.getSouth() * OSM_TILE), r1 = Math.floor(b.getNorth() * OSM_TILE);
+            const c0 = Math.floor(b.getWest() * OSM_TILE), c1 = Math.floor(b.getEast() * OSM_TILE);
+            osmTooWide = (r1 - r0 + 1) * (c1 - c0 + 1) > OSM_MAX_VIEW_TILES;
+            if (osmTooWide || !groups.size) break;
+            const jobs = [];
+            const now = Date.now();
+            groups.forEach(group => {
+                for (let row = r0; row <= r1; row++) {
+                    const missing = [];
+                    for (let col = c0; col <= c1; col++) {
+                        const id = row + '_' + col + '|' + group;
+                        if (osmLoaded.has(id)) continue;
+                        if ((osmRetryAt.get(id) || 0) > now) { osmPartial = true; continue; }
+                        missing.push(col);
+                    }
+                    while (missing.length) {
+                        const first = missing[0];
+                        const cols = missing.filter(col => col - first < OSM_CHUNK_COLS);
+                        missing.splice(0, cols.length);
+                        jobs.push({group, row, cols});
+                    }
+                }
+            });
+            for (const job of jobs) {
+                if (osmAgain || !osmOn) break;
+                osmUpdateChip();
+                if (!(await osmRunJob(job))) { osmAgain = false; break; }
+            }
+        } while (osmAgain && osmOn);
+    } finally {
+        osmBusy = false;
+        osmUpdateChip();
+    }
+}
+
+function osmScheduleLoad() {
+    clearTimeout(osmTimer);
+    osmTimer = setTimeout(osmLoadView, 600);
+}
+
+(function addOsmLayer() {
+    if (!OSM_LAYER_ENABLED || !osmCluster) return;
+    const btn = document.getElementById('mapSatelliteToggle');
+    const menu = btn?.parentNode.querySelector('.dropdown-menu');
+    if (!menu) return;
+    const divider = document.createElement('li');
+    divider.innerHTML = '<hr class="dropdown-divider">';
+    const header = document.createElement('li');
+    header.innerHTML = '<h6 class="dropdown-header"></h6>';
+    header.firstChild.textContent = t('osm.header');
+    menu.append(divider, header);
+    const addRow = (attr, key, icon, color, label, extraClass) => {
+        const li = document.createElement('li');
+        li.innerHTML = '<label class="dropdown-item wr-overlay-item ' + extraClass + '"><input type="checkbox" class="form-check-input" ' + attr + '="' + key + '"><i class="bi ' + icon + '"' + (color ? ' style="color:' + color + '"' : '') + '></i><span></span></label>';
+        li.querySelector('span').textContent = label;
+        menu.appendChild(li);
+    };
+    addRow('data-osm-master', '1', 'bi-map', '', t('osm.master'), 'fw-semibold');
+    OSM_CATEGORIES.forEach(c => addRow('data-osm', c.key, c.icon, c.color, t('osm.cat_' + c.key), ''));
+    const note = document.createElement('li');
+    note.innerHTML = '<div class="dropdown-item-text small text-muted wr-osm-note"></div>';
+    note.querySelector('div').textContent = t('osm.incomplete');
+    menu.appendChild(note);
+
+    const syncInputs = () => {
+        menu.querySelector('input[data-osm-master]').checked = osmOn;
+        menu.querySelectorAll('input[data-osm]').forEach(input => {
+            input.checked = osmCatsOn.has(input.dataset.osm);
+            input.disabled = !osmOn;
+        });
+    };
+    menu.addEventListener('change', e => {
+        const master = e.target.closest('input[data-osm-master]');
+        const cat = e.target.closest('input[data-osm]');
+        if (!master && !cat) return;
+        if (master) osmOn = master.checked;
+        else if (cat.checked) osmCatsOn.add(cat.dataset.osm);
+        else osmCatsOn.delete(cat.dataset.osm);
+        osmSavePrefs();
+        syncInputs();
+        osmAttach();
+        osmRender();
+        osmUpdateChip();
+        osmScheduleLoad();
+    });
+    syncInputs();
+    map.on('moveend', () => { osmAttach(); osmUpdateChip(); osmScheduleLoad(); });
+    osmAttach();
+    osmScheduleLoad();
+})();
 
 const ANNOTATION_COLOR = '#1f2937';
 // Battle-map annotation tool state — a plain toggle over the same live map

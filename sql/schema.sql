@@ -3171,4 +3171,18 @@ CREATE TABLE IF NOT EXISTS `mission_command_post_log` (
     CONSTRAINT `fk_cp_log_followed` FOREIGN KEY (`followed_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- OPENSTREETMAP LAYER (v3.352.0). What Overpass answered for one 0.05 degree
+-- tile of the Action Room map and one group of features; global, not per
+-- mission. Served stale when Overpass is down.
+CREATE TABLE IF NOT EXISTS `osm_feature_cache` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `tile_key` VARCHAR(24) NOT NULL COMMENT 'Tile of 0.05 degrees: row_column, e.g. 703_474',
+    `layer_group` VARCHAR(16) NOT NULL COMMENT 'points | paths | tracks | cliffs',
+    `payload` MEDIUMTEXT NOT NULL COMMENT 'Compact JSON list of features, see includes/osm.php',
+    `element_count` INT UNSIGNED NOT NULL DEFAULT 0,
+    `fetched_at` DATETIME NOT NULL,
+    UNIQUE KEY `uk_osm_tile_group` (`tile_key`, `layer_group`),
+    INDEX `idx_osm_fetched` (`fetched_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

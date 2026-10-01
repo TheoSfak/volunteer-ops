@@ -508,6 +508,7 @@ $actionRoomFields = [
     'vitals_episode_tachy_minutes', 'vitals_episode_brady_minutes', 'vitals_episode_strain_minutes',
     'google_maps_api_key',
     'search_rings_enabled',
+    'osm_layer_enabled',
 ];
 
 if (isPost()) {
@@ -529,7 +530,7 @@ if (isPost()) {
         foreach ($fieldsToUpdate as $field) {
                     $value = isset($_POST[$field]) ? $_POST[$field] : '';
 
-                    if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy', 'war_room_gps_smoothing', 'war_room_native_sampling', 'war_room_native_full_tracking'])) {
+                    if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'osm_layer_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy', 'war_room_gps_smoothing', 'war_room_native_sampling', 'war_room_native_full_tracking'])) {
                         $value = isset($_POST[$field]) ? '1' : '0';
                     }
 
@@ -2498,6 +2499,25 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         <i class="bi bi-shield-lock me-1"></i>
                         Στον δρομολογητή στέλνονται <strong>μόνο δύο ζεύγη συντεταγμένων</strong> —
                         κανένα όνομα, καμία ομάδα, κανένα αναγνωριστικό.
+                    </div>
+                </div>
+            </div>
+
+            <!-- OpenStreetMap layer on the live map -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-map me-1"></i>Στρώμα OpenStreetMap στον Χάρτη</h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="osm_layer_enabled" id="osmLayerEnabled"
+                               <?= ($settings['osm_layer_enabled'] ?? '1') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="osmLayerEnabled">
+                            <strong>Μονοπάτια, σπηλιές, καταφύγια, πηγές και άλλα σημεία από το OpenStreetMap</strong>
+                        </label>
+                        <div class="form-text">
+                            Προαιρετικό στρώμα στο μενού επιπέδων του χάρτη, κλειστό από προεπιλογή. Τα δεδομένα είναι εθελοντικής χαρτογράφησης και <strong>δεν είναι πλήρη</strong>: μια σπηλιά ή ένα καταφύγιο που λείπει από τον χάρτη δεν σημαίνει ότι δεν υπάρχει. Ο server ζητά τα δεδομένα από δημόσιους servers Overpass και τα κρατά 30 ημέρες· προς τα έξω φεύγει μόνο το τετράγωνο του χάρτη που βλέπετε, χωρίς κανένα όνομα ή αναγνωριστικό.
+                        </div>
                     </div>
                 </div>
             </div>

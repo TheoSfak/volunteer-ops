@@ -7475,6 +7475,23 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 177,
+            'description' => "OpenStreetMap layer on the Action Room map (v3.352.0). osm_feature_cache: what the Overpass API answered for one 0.05° tile of the map and one group of features (points | paths | tracks | cliffs), kept as the compact JSON the page draws. Global, not per mission: the same hillside serves every mission that looks at it. Rows are refreshed after 30 days and an old row is still served when Overpass is down.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS osm_feature_cache (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    tile_key VARCHAR(24) NOT NULL COMMENT 'Tile of 0.05 degrees: row_column, e.g. 703_474',
+                    layer_group VARCHAR(16) NOT NULL COMMENT 'points | paths | tracks | cliffs',
+                    payload MEDIUMTEXT NOT NULL COMMENT 'Compact JSON list of features, see includes/osm.php',
+                    element_count INT UNSIGNED NOT NULL DEFAULT 0,
+                    fetched_at DATETIME NOT NULL,
+                    UNIQUE KEY uk_osm_tile_group (tile_key, layer_group),
+                    INDEX idx_osm_fetched (fetched_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

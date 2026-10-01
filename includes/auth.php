@@ -112,6 +112,10 @@ define('WAR_ROOM_ACTION_SCRIPTS', [
     // moved from the same long-open tab, often from a tablet in the vehicle
     // the command post is in.
     'mission-command-post.php',
+    // mission-osm.php (the OpenStreetMap layer on the live map, v3.352.0) is
+    // asked from the same long-open tab every time the map is moved, and
+    // partner-org guests use the map like everyone else.
+    'mission-osm.php',
 ]);
 
 function initSession() {
