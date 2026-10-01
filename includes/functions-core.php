@@ -815,3 +815,30 @@ function leaderboardPosition(int $userId): ?array {
     $total = (int) dbFetchValue("SELECT COUNT(*) FROM users WHERE is_active = 1 AND deleted_at IS NULL");
     return ['rank' => $ahead + 1, 'total' => $total, 'points' => (int) $me['total_points']];
 }
+
+/**
+ * The first rows of the leaderboard, in the order leaderboard.php lists them
+ * (total_points DESC, name ASC; active, not deleted, any role) — for the
+ * dashboard's «Κορυφαίοι Εθελοντές».
+ *
+ * That widget used to run its own query for role = VOLUNTEER only, with no
+ * deleted_at test and no tie-break, so somebody could be 2nd in it because the
+ * shift leaders and administrators above them were left out, and 5th on the
+ * leaderboard and on their own page. Same list as the leaderboard now, so the
+ * number beside a name in the widget is that person's rank everywhere.
+ * Hours and shifts are lifetime, as the widget always actually computed them.
+ */
+function leaderboardTop(int $limit = 5): array {
+    $limit = max(1, min(100, $limit));
+    return dbFetchAll(
+        "SELECT u.id, u.name, u.total_points,
+                COUNT(DISTINCT pr.id) AS shifts_count,
+                COALESCE(SUM(pr.actual_hours), 0) AS total_hours
+         FROM users u
+         LEFT JOIN participation_requests pr ON pr.volunteer_id = u.id AND pr.attended = 1
+         WHERE u.is_active = 1 AND u.deleted_at IS NULL
+         GROUP BY u.id
+         ORDER BY u.total_points DESC, u.name ASC
+         LIMIT {$limit}"
+    );
+}

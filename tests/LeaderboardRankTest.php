@@ -103,6 +103,29 @@ final class LeaderboardRankTest extends TestCase
         $this->assertSame($before + 1, leaderboardPosition($me)['total']);
     }
 
+    public function testTheDashboardTopListIsTheLeaderboardsOwnTop(): void
+    {
+        // The dashboard widget ran its own query for volunteers only, so
+        // somebody could be 2nd in it with three shift leaders above them on
+        // the leaderboard. Its place for a person must be their rank.
+        $this->makeUser('Lead One', self::BASE + 900, ['role' => 'SHIFT_LEADER']);
+        $this->makeUser('Lead Two', self::BASE + 800, ['role' => 'SHIFT_LEADER']);
+        $this->makeUser('Lead Three', self::BASE + 700, ['role' => 'SHIFT_LEADER']);
+        $this->makeUser('Gone', self::BASE + 650, ['deleted_at' => date('Y-m-d H:i:s')]);
+        $me = $this->makeUser('Plain Volunteer', self::BASE + 600);
+
+        $top = leaderboardTop(4);
+        $this->assertCount(4, $top);
+        $names = array_column($top, 'name');
+        $this->assertSame(['Lead One', 'Lead Two', 'Lead Three', 'Plain Volunteer'], array_slice($names, 0, 4));
+        $this->assertNotContains('Gone', $names);
+        $this->assertSame(4, leaderboardPosition($me)['rank']);
+        $this->assertSame($me, (int) $top[3]['id'], 'the widget puts them where their rank says');
+        $this->assertSame(array_map('intval', array_column($top, 'id')), array_slice(array_map("intval", array_column(dbFetchAll(
+            "SELECT u.id FROM users u WHERE u.is_active = 1 AND u.deleted_at IS NULL ORDER BY u.total_points DESC, u.name ASC"
+        ), 'id')), 0, 4));
+    }
+
     public function testSomebodyNotOnTheBoardHasNoPosition(): void
     {
         $gone = $this->makeUser('Gone', self::BASE + 1, ['deleted_at' => date('Y-m-d H:i:s')]);

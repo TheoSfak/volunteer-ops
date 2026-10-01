@@ -322,22 +322,9 @@ if (isAdmin()) {
         ];
     }
 
-    // Top volunteers this month
-    $topVolunteers = dbFetchAll(
-        "SELECT u.id, u.name, u.total_points, 
-                COUNT(DISTINCT pr.id) as shifts_count,
-                COALESCE(SUM(pr.actual_hours), 0) as total_hours
-         FROM users u
-         LEFT JOIN participation_requests pr ON u.id = pr.volunteer_id 
-             AND pr.attended = 1
-         LEFT JOIN shifts s ON s.id = pr.shift_id
-             AND s.start_time >= ? AND s.start_time < ? + INTERVAL 1 MONTH
-         WHERE u.role = ? AND u.is_active = 1
-         GROUP BY u.id
-         ORDER BY u.total_points DESC
-         LIMIT 5",
-        [$currentMonth . '-01', $currentMonth . '-01', ROLE_VOLUNTEER]
-    );
+    // The top of the leaderboard itself — the same list, order and crowd as
+    // leaderboard.php, so a place in this widget is that person's place there.
+    $topVolunteers = leaderboardTop(5);
     
     // Recent missions
     $recentMissions = dbFetchAll(
