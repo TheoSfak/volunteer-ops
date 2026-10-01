@@ -107,10 +107,7 @@ if ($period === 'all') {
 $myRank = null;
 $currentUser = getCurrentUser();
 if ($period === 'all') {
-    $myRank = dbFetchValue(
-        "SELECT COUNT(*) + 1 FROM users WHERE total_points > ? AND is_active = 1 AND deleted_at IS NULL",
-        [$currentUser['total_points']]
-    );
+    $myRank = leaderboardPosition((int) $currentUser['id'])['rank'] ?? null;
 }
 
 // Get departments for filter

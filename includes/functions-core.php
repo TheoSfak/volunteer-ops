@@ -777,3 +777,41 @@ function ensurePrivateUploadDir(string $dir): void {
         );
     }
 }
+
+/**
+ * Where somebody stands on the volunteers' leaderboard, and out of how many.
+ *
+ * ONE definition for every page that shows a rank (leaderboard.php, the
+ * dashboard card, my-points.php). They used to count three different crowds:
+ * the leaderboard counted every active user who is not deleted, the dashboard
+ * only volunteers and shift leaders, and my-points.php every active user
+ * INCLUDING soft-deleted ones — so a volunteer could be 2nd on the leaderboard
+ * and 5th on their own page because three people who had left stood above them
+ * on one and not on the other.
+ *
+ * The crowd is the leaderboard's own list: active, not deleted. Ties are broken
+ * by name, exactly as that list is sorted (total_points DESC, name ASC), so the
+ * number shown is the position they hold in the list rather than "the best of a
+ * tie" — two people on equal points used to both read as the same rank while
+ * the list put one under the other.
+ *
+ * Returns ['rank' => int, 'total' => int, 'points' => int], or null for
+ * somebody who is not on the board (inactive, deleted, unknown).
+ */
+function leaderboardPosition(int $userId): ?array {
+    $me = dbFetchOne(
+        "SELECT name, total_points FROM users WHERE id = ? AND is_active = 1 AND deleted_at IS NULL",
+        [$userId]
+    );
+    if (!$me) {
+        return null;
+    }
+    $ahead = (int) dbFetchValue(
+        "SELECT COUNT(*) FROM users
+         WHERE is_active = 1 AND deleted_at IS NULL
+           AND (total_points > ? OR (total_points = ? AND name < ?))",
+        [$me['total_points'], $me['total_points'], $me['name']]
+    );
+    $total = (int) dbFetchValue("SELECT COUNT(*) FROM users WHERE is_active = 1 AND deleted_at IS NULL");
+    return ['rank' => $ahead + 1, 'total' => $total, 'points' => (int) $me['total_points']];
+}

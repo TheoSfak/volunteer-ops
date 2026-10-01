@@ -499,15 +499,12 @@ if (isAdmin()) {
     }
 
     // Leaderboard rank
-    $leaderboardRank = (int) dbFetchValue(
-        "SELECT COUNT(*) + 1 FROM users
-         WHERE total_points > ? AND role IN ('" . ROLE_VOLUNTEER . "','" . ROLE_SHIFT_LEADER . "') AND is_active = 1 AND deleted_at IS NULL",
-        [$user['total_points'] ?? 0]
-    );
-    $leaderboardTotal = (int) dbFetchValue(
-        "SELECT COUNT(*) FROM users
-         WHERE role IN ('" . ROLE_VOLUNTEER . "','" . ROLE_SHIFT_LEADER . "') AND is_active = 1 AND deleted_at IS NULL"
-    );
+    // The leaderboard's own position, not a count of its own: this card used to
+    // count volunteers and shift leaders only, and read differently from the
+    // leaderboard page it links to. See leaderboardPosition().
+    $leaderboardPosition = leaderboardPosition((int) $user['id']);
+    $leaderboardRank = $leaderboardPosition['rank'] ?? 0;
+    $leaderboardTotal = $leaderboardPosition['total'] ?? 0;
 
     // Recent achievements & next to earn
     $recentAchievements = [];

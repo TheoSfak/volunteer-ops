@@ -50,12 +50,10 @@ $monthlyPoints = dbFetchAll(
 );
 
 // Get rank
-$rank = dbFetchValue(
-    "SELECT COUNT(*) + 1 FROM users WHERE total_points > ? AND is_active = 1",
-    [$user['total_points']]
-);
-
-$totalVolunteers = dbFetchValue("SELECT COUNT(*) FROM users WHERE is_active = 1");
+// The same position the leaderboard shows — see leaderboardPosition().
+$position = leaderboardPosition((int) $user['id']);
+$rank = $position['rank'] ?? '—';
+$totalVolunteers = $position['total'] ?? (int) dbFetchValue("SELECT COUNT(*) FROM users WHERE is_active = 1 AND deleted_at IS NULL");
 
 // Stats
 $thisMonth = dbFetchValue(
