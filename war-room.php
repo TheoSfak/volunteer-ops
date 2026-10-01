@@ -10811,6 +10811,7 @@ function measureNearestCandidates(point) {
             // How the team moves: it decides which of the two routed times is
             // ITS time, and so who is quickest.
             transport: p.transport || 'foot',
+            teamLabel: p.team_label || null, color: p.team_color || null,
         });
     });
     return [...best.values()].sort((a, b) => a.straight - b.straight).slice(0, MEASURE_NEAREST_MAX);
@@ -10821,6 +10822,25 @@ function measureNearest(point) {
     const seq = measureSeq;
     measureEnsureLayer();
     const candidates = measureNearestCandidates(point);
+    // «Πιο κοντά» needs something to choose between. With one team on the map
+    // there is nothing to compare, and with two it is just "the other one" —
+    // the useful answer there is how far apart they are, so that is what is
+    // shown. From three on it is the ranking below.
+    if (candidates.length === 1) {
+        measureShowCard(measureCardHead(t('measure.nearest_title'), 'bi-people-fill')
+            + `<div class="small">${escapeHtml(t('measure.nearest_needs_two'))}</div>`);
+        return;
+    }
+    if (candidates.length === 2) {
+        const [a, b] = candidates;
+        measureShowPairs([{
+            a_label: a.teamLabel || a.label, a_lat: a.lat, a_lng: a.lng, a_color: a.color,
+            b_label: b.teamLabel || b.label, b_lat: b.lat, b_lng: b.lng, b_color: b.color,
+            distance_m: L.latLng(a.lat, a.lng).distanceTo(L.latLng(b.lat, b.lng)),
+            is_stale: a.stale || b.stale,
+        }], t('measure.nearest_two_note'), true);
+        return;
+    }
     measurePin(point, '◎').addTo(measureLayer);
     if (!candidates.length) {
         measureShowCard(measureCardHead(t('measure.nearest_title'), 'bi-people-fill')
@@ -10970,6 +10990,14 @@ function measureTeamDistances() {
             + `<div class="small text-muted">${escapeHtml(t('measure.team_distances_none'))}</div>`);
         return;
     }
+    measureShowPairs(pairs);
+}
+
+// Draws pairs of teams — [{a_label, a_lat, a_lng, a_color, b_*, distance_m,
+// is_stale}] — with a distance on each line and the pairs card. $note is a
+// line for the foot of the card; $selectFirst fetches the first pair's walk
+// and drive at once, for when there is only one pair to look at.
+function measureShowPairs(pairs, note = null, selectFirst = false) {
     const lines = pairs.map(p => {
         const line = L.polyline([[p.a_lat, p.a_lng], [p.b_lat, p.b_lng]], {color: '#374151', weight: 2, opacity: 0.75, dashArray: '4 6', interactive: false}).addTo(measureLayer);
         L.marker([(p.a_lat + p.b_lat) / 2, (p.a_lng + p.b_lng) / 2], {
@@ -10994,8 +11022,9 @@ function measureTeamDistances() {
         bounds.extend([pos.lat, pos.lng]);
     });
     if (bounds.isValid() && !map.getBounds().contains(bounds)) map.fitBounds(bounds, {padding: [40, 40]});
-    measurePairsState = {pairs, lines, selected: null, routes: {}, routeLayer: L.layerGroup().addTo(measureLayer)};
+    measurePairsState = {pairs, lines, selected: null, routes: {}, routeLayer: L.layerGroup().addTo(measureLayer), note};
     measureRenderPairs(measurePairsState);
+    if (selectFirst) measureTeamPairSelect(0);
 }
 
 // A pair's walk and drive, asked only when that pair is tapped: routing every
@@ -11073,7 +11102,8 @@ function measureRenderPairs(s) {
     }).join('');
     const notes = [];
     if (s.pairs.some(p => p.is_stale)) notes.push(['text-warning-emphasis', t('measure.team_distances_stale')]);
-    notes.push(['text-muted', t('measure.team_distances_hint')]);
+    if (s.note) notes.push(['text-muted', s.note]);
+    else notes.push(['text-muted', t('measure.team_distances_hint')]);
     measureShowCard(measureCardHead(t('measure.team_distances'), 'bi-diagram-3')
         + `<div class="wr-measure-scroll">${rows}</div>`
         + notes.map(([cls, text]) => `<div class="small ${cls} mt-1">${escapeHtml(text)}</div>`).join(''), true);
