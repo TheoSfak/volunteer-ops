@@ -74,6 +74,11 @@ const OSM_MAX_ITEMS = 6000;
  */
 const OSM_OVERPASS_URLS = [
     'https://overpass-api.de/api/interpreter',
+    // The other free worldwide instance (overpass.kumi.systems is no longer
+    // listed on the OSM wiki). Unreachable from Heraklion on 2026-10-01, so a
+    // dead one costs only OSM_CONNECT_TIMEOUT; a host that is firewalled off
+    // from overpass-api.de (yphresies.gr was: "Could not connect") may reach it.
+    'https://overpass.private.coffee/api/interpreter',
 ];
 
 /**
@@ -317,6 +322,7 @@ function osmFetchBundle(string $bundle, float $south, float $west, float $north,
     // request run (often 30 s, and a request killed halfway caches nothing, so
     // the tile would fail for ever): each attempt gets only what is left.
     $deadline = microtime(true) + OSM_REQUEST_DEADLINE;
+    $notes = []; // what each server said, for $why
 
     foreach (OSM_OVERPASS_URLS as $url) {
         $host = (string) parse_url($url, PHP_URL_HOST);
@@ -324,7 +330,7 @@ function osmFetchBundle(string $bundle, float $south, float $west, float $north,
         // busy for a moment: it asks to be left alone briefly and then tried once more.
         for ($attempt = 0; $attempt < 2; $attempt++) {
             $left = (int) floor($deadline - microtime(true));
-            if ($left < 4) { $why = ($why ?? $host) . ' (out of time)'; break 2; }
+            if ($left < 4) { $notes[] = $host . ' (out of time)'; break 2; }
             $ch = curl_init($url);
             curl_setopt_array($ch, [
                 CURLOPT_POST           => true,
@@ -343,12 +349,12 @@ function osmFetchBundle(string $bundle, float $south, float $west, float $north,
             if ($code === 200) {
                 $all = osmParseAll($body === false ? null : $body);
                 if ($all !== null) return array_intersect_key($all, array_flip(OSM_BUNDLES[$bundle]));
-                $why = $host . ': unusable answer';
+                $notes[] = $host . ': unusable answer';
                 error_log('[osm] unusable answer from ' . $url . ' for ' . $bundle);
                 break;
             }
             // HTTP 0 is no answer at all: the reason is cURL's own.
-            $why = $host . ($code === 0 ? ': ' . ($curlError !== '' ? $curlError : 'no answer') : ' HTTP ' . $code);
+            $notes[] = $host . ($code === 0 ? ': ' . ($curlError !== '' ? $curlError : 'no answer') : ' HTTP ' . $code);
             error_log('[osm] ' . $url . ' HTTP ' . $code . ($curlError !== '' ? ' (' . $curlError . ')' : '') . ' for ' . $bundle);
             if ($attempt === 0 && ($code === 429 || $code === 504)) {
                 sleep(OSM_BUSY_PAUSE);
@@ -357,6 +363,8 @@ function osmFetchBundle(string $bundle, float $south, float $west, float $north,
             break;
         }
     }
+    // Every server's own word, so a page showing it says which of them were tried.
+    $why = mb_substr(implode(' | ', $notes), 0, 300);
     return null;
 }
 
