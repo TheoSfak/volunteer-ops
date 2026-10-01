@@ -7,7 +7,11 @@ require_once __DIR__ . '/bootstrap.php';
 requirePermission('citizens_view');
 
 $pageTitle = 'Λίστα Πολιτών';
-$seminarTypes = ['BLS ADULT', 'BLS PEDIATRIC', 'TRAUMA', 'FIRST AID'];
+
+// The seminar types offered on the citizen form are the active certificate types
+// of citizen-certificate-types.php, so adding one there adds it here.
+$certTypes = dbFetchAll("SELECT * FROM citizen_certificate_types WHERE is_active = 1 ORDER BY name");
+$seminarTypes = array_column($certTypes, 'name');
 
 // Check if timestamp columns exist — if not, create them directly
 $_hasTsCols = !empty(dbFetchAll("SHOW COLUMNS FROM citizens LIKE 'contact_done_at'"));
@@ -123,7 +127,12 @@ if (isPost()) {
         case 'update':
             $id = (int) post('citizen_id');
             $seminarType = trim(post('seminar_type'));
-            if ($seminarType !== '' && !in_array($seminarType, $seminarTypes, true)) {
+            // A citizen keeps a value they already have even when that type was
+            // renamed or switched off since: saving the form must not refuse it,
+            // nor blank it.
+            $keptType = $action === 'update' && $id > 0
+                && $seminarType === (string) dbFetchValue("SELECT seminar_type FROM citizens WHERE id = ?", [$id]);
+            if ($seminarType !== '' && !$keptType && !in_array($seminarType, $seminarTypes, true)) {
                 setFlash('error', 'Μη έγκυρο είδος σεμιναρίου.');
                 redirect('citizens.php');
             }
@@ -427,8 +436,8 @@ if ($editId) {
     $editCitizen = dbFetchOne("SELECT * FROM citizens WHERE id = ?", [$editId]);
 }
 
-// Certificate types for the cert-creation modal
-$certTypes = dbFetchAll("SELECT * FROM citizen_certificate_types WHERE is_active = 1 ORDER BY name");
+// Certificate types for the cert-creation modal: $certTypes, loaded at the top
+// together with the seminar types, which are the same list.
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -840,7 +849,23 @@ function resetForm() {
     document.getElementById('formCitizenId').value = '0';
     document.getElementById('modalTitle').textContent = 'Νέος Πολίτης';
     document.getElementById('citizenForm').reset();
+    setSeminarType(''); // drops the extra option an earlier edit of an out-of-list type left
     document.getElementById('registered_at').value = new Date().toISOString().split('T')[0];
+}
+
+// Sets the seminar select. A value that is no longer in the list (its type was
+// renamed or switched off) gets an option of its own, so editing that citizen
+// does not blank it; the extra option is dropped again on the next call.
+function setSeminarType(value) {
+    var select = document.getElementById('seminar_type');
+    Array.prototype.slice.call(select.querySelectorAll('option[data-extra]')).forEach(function (o) { o.remove(); });
+    value = value || '';
+    if (value && !Array.prototype.some.call(select.options, function (o) { return o.value === value; })) {
+        var extra = new Option(value, value);
+        extra.setAttribute('data-extra', '1');
+        select.add(extra);
+    }
+    select.value = value;
 }
 
 function cloneCitizen(c) {
@@ -873,7 +898,7 @@ function editCitizen(c) {
     document.getElementById('last_name_gr').value = c.last_name_gr || '';
     document.getElementById('first_name_lat').value = c.first_name_lat || '';
     document.getElementById('last_name_lat').value = c.last_name_lat || '';
-    document.getElementById('seminar_type').value = c.seminar_type || '';
+    setSeminarType(c.seminar_type);
     document.getElementById('birth_date').value = c.birth_date || '';
     document.getElementById('citizen_email').value = c.email || '';
     document.getElementById('citizen_phone').value = c.phone || '';
