@@ -2324,7 +2324,11 @@ include __DIR__ . '/includes/header.php';
        so the layers-menu tick takes effect at once. */
     .wr-pin-team-label { background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
     .wr-pin-team-label::before { display: none !important; }
-    #warRoomMap.wr-hide-pin-team-labels .wr-pin-team-label { display: none; }
+    #warRoomMap.wr-hide-pin-team-labels .wr-pin-team-label,
+    #warRoomMap.wr-hide-pin-team-labels .wr-cluster-team-label { display: none; }
+    /* The same pill on a cluster bubble: hangs above the 40px circle, centred
+       on it, whatever its width. */
+    .marker-cluster .wr-cluster-team-label { position: absolute; left: 50%; bottom: 100%; transform: translateX(-50%); margin-bottom: 2px; background: #fff; color: #1f2937; border: 2px solid #6c757d; padding: 0 6px; border-radius: 10px; font-weight: 700; font-size: .72rem; line-height: 1.35; white-space: nowrap; box-shadow: 0 1px 3px #0006; pointer-events: none; }
     /* Search-area/sector/restricted-area polygon name labels — same
        box/arrow-stripping as dispatch-team-label above, but its own class
        rather than reusing that one: these are plain text (no inline-styled
@@ -7301,7 +7305,29 @@ coverageLayer = L.featureGroup();
 // pin-charge-alert-btn wiring below. spiderfyOnMaxZoom is the library
 // default (true) — named explicitly anyway since it's the whole point
 // of adding this library in the first place, not an incidental option.
-sharedMarkerCluster = L.markerClusterGroup({spiderfyOnMaxZoom: true, showCoverageOnHover: false}).addTo(map);
+// iconCreateFunction is the library's own default bubble (same markup and
+// size classes) plus the team names of the position dots inside it
+// (clusterTeamLabelHtml()) — so grouping does not hide whose they are.
+function clusterTeamLabelHtml(cluster) {
+    const teams = new Map();
+    cluster.getAllChildMarkers().forEach(m => { if (m._wrTeam) teams.set(m._wrTeam.label, m._wrTeam.color); });
+    if (!teams.size) return '';
+    const names = [...teams.keys()].sort((a, b) => a.localeCompare(b, undefined, {numeric: true}));
+    const shown = names.slice(0, 2).join(', ') + (names.length > 2 ? ' +' + (names.length - 2) : '');
+    const edge = teams.size === 1 ? [...teams.values()][0] : '#6c757d';
+    return `<span class="wr-cluster-team-label" style="border-color:${escapeHtml(edge || '#6c757d')};">${escapeHtml(shown)}</span>`;
+}
+sharedMarkerCluster = L.markerClusterGroup({
+    spiderfyOnMaxZoom: true, showCoverageOnHover: false,
+    iconCreateFunction: cluster => {
+        const n = cluster.getChildCount();
+        return L.divIcon({
+            html: '<div><span>' + n + '</span></div>' + clusterTeamLabelHtml(cluster),
+            className: 'marker-cluster marker-cluster-' + (n < 10 ? 'small' : (n < 100 ? 'medium' : 'large')),
+            iconSize: new L.Point(40, 40),
+        });
+    },
+}).addTo(map);
 // FeatureGroup (not plain LayerGroup) is required here: only FeatureGroup
 // propagates child-layer events like 'popupopen' up to the group's own
 // listeners, which is how dispatchLayer.on('popupopen', ...) below wires up
@@ -12047,6 +12073,7 @@ function buildPinMarker(pin, interactive = true) {
     // show. Whether it is visible is the layers-menu tick (see
     // addPinTeamLabelToggle()), a class on the map element, never a rebuild.
     // The offset clears the heading arrow, which orbits the dot at ~21px.
+    marker._wrTeam = pin.team_label ? {label: pin.team_label, color: pin.team_color || null} : null;
     if (interactive && pin.team_label) {
         marker.bindTooltip(
             `<span style="display:inline-block;background:#fff;color:#1f2937;border:2px solid ${escapeHtml(pin.team_color || '#6c757d')};padding:0 6px;border-radius:10px;font-weight:700;font-size:.72rem;line-height:1.35;white-space:nowrap;box-shadow:0 1px 3px #0006;${opacity}">${escapeHtml(pin.team_label)}</span>`,
