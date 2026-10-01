@@ -2597,6 +2597,14 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         .then(function (res) { clearTimeout(timer); return res; });
                 }
 
+                // Waits `seconds`, counting down in the line under the bar, and ends early on Pause.
+                async function waitFor(seconds, text) {
+                    for (var left = seconds; left > 0 && running; left--) {
+                        line.textContent = text + ' ' + left + ' δ.';
+                        await new Promise(function (ok) { setTimeout(ok, 1000); });
+                    }
+                }
+
                 async function run() {
                     running = true; failedNow = 0; lastWhy = ''; onlyFailedLeft = false;
                     render();
@@ -2614,7 +2622,9 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                     while (running) {
                         var r = await call('step', {after: after});
                         if (!r.ok) {
-                            if (r.network && retries++ < 3) { await new Promise(function (ok) { setTimeout(ok, 5000); }); continue; }
+                            // This server did not answer (a dropped connection, a gateway timeout):
+                            // wait and ask again, a little longer each time, before giving up.
+                            if (r.network && retries++ < 8) { await waitFor(Math.min(60, 10 * retries), (r.error || 'Δεν απάντησε ο server') + ' — ξανά σε'); continue; }
                             line.textContent = (r.error || 'Σφάλμα') + ' Πατήστε το κουμπί για να συνεχίσει.';
                             break;
                         }
@@ -2627,12 +2637,18 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         }
                         if (r.failed) {
                             failedNow++; inARow++; lastWhy = r.why || '';
-                            // Overpass (or this server's way to it) is not answering: going on
-                            // would only make a hundred more failed requests in a minute.
-                            if (inARow >= 5) {
+                            // The public Overpass answers 504/429 in clusters that pass in a minute
+                            // or two. After three in a row, wait, and wait longer each time (15 s,
+                            // 30 s, 1 min, then 2 min), and carry on by itself; only a dozen in a row
+                            // (a quarter of an hour of silence) is taken as "not answering".
+                            if (inARow >= 12) {
                                 showProgress(startedAt);
-                                line.textContent = 'Το Overpass δεν απαντά (5 συνεχόμενες αποτυχίες)' + (lastWhy ? ' — ' + lastWhy : '') + '. Δοκιμάστε ξανά αργότερα· ό,τι έχει κατέβει μένει.';
+                                line.textContent = 'Το Overpass δεν απαντά (12 συνεχόμενες αποτυχίες)' + (lastWhy ? ' — ' + lastWhy : '') + '. Δοκιμάστε ξανά αργότερα· ό,τι έχει κατέβει μένει.';
                                 break;
+                            }
+                            if (inARow >= 3) {
+                                showProgress(startedAt);
+                                await waitFor(Math.min(120, 15 * Math.pow(2, inARow - 3)), 'Το Overpass είναι απασχολημένο' + (lastWhy ? ' (' + lastWhy + ')' : '') + ' — ξανά σε');
                             }
                         } else {
                             inARow = 0;
