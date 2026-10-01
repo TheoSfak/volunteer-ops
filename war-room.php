@@ -2499,6 +2499,7 @@ include __DIR__ . '/includes/header.php';
     .wr-hidden-chip button { border: 0; background: none; padding: 0; color: #0d6efd; text-decoration: underline; font-size: inherit; }
     /* OpenStreetMap layer (v3.352.0): small round pins, one colour per kind. */
     .wr-osm-pin-wrap { background: none; border: 0; }
+    .wr-osm-chip { white-space: pre-line; }
     .wr-osm-pin { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.5); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1; }
     .wr-osm-popup { min-width: 170px; }
     .wr-osm-note { white-space: normal; max-width: 260px; }
@@ -7612,7 +7613,7 @@ try {
 const OSM_LAYER_ENABLED = <?= json_encode(getSetting('osm_layer_enabled', '1') === '1') ?>;
 const OSM_TILE = 20;            // tiles of 0.05 degrees, the same cut as includes/osm.php
 const OSM_CHUNK_COLS = 4;       // tiles per request, in a row
-const OSM_MAX_VIEW_TILES = 60;  // a view wider than this is asked to zoom in
+const OSM_MAX_VIEW_TILES = 24;  // a view wider than this is asked to zoom in: a cold tile is a query to a public server, a few seconds each
 const OSM_MAX_ITEMS = 15000;    // past this the layer starts over rather than grow
 const OSM_RETRY_MS = 130 * 1000;     // a tile the server could not get: its own retry pause is 2 min
 const OSM_ATTRIBUTION = '© OpenStreetMap contributors';
@@ -7677,6 +7678,11 @@ const osmLoaded = new Set();  // 'row_col|group' the server has answered for
 const osmRetryAt = new Map(); // 'row_col|group' -> when to ask again after a failure
 let osmBusy = false, osmAgain = false, osmTimer = null, osmPartial = false, osmTooWide = false, osmGen = 0, osmAttributed = false;
 let osmSettled = false; // the last load of this view finished cleanly
+let osmLater = false;   // something is still being fetched and will be asked for again shortly
+let osmDiag = '';       // the server's short reason for the last failure
+let osmRetryTimer = null;
+let osmProgress = {done: 0, total: 0};
+const OSM_BUNDLE_OF = {points: 'core', paths: 'core', cliffs: 'core', tracks: 'tracks'}; // as OSM_BUNDLES in includes/osm.php
 let osmChip = null;
 
 // A word from the language file, or the raw value when there is no translation.
@@ -7807,6 +7813,20 @@ function osmAnyInView() {
     return false;
 }
 
+// The zoom to move to so that the map shows at least `from` and no more tiles
+// than OSM_MAX_VIEW_TILES: a wide screen at a low zoom would be dozens of tiles.
+function osmZoomFor(from) {
+    const size = map.getSize();
+    const lat = map.getCenter().lat;
+    for (let z = Math.max(from, map.getZoom()); z < 18; z++) {
+        const degLng = 360 / (256 * Math.pow(2, z));
+        const degLat = degLng * Math.cos(lat * Math.PI / 180);
+        const tiles = (Math.ceil(size.x * degLng * OSM_TILE) + 1) * (Math.ceil(size.y * degLat * OSM_TILE) + 1);
+        if (tiles <= OSM_MAX_VIEW_TILES) return z;
+    }
+    return 18;
+}
+
 // The lowest zoom at which every ticked category can be drawn, or null.
 function osmMinZoomTicked() {
     const zooms = OSM_CATEGORIES.filter(c => osmCatsOn.has(c.key)).map(c => c.minZoom);
@@ -7823,14 +7843,17 @@ function osmUpdateChip() {
         const z = map.getZoom();
         const far = OSM_CATEGORIES.filter(c => osmCatsOn.has(c.key) && c.minZoom > z).map(c => t('osm.cat_' + c.key));
         const ticked = OSM_CATEGORIES.filter(c => osmCatsOn.has(c.key)).length;
-        if (osmTooWide || (far.length && far.length === ticked)) text = t('osm.zoom_in_all');
-        else if (far.length) text = t('osm.zoom_in', {list: far.join(', ')});
-        else if (osmBusy) text = t('osm.loading');
-        else if (osmPartial) text = t('osm.partial');
+        // Two lines at most: what the zoom hides, and what the loading is doing.
+        const lines = [];
+        if (osmTooWide || (far.length && far.length === ticked)) lines.push(t('osm.zoom_in_all'));
+        else if (far.length) lines.push(t('osm.zoom_in', {list: far.join(', ')}));
+        if (osmBusy || osmLater) lines.push(osmProgress.total ? t('osm.loading_n', {done: osmProgress.done, total: osmProgress.total}) : t('osm.loading'));
+        else if (osmPartial) lines.push(osmDiag ? t('osm.partial_why', {why: osmDiag}) : t('osm.partial'));
         // Loaded cleanly and still nothing in sight: say so, or "nothing
         // appeared" reads as "it is broken". Often it only means nobody has
         // mapped this stretch of ground.
-        else if (osmSettled && ticked && !osmAnyInView()) text = t('osm.empty');
+        else if (osmSettled && ticked && !lines.length && !osmAnyInView()) lines.push(t('osm.empty'));
+        text = lines.join('\n');
     }
     if (!text) {
         if (osmChip) { osmChip.remove(); osmChip = null; }
@@ -7840,7 +7863,7 @@ function osmUpdateChip() {
         const Chip = L.Control.extend({
             options: {position: 'bottomleft'},
             onAdd: function () {
-                const div = L.DomUtil.create('div', 'leaflet-control wr-hidden-chip');
+                const div = L.DomUtil.create('div', 'leaflet-control wr-hidden-chip wr-osm-chip');
                 L.DomEvent.disableClickPropagation(div);
                 return div;
             },
@@ -7859,41 +7882,64 @@ function osmRequest(body) {
     const form = new URLSearchParams({
         csrf_token: csrfToken, mission_id: '<?= $missionId ?>',
         south: body.south.toFixed(6), north: body.north.toFixed(6),
-        west: body.west.toFixed(6), east: body.east.toFixed(6), groups: body.group,
+        west: body.west.toFixed(6), east: body.east.toFixed(6), groups: body.groups,
     });
     return fetch('mission-osm.php', {method: 'POST', body: form, signal: ctrl.signal})
         .then(r => r.ok ? r.json() : null)
         .finally(() => clearTimeout(timer));
 }
 
-// One request: a row of up to OSM_CHUNK_COLS tiles, one group. Asked again while
-// the server says some of it is still to be fetched. false = it failed.
+// One request: a row of up to OSM_CHUNK_COLS tiles, the groups of one bundle.
+// The server fetches from Overpass one tile per request, so it is asked again
+// while it says some of the row is still to come. false = it failed.
 async function osmRunJob(job) {
     const gen = osmGen;
     const eps = 1e-6; // keeps the box inside its own tiles, off the neighbours' edge
     const body = {
         south: job.row / OSM_TILE + eps, north: (job.row + 1) / OSM_TILE - eps,
         west: job.cols[0] / OSM_TILE + eps, east: (job.cols[job.cols.length - 1] + 1) / OSM_TILE - eps,
-        group: job.group,
+        groups: job.groups.join(','),
     };
-    for (let attempt = 0; attempt < 8; attempt++) {
+    let pending = [];
+    for (let attempt = 0; attempt < 12; attempt++) {
         let data = null;
         try { data = await osmRequest(body); } catch (e) { data = null; }
         if (gen !== osmGen || !osmOn) return true;
-        if (!data || !data.ok) { osmRetryAt.set('net', Date.now() + 30000); osmPartial = true; return false; }
+        if (!data || !data.ok) {
+            osmRetryAt.set('net', Date.now() + 30000);
+            osmPartial = true;
+            osmDiag = data && data.error ? data.error : t('osm.no_answer');
+            console.warn('[osm] request failed:', data);
+            return false;
+        }
         osmAddItems(data.items);
         (data.ready || []).forEach(id => osmLoaded.add(id));
-        (data.failed || []).forEach(id => { osmRetryAt.set(id, Date.now() + OSM_RETRY_MS); osmPartial = true; });
-        if (!(data.pending || []).length) return true;
-        await new Promise(resolve => setTimeout(resolve, 1200));
+        if ((data.failed || []).length) {
+            data.failed.forEach(id => osmRetryAt.set(id, Date.now() + OSM_RETRY_MS));
+            osmPartial = true;
+            osmDiag = data.diag || '';
+            console.warn('[osm] Overpass did not answer for', data.failed, '-', data.diag || 'no reason given');
+        }
+        // Tiles settled by this answer, counted once per tile for the progress shown.
+        const settled = new Set([...(data.ready || []), ...(data.failed || [])].map(id => id.split('|')[0]));
+        osmProgress.done = Math.min(osmProgress.total, osmProgress.done + settled.size - (job.counted || 0));
+        job.counted = settled.size;
+        pending = data.pending || [];
+        if (!pending.length) return true;
+        osmUpdateChip();
+        await new Promise(resolve => setTimeout(resolve, 300));
     }
-    return true; // still being fetched after eight asks: the next move asks again
+    // Still being fetched after a dozen asks (another visitor's request holds
+    // the tile, or Overpass is slow): look again shortly, by itself.
+    pending.forEach(id => osmRetryAt.set(id, Date.now() + 8000));
+    osmLater = true;
+    return true;
 }
 
 async function osmLoadView() {
     if (!osmOn || !osmCluster) return;
     if (osmBusy) { osmAgain = true; return; }
-    if ((osmRetryAt.get('net') || 0) > Date.now()) { osmUpdateChip(); return; }
+    if ((osmRetryAt.get('net') || 0) > Date.now()) { osmPartial = true; osmUpdateChip(); osmArmRetry(); return; }
     osmBusy = true;
     let failedPass = false;
     osmUpdateChip();
@@ -7901,6 +7947,7 @@ async function osmLoadView() {
         do {
             osmAgain = false;
             osmPartial = false;
+            osmLater = false;
             const z = map.getZoom();
             const groups = new Set(OSM_CATEGORIES.filter(c => osmCatsOn.has(c.key) && c.minZoom <= z).map(c => c.group));
             const b = map.getBounds();
@@ -7908,25 +7955,41 @@ async function osmLoadView() {
             const c0 = Math.floor(b.getWest() * OSM_TILE), c1 = Math.floor(b.getEast() * OSM_TILE);
             osmTooWide = (r1 - r0 + 1) * (c1 - c0 + 1) > OSM_MAX_VIEW_TILES;
             if (osmTooWide || !groups.size) break;
+            // The groups are asked for a bundle at a time: the server reads
+            // points, paths and cliffs of a tile in ONE Overpass query.
+            const byBundle = {};
+            groups.forEach(group => { (byBundle[OSM_BUNDLE_OF[group]] = byBundle[OSM_BUNDLE_OF[group]] || []).push(group); });
             const jobs = [];
             const now = Date.now();
-            groups.forEach(group => {
+            Object.keys(byBundle).forEach(bundle => {
+                const wanted = byBundle[bundle];
                 for (let row = r0; row <= r1; row++) {
                     const missing = [];
                     for (let col = c0; col <= c1; col++) {
-                        const id = row + '_' + col + '|' + group;
-                        if (osmLoaded.has(id)) continue;
-                        if ((osmRetryAt.get(id) || 0) > now) { osmPartial = true; continue; }
+                        const ids = wanted.map(group => row + '_' + col + '|' + group);
+                        if (ids.every(id => osmLoaded.has(id))) continue;
+                        if (ids.some(id => (osmRetryAt.get(id) || 0) > now)) { osmPartial = true; continue; }
                         missing.push(col);
                     }
                     while (missing.length) {
                         const first = missing[0];
                         const cols = missing.filter(col => col - first < OSM_CHUNK_COLS);
                         missing.splice(0, cols.length);
-                        jobs.push({group, row, cols});
+                        jobs.push({groups: wanted, row, cols});
                     }
                 }
             });
+            // The middle of the screen first, then outwards: what the viewer is
+            // looking at fills in before what is at the edge.
+            const centre = map.getCenter();
+            const kmLng = Math.cos(centre.lat * Math.PI / 180);
+            const away = job => {
+                const dLat = (job.row + 0.5) / OSM_TILE - centre.lat;
+                const dLng = ((job.cols[0] + job.cols[job.cols.length - 1] + 1) / 2 / OSM_TILE - centre.lng) * kmLng;
+                return dLat * dLat + dLng * dLng;
+            };
+            jobs.sort((a, bb) => away(a) - away(bb));
+            osmProgress = {done: 0, total: jobs.reduce((sum, job) => sum + job.cols.length, 0)};
             for (const job of jobs) {
                 if (osmAgain || !osmOn) break;
                 osmUpdateChip();
@@ -7935,9 +7998,22 @@ async function osmLoadView() {
         } while (osmAgain && osmOn);
     } finally {
         osmBusy = false;
-        osmSettled = osmOn && !osmTooWide && !osmPartial && !failedPass;
+        osmSettled = osmOn && !osmTooWide && !osmPartial && !osmLater && !failedPass;
         osmUpdateChip();
+        osmArmRetry();
     }
+}
+
+// "It will try again" has to be true: when something failed or is still to come,
+// look again by itself the moment its pause is over, not only when the map is
+// next moved.
+function osmArmRetry() {
+    clearTimeout(osmRetryTimer);
+    if (!osmOn || !(osmPartial || osmLater)) return;
+    const now = Date.now();
+    const next = Math.min(...[...osmRetryAt.values()].filter(at => at > now));
+    if (!isFinite(next)) return;
+    osmRetryTimer = setTimeout(osmScheduleLoad, next - now + 500);
 }
 
 function osmScheduleLoad() {
@@ -8000,7 +8076,10 @@ function osmScheduleLoad() {
         // never when the saved choice is restored on page load, which must not
         // move the map by itself.
         const asked = master ? (master.checked ? osmMinZoomTicked() : null) : (cat.checked ? OSM_CATEGORIES.find(c => c.key === cat.dataset.osm).minZoom : null);
-        if (osmOn && asked !== null && map.getZoom() < asked) map.setZoom(asked);
+        if (osmOn && asked !== null) {
+            const target = osmZoomFor(asked);
+            if (map.getZoom() < target) map.setZoom(target);
+        }
         osmAttach();
         osmRender();
         osmScheduleLoad();

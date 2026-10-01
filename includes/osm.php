@@ -53,12 +53,14 @@ const OSM_BUNDLES = [
 ];
 
 /** Overpass' own server-side limit for one query, and ours for the call. */
-const OSM_QUERY_TIMEOUT = 35;
-const OSM_CURL_TIMEOUT = 40;
+const OSM_QUERY_TIMEOUT = 20;
+const OSM_CURL_TIMEOUT = 22;
+/** Seconds of Overpass time one Overpass call may use in all, retry included. */
+const OSM_REQUEST_DEADLINE = 25;
 /** A server that does not even answer the connection is skipped quickly. */
 const OSM_CONNECT_TIMEOUT = 6;
 /** The pause before the one retry after a 429 or 504, in seconds. */
-const OSM_BUSY_PAUSE = 5;
+const OSM_BUSY_PAUSE = 3;
 
 /** Most features one response carries; a guard, not a tuned figure. */
 const OSM_MAX_ITEMS = 6000;
@@ -306,35 +308,48 @@ function osmParseAll(?string $body): ?array {
  * turn. [group => items] for every group of the bundle, or null when none of the
  * servers gave a usable answer.
  */
-function osmFetchBundle(string $bundle, float $south, float $west, float $north, float $east): ?array {
+function osmFetchBundle(string $bundle, float $south, float $west, float $north, float $east, ?string &$why = null): ?array {
     $query = osmBundleQuery($bundle, $south, $west, $north, $east);
-    if ($query === null || !function_exists('curl_init')) return null;
+    if ($query === null) { $why = 'unknown bundle'; return null; }
+    if (!function_exists('curl_init')) { $why = 'curl is not available on this server'; return null; }
+
+    // The whole call, retry included, must fit what a shared host lets one
+    // request run (often 30 s, and a request killed halfway caches nothing, so
+    // the tile would fail for ever): each attempt gets only what is left.
+    $deadline = microtime(true) + OSM_REQUEST_DEADLINE;
 
     foreach (OSM_OVERPASS_URLS as $url) {
+        $host = (string) parse_url($url, PHP_URL_HOST);
         // "Too many requests" and "gateway timeout" are Overpass saying it is
         // busy for a moment: it asks to be left alone briefly and then tried once more.
         for ($attempt = 0; $attempt < 2; $attempt++) {
+            $left = (int) floor($deadline - microtime(true));
+            if ($left < 4) { $why = ($why ?? $host) . ' (out of time)'; break 2; }
             $ch = curl_init($url);
             curl_setopt_array($ch, [
                 CURLOPT_POST           => true,
                 CURLOPT_POSTFIELDS     => http_build_query(['data' => $query]),
                 CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_CONNECTTIMEOUT => OSM_CONNECT_TIMEOUT,
-                CURLOPT_TIMEOUT        => OSM_CURL_TIMEOUT,
+                CURLOPT_CONNECTTIMEOUT => min(OSM_CONNECT_TIMEOUT, $left),
+                CURLOPT_TIMEOUT        => min(OSM_CURL_TIMEOUT, $left),
                 CURLOPT_SSL_VERIFYPEER => true,
                 CURLOPT_USERAGENT      => 'VolunteerOps/' . APP_VERSION . ' (search and rescue volunteer coordination)',
             ]);
             $body = curl_exec($ch);
             $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            $curlError = curl_error($ch);
             curl_close($ch);
 
             if ($code === 200) {
                 $all = osmParseAll($body === false ? null : $body);
                 if ($all !== null) return array_intersect_key($all, array_flip(OSM_BUNDLES[$bundle]));
+                $why = $host . ': unusable answer';
                 error_log('[osm] unusable answer from ' . $url . ' for ' . $bundle);
                 break;
             }
-            error_log('[osm] ' . $url . ' HTTP ' . $code . ' for ' . $bundle);
+            // HTTP 0 is no answer at all: the reason is cURL's own.
+            $why = $host . ($code === 0 ? ': ' . ($curlError !== '' ? $curlError : 'no answer') : ' HTTP ' . $code);
+            error_log('[osm] ' . $url . ' HTTP ' . $code . ($curlError !== '' ? ' (' . $curlError . ')' : '') . ' for ' . $bundle);
             if ($attempt === 0 && ($code === 429 || $code === 504)) {
                 sleep(OSM_BUSY_PAUSE);
                 continue;
@@ -397,9 +412,10 @@ function osmCacheRetryLater(string $tileKey, string $group): void {
  * and no fetch allowed now — the page should ask again) or 'failed' (Overpass
  * did not answer: byGroup holds whatever was known, possibly nothing, and the
  * page should ask again in a couple of minutes). $budget is how many Overpass
- * calls this request may still make; it is spent here.
+ * calls this request may still make; it is spent here. $why, when given, is set
+ * to a short plain reason whenever the answer is 'failed' or the refresh failed.
  */
-function osmTileBundle(string $tileKey, string $bundle, float $s, float $w, float $n, float $e, int &$budget): array {
+function osmTileBundle(string $tileKey, string $bundle, float $s, float $w, float $n, float $e, int &$budget, ?string &$why = null): array {
     $groups = OSM_BUNDLES[$bundle];
     $held = [];
     $allFresh = true;
@@ -416,7 +432,10 @@ function osmTileBundle(string $tileKey, string $bundle, float $s, float $w, floa
     }
     // Served, but not called "fresh": the page would take an empty answer for a
     // finished one and never ask again until it was reloaded.
-    if ($allFresh) return [$held, $retrying ? 'failed' : 'fresh'];
+    if ($allFresh) {
+        if ($retrying) $why = $why ?? 'waiting to retry after an earlier failure';
+        return [$held, $retrying ? 'failed' : 'fresh'];
+    }
 
     // "Something known" means something to draw: a row that is only the empty
     // marker of a failed refresh counts for nothing.
@@ -431,7 +450,7 @@ function osmTileBundle(string $tileKey, string $bundle, float $s, float $w, floa
     if (!$got) return $notNow;
     try {
         $budget--;
-        $fetched = osmFetchBundle($bundle, $s, $w, $n, $e);
+        $fetched = osmFetchBundle($bundle, $s, $w, $n, $e, $why);
         if ($fetched === null) {
             foreach ($groups as $group) osmCacheRetryLater($tileKey, $group);
             return [$held, $anyData ? 'stale' : 'failed'];

@@ -31,7 +31,7 @@ const OSM_RATE_MAX = 300;
 const OSM_RATE_WINDOW = 600;
 
 /** Overpass calls one request may make. The rest of a big view fills in on the next ask. */
-const OSM_FETCHES_PER_REQUEST = 2;
+const OSM_FETCHES_PER_REQUEST = 1;
 
 $userId = (int) getCurrentUserId();
 
@@ -88,11 +88,15 @@ $_SESSION[$key] = $calls;
 // request otherwise and the 5s poll queues behind it.
 session_write_close();
 
-// Up to two Overpass calls, each of which may wait out a busy server once: past
-// PHP's default 30 s on a server that counts wall time (Windows does).
-set_time_limit(OSM_FETCHES_PER_REQUEST * (2 * OSM_CURL_TIMEOUT + OSM_BUSY_PAUSE) + 20);
+// Whatever the page does, finish and cache what Overpass was asked for: a call
+// abandoned halfway is a tile that never fills. Each Overpass call keeps to
+// OSM_REQUEST_DEADLINE seconds by itself, so a host that cannot raise PHP's
+// time limit (set_time_limit is often disabled) still fits.
+ignore_user_abort(true);
+@set_time_limit(OSM_FETCHES_PER_REQUEST * OSM_REQUEST_DEADLINE + 15);
 
 $budget = OSM_FETCHES_PER_REQUEST;
+$why = null;
 $items = [];
 $seen = [];
 $ready = [];
@@ -106,7 +110,7 @@ foreach ($groups as $group) $wantedByBundle[osmBundleOf($group)][] = $group;
 
 foreach ($tiles as [$tileKey, $s, $w, $n, $e]) {
     foreach ($wantedByBundle as $bundle => $wanted) {
-        [$byGroup, $state] = osmTileBundle($tileKey, $bundle, $s, $w, $n, $e, $budget);
+        [$byGroup, $state] = osmTileBundle($tileKey, $bundle, $s, $w, $n, $e, $budget, $why);
         foreach ($wanted as $group) {
             // "tile|group" is what the page keeps to know what it already has.
             $tileGroup = $tileKey . '|' . $group;
@@ -134,6 +138,10 @@ echo json_encode([
     'ready'       => $ready,
     'pending'     => $pending,
     'failed'      => $failed,
+    // Why the last fetch failed, for the page to show: a developer reading the
+    // console, or an admin asked "what does it say?", can tell Overpass being
+    // busy from this server being unable to reach it at all.
+    'diag'        => $failed || $why !== null ? $why : null,
     'truncated'   => $truncated,
     'attribution' => '© OpenStreetMap contributors',
 ], JSON_UNESCAPED_UNICODE);
