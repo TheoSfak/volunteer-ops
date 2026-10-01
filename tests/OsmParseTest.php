@@ -109,6 +109,30 @@ final class OsmParseTest extends TestCase
         $this->assertNull(osmParseAll('{"remark":"runtime error: out of memory","elements":[]}'));
     }
 
+    public function testAnAnswerForSeveralTilesIsCutIntoTheirOwn(): void
+    {
+        $this->assertSame('704_496', osmTileKeyOf(35.21, 24.81));
+        $this->assertSame('704_497', osmTileKeyOf(35.21, 24.86));
+
+        $peakWest = ['t' => 'n', 'id' => 1, 'c' => 'peak', 'lat' => 35.21, 'lng' => 24.81];
+        $peakEast = ['t' => 'n', 'id' => 2, 'c' => 'peak', 'lat' => 35.22, 'lng' => 24.86];
+        $elsewhere = ['t' => 'n', 'id' => 3, 'c' => 'peak', 'lat' => 36.0, 'lng' => 25.0];
+        // A path with a vertex in each of the two tiles belongs to both, whole.
+        $path = ['t' => 'w', 'id' => 9, 'c' => 'path', 'p' => [[35.21, 24.84], [35.21, 24.86]]];
+
+        $split = osmSplitIntoTiles(
+            ['points' => [$peakWest, $peakEast, $elsewhere], 'paths' => [$path], 'cliffs' => []],
+            ['704_496', '704_497']
+        );
+        $this->assertSame([1], array_column($split['704_496']['points'], 'id'));
+        $this->assertSame([2], array_column($split['704_497']['points'], 'id'));
+        $this->assertSame([9], array_column($split['704_496']['paths'], 'id'));
+        $this->assertSame([9], array_column($split['704_497']['paths'], 'id'));
+        $this->assertSame($path['p'], $split['704_497']['paths'][0]['p']);   // whole, not clipped
+        $this->assertSame([], $split['704_496']['cliffs']);                  // every group present
+        $this->assertSame(['704_496', '704_497'], array_keys($split));       // the far peak went nowhere
+    }
+
     // ── Points ─────────────────────────────────────────────────────────────
 
     public function testPointsAreReducedToWhatTheMapDraws(): void

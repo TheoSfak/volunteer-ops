@@ -33,6 +33,9 @@ const OSM_TILE_DIVISOR = 20;
 /** The most tiles one request may cover. A phone screen at zoom 13 is about 4. */
 const OSM_MAX_TILES = 12;
 
+/** Tiles in a row fetched by one Overpass query. */
+const OSM_CHUNK_TILES = 4;
+
 /** The groups a page may ask for. Each is one Overpass query per tile. */
 const OSM_GROUPS = ['points', 'paths', 'tracks', 'cliffs'];
 
@@ -411,24 +414,52 @@ function osmCacheRetryLater(string $tileKey, string $group): void {
     );
 }
 
+/** The key of the tile a point lies in. */
+function osmTileKeyOf(float $lat, float $lng): string {
+    return ((int) floor($lat * OSM_TILE_DIVISOR)) . '_' . ((int) floor($lng * OSM_TILE_DIVISOR));
+}
+
 /**
- * The features of one bundle in one tile.
- *
- * Returns [byGroup, state]: byGroup is [group => items] for every group of the
- * bundle, and state is 'fresh' (from the cache, or just fetched), 'stale' (an
- * old answer; the refresh failed or was held back), 'pending' (nothing known yet
- * and no fetch allowed now — the page should ask again) or 'failed' (Overpass
- * did not answer: byGroup holds whatever was known, possibly nothing, and the
- * page should ask again in a couple of minutes). $budget is how many Overpass
- * calls this request may still make; it is spent here. $why, when given, is set
- * to a short plain reason whenever the answer is 'failed' or the refresh failed.
+ * Overpass' answer for a box that covers several tiles, cut into one answer per
+ * tile: [tileKey => [group => items]] for every key in $tileKeys. A point goes to
+ * the tile it lies in; a line goes to EVERY tile one of its vertices lies in, and
+ * whole, so it is drawn from whichever tile is loaded. (A segment long enough to
+ * cross a tile without a vertex in it is not given to that tile; the way is still
+ * drawn from the neighbours.) Features of tiles not in $tileKeys are dropped.
  */
-function osmTileBundle(string $tileKey, string $bundle, float $s, float $w, float $n, float $e, int &$budget, ?string &$why = null): array {
-    $groups = OSM_BUNDLES[$bundle];
+function osmSplitIntoTiles(array $byGroup, array $tileKeys): array {
+    $wanted = array_flip($tileKeys);
+    $out = [];
+    foreach ($tileKeys as $key) {
+        foreach (array_keys($byGroup) as $group) $out[$key][$group] = [];
+    }
+    foreach ($byGroup as $group => $items) {
+        foreach ($items as $item) {
+            $keys = [];
+            if (isset($item['p'])) {
+                foreach ($item['p'] as [$lat, $lng]) $keys[osmTileKeyOf((float) $lat, (float) $lng)] = true;
+            } else {
+                $keys[osmTileKeyOf((float) $item['lat'], (float) $item['lng'])] = true;
+            }
+            foreach ($keys as $key => $_) {
+                if (isset($wanted[$key])) $out[$key][$group][] = $item;
+            }
+        }
+    }
+    return $out;
+}
+
+/**
+ * What the cache holds for one tile and bundle: [byGroup, needsFetch, state].
+ * State is 'fresh', 'failed' (inside the retry window of an earlier failed
+ * refresh), or — when the tile needs fetching — the fallback if it cannot be
+ * fetched now: 'stale' (something old to draw) or 'pending' (nothing known).
+ */
+function osmTileRead(string $tileKey, string $bundle): array {
     $held = [];
     $allFresh = true;
     $retrying = false;
-    foreach ($groups as $group) {
+    foreach (OSM_BUNDLES[$bundle] as $group) {
         $row = osmCacheRead($tileKey, $group);
         $held[$group] = $row !== null ? $row[0] : [];
         if ($row === null || $row[1] >= OSM_CACHE_TTL) $allFresh = false;
@@ -440,32 +471,77 @@ function osmTileBundle(string $tileKey, string $bundle, float $s, float $w, floa
     }
     // Served, but not called "fresh": the page would take an empty answer for a
     // finished one and never ask again until it was reloaded.
-    if ($allFresh) {
-        if ($retrying) $why = $why ?? 'waiting to retry after an earlier failure';
-        return [$held, $retrying ? 'failed' : 'fresh'];
-    }
-
+    if ($allFresh) return [$held, false, $retrying ? 'failed' : 'fresh'];
     // "Something known" means something to draw: a row that is only the empty
     // marker of a failed refresh counts for nothing.
-    $anyData = (bool) array_filter($held);
-    $notNow = [$held, $anyData ? 'stale' : 'pending'];
-    if ($budget <= 0) return $notNow;
+    return [$held, true, array_filter($held) ? 'stale' : 'pending'];
+}
 
-    // One caller at a time per tile, so ten volunteers opening the same
-    // hillside do not send Overpass ten identical queries.
-    $lock = 'osm_' . $tileKey . '_' . $bundle;
+/**
+ * The features of one bundle in a row of tiles — ONE Overpass query for all the
+ * tiles of it that need one, however many (a screen of 18 tiles is five queries,
+ * not eighteen: on a public server that is minutes saved).
+ *
+ * $tiles is a list of [tileKey, south, west, north, east], side by side. Returns
+ * [byTile, states]: byTile is [tileKey => [group => items]] and states is
+ * [tileKey => state], where state is 'fresh' (from the cache, or just fetched),
+ * 'stale' (an old answer; the refresh failed or was held back), 'pending'
+ * (nothing known yet and no fetch allowed now — the page should ask again) or
+ * 'failed' (Overpass did not answer: the tile holds whatever was known, possibly
+ * nothing, and the page should ask again in a couple of minutes). $budget is how
+ * many Overpass calls this request may still make; it is spent here. $why, when
+ * given, is set to a short plain reason whenever a tile is 'failed' or a refresh
+ * failed.
+ */
+function osmChunkBundle(array $tiles, string $bundle, int &$budget, ?string &$why = null): array {
+    $groups = OSM_BUNDLES[$bundle];
+    $byTile = [];
+    $states = [];
+    $want = [];
+    foreach ($tiles as $tile) {
+        $key = $tile[0];
+        [$held, $needsFetch, $state] = osmTileRead($key, $bundle);
+        $byTile[$key] = $held;
+        $states[$key] = $state;
+        if ($needsFetch) $want[$key] = $tile;
+        if ($state === 'failed') $why = $why ?? 'waiting to retry after an earlier failure';
+    }
+    if (!$want || $budget <= 0) return [$byTile, $states];
+
+    // One caller at a time for the same tiles, so ten volunteers opening the
+    // same hillside do not send Overpass ten identical queries.
+    $lock = 'osm_' . substr(md5($bundle . implode(',', array_keys($want))), 0, 24);
     $got = (int) dbFetchValue("SELECT GET_LOCK(?, 0)", [$lock]) === 1;
-    if (!$got) return $notNow;
+    if (!$got) return [$byTile, $states];
     try {
         $budget--;
-        $fetched = osmFetchBundle($bundle, $s, $w, $n, $e, $why);
+        // The smallest box that holds every tile that needs asking for.
+        $south = min(array_column($want, 1));
+        $west = min(array_column($want, 2));
+        $north = max(array_column($want, 3));
+        $east = max(array_column($want, 4));
+        $fetched = osmFetchBundle($bundle, (float) $south, (float) $west, (float) $north, (float) $east, $why);
         if ($fetched === null) {
-            foreach ($groups as $group) osmCacheRetryLater($tileKey, $group);
-            return [$held, $anyData ? 'stale' : 'failed'];
+            foreach ($want as $key => $_) {
+                foreach ($groups as $group) osmCacheRetryLater($key, $group);
+                $states[$key] = array_filter($byTile[$key]) ? 'stale' : 'failed';
+            }
+            return [$byTile, $states];
         }
-        foreach ($groups as $group) osmCacheWrite($tileKey, $group, $fetched[$group] ?? []);
-        return [$fetched, 'fresh'];
+        $split = osmSplitIntoTiles($fetched, array_keys($want));
+        foreach ($want as $key => $_) {
+            foreach ($groups as $group) osmCacheWrite($key, $group, $split[$key][$group] ?? []);
+            $byTile[$key] = $split[$key];
+            $states[$key] = 'fresh';
+        }
+        return [$byTile, $states];
     } finally {
         dbFetchValue("SELECT RELEASE_LOCK(?)", [$lock]);
     }
+}
+
+/** The same for a single tile: [byGroup, state]. */
+function osmTileBundle(string $tileKey, string $bundle, float $s, float $w, float $n, float $e, int &$budget, ?string &$why = null): array {
+    [$byTile, $states] = osmChunkBundle([[$tileKey, $s, $w, $n, $e]], $bundle, $budget, $why);
+    return [$byTile[$tileKey], $states[$tileKey]];
 }

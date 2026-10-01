@@ -108,25 +108,38 @@ $truncated = false;
 $wantedByBundle = [];
 foreach ($groups as $group) $wantedByBundle[osmBundleOf($group)][] = $group;
 
-foreach ($tiles as [$tileKey, $s, $w, $n, $e]) {
+// Tiles side by side in a row are asked of Overpass together, OSM_CHUNK_TILES at
+// a time: one query for a row of them, not one each.
+$rows = [];
+foreach ($tiles as $tile) $rows[(int) explode('_', $tile[0])[0]][] = $tile;
+$chunks = [];
+foreach ($rows as $rowTiles) {
+    foreach (array_chunk($rowTiles, OSM_CHUNK_TILES) as $chunk) $chunks[] = $chunk;
+}
+
+foreach ($chunks as $chunk) {
     foreach ($wantedByBundle as $bundle => $wanted) {
-        [$byGroup, $state] = osmTileBundle($tileKey, $bundle, $s, $w, $n, $e, $budget, $why);
-        foreach ($wanted as $group) {
-            // "tile|group" is what the page keeps to know what it already has.
-            $tileGroup = $tileKey . '|' . $group;
-            if ($state === 'pending') $pending[] = $tileGroup;
-            elseif ($state === 'failed') $failed[] = $tileGroup;
-            else $ready[] = $tileGroup;
-            foreach ($byGroup[$group] ?? [] as $item) {
-                // A feature that crosses a tile edge comes back with each tile.
-                $featureId = $item['t'] . $item['id'];
-                if (isset($seen[$featureId])) continue;
-                if (count($items) >= OSM_MAX_ITEMS) {
-                    $truncated = true;
-                    break 4;
+        [$byTile, $states] = osmChunkBundle($chunk, $bundle, $budget, $why);
+        foreach ($chunk as $tile) {
+            $tileKey = $tile[0];
+            $state = $states[$tileKey];
+            foreach ($wanted as $group) {
+                // "tile|group" is what the page keeps to know what it already has.
+                $tileGroup = $tileKey . '|' . $group;
+                if ($state === 'pending') $pending[] = $tileGroup;
+                elseif ($state === 'failed') $failed[] = $tileGroup;
+                else $ready[] = $tileGroup;
+                foreach ($byTile[$tileKey][$group] ?? [] as $item) {
+                    // A feature that crosses a tile edge comes back with each tile.
+                    $featureId = $item['t'] . $item['id'];
+                    if (isset($seen[$featureId])) continue;
+                    if (count($items) >= OSM_MAX_ITEMS) {
+                        $truncated = true;
+                        break;
+                    }
+                    $seen[$featureId] = true;
+                    $items[] = $item;
                 }
-                $seen[$featureId] = true;
-                $items[] = $item;
             }
         }
     }

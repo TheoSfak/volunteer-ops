@@ -7990,11 +7990,18 @@ async function osmLoadView() {
             };
             jobs.sort((a, bb) => away(a) - away(bb));
             osmProgress = {done: 0, total: jobs.reduce((sum, job) => sum + job.cols.length, 0)};
-            for (const job of jobs) {
-                if (osmAgain || !osmOn) break;
-                osmUpdateChip();
-                if (!(await osmRunJob(job))) { osmAgain = false; failedPass = true; break; }
-            }
+            // Two at a time: Overpass lets one address have two queries running,
+            // and most of a tile's time is waiting for it, not working.
+            let nextJob = 0;
+            const worker = async () => {
+                while (nextJob < jobs.length) {
+                    if (osmAgain || !osmOn || failedPass) return;
+                    const job = jobs[nextJob++];
+                    osmUpdateChip();
+                    if (!(await osmRunJob(job))) { osmAgain = false; failedPass = true; return; }
+                }
+            };
+            await Promise.all([worker(), worker()]);
         } while (osmAgain && osmOn);
     } finally {
         osmBusy = false;

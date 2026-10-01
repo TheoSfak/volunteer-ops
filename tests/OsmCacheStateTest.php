@@ -88,6 +88,30 @@ final class OsmCacheStateTest extends TestCase
         $this->assertSame(['pending', 0], $this->ask());
     }
 
+    public function testARowOfTilesIsAnsweredTileByTile(): void
+    {
+        // Three tiles side by side: one with an answer, one in its retry window,
+        // one never seen. With no fetch allowed each gets its own state.
+        foreach (['zz_1' => [0, self::PEAK], 'zz_2' => [OSM_CACHE_TTL - OSM_RETRY_AFTER + 30, []]] as $key => [$age, $items]) {
+            foreach (OSM_BUNDLES['core'] as $group) {
+                $held = $group === 'points' ? $items : [];
+                dbExecute(
+                    "INSERT INTO osm_feature_cache (tile_key, layer_group, payload, element_count, fetched_at)
+                     VALUES (?, ?, ?, ?, DATE_SUB(NOW(), INTERVAL $age SECOND))",
+                    [$key, $group, json_encode($held), count($held)]
+                );
+            }
+        }
+        $budget = 0;
+        [$byTile, $states] = osmChunkBundle(
+            [['zz_1', 0.0, 0.0, 0.05, 0.05], ['zz_2', 0.0, 0.05, 0.05, 0.10], ['zz_3', 0.0, 0.10, 0.05, 0.15]],
+            'core', $budget
+        );
+        $this->assertSame(['zz_1' => 'fresh', 'zz_2' => 'failed', 'zz_3' => 'pending'], $states);
+        $this->assertCount(1, $byTile['zz_1']['points']);
+        $this->assertSame([], $byTile['zz_3']['points']);
+    }
+
     public function testATileNeverSeenIsPending(): void
     {
         $this->assertSame(['pending', 0], $this->ask());

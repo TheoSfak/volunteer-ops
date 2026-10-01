@@ -20,37 +20,37 @@ echo "Started at: " . date('Y-m-d H:i:s') . "\n";
 echo "==============================================\n\n";
 
 // 1. Task Deadline Reminders
-echo "[1/8] Processing Task Deadline Reminders...\n";
+echo "[1/9] Processing Task Deadline Reminders...\n";
 include __DIR__ . '/cron_task_reminders.php';
 echo "\n";
 
 // 2. Shift Reminders
-echo "[2/8] Processing Shift Reminders...\n";
+echo "[2/9] Processing Shift Reminders...\n";
 include __DIR__ . '/cron_shift_reminders.php';
 echo "\n";
 
 // 3. Incomplete Mission Alerts
-echo "[3/8] Processing Incomplete Mission Alerts...\n";
+echo "[3/9] Processing Incomplete Mission Alerts...\n";
 include __DIR__ . '/cron_incomplete_missions.php';
 echo "\n";
 
 // 4. Certificate Expiry Reminders
-echo "[4/8] Processing Certificate Expiry Reminders...\n";
+echo "[4/9] Processing Certificate Expiry Reminders...\n";
 include __DIR__ . '/cron_certificate_expiry.php';
 echo "\n";
 
 // 5. Shelf Item Expiry Reminders
-echo "[5/8] Processing Shelf Item Expiry Reminders...\n";
+echo "[5/9] Processing Shelf Item Expiry Reminders...\n";
 include __DIR__ . '/cron_shelf_expiry.php';
 echo "\n";
 
 // 6. Citizen Certificate Expiry Reminders
-echo "[6/8] Processing Citizen Certificate Expiry Reminders...\n";
+echo "[6/9] Processing Citizen Certificate Expiry Reminders...\n";
 include __DIR__ . '/cron_citizen_cert_expiry.php';
 echo "\n";
 
 // 7. Annual Subscription Expiry Reminders
-echo "[7/8] Processing Annual Subscription Expiry Reminders...\n";
+echo "[7/9] Processing Annual Subscription Expiry Reminders...\n";
 include __DIR__ . '/cron_subscription_expiry.php';
 echo "\n";
 
@@ -59,8 +59,13 @@ echo "\n";
 // that only holds when an admin remembers to click something is not a
 // retention window. Safe when the feature is off: old rows still age out,
 // which is exactly what should happen to health data nobody collects any more.
-echo "[8/8] Purging expired heart-rate samples...\n";
+echo "[8/9] Purging expired heart-rate samples...\n";
 include __DIR__ . '/cron_vitals_purge.php';
+echo "\n";
+// 9. OpenStreetMap prewarm: fills the map layer's cache around open missions, a bounded
+// amount per run, so the Action Room map is already full when somebody opens it.
+echo "[9/9] Warming the OpenStreetMap cache around open missions...\n";
+include __DIR__ . '/cron_osm_prewarm.php';
 echo "\n";
 
 echo "==============================================\n";
