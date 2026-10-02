@@ -116,6 +116,54 @@ define('WAR_ROOM_ACTION_SCRIPTS', [
     // asked from the same long-open tab every time the map is moved, and
     // partner-org guests use the map like everyone else.
     'mission-osm.php',
+    // The four below are called by the volunteer's own phone from inside the
+    // open war-room.php tab and were on NEITHER list, so a partner-org guest
+    // or a mission visitor (approved participants like anyone else, shown the
+    // same buttons) got bootstrap.php's 302 to war-room.php instead of JSON:
+    //   · mission-voice.php  — «Φωνητικό» push-to-talk; r.json() threw and the
+    //     button said «η αποστολή απέτυχε» every single time. SOS was fine.
+    //   · mission-live.php   — a volunteer accepting a live-video request.
+    //   · vitals-ingest.php  — the heart-rate strap's session-authed uploads
+    //     (its bearer branch has no session, so it never met the gate).
+    //   · mobile-debug-log.php — the page's own diagnostic uploads, which are
+    //     most wanted from exactly the guest phones nobody has tested.
+    'mission-voice.php', 'mission-live.php', 'vitals-ingest.php', 'mobile-debug-log.php',
+]);
+
+// Pages (not AJAX) a partner-org guest AND a mission visitor may open, on top
+// of WAR_ROOM_ACTION_SCRIPTS. Kept apart from that constant on purpose: these
+// are not called from a long-open tab, so they gain nothing from the idle-
+// timeout exemption it also buys. bootstrap.php merges this into both guest
+// lists, and tests/GuestAccessTest.php fails when a page the Action Room links
+// to is on neither — the gap that hid the three below until a guest hit them.
+define('WAR_ROOM_GUEST_PAGES', [
+    // The header bell lists the guest's own notifications, and this is the only
+    // script that marks one read. Off the list, the badge counted up forever and
+    // every item in the dropdown bounced back to the Action Room unread.
+    'notifications.php',
+    // The «?» on the missing-person card, shown to every approved participant.
+    'missing-person-guide.php',
+    // Public team briefing sheet (token in the URL). The gate applies to anyone
+    // logged in, so a guest who is a team leader and opens the link on the
+    // phone they are signed in on was thrown back to the map.
+    'briefing-view.php',
+]);
+
+// Pages only a partner-org guest gets (a mission visitor's list is narrower by
+// design — see bootstrap.php). Moved out of bootstrap.php so the test above can
+// read the one list instead of a copy.
+define('WAR_ROOM_PARTNER_GUEST_PAGES', [
+    'missions.php', 'profile.php', 'logout.php',
+    'mission-certificate-print.php', 'certificate-verify.php',
+    'mission-guest-debrief.php', 'export-mission-activity.php', 'export-mission-chat.php',
+    // mobile-token-issue.php — native Android app requests its
+    // background-ping bearer token here, session-authed like everything
+    // else on this list. Guest/partner-org volunteers are exactly who
+    // field GPS reliability matters most for, so they need this too.
+    // (mobile-ping-location.php itself is NOT on this list: it's
+    // bearer-token-authed with no session at all, so isLoggedIn() is
+    // false and the guest gate never runs for it.)
+    'mobile-token-issue.php', 'mobile-app-setup.php', 'mobile-token-check.php',
 ]);
 
 function initSession() {

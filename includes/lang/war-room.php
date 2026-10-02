@@ -23,6 +23,8 @@ return [
         'common.no_ping_short' => 'χωρίς στίγμα',
         'common.select_active_volunteer' => 'Επιλέξτε τουλάχιστον έναν εθελοντή με ενεργή βάρδια.',
         'common.close' => 'Κλείσιμο',
+        'common.error' => 'Παρουσιάστηκε σφάλμα. Δοκιμάστε ξανά.',
+        'offline.contact_responsible' => 'Υπεύθυνος αποστολής',
         'common.edit' => 'Επεξεργασία',
         'common.updated_label' => 'Ενημέρωση:',
         // Live-data staleness banner
@@ -2509,6 +2511,8 @@ return [
         'common.no_ping_short' => 'no ping yet',
         'common.select_active_volunteer' => 'Select at least one volunteer with an active shift.',
         'common.close' => 'Close',
+        'common.error' => 'Something went wrong. Please try again.',
+        'offline.contact_responsible' => 'Mission lead',
         'common.edit' => 'Edit',
         'common.updated_label' => 'Updated:',
         // Live-data staleness banner

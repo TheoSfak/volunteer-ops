@@ -18373,8 +18373,11 @@ function voiceSendClip(blob, ext, heldMs) {
         // against each other and rejects a mismatch.
         fd.append('clip', blob, 'voice.' + ext);
         fetch('mission-voice.php', {method: 'POST', body: fd})
-            .then(r => r.json())
+            .then(r => checkSessionAlive(r) ? r.json() : null)
             .then(result => {
+                // null = the reply was a redirect / HTML page, not this
+                // endpoint's JSON; checkSessionAlive has already said why.
+                if (!result) { voiceSetStatus(t('voice.send_failed'), 'text-danger'); return; }
                 voiceSetStatus(result.ok ? t('voice.sent') : (result.error || t('voice.send_failed')),
                                result.ok ? 'text-success' : 'text-danger');
             })

@@ -5699,6 +5699,11 @@ function notifyGuestsMissionDebriefEligible(int $missionId): void {
          JOIN shifts s ON s.id = pr.shift_id
          JOIN users u ON u.id = pr.volunteer_id
          WHERE s.mission_id = ? AND pr.status = ? AND u.is_external = 1
+           -- A mission visitor is is_external too, but mission-guest-debrief.php
+           -- is not on their allow-list and bootstrap.php soft-deletes the
+           -- account as soon as the mission stops being open — the invite would
+           -- be a link they can never open.
+           AND u.is_mission_visitor = 0
            AND NOT EXISTS (
                SELECT 1 FROM mission_guest_debriefs mgd
                WHERE mgd.mission_id = ? AND mgd.user_id = u.id

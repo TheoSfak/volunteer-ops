@@ -182,21 +182,12 @@ if (isLoggedIn() && isExternalGuest()) {
     // says whether the token already on this phone is the logged-in user's
     // and revokes it when it belongs to somebody else — which matters just as
     // much when a visitor is handed a phone that was somebody's before.
+    // WAR_ROOM_GUEST_PAGES / WAR_ROOM_PARTNER_GUEST_PAGES live in
+    // includes/auth.php beside WAR_ROOM_ACTION_SCRIPTS (with the reasoning for
+    // each entry) so tests/GuestAccessTest.php reads the same lists this does.
     $__extAllowed = $__isMissionVisitor
-        ? array_merge(WAR_ROOM_ACTION_SCRIPTS, ['logout.php', 'mobile-token-check.php'])
-        : array_merge(WAR_ROOM_ACTION_SCRIPTS, [
-            'missions.php', 'profile.php', 'logout.php',
-            'mission-certificate-print.php', 'certificate-verify.php',
-            'mission-guest-debrief.php', 'export-mission-activity.php', 'export-mission-chat.php',
-            // mobile-token-issue.php — native Android app requests its
-            // background-ping bearer token here, session-authed like everything
-            // else on this list. Guest/partner-org volunteers are exactly who
-            // field GPS reliability matters most for, so they need this too.
-            // (mobile-ping-location.php itself is NOT on this list: it's
-            // bearer-token-authed with no session at all, so isLoggedIn() is
-            // false and this whole guest gate never runs for it.)
-            'mobile-token-issue.php', 'mobile-app-setup.php', 'mobile-token-check.php',
-        ]);
+        ? array_merge(WAR_ROOM_ACTION_SCRIPTS, WAR_ROOM_GUEST_PAGES, ['logout.php', 'mobile-token-check.php'])
+        : array_merge(WAR_ROOM_ACTION_SCRIPTS, WAR_ROOM_GUEST_PAGES, WAR_ROOM_PARTNER_GUEST_PAGES);
     if (!in_array($__extScript, $__extAllowed, true)) {
         if ($__isMissionVisitor) {
             redirect(!empty($__extUser['mission_visitor_mission_id'])
