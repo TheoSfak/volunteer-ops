@@ -1149,7 +1149,7 @@ foreach (dbFetchAll(
      LEFT JOIN (SELECT user_id, shift_id, MAX(id) AS max_id
                   FROM volunteer_pings
                  WHERE shift_id IN ({$missionShiftPlaceholders})
-                 GROUP BY user_id, shift_id) l
+                 GROUP BY " . pingLatestGroupBy() . ") l
             ON l.user_id = pr.volunteer_id AND l.shift_id = pr.shift_id
      LEFT JOIN volunteer_pings lp ON lp.id = l.max_id
      WHERE s.mission_id = ? AND pr.status = ?",
@@ -1249,11 +1249,13 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
         // database refused new connections (max_user_connections).
         //
         // The ids are now resolved first, from volunteer_pings alone:
-        //   - MAX(id) GROUP BY user_id, shift_id over the mission's shift ids
+        //   - MAX(id) GROUP BY shift_id, user_id over the mission's shift ids
         //     is answered by a loose index scan ("Using index for group-by") on
-        //     the existing idx_pings_user_shift, whose InnoDB leaf entries carry
-        //     the PK. It visits one index entry per group instead of one per
-        //     ping, so a 12-hour mission costs the same as a 10-minute one.
+        //     idx_pings_shift_user (migration 179; before it, GROUP BY user_id,
+        //     shift_id on idx_pings_user_shift, which also scans every volunteer
+        //     who ever pinged - see pingLatestGroupBy()). InnoDB leaf entries
+        //     carry the PK. It visits one index entry per group instead of one
+        //     per ping, so a 12-hour mission costs the same as a 10-minute one.
         //     The shift ids MUST be an explicit IN list — resolving them with a
         //     subquery, or joining shifts in here, loses the loose scan and puts
         //     the full scan straight back (verified with EXPLAIN both ways).
@@ -1284,7 +1286,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                      FROM (SELECT user_id, shift_id, MAX(id) AS max_id
                              FROM volunteer_pings
                             WHERE shift_id IN ({$missionShiftPlaceholders})
-                            GROUP BY user_id, shift_id) l
+                            GROUP BY " . pingLatestGroupBy() . ") l
                  ) sel
                  JOIN volunteer_pings vp ON vp.id = sel.max_id
                  LEFT JOIN volunteer_pings pvp ON pvp.id = sel.prev_id

@@ -7816,7 +7816,7 @@ function loadTeamPositionsForMission(int $missionId, array $continuousFieldMinut
          FROM (SELECT user_id, shift_id, MAX(id) AS max_id
                  FROM volunteer_pings
                 WHERE shift_id IN ({$shiftPlaceholders})
-                GROUP BY user_id, shift_id) l
+                GROUP BY " . pingLatestGroupBy() . ") l
          JOIN volunteer_pings vp ON vp.id = l.max_id
          JOIN mission_team_members mtm ON mtm.user_id = vp.user_id AND mtm.mission_id = ?
          JOIN mission_action_room_participants arp

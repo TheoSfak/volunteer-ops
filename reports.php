@@ -447,7 +447,7 @@ case 'inventory':
 
 // ===== TAB 8: SYSTEM =====
 case 'system':
-    $kpi['audit_total']   = safeFetchValue("SELECT COUNT(*) FROM audit_log WHERE created_at >= ? AND created_at < ? + INTERVAL 1 DAY", [$startDate, $endDate]);
+    $kpi['audit_total']   = safeFetchValue("SELECT COUNT(*) FROM audit_logs WHERE created_at >= ? AND created_at < ? + INTERVAL 1 DAY", [$startDate, $endDate]);
     $kpi['emails_sent']   = safeFetchValue("SELECT COALESCE(SUM(sent_count),0) FROM newsletters WHERE sent_at >= ? AND sent_at < ? + INTERVAL 1 DAY", [$startDate, $endDate]);
     $kpi['emails_failed'] = safeFetchValue("SELECT COALESCE(SUM(failed_count),0) FROM newsletters WHERE sent_at >= ? AND sent_at < ? + INTERVAL 1 DAY", [$startDate, $endDate]);
     $kpi['notif_total']   = safeFetchValue("SELECT COUNT(*) FROM notifications WHERE created_at >= ? AND created_at < ? + INTERVAL 1 DAY", [$startDate, $endDate]);
@@ -456,12 +456,12 @@ case 'system':
     // Audit per month
     $chartData['auditMonthly'] = safeFetchAll(
         "SELECT DATE_FORMAT(created_at,'%Y-%m') as month, COUNT(*) as cnt
-         FROM audit_log WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
+         FROM audit_logs WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
          GROUP BY month ORDER BY month");
 
     // Audit by action
     $chartData['auditByAction'] = safeFetchAll(
-        "SELECT action, COUNT(*) as cnt FROM audit_log
+        "SELECT action, COUNT(*) as cnt FROM audit_logs
          WHERE DATE(created_at) BETWEEN ? AND ?
          GROUP BY action ORDER BY cnt DESC LIMIT 10", [$startDate, $endDate]);
 

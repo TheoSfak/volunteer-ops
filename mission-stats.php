@@ -134,14 +134,20 @@ $chatCount = (int) dbFetchValue("SELECT COUNT(*) FROM mission_chat_messages WHER
 $triageReport = loadTriageReportForMission($missionId);
 
 // Recap map data: last-known ping per volunteer, dispatch points/areas, geo-tagged photos.
+// The mission's shift ids go in as a literal IN list: resolving them with a
+// join or subquery loses the loose index scan and the page re-reads every ping
+// of every volunteer (over 40 s on MySQL 8 with a mission's worth of pings).
+$lastPingShiftIds = array_column(dbFetchAll("SELECT id FROM shifts WHERE mission_id = ?", [$missionId]), 'id') ?: [0];
+$lastPingPh = implode(',', array_fill(0, count($lastPingShiftIds), '?'));
 $lastPings = dbFetchAll(
     "SELECT vp.lat, vp.lng, vp.created_at, u.name
-     FROM volunteer_pings vp
-     JOIN shifts s ON s.id = vp.shift_id
-     JOIN users u ON u.id = vp.user_id
-     WHERE s.mission_id = ?
-       AND vp.id = (SELECT MAX(vp2.id) FROM volunteer_pings vp2 JOIN shifts s2 ON s2.id = vp2.shift_id WHERE s2.mission_id = ? AND vp2.user_id = vp.user_id)",
-    [$missionId, $missionId]
+     FROM (SELECT user_id, MAX(id) AS max_id
+             FROM volunteer_pings
+            WHERE shift_id IN ({$lastPingPh})
+            GROUP BY user_id) l
+     JOIN volunteer_pings vp ON vp.id = l.max_id
+     JOIN users u ON u.id = vp.user_id",
+    $lastPingShiftIds
 );
 $dispatchGeo = dbFetchAll("SELECT type, geo, label FROM mission_dispatch_points WHERE mission_id = ?", [$missionId]);
 $photoPoints = array_values(array_filter($media, fn($m) => $m['lat'] !== null));

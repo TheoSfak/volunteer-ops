@@ -7520,6 +7520,61 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 179,
+            'description' => 'Additive performance indexes from the 2026-10-02 database audit: volunteer_pings (shift_id, user_id) and (shift_id, source, created_at), participation_requests (volunteer_id, attended), users (is_team_captain). The Action Room poll, the history page and the leaderboard stop scanning pings and users.',
+            'up' => function () {
+                // Only one request may build the indexes. Without this, a second
+                // page load that arrives while ALTER TABLE is running queues on
+                // the table's metadata lock and holds its database connection
+                // the whole time (reproduced: 13 s) - against a low
+                // max_user_connections that is how a deploy during a live
+                // mission becomes an outage. The loser fails fast; it retries
+                // after the usual cooldown and by then finds the version raised.
+                $lockName = 'vo_migration_179_' . dbFetchValue("SELECT DATABASE()");
+                if ((int) dbFetchValue("SELECT GET_LOCK(?, 0)", [$lockName]) !== 1) {
+                    throw new RuntimeException('v179 is already being applied by another request');
+                }
+                try {
+                    // Same add-if-absent helper as v37: INFORMATION_SCHEMA check,
+                    // then a plain ALTER TABLE ... ADD INDEX (no IF NOT EXISTS,
+                    // which MySQL 8 does not have). Online on both engines.
+                    $addIndex = function (string $table, string $indexName, string $columns) {
+                        $tblExists = dbFetchOne(
+                            "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
+                            [$table]
+                        );
+                        if (!$tblExists) return;
+                        $exists = dbFetchOne(
+                            "SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+                             WHERE TABLE_SCHEMA = DATABASE()
+                               AND TABLE_NAME   = ?
+                               AND INDEX_NAME   = ?",
+                            [$table, $indexName]
+                        );
+                        if (!$exists) {
+                            dbExecute("ALTER TABLE `{$table}` ADD INDEX `{$indexName}` ({$columns})");
+                        }
+                    };
+
+                    // Latest ping per volunteer in a mission: GROUP BY shift_id, user_id
+                    // is answered by a loose index scan bounded by THIS mission's volunteers.
+                    $addIndex('volunteer_pings', 'idx_pings_shift_user', 'shift_id, user_id');
+                    // History page / manual-ping counts: WHERE shift_id IN (..) AND source = ..
+                    $addIndex('volunteer_pings', 'idx_pings_shift_source_time', 'shift_id, source, created_at');
+                    // leaderboard: attended count per volunteer, index-only
+                    $addIndex('participation_requests', 'idx_pr_vol_attended', 'volunteer_id, attended');
+                    // teamCaptains() runs on every Action Room poll
+                    if (dbColumnExists('users', 'is_team_captain')) {
+                        $addIndex('users', 'idx_users_team_captain', 'is_team_captain');
+                    }
+                } finally {
+                    dbFetchValue("SELECT RELEASE_LOCK(?)", [$lockName]);
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

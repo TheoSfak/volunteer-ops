@@ -494,6 +494,22 @@ function getSetting($key, $default = null) {
 }
 
 /**
+ * Column order for the "latest ping per volunteer" GROUP BY.
+ *
+ * `SELECT user_id, shift_id, MAX(id) FROM volunteer_pings WHERE shift_id IN (...)
+ * GROUP BY ... has two possible orders. user_id, shift_id loose-scans
+ * idx_pings_user_shift, so its cost grows with every volunteer who has EVER
+ * pinged. shift_id, user_id loose-scans idx_pings_shift_user (migration 179),
+ * bounded by the volunteers of THIS mission. Same rows either way; but the
+ * second order without that index is about 7x slower, so it is only used once
+ * the migration that creates the index has been recorded. A stale (lower)
+ * value is harmless: it just keeps the old order.
+ */
+function pingLatestGroupBy(): string {
+    return ((int) getSetting('db_schema_version', '0') >= 179) ? 'shift_id, user_id' : 'user_id, shift_id';
+}
+
+/**
  * Which Android app belongs to the site serving this request.
  *
  * Matched on host rather than on a setting an admin has to remember to set:
@@ -831,14 +847,19 @@ function leaderboardPosition(int $userId): ?array {
 function leaderboardTop(int $limit = 5): array {
     $limit = max(1, min(100, $limit));
     return dbFetchAll(
-        "SELECT u.id, u.name, u.total_points,
+        // The top N users are picked first and only they are joined to
+        // participation_requests, instead of counting every volunteer's shifts
+        // and then throwing all but N rows away.
+        "SELECT t.id, t.name, t.total_points,
                 COUNT(DISTINCT pr.id) AS shifts_count,
                 COALESCE(SUM(pr.actual_hours), 0) AS total_hours
-         FROM users u
-         LEFT JOIN participation_requests pr ON pr.volunteer_id = u.id AND pr.attended = 1
-         WHERE u.is_active = 1 AND u.deleted_at IS NULL
-         GROUP BY u.id
-         ORDER BY u.total_points DESC, u.name ASC
-         LIMIT {$limit}"
+         FROM (SELECT id, name, total_points
+                 FROM users
+                WHERE is_active = 1 AND deleted_at IS NULL
+                ORDER BY total_points DESC, name ASC
+                LIMIT {$limit}) t
+         LEFT JOIN participation_requests pr ON pr.volunteer_id = t.id AND pr.attended = 1
+         GROUP BY t.id, t.name, t.total_points
+         ORDER BY t.total_points DESC, t.name ASC"
     );
 }

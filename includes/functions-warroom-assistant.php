@@ -537,7 +537,7 @@ function collectMissionAssistantRaw(int $missionId, int $userId, array $missionS
          LEFT JOIN (SELECT user_id, shift_id, MAX(id) AS max_id
                       FROM volunteer_pings
                      WHERE shift_id IN ({$shiftPlaceholders})
-                     GROUP BY user_id, shift_id) l
+                     GROUP BY " . pingLatestGroupBy() . ") l
                 ON l.user_id = pr.volunteer_id AND l.shift_id = pr.shift_id
          LEFT JOIN volunteer_pings lp ON lp.id = l.max_id
          LEFT JOIN mission_team_members mtm

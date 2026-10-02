@@ -387,7 +387,7 @@ function loadLatestVitalsByVolunteerId(int $missionId, array $shiftBinds, string
              FROM (SELECT user_id, shift_id, MAX(id) AS max_id
                      FROM volunteer_vitals
                     WHERE shift_id IN ({$shiftPlaceholders})
-                    GROUP BY user_id, shift_id) l
+                    GROUP BY shift_id, user_id) l
              JOIN volunteer_vitals v ON v.id = l.max_id",
             $shiftBinds
         );

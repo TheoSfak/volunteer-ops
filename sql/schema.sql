@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     FOREIGN KEY (`mission_visitor_mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
     INDEX `idx_users_mission_visitor` (`mission_visitor_mission_id`, `is_mission_visitor`),
     INDEX `idx_users_dog_handler` (`is_dog_handler`),
+    INDEX `idx_users_team_captain` (`is_team_captain`),
     UNIQUE INDEX `idx_users_telegram_chat` (`telegram_chat_id`),
     CHECK (`is_mission_visitor` = 0 OR `is_external` = 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -384,7 +385,8 @@ CREATE TABLE IF NOT EXISTS `participation_requests` (
     FOREIGN KEY (`attendance_confirmed_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     UNIQUE KEY `unique_participation` (`shift_id`, `volunteer_id`),
     INDEX `idx_participation_status` (`status`),
-    INDEX `idx_participation_volunteer` (`volunteer_id`)
+    INDEX `idx_participation_volunteer` (`volunteer_id`),
+    INDEX `idx_pr_vol_attended` (`volunteer_id`, `attended`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
@@ -1473,7 +1475,9 @@ CREATE TABLE IF NOT EXISTS `volunteer_pings` (
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`shift_id`) REFERENCES `shifts`(`id`) ON DELETE CASCADE,
     INDEX `idx_pings_shift_time` (`shift_id`, `created_at`),
-    INDEX `idx_pings_user_shift` (`user_id`, `shift_id`)
+    INDEX `idx_pings_user_shift` (`user_id`, `shift_id`),
+    INDEX `idx_pings_shift_user` (`shift_id`, `user_id`),
+    INDEX `idx_pings_shift_source_time` (`shift_id`, `source`, `created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- RESCUER VITALS (heart rate from a standard Bluetooth LE Heart Rate Service

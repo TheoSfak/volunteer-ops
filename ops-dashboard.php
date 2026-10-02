@@ -243,14 +243,19 @@ if (get('ajax') === '1') {
             $ph = implode(',', array_fill(0, count($shiftIds), '?'));
             $fsCol = $hasFieldStatus ? ', pr.field_status' : ', NULL as field_status';
             $pingRowsAjax = dbFetchAll(
+                // Latest ping per (volunteer, shift) is resolved first from
+                // volunteer_pings alone (loose index scan), then kept only if
+                // it is under 2 h old. The old correlated MAX(id) per candidate
+                // row read every ping of that volunteer: seconds on MySQL 8.
                 "SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.created_at, u.name{$fsCol}
-                 FROM volunteer_pings vp
+                 FROM (SELECT user_id, shift_id, MAX(id) AS max_id
+                         FROM volunteer_pings
+                        WHERE shift_id IN ($ph)
+                        GROUP BY " . pingLatestGroupBy() . ") l
+                 JOIN volunteer_pings vp ON vp.id = l.max_id
                  JOIN users u ON vp.user_id = u.id
                  LEFT JOIN participation_requests pr ON pr.volunteer_id = vp.user_id AND pr.shift_id = vp.shift_id
-                 WHERE vp.shift_id IN ($ph)
-                   AND vp.created_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
-                   AND vp.id = (SELECT MAX(vp2.id) FROM volunteer_pings vp2
-                                WHERE vp2.user_id = vp.user_id AND vp2.shift_id = vp.shift_id)",
+                 WHERE vp.created_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)",
                 $shiftIds
             );
             foreach ($pingRowsAjax as $p) {
@@ -394,15 +399,14 @@ if ($hasPingsTable && !empty($shiftIds)) {
         $fsCol2 = $hasFieldStatus ? ', pr.field_status' : ', NULL as field_status';
         $pingRows = dbFetchAll(
             "SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.created_at, u.name{$fsCol2}
-             FROM volunteer_pings vp
+             FROM (SELECT user_id, shift_id, MAX(id) AS max_id
+                     FROM volunteer_pings
+                    WHERE shift_id IN ($placeholders2)
+                    GROUP BY " . pingLatestGroupBy() . ") l
+             JOIN volunteer_pings vp ON vp.id = l.max_id
              JOIN users u ON vp.user_id = u.id
              LEFT JOIN participation_requests pr ON pr.volunteer_id = vp.user_id AND pr.shift_id = vp.shift_id
-             WHERE vp.shift_id IN ($placeholders2)
-               AND vp.created_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)
-               AND vp.id = (
-                   SELECT MAX(vp2.id) FROM volunteer_pings vp2
-                   WHERE vp2.user_id = vp.user_id AND vp2.shift_id = vp.shift_id
-               )",
+             WHERE vp.created_at >= DATE_SUB(NOW(), INTERVAL 2 HOUR)",
             $shiftIds
         );
         foreach ($pingRows as $pr) {
