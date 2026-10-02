@@ -1271,23 +1271,24 @@ if (isPost()) {
         redirect('settings.php?tab=health');
 
     } elseif ($action === 'health_cleanup_logs') {
-        $months = (int) post('cleanup_months', 1);
-        if ($months < 1) $months = 1;
-        // "1 μηνών" is not Greek. The cutoff is a hidden field rather than a
-        // fixed literal, so both forms have to read correctly.
-        $monthLabel = $months === 1 ? 'ενός μήνα' : "$months μηνών";
-        $deleted = dbExecute("DELETE FROM audit_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL ? MONTH)", [$months]);
-        logAudit('health_cleanup', 'audit_logs', null, "Διαγραφή $deleted εγγραφών παλαιότερων $monthLabel");
-        setFlash('success', "Διαγράφηκαν $deleted εγγραφές audit log παλαιότερες $monthLabel.");
+        // All three cleanup buttons use the same 7-day cutoff. It is a hidden
+        // field rather than a fixed literal, and the label is built from it,
+        // so "1 ημερών" can not appear if a different cutoff is ever posted.
+        $days = (int) post('cleanup_days', 7);
+        if ($days < 1) $days = 1;
+        $dayLabel = $days === 1 ? 'μίας ημέρας' : "$days ημερών";
+        $deleted = dbExecute("DELETE FROM audit_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)", [$days]);
+        logAudit('health_cleanup', 'audit_logs', null, "Διαγραφή $deleted εγγραφών παλαιότερων $dayLabel");
+        setFlash('success', "Διαγράφηκαν $deleted εγγραφές audit log παλαιότερες $dayLabel.");
         redirect('settings.php?tab=health');
 
     } elseif ($action === 'health_cleanup_email_logs') {
-        $months = (int) post('cleanup_months', 1);
-        if ($months < 1) $months = 1;
-        $monthLabel = $months === 1 ? 'ενός μήνα' : "$months μηνών";
-        $deleted = dbExecute("DELETE FROM email_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL ? MONTH)", [$months]);
-        logAudit('health_cleanup', 'email_logs', null, "Διαγραφή $deleted email logs παλαιότερων $monthLabel");
-        setFlash('success', "Διαγράφηκαν $deleted εγγραφές email log παλαιότερες $monthLabel.");
+        $days = (int) post('cleanup_days', 7);
+        if ($days < 1) $days = 1;
+        $dayLabel = $days === 1 ? 'μίας ημέρας' : "$days ημερών";
+        $deleted = dbExecute("DELETE FROM email_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)", [$days]);
+        logAudit('health_cleanup', 'email_logs', null, "Διαγραφή $deleted email logs παλαιότερων $dayLabel");
+        setFlash('success', "Διαγράφηκαν $deleted εγγραφές email log παλαιότερες $dayLabel.");
         redirect('settings.php?tab=health');
 
     // Same age-only rule as the two cleanups above: a notification past the
@@ -4139,17 +4140,17 @@ unset($_SESSION['health_results'], $_SESSION['health_ran']);
                     <form method="post" class="d-inline">
                         <?= csrfField() ?>
                         <input type="hidden" name="action" value="health_cleanup_logs">
-                        <input type="hidden" name="cleanup_months" value="1">
-                        <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Διαγραφή audit logs παλαιότερων ενός μήνα;')">
-                            <i class="bi bi-trash me-1"></i>Καθαρισμός Audit Log (&gt; 1μ)
+                        <input type="hidden" name="cleanup_days" value="7">
+                        <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Διαγραφή audit logs παλαιότερων των 7 ημερών;')">
+                            <i class="bi bi-trash me-1"></i>Καθαρισμός Audit Log (&gt; 7 ημ.)
                         </button>
                     </form>
                     <form method="post" class="d-inline">
                         <?= csrfField() ?>
                         <input type="hidden" name="action" value="health_cleanup_email_logs">
-                        <input type="hidden" name="cleanup_months" value="1">
-                        <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Διαγραφή email logs παλαιότερων ενός μήνα;')">
-                            <i class="bi bi-trash me-1"></i>Καθαρισμός Email Log (&gt; 1μ)
+                        <input type="hidden" name="cleanup_days" value="7">
+                        <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Διαγραφή email logs παλαιότερων των 7 ημερών;')">
+                            <i class="bi bi-trash me-1"></i>Καθαρισμός Email Log (&gt; 7 ημ.)
                         </button>
                     </form>
                     <form method="post" class="d-inline">
