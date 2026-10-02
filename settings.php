@@ -246,6 +246,19 @@ function runHealthChecks() {
                  'detail' => $freeGB < 1 ? 'Χαμηλός ελεύθερος χώρος' : ''];
     }
     
+    // PHP session files (counted with a dry run, bounded to 3 s).
+    require_once __DIR__ . '/includes/session-cleanup.php';
+    $sess = sessionFilesCleanup(['dry_run' => true, 'time_budget' => 3]);
+    if ($sess['readable']) {
+        $sessGoing = $sess['deleted_old'] + $sess['deleted_stub'];
+        $fs[] = ['label' => 'Αρχεία συνεδριών', 'value' => number_format($sess['scanned']) . ' ελεγμένα',
+                 'status' => $sessGoing > 5000 ? 'warning' : 'ok',
+                 'detail' => number_format($sessGoing) . ' μπορούν να διαγραφούν (' . number_format($sess['deleted_stub']) . ' κενά, '
+                           . number_format($sess['deleted_old']) . ' παλιά)' . ($sess['complete'] ? '' : ' - μερικός έλεγχος')];
+    } else {
+        $fs[] = ['label' => 'Αρχεία συνεδριών', 'value' => 'Μη προσβάσιμο', 'status' => 'warning', 'detail' => $sess['dir']];
+    }
+
     $results['checks']['filesystem'] = $fs;
     $results['missing_dirs'] = $missingDirs;
     
@@ -1286,12 +1299,32 @@ if (isPost()) {
     // actionable anyway. Because this does remove user-facing state rather
     // than a pure log, the button's confirm says so in as many words.
     } elseif ($action === 'health_cleanup_notifications') {
-        $months = (int) post('cleanup_months', 1);
-        if ($months < 1) $months = 1;
-        $monthLabel = $months === 1 ? 'ενός μήνα' : "$months μηνών";
-        $deleted = dbExecute("DELETE FROM notifications WHERE created_at < DATE_SUB(NOW(), INTERVAL ? MONTH)", [$months]);
-        logAudit('health_cleanup', 'notifications', null, "Διαγραφή $deleted ειδοποιήσεων παλαιότερων $monthLabel");
-        setFlash('success', "Διαγράφηκαν $deleted ειδοποιήσεις παλαιότερες $monthLabel.");
+        // The cutoff is 7 days (it used to be a month): a week-old
+        // notification is no longer news, and this is the largest table an
+        // admin can thin by hand.
+        $days = (int) post('cleanup_days', 7);
+        if ($days < 1) $days = 1;
+        $dayLabel = $days === 1 ? 'μίας ημέρας' : "$days ημερών";
+        $deleted = dbExecute("DELETE FROM notifications WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)", [$days]);
+        logAudit('health_cleanup', 'notifications', null, "Διαγραφή $deleted ειδοποιήσεων παλαιότερων $dayLabel");
+        setFlash('success', "Διαγράφηκαν $deleted ειδοποιήσεις παλαιότερες $dayLabel.");
+        redirect('settings.php?tab=health');
+
+    // PHP session files: what may be deleted is defined in includes/session-cleanup.php.
+    } elseif ($action === 'health_cleanup_sessions') {
+        require_once __DIR__ . '/includes/session-cleanup.php';
+        $sweep = sessionFilesCleanup();
+        if (!$sweep['readable']) {
+            setFlash('error', 'Ο φάκελος συνεδριών δεν είναι προσβάσιμος (' . $sweep['dir'] . ').');
+        } else {
+            $deleted = $sweep['deleted_old'] + $sweep['deleted_stub'];
+            logAudit('health_cleanup', 'sessions', null, "Διαγραφή $deleted αρχείων συνεδριών ({$sweep['deleted_old']} παλιά, {$sweep['deleted_stub']} κενά)");
+            $msg = "Διαγράφηκαν $deleted αρχεία συνεδριών ({$sweep['deleted_old']} παλιά, {$sweep['deleted_stub']} κενά, "
+                 . round($sweep['freed_bytes'] / 1024, 1) . ' KB). Ελέγχθηκαν ' . $sweep['scanned'] . '.';
+            if (!$sweep['complete']) $msg .= ' Έμειναν ακόμα αρχεία: ξανατρέξτε τον καθαρισμό.';
+            if ($sweep['failed'] > 0) $msg .= ' ' . $sweep['failed'] . ' δεν μπόρεσαν να διαγραφούν.';
+            setFlash('success', $msg);
+        }
         redirect('settings.php?tab=health');
 
     } elseif ($action === 'save_prerequisites') {
@@ -4122,9 +4155,9 @@ unset($_SESSION['health_results'], $_SESSION['health_ran']);
                     <form method="post" class="d-inline">
                         <?= csrfField() ?>
                         <input type="hidden" name="action" value="health_cleanup_notifications">
-                        <input type="hidden" name="cleanup_months" value="1">
-                        <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Διαγραφή ΟΛΩΝ των ειδοποιήσεων παλαιότερων ενός μήνα — και των αδιάβαστων. Συνέχεια;')">
-                            <i class="bi bi-trash me-1"></i>Καθαρισμός Ειδοποιήσεων (&gt; 1μ)
+                        <input type="hidden" name="cleanup_days" value="7">
+                        <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Διαγραφή ΟΛΩΝ των ειδοποιήσεων παλαιότερων των 7 ημερών — και των αδιάβαστων. Συνέχεια;')">
+                            <i class="bi bi-trash me-1"></i>Καθαρισμός Ειδοποιήσεων (&gt; 7 ημ.)
                         </button>
                     </form>
                 </div>
@@ -4162,17 +4195,26 @@ unset($_SESSION['health_results'], $_SESSION['health_ran']);
                     </tbody>
                 </table>
             </div>
-            <?php if (($healthResults['missing_dirs'] ?? 0) > 0): ?>
             <div class="card-footer">
-                <form method="post" class="d-inline">
-                    <?= csrfField() ?>
-                    <input type="hidden" name="action" value="health_fix_dirs">
-                    <button type="submit" class="btn btn-sm btn-warning">
-                        <i class="bi bi-folder-plus me-1"></i>Δημιουργία Φακέλων (<?= $healthResults['missing_dirs'] ?>)
-                    </button>
-                </form>
+                <div class="d-flex gap-2 flex-wrap">
+                    <?php if (($healthResults['missing_dirs'] ?? 0) > 0): ?>
+                    <form method="post" class="d-inline">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="health_fix_dirs">
+                        <button type="submit" class="btn btn-sm btn-warning">
+                            <i class="bi bi-folder-plus me-1"></i>Δημιουργία Φακέλων (<?= $healthResults['missing_dirs'] ?>)
+                        </button>
+                    </form>
+                    <?php endif; ?>
+                    <form method="post" class="d-inline">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="health_cleanup_sessions">
+                        <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Διαγραφή παλιών και κενών αρχείων συνεδριών; Όσοι είναι συνδεδεμένοι δεν επηρεάζονται.')">
+                            <i class="bi bi-trash me-1"></i>Καθαρισμός αρχείων συνεδριών
+                        </button>
+                    </form>
+                </div>
             </div>
-            <?php endif; ?>
         </div>
 
         <!-- 4. Data Integrity -->
