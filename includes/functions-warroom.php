@@ -6777,6 +6777,13 @@ function computeDispatchEta(int $dispatchId, int $teamId, float $destLat, float 
  * caller's straight line takes over rather than the dispatch showing nothing.
  */
 function fetchWalkingEtaMinutes(float $lat1, float $lng1, float $lat2, float $lng2): ?array {
+    // route-distance.php is not part of the bootstrap chain: only ai-live.php,
+    // mission-measure.php and api-route-test.php load it. Without this the
+    // Action Room page and poll died with "Call to undefined function
+    // routeDistanceAvailable()" as soon as a team on foot had a dispatch with a
+    // ping (v3.357.0 - v3.358.0). PHPUnit never saw it because tests/bootstrap.php
+    // loads ai-live.php; see tests/WalkingEtaStandaloneTest.php.
+    require_once __DIR__ . '/route-distance.php';
     if (!routeDistanceAvailable()) {
         return null;
     }
