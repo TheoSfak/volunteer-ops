@@ -335,3 +335,56 @@ function computeGpsCalibration(int $missionId, float $refLat, float $refLng, str
     }
     return $out;
 }
+
+/**
+ * Delete refused-fix log rows older than $days days (the admin's manual
+ * "Καθαρισμός" button on Ρυθμίσεις -> Υγεία Εφαρμογής).
+ *
+ * loadMissionGpsGaps() treats a gap as "judged" when the log was already
+ * running when it began (setting gps_refusal_log_since), and then reads an
+ * empty refusal list as "nothing arrived - the phone sent nothing". After a
+ * purge that is no longer true for a gap older than the cutoff: its refusals
+ * were deleted, not absent. So whenever rows are deleted the setting is raised
+ * to the cutoff (never lowered), and gaps from before it come back as not
+ * judged instead of wrongly blaming the phone.
+ *
+ * Deleted in chunks, oldest id first: the table has no index on fix_at, and one
+ * big DELETE would scan it while holding row locks that a refusal being logged
+ * by a ping request has to wait for.
+ *
+ * @return array{deleted:int,complete:bool,cutoff:?string}
+ */
+function purgeGpsRefusalLog(int $days, int $timeBudgetSeconds = 20, int $chunk = 5000): array
+{
+    $days = max(1, $days);
+    $started = microtime(true);
+    $deleted = 0;
+    $complete = true;
+    $cutoff = (string) dbFetchValue("SELECT DATE_SUB(NOW(), INTERVAL ? DAY)", [$days]);
+
+    try {
+        do {
+            $n = (int) dbExecute(
+                "DELETE FROM volunteer_ping_refusal_log WHERE fix_at < ? ORDER BY id LIMIT " . (int) $chunk,
+                [$cutoff]
+            );
+            $deleted += $n;
+            if ($n >= $chunk && (microtime(true) - $started) > $timeBudgetSeconds) {
+                $complete = false;
+                break;
+            }
+        } while ($n >= $chunk);
+    } catch (Exception $e) {
+        // Before migration 171 there is no table, so nothing to purge.
+        return ['deleted' => 0, 'complete' => true, 'cutoff' => null];
+    }
+
+    if ($deleted > 0) {
+        dbExecute(
+            "INSERT INTO settings (setting_key, setting_value) VALUES ('gps_refusal_log_since', ?)
+             ON DUPLICATE KEY UPDATE setting_value = IF(setting_value < VALUES(setting_value), VALUES(setting_value), setting_value)",
+            [$cutoff]
+        );
+    }
+    return ['deleted' => $deleted, 'complete' => $complete, 'cutoff' => $cutoff];
+}

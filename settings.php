@@ -1311,6 +1311,20 @@ if (isPost()) {
         setFlash('success', "Διαγράφηκαν $deleted ειδοποιήσεις παλαιότερες $dayLabel.");
         redirect('settings.php?tab=health');
 
+    // Refused-fix log of the GPS quality report. See purgeGpsRefusalLog() for why
+    // this raises gps_refusal_log_since instead of just deleting.
+    } elseif ($action === 'health_cleanup_refusal_log') {
+        require_once __DIR__ . '/includes/functions-gps-quality.php';
+        $days = (int) post('cleanup_days', 7);
+        if ($days < 1) $days = 1;
+        $dayLabel = $days === 1 ? 'μίας ημέρας' : "$days ημερών";
+        $res = purgeGpsRefusalLog($days);
+        logAudit('health_cleanup', 'volunteer_ping_refusal_log', null, "Διαγραφή {$res['deleted']} εγγραφών παλαιότερων $dayLabel");
+        $msg = "Διαγράφηκαν {$res['deleted']} εγγραφές του log απορρίψεων GPS παλαιότερες $dayLabel.";
+        if (!$res['complete']) $msg .= ' Έμειναν ακόμα εγγραφές: ξανατρέξτε τον καθαρισμό.';
+        setFlash('success', $msg);
+        redirect('settings.php?tab=health');
+
     // PHP session files: what may be deleted is defined in includes/session-cleanup.php.
     } elseif ($action === 'health_cleanup_sessions') {
         require_once __DIR__ . '/includes/session-cleanup.php';
@@ -4159,6 +4173,14 @@ unset($_SESSION['health_results'], $_SESSION['health_ran']);
                         <input type="hidden" name="cleanup_days" value="7">
                         <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Διαγραφή ΟΛΩΝ των ειδοποιήσεων παλαιότερων των 7 ημερών — και των αδιάβαστων. Συνέχεια;')">
                             <i class="bi bi-trash me-1"></i>Καθαρισμός Ειδοποιήσεων (&gt; 7 ημ.)
+                        </button>
+                    </form>
+                    <form method="post" class="d-inline">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="health_cleanup_refusal_log">
+                        <input type="hidden" name="cleanup_days" value="7">
+                        <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Διαγραφή του log απορρίψεων GPS παλαιότερου των 7 ημερών; Η αναφορά ποιότητας GPS δεν θα μπορεί πλέον να πει τι απορρίφθηκε σε κενά πριν από αυτή την ημερομηνία.')">
+                            <i class="bi bi-trash me-1"></i>Καθαρισμός Log GPS (&gt; 7 ημ.)
                         </button>
                     </form>
                 </div>
