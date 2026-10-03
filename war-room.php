@@ -11666,6 +11666,7 @@ let mapPointsCluster = null;
 const mapPointMarkers = new Map();   // id -> marker
 const mapPointSigs = new Map();      // id -> JSON of what the marker was drawn from
 let mpRefreshing = false;
+const mpAltitudeCache = new Map();   // 'lat,lng' -> metres looked up
 let mpImportReady = false;           // the text in the box has been checked and has points to add
 if (map && MP_VISIBLE) {
     // Its own cluster group, like the OSM layer: a few hundred pins at one
@@ -11685,7 +11686,7 @@ function mpPopupContent(id) {
     if (!p) return div;
     div.innerHTML = `
         <div class="fw-semibold"><i class="bi bi-geo-alt-fill me-1 wr-mp-flag"></i>${escapeHtml(p.name)}</div>
-        ${p.elevation !== null ? `<div class="small"><i class="bi bi-triangle-fill me-1 text-muted"></i>${escapeHtml(t('mp.popup_elevation', {m: p.elevation}))}</div>` : ''}
+        <div class="small" data-mp-altitude><i class="bi bi-triangle-fill me-1 text-muted"></i>${escapeHtml(t('measure.altitude_loading'))}</div>
         ${p.access ? `<div class="small"><i class="bi ${mpAccessIcon(p.access)} me-1 text-muted"></i>${escapeHtml(t('mp.access_' + p.access))}</div>` : ''}
         ${p.note ? `<div class="mt-1" style="white-space:pre-wrap">${escapeHtml(p.note)}</div>` : ''}
         <div class="small text-muted mt-1">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div>
@@ -11694,25 +11695,33 @@ function mpPopupContent(id) {
         <hr class="my-2">
         <label class="form-label small fw-semibold mb-0">${escapeHtml(t('mp.f_name'))}</label>
         <input type="text" class="form-control form-control-sm mb-1" data-mp-name maxlength="120" value="${escapeHtml(p.name)}">
-        <div class="d-flex gap-2 mb-1">
-            <div style="flex:1;min-width:0">
-                <label class="form-label small fw-semibold mb-0">${escapeHtml(t('mp.f_elevation'))}</label>
-                <input type="text" inputmode="numeric" class="form-control form-control-sm" data-mp-ele maxlength="6" value="${p.elevation !== null ? p.elevation : ''}">
-            </div>
-            <div style="flex:1.4;min-width:0">
-                <label class="form-label small fw-semibold mb-0">${escapeHtml(t('mp.f_access'))}</label>
-                <select class="form-select form-select-sm" data-mp-access>
-                    <option value="">${escapeHtml(t('mp.access_opt_none'))}</option>
-                    ${['foot', 'vehicle', 'both'].map(a => `<option value="${a}"${p.access === a ? ' selected' : ''}>${escapeHtml(t('mp.access_opt_' + a))}</option>`).join('')}
-                </select>
-            </div>
-        </div>
+        <label class="form-label small fw-semibold mb-0">${escapeHtml(t('mp.f_access'))}</label>
+        <select class="form-select form-select-sm mb-1" data-mp-access>
+            <option value="">${escapeHtml(t('mp.access_opt_none'))}</option>
+            ${['foot', 'vehicle', 'both'].map(a => `<option value="${a}"${p.access === a ? ' selected' : ''}>${escapeHtml(t('mp.access_opt_' + a))}</option>`).join('')}
+        </select>
         <label class="form-label small fw-semibold mb-0">${escapeHtml(t('mp.f_note'))}</label>
         <textarea class="form-control form-control-sm mb-2" data-mp-note rows="3" maxlength="2000" placeholder="${escapeHtml(t('mp.f_note_ph'))}">${escapeHtml(p.note || '')}</textarea>
         <div class="d-flex gap-1">
             <button type="button" class="btn btn-sm btn-primary flex-grow-1" data-mp="save"><i class="bi bi-check-lg me-1"></i>${escapeHtml(t('mp.save_btn'))}</button>
             <button type="button" class="btn btn-sm btn-outline-danger" data-mp="delete"><i class="bi bi-trash3 me-1"></i>${escapeHtml(t('mp.delete_btn'))}</button>
         </div>` : ''}`;
+    // The altitude is looked up, not typed: the same service as the map's
+    // right-click menu. Remembered per place so a popup refreshed by the poll
+    // does not ask again; the stored value (from an imported file) stands in
+    // when the lookup has no answer.
+    const altLine = div.querySelector('[data-mp-altitude]');
+    const showAltitude = metres => {
+        if (metres === null || metres === undefined) { altLine.remove(); return; }
+        altLine.innerHTML = '<i class="bi bi-triangle-fill me-1 text-muted"></i>' + escapeHtml(t('measure.altitude', {height: measureMetres(metres)}));
+    };
+    const altKey = p.lat.toFixed(6) + ',' + p.lng.toFixed(6);
+    if (mpAltitudeCache.has(altKey)) showAltitude(mpAltitudeCache.get(altKey));
+    else measureElevations([[p.lat, p.lng]]).then(heights => {
+        const metres = heights && heights[0] !== null && heights[0] !== undefined ? heights[0] : p.elevation;
+        if (heights) mpAltitudeCache.set(altKey, metres);
+        if (altLine.isConnected) showAltitude(metres);
+    });
     if (!MP_CAN_MANAGE) return div;
     div.addEventListener('click', e => {
         const btn = e.target.closest('[data-mp]');
@@ -11722,7 +11731,6 @@ function mpPopupContent(id) {
             mpPost({
                 action: 'update', id: p.id,
                 name: div.querySelector('[data-mp-name]').value,
-                elevation: div.querySelector('[data-mp-ele]').value,
                 access: div.querySelector('[data-mp-access]').value,
                 note: div.querySelector('[data-mp-note]').value,
             }).then(res => {
@@ -11874,7 +11882,6 @@ function mpRenderList() {
             <div class="d-flex justify-content-between gap-2">
                 <span class="fw-semibold">${escapeHtml(p.name)}</span>
                 <span class="small text-muted text-nowrap">
-                    ${p.elevation !== null ? escapeHtml(t('mp.popup_elevation', {m: p.elevation})) : ''}
                     ${p.access ? `<i class="bi ${mpAccessIcon(p.access)} ms-1"></i>` : ''}
                 </span>
             </div>

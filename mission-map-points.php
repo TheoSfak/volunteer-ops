@@ -125,8 +125,14 @@ if ($action === 'preview' || $action === 'import') {
 }
 
 if ($action === 'update') {
+    // The popup no longer sends an altitude (it is looked up when the point is
+    // opened); an update without one keeps what an imported file gave it.
     $elevationText = trim((string) post('elevation'));
-    $elevation = null;
+    $elevation = isset($_POST['elevation']) ? null : dbFetchValue(
+        "SELECT elevation_m FROM mission_map_points WHERE id = ? AND mission_id = ?",
+        [(int) post('id'), $missionId]
+    );
+    $elevation = $elevation !== null && $elevation !== false ? (int) $elevation : null;
     if ($elevationText !== '') {
         $elevation = mapPointParseElevation($elevationText);
         if ($elevation === null || !mapPointElevationInRange($elevation)) {
