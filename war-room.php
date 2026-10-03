@@ -12291,18 +12291,24 @@ function mpRouteApply() {
         if (el.summary) el.summary.innerHTML = '';
         return;
     }
-    if (el.box) el.box.classList.remove('d-none');
+    // Command switched it off for everybody: the route stays saved (switching it
+    // back on costs nothing) but nobody else sees it or its controls; command
+    // still sees the section, with the switch off.
+    if (el.box) el.box.classList.toggle('d-none', !route.active && !MP_CAN_MANAGE);
     if (mpRouteDrawnStamp !== route.stamp) {
         const drawn = mpLinkBuildLayer(route);
         mpRouteDrawnStamp = route.stamp;
         mpLinkHidden = false;
         if (el.summary) el.summary.innerHTML = mpLinkSummaryHtml(route, drawn)
             || `<div class="text-warning-emphasis">${escapeHtml(t('mp.link_unrouted', {n: route.unrouted}))}</div>`;
-        if (mpRouteSeen && !mpDrawing && drawn > 0) opToast(t('mp.link_shared_toast'));
+        if (mpRouteSeen && !mpDrawing && drawn > 0 && route.active) opToast(t('mp.link_shared_toast'));
     }
-    if (el.sw) el.sw.checked = !mpLinkHidden;
+    // Command's switch is the route's own on/off, for everybody; anyone else's
+    // only hides the lines on their own screen.
+    const hidden = !route.active || (!MP_CAN_MANAGE && mpLinkHidden);
+    if (el.sw) el.sw.checked = MP_CAN_MANAGE ? route.active : !mpLinkHidden;
     if (mpLinkLayer && map) {
-        if (mpLinkHidden) map.removeLayer(mpLinkLayer);
+        if (hidden) map.removeLayer(mpLinkLayer);
         else if (!map.hasLayer(mpLinkLayer)) mpLinkLayer.addTo(map);
     }
 }
@@ -12377,7 +12383,17 @@ function mpLinkClear() {
         });
     }
     const linkSwitch = document.getElementById('mapPointsLinkSwitch');
-    linkSwitch.addEventListener('change', () => { mpLinkHidden = !linkSwitch.checked; mpRouteApply(); });
+    linkSwitch.addEventListener('change', () => {
+        if (MP_CAN_MANAGE) {
+            // For everybody: the route stays saved, only whether it is shown changes.
+            if (!mapPointRoute) { linkSwitch.checked = false; return; }
+            mpDrawing = true;
+            mpPost({action: 'route_toggle', active: linkSwitch.checked ? '1' : '0'}).then(() => { mpDrawing = false; });
+            return;
+        }
+        mpLinkHidden = !linkSwitch.checked;
+        mpRouteApply();
+    });
     document.getElementById('mapPointsLinkDraw')?.addEventListener('click', mpLinkDraw);
     document.getElementById('mapPointsLinkClear')?.addEventListener('click', mpLinkClear);
     list.addEventListener('click', e => {

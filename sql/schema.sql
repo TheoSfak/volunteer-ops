@@ -3253,6 +3253,7 @@ CREATE TABLE IF NOT EXISTS `mission_map_point_routes` (
     `meters` INT UNSIGNED NOT NULL DEFAULT 0,
     `minutes` INT UNSIGNED NOT NULL DEFAULT 0,
     `unrouted` INT UNSIGNED NOT NULL DEFAULT 0,
+    `active` TINYINT(1) NOT NULL DEFAULT 1,
     `legs` MEDIUMTEXT NOT NULL COMMENT 'JSON: from_id, to_id, meters, minutes, points[] per leg',
     `created_by` INT UNSIGNED NULL,
     `created_at` DATETIME NOT NULL,

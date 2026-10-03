@@ -420,8 +420,8 @@ function missionMapPointsVersion(int $missionId): string {
     }
     // The shared road route (v3.365.0): drawn, redrawn or taken off.
     if (dbColumnExists('mission_map_point_routes', 'mission_id')) {
-        $stamp = dbFetchValue("SELECT created_at FROM mission_map_point_routes WHERE mission_id = ?", [$missionId]);
-        $version .= '/r' . ($stamp ? preg_replace('/\D/', '', (string) $stamp) : '0');
+        $r = dbFetchOne("SELECT created_at, active FROM mission_map_point_routes WHERE mission_id = ?", [$missionId]);
+        $version .= '/r' . ($r ? preg_replace('/\D/', '', (string) $r['created_at']) . 'a' . (int) $r['active'] : '0');
     }
     return $version;
 }
@@ -661,6 +661,15 @@ function saveMapPointRoute(int $missionId, array $result, int $userId): void {
     );
 }
 
+/**
+ * Switch the saved route off or on for everybody, without drawing it again: the
+ * route stays saved, so switching it back on costs nothing. True when it exists.
+ */
+function setMapPointRouteActive(int $missionId, bool $active): bool {
+    dbExecute("UPDATE mission_map_point_routes SET active = ? WHERE mission_id = ?", [$active ? 1 : 0, $missionId]);
+    return (bool) dbFetchValue("SELECT 1 FROM mission_map_point_routes WHERE mission_id = ?", [$missionId]);
+}
+
 function clearMapPointRoute(int $missionId): bool {
     return dbExecute("DELETE FROM mission_map_point_routes WHERE mission_id = ?", [$missionId]) > 0;
 }
@@ -706,6 +715,7 @@ function loadMapPointRoute(int $missionId): ?array {
         'meters'   => (int) $row['meters'],
         'minutes'  => (int) $row['minutes'],
         'unrouted' => (int) $row['unrouted'],
+        'active'   => (bool) $row['active'],
         'legs'     => $legs,
         'by'       => $row['by_name'],
     ];

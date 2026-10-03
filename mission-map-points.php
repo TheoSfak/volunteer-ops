@@ -129,6 +129,18 @@ if ($action === 'connect') {
     exit;
 }
 
+if ($action === 'route_toggle') {
+    if (!$canManage) {
+        echo json_encode(['ok' => false, 'error' => t('mp.err_manage')]);
+        exit;
+    }
+    if (setMapPointRouteActive($missionId, post('active') === '1')) {
+        logAudit(post('active') === '1' ? 'map_points_route_shown' : 'map_points_route_hidden', 'missions', $missionId);
+    }
+    echo $answer();
+    exit;
+}
+
 if ($action === 'route_clear') {
     if (!$canManage) {
         echo json_encode(['ok' => false, 'error' => t('mp.err_manage')]);

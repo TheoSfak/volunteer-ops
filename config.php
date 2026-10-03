@@ -11,8 +11,8 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.365.0');
-define('DB_SCHEMA_VERSION', 183);
+define('APP_VERSION', '3.365.1');
+define('DB_SCHEMA_VERSION', 184);
 
 // Android APK versionName, matching mobile-app/android/app/build.gradle.
 // The download filename embeds this on purpose: the APK used to live at a

@@ -7670,6 +7670,16 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 184,
+            'description' => 'Command can switch the shared road route between map points off and on for everybody without drawing (and paying for) it again (v3.365.1): mission_map_point_routes.active.',
+            'up' => function () {
+                if (!dbColumnExists('mission_map_point_routes', 'active')) {
+                    dbExecute("ALTER TABLE mission_map_point_routes ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1 AFTER unrouted");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

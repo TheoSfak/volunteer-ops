@@ -687,4 +687,41 @@ final class MapPointsTest extends TestCase
         $this->assertNotSame($v1, missionMapPointsVersion($this->missionId));
         $this->assertSame($v0, missionMapPointsVersion($this->missionId), 'back to how it was with no route');
     }
+
+    public function testCommandCanSwitchTheSavedRouteOffAndOnForEverybodyWithoutDrawingItAgain(): void
+    {
+        $this->seedPoints();
+        $this->drawRoute(loadMissionMapPoints($this->missionId));
+        $route = loadMapPointRoute($this->missionId);
+        $this->assertTrue($route['active'], 'a freshly drawn route is on');
+        $stamp = $route['stamp'];
+        $v1 = missionMapPointsVersion($this->missionId);
+
+        $this->assertTrue(setMapPointRouteActive($this->missionId, false));
+        $off = loadMapPointRoute($this->missionId);
+        $this->assertFalse($off['active']);
+        $this->assertSame($stamp, $off['stamp'], 'it is the same saved route, not a new one');
+        $this->assertCount(2, $off['legs'], 'and nothing of it was thrown away');
+        $v2 = missionMapPointsVersion($this->missionId);
+        $this->assertNotSame($v1, $v2, 'open pages learn of the switch on their next poll');
+
+        $this->assertTrue(setMapPointRouteActive($this->missionId, true));
+        $this->assertTrue(loadMapPointRoute($this->missionId)['active']);
+        $this->assertSame($v1, missionMapPointsVersion($this->missionId));
+    }
+
+    public function testSwitchingARouteThatDoesNotExistDoesNothing(): void
+    {
+        $this->assertFalse(setMapPointRouteActive($this->missionId, false));
+    }
+
+    public function testDrawingAgainSwitchesItBackOn(): void
+    {
+        $this->seedPoints();
+        $points = loadMissionMapPoints($this->missionId);
+        $this->drawRoute($points);
+        setMapPointRouteActive($this->missionId, false);
+        $this->drawRoute($points);
+        $this->assertTrue(loadMapPointRoute($this->missionId)['active']);
+    }
 }
