@@ -12288,7 +12288,10 @@ function mpRouteApply() {
         mpLinkLayer = null;
         mpRouteDrawnStamp = null;
         if (el.box && !MP_CAN_MANAGE) el.box.classList.add('d-none');
-        if (el.summary) el.summary.innerHTML = '';
+        if (el.sw) el.sw.checked = false;
+        if (el.summary && !mpLinkBusy) {
+            el.summary.innerHTML = MP_CAN_MANAGE ? `<div class="text-muted">${escapeHtml(t('mp.link_none_yet'))}</div>` : '';
+        }
         return;
     }
     // Command switched it off for everybody: the route stays saved (switching it
@@ -12316,7 +12319,7 @@ function mpRouteApply() {
 // Command: ask for the route; the server keeps it and everybody gets it.
 function mpLinkDraw() {
     if (!MP_CAN_MANAGE) return;
-    if (!MP_ROUTING) { alert(t('mp.link_no_google')); return; }
+    if (!MP_ROUTING) { alert(t('mp.link_no_google')); mpRouteApply(); return; }
     if (mpLinkBusy) return;
     mpLinkBusy = true;
     mpDrawing = true;
@@ -12385,8 +12388,13 @@ function mpLinkClear() {
     const linkSwitch = document.getElementById('mapPointsLinkSwitch');
     linkSwitch.addEventListener('change', () => {
         if (MP_CAN_MANAGE) {
+            // Nothing saved yet (a route drawn before v3.365.0 was never kept):
+            // switching on draws it, like the button, instead of snapping back.
+            if (!mapPointRoute) {
+                if (linkSwitch.checked) mpLinkDraw(); else linkSwitch.checked = false;
+                return;
+            }
             // For everybody: the route stays saved, only whether it is shown changes.
-            if (!mapPointRoute) { linkSwitch.checked = false; return; }
             mpDrawing = true;
             mpPost({action: 'route_toggle', active: linkSwitch.checked ? '1' : '0'}).then(() => { mpDrawing = false; });
             return;
