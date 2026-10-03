@@ -20509,6 +20509,10 @@ function reloadForGpsChange(extend) {
 
     function enhance(card) {
         const id = card.dataset.cardId;
+        // The live map is never folded: its box is sized and moved by the map
+        // code (fullscreen, layout drag, follow-pins) and a collapse around it
+        // broke it. Not one of the cards that collapse.
+        if (id === 'mapCard') return;
         let header = card.querySelector(':scope > .card-header');
         if (header && (header.matches('[data-bs-toggle="collapse"]') || header.querySelector('[data-bs-toggle="collapse"]'))) return;
         if (!header) {
@@ -20579,10 +20583,6 @@ function reloadForGpsChange(extend) {
             header.setAttribute('aria-expanded', 'false');
             collapsed.add(id);
             persist();
-        });
-        // A map measured while hidden is 0x0; give it its size back.
-        target.addEventListener('shown.bs.collapse', e => {
-            if (e.target === target && typeof map !== 'undefined' && map && target.querySelector('#warRoomMap')) map.invalidateSize();
         });
     }
 
