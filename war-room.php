@@ -3609,7 +3609,7 @@ include __DIR__ . '/includes/header.php';
        tip is the spot (the icon is 0x0 at the coordinate), so a drag moves the
        spot, not the label. Dark on amber reads on street, topo and satellite. */
     .wr-cp-marker { position: absolute; left: 0; top: 0; transform: translate(-50%, calc(-100% - 7px)); display: inline-flex; align-items: center; gap: 4px; background: #0f172a; color: #fff; font: 700 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 5px 8px; border-radius: 8px; border: 2px solid #fbbf24; box-shadow: 0 2px 6px rgba(0,0,0,.55); white-space: nowrap; cursor: pointer; }
-    .wr-cp-marker .bi { color: #fbbf24; font-size: 14px; }
+    .wr-cp-marker .bi { color: #fbbf24; font-size: 18px; line-height: 1; }
     .wr-cp-marker::after { content: ''; position: absolute; left: 50%; bottom: -9px; transform: translateX(-50%); border: 7px solid transparent; border-top-color: #fbbf24; border-bottom: 0; }
     .leaflet-marker-draggable .wr-cp-marker { cursor: move; }
     /* Following a device: a signal that pulses. The device gone quiet: grey
@@ -11379,7 +11379,7 @@ function cpDistanceText(metres) {
 function cpIcon(following, stale) {
     return L.divIcon({
         className: 'wr-cp-icon',
-        html: `<div class="wr-cp-marker${following ? ' is-following' : ''}${stale ? ' is-stale' : ''}"><i class="bi bi-house-gear-fill"></i><span>${escapeHtml(t('cp.label'))}</span>${following ? '<i class="bi bi-broadcast wr-cp-signal"></i>' : ''}</div>`,
+        html: `<div class="wr-cp-marker${following ? ' is-following' : ''}${stale ? ' is-stale' : ''}"><i class="bi bi-house-gear-fill"></i>${following ? '<i class="bi bi-broadcast wr-cp-signal"></i>' : ''}</div>`,
         iconSize: [0, 0], iconAnchor: [0, 0], popupAnchor: [0, -36],
     });
 }
@@ -11620,10 +11620,9 @@ function cpSyncButton() {
     const label = t(commandPost ? 'cp.btn_show' : 'cp.btn_place');
     btn.title = label;
     btn.setAttribute('aria-label', label);
-    // Not yet placed: command sees the word, not only an icon, until it is.
+    // Only the house, placed or not: the name is in the tooltip and the popup.
     btn.parentElement.classList.toggle('is-unset', !commandPost);
-    btn.innerHTML = '<i class="bi bi-house-gear-fill"></i>'
-        + (commandPost ? '' : `<span>${escapeHtml(t('cp.label'))}</span>`);
+    btn.innerHTML = '<i class="bi bi-house-gear-fill"></i>';
 }
 
 // Take the map to the command post and open it. fromMap: asked from the map
