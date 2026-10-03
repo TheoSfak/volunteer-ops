@@ -2213,6 +2213,10 @@ include __DIR__ . '/includes/header.php';
         body.wr-tabs-ready { padding-bottom: 0; }
     }
     .wr-collapsible-header { cursor: pointer; }
+    /* The chevron added to cards that did not collapse before (see
+       makeEveryCardCollapsible): pinned to the header's right end. */
+    .wr-card-hdr { position: relative; padding-right: 2.4rem !important; }
+    .wr-card-hdr > .wr-card-chevron { position: absolute; right: 1rem; top: 50%; margin-top: -.5em; line-height: 1; }
     .wr-collapsible-chevron { transition: transform .2s; }
     .wr-collapsible-header:not(.collapsed) .wr-collapsible-chevron { transform: rotate(180deg); }
     /* Drag-and-drop card layout (admin desktop view only) — a flat flex stack
@@ -17813,8 +17817,11 @@ function renderWeatherCard(w, eu) {
     if (!w || w.status !== 'ok') { wrap.style.display = 'none'; return; }
     wrap.style.display = '';
     if (header) {
-        header.className = 'card-header d-flex justify-content-between align-items-center'
-            + (w.severity === 'danger' ? ' bg-danger bg-opacity-10' : (w.severity === 'warning' ? ' bg-warning bg-opacity-10' : ''));
+        // classList, not className: makeEveryCardCollapsible() put its own
+        // classes on this header and a rewrite would take them off again.
+        header.classList.remove('bg-danger', 'bg-warning', 'bg-opacity-10');
+        if (w.severity === 'danger') header.classList.add('bg-danger', 'bg-opacity-10');
+        else if (w.severity === 'warning') header.classList.add('bg-warning', 'bg-opacity-10');
     }
 
     const warningsHtml = (w.warnings && w.warnings.length)
@@ -20466,6 +20473,121 @@ function reloadForGpsChange(extend) {
     tick();
     gpsReloadTimer = setInterval(tick, 250);
 }
+
+// ── Every card collapses (v3.362.0) ──────────────────────────────────────────
+// Some cards always collapsed (their markup carries a Bootstrap toggle); the
+// rest never did. This gives the rest the same behaviour, for command and for
+// volunteers alike, from the cards that are actually on the page: a click on
+// the card's header folds everything under it away, the chevron turns, and the
+// choice is remembered in this browser. Controls inside a header (buttons,
+// links, menus) keep working and do not fold the card.
+//   - Cards with a toggle of their own are left alone.
+//   - The three that were collapsible on phones only (d-lg-block) now collapse
+//     on desktop too, and still start open there.
+//   - Arranging the layout (cards unlocked for dragging) never folds a card.
+(function makeEveryCardCollapsible() {
+    const STORE_KEY = 'wr_cards_collapsed';
+    const collapsed = new Set();
+    try {
+        const saved = JSON.parse(localStorage.getItem(STORE_KEY) || '[]');
+        if (Array.isArray(saved)) saved.forEach(id => collapsed.add(String(id)));
+    } catch (e) {}
+    const persist = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify([...collapsed])); } catch (e) {} };
+    const CONTROLS = 'button, a, input, select, textarea, label, .dropdown-menu, .btn-group, [data-no-collapse]';
+    const desktop = window.matchMedia('(min-width: 992px)').matches;
+
+    // The three phone-only ones: collapsible everywhere, open on desktop as before.
+    document.querySelectorAll('.card-body.collapse.d-lg-block').forEach(body => {
+        body.classList.remove('d-lg-block');
+        if (!desktop || !body.id) return;
+        body.classList.add('show');
+        document.querySelectorAll('[data-bs-target="#' + CSS.escape(body.id) + '"]').forEach(h => {
+            h.classList.remove('collapsed');
+            h.setAttribute('aria-expanded', 'true');
+        });
+    });
+
+    function enhance(card) {
+        const id = card.dataset.cardId;
+        let header = card.querySelector(':scope > .card-header');
+        if (header && (header.matches('[data-bs-toggle="collapse"]') || header.querySelector('[data-bs-toggle="collapse"]'))) return;
+        if (!header) {
+            // A card that is only a body (the mission management one): its
+            // own heading is the handle.
+            header = card.querySelector(':scope > .card-body > h6, :scope > .card-body > h5');
+            if (!header || header.matches('[data-bs-toggle="collapse"]')) return;
+        }
+        const content = [];
+        for (let n = header.nextElementSibling; n; n = n.nextElementSibling) content.push(n);
+        if (!content.length) return;
+
+        let target;
+        if (content.length === 1 && content[0].classList.contains('card-body')) {
+            target = content[0];
+        } else {
+            target = document.createElement('div');
+            header.parentNode.insertBefore(target, content[0]);
+            content.forEach(n => target.appendChild(n));
+        }
+        if (!target.id) target.id = id + 'Collapse';
+        target.classList.add('collapse');
+        const startCollapsed = collapsed.has(id);
+        target.classList.toggle('show', !startCollapsed);
+
+        // The chevron sits at the right end whatever the header holds (the
+        // map's has a whole toolbar): pinned there, with room reserved, so the
+        // header's own layout is not touched.
+        const arrow = document.createElement('i');
+        arrow.className = 'bi bi-chevron-down wr-collapsible-chevron wr-card-chevron';
+        header.classList.add('wr-card-hdr');
+        header.appendChild(arrow);
+
+        header.classList.add('wr-collapsible-header');
+        header.classList.toggle('collapsed', startCollapsed);
+        header.setAttribute('role', 'button');
+        header.setAttribute('tabindex', '0');
+        header.setAttribute('aria-controls', target.id);
+        header.setAttribute('aria-expanded', startCollapsed ? 'false' : 'true');
+        // Only so the view restored after a reload (data-bs-target lookups)
+        // finds this header; the click itself is handled below, not by Bootstrap.
+        header.setAttribute('data-bs-target', '#' + target.id);
+
+        const toggle = () => {
+            if (card.closest('.wr-unlocked')) return;
+            bootstrap.Collapse.getOrCreateInstance(target, {toggle: false}).toggle();
+        };
+        header.addEventListener('click', e => {
+            const control = e.target.closest(CONTROLS);
+            if (control && control !== header && header.contains(control)) return;
+            toggle();
+        });
+        header.addEventListener('keydown', e => {
+            if (e.target !== header || (e.key !== 'Enter' && e.key !== ' ')) return;
+            e.preventDefault();
+            toggle();
+        });
+        target.addEventListener('show.bs.collapse', e => {
+            if (e.target !== target) return;
+            header.classList.remove('collapsed');
+            header.setAttribute('aria-expanded', 'true');
+            collapsed.delete(id);
+            persist();
+        });
+        target.addEventListener('hide.bs.collapse', e => {
+            if (e.target !== target) return;
+            header.classList.add('collapsed');
+            header.setAttribute('aria-expanded', 'false');
+            collapsed.add(id);
+            persist();
+        });
+        // A map measured while hidden is 0x0; give it its size back.
+        target.addEventListener('shown.bs.collapse', e => {
+            if (e.target === target && typeof map !== 'undefined' && map && target.querySelector('#warRoomMap')) map.invalidateSize();
+        });
+    }
+
+    document.querySelectorAll('.card[data-card-id]').forEach(enhance);
+})();
 
 function saveViewAndReload() {
     clearInterval(gpsReloadTimer);
