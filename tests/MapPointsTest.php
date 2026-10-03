@@ -355,4 +355,219 @@ final class MapPointsTest extends TestCase
         $this->assertSame([], $r['legs']);
         $this->assertSame(0, $r['unrouted']);
     }
+
+    // ── Sending points to teams (v3.364.0) ──────────────────────────────────
+
+    private function makeTeam(string $codename, int $number, array $memberIds): int
+    {
+        $shiftId = (int) dbFetchValue("SELECT id FROM shifts WHERE mission_id = ? LIMIT 1", [$this->missionId]);
+        if (!$shiftId) {
+            $shiftId = (int) dbInsert(
+                "INSERT INTO shifts (mission_id, start_time, end_time) VALUES (?, ?, ?)",
+                [$this->missionId, date('Y-m-d H:i:s', time() - 3600), date('Y-m-d H:i:s', time() + 3600)]
+            );
+        }
+        $teamId = (int) dbInsert(
+            "INSERT INTO mission_teams (mission_id, codename, team_number, created_by) VALUES (?, ?, ?, ?)",
+            [$this->missionId, $codename, $number, $this->userId]
+        );
+        foreach ($memberIds as $uid) {
+            dbInsert("INSERT INTO participation_requests (shift_id, volunteer_id, status) VALUES (?, ?, ?)", [$shiftId, $uid, PARTICIPATION_APPROVED]);
+            dbInsert("INSERT INTO mission_team_members (team_id, mission_id, user_id) VALUES (?, ?, ?)", [$teamId, $this->missionId, $uid]);
+            dbInsert("INSERT INTO mission_action_room_participants (mission_id, user_id) VALUES (?, ?)", [$this->missionId, $uid]);
+        }
+        return $teamId;
+    }
+
+    private function makeMember(string $name): int
+    {
+        return (int) dbInsert("INSERT INTO users (name, email, password) VALUES (?, ?, ?)", [$name, 'mp-m-' . uniqid('', true) . '@example.invalid', 'x']);
+    }
+
+    private function missionRow(): array
+    {
+        return dbFetchOne("SELECT id, title, responsible_user_id FROM missions WHERE id = ?", [$this->missionId]);
+    }
+
+    private function seedPoints(): array
+    {
+        importMissionMapPoints($this->missionId, parseMapPointText("35.1,24.1,Α\n35.2,24.2,Β\n35.3,24.3,Γ\n")['rows'], $this->userId);
+        return array_column(loadMissionMapPoints($this->missionId), null, 'name');
+    }
+
+    public function testAPointNobodyWasSentToIsFree(): void
+    {
+        $points = $this->seedPoints();
+        $this->assertSame('free', $points['Α']['status']);
+        $this->assertSame([], loadMissionMapPoints($this->missionId, true)[0]['visits']);
+        $this->assertArrayNotHasKey('visits', loadMissionMapPoints($this->missionId)[0]);
+    }
+
+    public function testAssigningMakesOneOrderPerPointForThatTeamAndOneNoticePerMember(): void
+    {
+        $points = $this->seedPoints();
+        $a = $this->makeMember('Μέλος Α');
+        $b = $this->makeMember('Μέλος Β');
+        $team = $this->makeTeam('Alpha', 1, [$a, $b]);
+
+        $r = assignMapPointsToTeam($this->missionRow(), $team, [$points['Α']['id'], $points['Β']['id']], $this->userId, 'Συντονιστής');
+        $this->assertSame(2, $r['assigned']);
+        $this->assertSame(0, $r['skipped']);
+
+        $rows = dbFetchAll("SELECT team_id, type, label, map_point_id, geo FROM mission_dispatch_points WHERE mission_id = ? ORDER BY id", [$this->missionId]);
+        $this->assertCount(2, $rows);
+        $this->assertSame([$team, $team], array_map(fn($x) => (int) $x['team_id'], $rows));
+        $this->assertSame(['Α', 'Β'], array_column($rows, 'label'));
+        $this->assertSame([$points['Α']['id'], $points['Β']['id']], array_map(fn($x) => (int) $x['map_point_id'], $rows));
+        $this->assertSame(['lat' => 35.1, 'lng' => 24.1], json_decode($rows[0]['geo'], true));
+
+        // Two points, but each member gets ONE notice, opening on the first order.
+        foreach ([$a, $b] as $uid) {
+            $notices = dbFetchAll("SELECT data FROM notifications WHERE user_id = ? AND data LIKE '%dispatchId%'", [$uid]);
+            $this->assertCount(1, $notices, 'one notice per member for the whole batch');
+            $this->assertSame($r['dispatch_ids'][0], (int) json_decode($notices[0]['data'], true)['dispatchId']);
+        }
+
+        $after = array_column(loadMissionMapPoints($this->missionId, true), null, 'name');
+        $this->assertSame('active', $after['Α']['status']);
+        $this->assertSame('active', $after['Β']['status']);
+        $this->assertSame('free', $after['Γ']['status']);
+        $this->assertSame('Alpha 1', $after['Α']['visits'][0]['team_label']);
+        $this->assertNotNull($after['Α']['visits'][0]['assigned']);
+        $this->assertNull($after['Α']['visits'][0]['completed']);
+    }
+
+    public function testASingleMemberTeamIsToldWithTheSingleDispatchWording(): void
+    {
+        $points = $this->seedPoints();
+        $a = $this->makeMember('Μόνος');
+        $team = $this->makeTeam('Bravo', 2, [$a]);
+        assignMapPointsToTeam($this->missionRow(), $team, [$points['Γ']['id']], $this->userId, 'Συντονιστής');
+        $message = (string) dbFetchValue("SELECT message FROM notifications WHERE user_id = ? AND data LIKE '%dispatchId%'", [$a]);
+        $this->assertStringContainsString('Γ', $message);
+    }
+
+    public function testTheSameTeamIsNotSentTwiceToAnOpenPointButAnotherTeamCanBe(): void
+    {
+        $points = $this->seedPoints();
+        $team1 = $this->makeTeam('Alpha', 1, [$this->makeMember('Μ1')]);
+        $team2 = $this->makeTeam('Bravo', 2, [$this->makeMember('Μ2')]);
+        $id = $points['Α']['id'];
+
+        $this->assertSame(1, assignMapPointsToTeam($this->missionRow(), $team1, [$id], $this->userId, 'Σ')['assigned']);
+        $again = assignMapPointsToTeam($this->missionRow(), $team1, [$id], $this->userId, 'Σ');
+        $this->assertSame(0, $again['assigned']);
+        $this->assertSame(1, $again['skipped']);
+        $this->assertSame(1, assignMapPointsToTeam($this->missionRow(), $team2, [$id], $this->userId, 'Σ')['assigned']);
+
+        $visits = loadMissionMapPoints($this->missionId, true)[0]['visits'];
+        $this->assertSame(['Alpha 1', 'Bravo 2'], array_column($visits, 'team_label'));
+    }
+
+    public function testTheTeamsStepsAndNoteLandInThePointsHistoryAndAnotherTeamCanFollow(): void
+    {
+        $points = $this->seedPoints();
+        $m1 = $this->makeMember('Μ1');
+        $m2 = $this->makeMember('Μ2');
+        $team1 = $this->makeTeam('Alpha', 1, [$m1]);
+        $team2 = $this->makeTeam('Bravo', 2, [$m2]);
+        $id = $points['Α']['id'];
+
+        $first = assignMapPointsToTeam($this->missionRow(), $team1, [$id], $this->userId, 'Σ')['dispatch_ids'][0];
+        $this->assertNull(advanceMissionDispatch($this->missionRow(), $first, $m1, 'Μ1', 'depart'));
+        $this->assertNull(advanceMissionDispatch($this->missionRow(), $first, $m1, 'Μ1', 'arrive'));
+        $this->assertSame('active', loadMissionMapPoints($this->missionId)[0]['status']);
+        $this->assertNull(advanceMissionDispatch($this->missionRow(), $first, $m1, 'Μ1', 'complete', null, 'Άδεια, χωρίς ίχνη'));
+
+        $done = loadMissionMapPoints($this->missionId, true)[0];
+        $this->assertSame('done', $done['status']);
+        $v = $done['visits'][0];
+        $this->assertSame('done', $v['state']);
+        $this->assertNotNull($v['departed']);
+        $this->assertNotNull($v['arrived']);
+        $this->assertNotNull($v['completed']);
+        $this->assertSame('Άδεια, χωρίς ίχνη', $v['note']);
+
+        // Done, but not closed for good: another team can be sent, and the point is active again.
+        $second = assignMapPointsToTeam($this->missionRow(), $team2, [$id], $this->userId, 'Σ');
+        $this->assertSame(1, $second['assigned']);
+        $again = loadMissionMapPoints($this->missionId, true)[0];
+        $this->assertSame('active', $again['status']);
+        $this->assertSame(['done', 'active'], array_column($again['visits'], 'state'));
+        $this->assertSame('Άδεια, χωρίς ίχνη', $again['visits'][0]['note']);
+
+        // The same team can also be sent back once its earlier visit is done.
+        $this->assertSame(1, assignMapPointsToTeam($this->missionRow(), $team1, [$id], $this->userId, 'Σ')['assigned']);
+    }
+
+    public function testACompletionWithNoNoteLeavesNone(): void
+    {
+        $points = $this->seedPoints();
+        $m = $this->makeMember('Μ');
+        $team = $this->makeTeam('Alpha', 1, [$m]);
+        $d = assignMapPointsToTeam($this->missionRow(), $team, [$points['Α']['id']], $this->userId, 'Σ')['dispatch_ids'][0];
+        advanceMissionDispatch($this->missionRow(), $d, $m, 'Μ', 'complete', null, '');
+        $this->assertNull(loadMissionMapPoints($this->missionId, true)[0]['visits'][0]['note']);
+    }
+
+    public function testWithdrawingTheOrderPutsThePointBackToFree(): void
+    {
+        $points = $this->seedPoints();
+        $team = $this->makeTeam('Alpha', 1, [$this->makeMember('Μ')]);
+        $d = assignMapPointsToTeam($this->missionRow(), $team, [$points['Α']['id']], $this->userId, 'Σ')['dispatch_ids'][0];
+        dbExecute("DELETE FROM mission_dispatch_points WHERE id = ?", [$d]);
+        $this->assertSame('free', loadMissionMapPoints($this->missionId)[0]['status']);
+    }
+
+    public function testDeletingAPointLeavesTheTeamsOrderStanding(): void
+    {
+        $points = $this->seedPoints();
+        $team = $this->makeTeam('Alpha', 1, [$this->makeMember('Μ')]);
+        $d = assignMapPointsToTeam($this->missionRow(), $team, [$points['Α']['id']], $this->userId, 'Σ')['dispatch_ids'][0];
+        deleteMissionMapPoint($this->missionId, $points['Α']['id']);
+        $row = dbFetchOne("SELECT id, map_point_id FROM mission_dispatch_points WHERE id = ?", [$d]);
+        $this->assertNotNull($row, 'the order stays');
+        $this->assertNull($row['map_point_id']);
+    }
+
+    public function testAssignRefusesAnotherMissionsTeamAndPoints(): void
+    {
+        $points = $this->seedPoints();
+        $otherTeam = (int) dbInsert(
+            "INSERT INTO mission_teams (mission_id, codename, team_number, created_by) VALUES (?, 'Zulu', 9, ?)",
+            [$this->otherMissionId, $this->userId]
+        );
+        $r = assignMapPointsToTeam($this->missionRow(), $otherTeam, [$points['Α']['id']], $this->userId, 'Σ');
+        $this->assertArrayHasKey('error', $r);
+        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_dispatch_points WHERE mission_id = ?", [$this->missionId]));
+
+        $ownTeam = $this->makeTeam('Alpha', 1, [$this->makeMember('Μ')]);
+        importMissionMapPoints($this->otherMissionId, parseMapPointText("35.9,24.9,Ξένο\n")['rows'], $this->userId);
+        $foreign = loadMissionMapPoints($this->otherMissionId)[0]['id'];
+        $this->assertSame(0, assignMapPointsToTeam($this->missionRow(), $ownTeam, [$foreign], $this->userId, 'Σ')['assigned']);
+    }
+
+    public function testTheVersionChangesWhenATeamIsSentAndWhenItProgresses(): void
+    {
+        $points = $this->seedPoints();
+        $m = $this->makeMember('Μ');
+        $team = $this->makeTeam('Alpha', 1, [$m]);
+        $v0 = missionMapPointsVersion($this->missionId);
+        $d = assignMapPointsToTeam($this->missionRow(), $team, [$points['Α']['id']], $this->userId, 'Σ')['dispatch_ids'][0];
+        $v1 = missionMapPointsVersion($this->missionId);
+        $this->assertNotSame($v0, $v1);
+        advanceMissionDispatch($this->missionRow(), $d, $m, 'Μ', 'depart');
+        $this->assertNotSame($v1, missionMapPointsVersion($this->missionId));
+    }
+
+    public function testTheCommandPostIsToldWhatTheTeamWroteOnCompleting(): void
+    {
+        $points = $this->seedPoints();
+        $m = $this->makeMember('Μ');
+        $team = $this->makeTeam('Alpha', 1, [$m]);
+        $d = assignMapPointsToTeam($this->missionRow(), $team, [$points['Α']['id']], $this->userId, 'Σ')['dispatch_ids'][0];
+        advanceMissionDispatch($this->missionRow(), $d, $m, 'Μ', 'complete', null, 'Βρέθηκε ένα γάντι');
+        $messages = array_column(dbFetchAll("SELECT message FROM notifications WHERE user_id = ? ORDER BY id", [$this->userId]), 'message');
+        $this->assertNotEmpty(array_filter($messages, fn($x) => str_contains($x, '«Βρέθηκε ένα γάντι»')), 'the completion notice carries the note');
+    }
 }

@@ -1809,7 +1809,7 @@ $triage = ($canManageWarRoom || $isApprovedParticipant) ? loadTriageStateForMiss
 $commandPost = ($canManageWarRoom || $isApprovedParticipant) ? loadMissionCommandPost($missionId) : null;
 // Imported reference points (v3.361.0), for command and the participants.
 $mapPointsVisible = $canManageWarRoom || $isApprovedParticipant;
-$mapPoints = $mapPointsVisible ? loadMissionMapPoints($missionId) : [];
+$mapPoints = $mapPointsVisible ? loadMissionMapPoints($missionId, $canManageWarRoom) : [];
 $mapPointsVersion = $mapPointsVisible ? missionMapPointsVersion($missionId) : null;
 // Joining the points by road needs the organisation's Google key and cURL
 // (checked inline: route-distance.php is not part of the bootstrap chain).
@@ -3638,6 +3638,8 @@ include __DIR__ . '/includes/header.php';
     .wr-mp-pin-wrap { background: none; border: 0; }
     .wr-mp-pin { color: #0d9488; font-size: 30px; line-height: 1; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 1px 4px rgba(0,0,0,.55); }
     .wr-mp-flag { color: #0d9488; }
+    .wr-mp-pin.is-active { color: #d97706; }
+    .wr-mp-pin.is-done { color: #16a34a; }
     .wr-mp-popup textarea, .wr-mp-popup input, .wr-mp-popup select { font-size: 13px; }
     #mapPointsText { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; white-space: pre; overflow: auto; }
     #mapPointsList .list-group-item { cursor: pointer; }
@@ -6303,6 +6305,18 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                     <label class="form-check-label small" for="mapPointsShowToggle"><?= h(t('mp.show_on_map')) ?></label>
                 </div>
                 <input type="search" class="form-control form-control-sm mb-2" id="mapPointsFilter" placeholder="<?= h(t('mp.filter_placeholder')) ?>" autocomplete="off">
+                <div id="mapPointsStatusChips" class="d-flex flex-wrap gap-1 mb-2"></div>
+                <?php if ($canManageWarRoom): ?>
+                <div id="mapPointsAssignBar" class="d-none rounded p-2 mb-2 bg-primary-subtle">
+                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                        <span class="fw-semibold small" id="mapPointsAssignCount"></span>
+                        <button type="button" class="btn btn-sm btn-link p-0" id="mapPointsSelectAll"><?= h(t('mp.select_all')) ?></button>
+                        <button type="button" class="btn btn-sm btn-link p-0" id="mapPointsSelectNone"><?= h(t('mp.select_none')) ?></button>
+                        <select class="form-select form-select-sm ms-auto" id="mapPointsAssignTeam" style="max-width:190px"></select>
+                        <button type="button" class="btn btn-sm btn-primary" id="mapPointsAssignBtn"><i class="bi bi-send-fill me-1"></i><?= h(t('mp.assign_btn')) ?></button>
+                    </div>
+                </div>
+                <?php endif; ?>
                 <div id="mapPointsList" class="list-group list-group-flush mb-3"></div>
                 <div class="border-top pt-3 mb-3" id="mapPointsLink">
                     <div class="form-check form-switch mb-2">
@@ -8642,6 +8656,10 @@ function renderDispatches(items) {
     dispatchLayer.clearLayers();
     let reopenLayer = null;
     items.forEach(item => {
+        // An order made from an imported map point is that point's own pin
+        // (teal/amber/green, with the team's progress in its popup), not a
+        // second purple one on top of it (v3.364.0).
+        if (item.map_point_id) return;
         const acksHtml = item.acks.length
             ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? escapeHtml(a.team_label) + ' — ' : ''}${guestNameHtml(a.user_name, a.is_external, a.home_team_name, a.home_team_color_bg, a.home_team_color_fg, a.guest_country_code)}${k9BadgeHtml(a.user_id, true)}${captainBadgeHtml(a.user_id, true)} (${a.time})`).join('<br>') + '</div>'
             : '';
@@ -8805,8 +8823,20 @@ function dispatchNavPoint(item) {
 // re-rendered — same "the server is the source of truth, re-render from its
 // response" shape postRouteAction() already uses.
 function postDispatchAction(action, id, btnEl) {
+    // Completing a point sent from the map's imported points asks for a note
+    // (optional: OK with nothing written completes it without one). From every
+    // place that offers the button, since they all come through here.
+    let note = null;
+    if (action === 'complete') {
+        const sent = (dispatches || []).find(d => String(d.id) === String(id));
+        if (sent && sent.map_point_id) {
+            note = window.prompt(t('mp.complete_note_prompt', {name: sent.label || ''}), '');
+            if (note === null) return Promise.resolve({ok: false});
+        }
+    }
     if (btnEl) btnEl.disabled = true;
     const data = new URLSearchParams({csrf_token: csrfToken, action: action, mission_id: '<?= $missionId ?>', id: String(id)});
+    if (note) data.set('note', note);
     return fetch('mission-dispatch.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
         if (result.ok) {
             if (map) map.closePopup();
@@ -11730,6 +11760,9 @@ function mpPopupContent(id) {
         ${p.note ? `<div class="mt-1" style="white-space:pre-wrap">${escapeHtml(p.note)}</div>` : ''}
         <div class="small text-muted mt-1">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div>
         ${navigationBtnHtml(p.lat, p.lng, {block: true})}
+        <div class="mt-2">${mpStatusBadge(p)}</div>
+        ${mpMyDispatchHtml(p)}
+        ${MP_CAN_MANAGE ? mpHistoryHtml(p) : ''}
         ${MP_CAN_MANAGE ? `
         <hr class="my-2">
         <label class="form-label small fw-semibold mb-0">${escapeHtml(t('mp.f_name'))}</label>
@@ -11761,11 +11794,18 @@ function mpPopupContent(id) {
         if (heights) mpAltitudeCache.set(altKey, metres);
         if (altLine.isConnected) showAltitude(metres);
     });
+    // «Ξεκινάω / Έφτασα / Ολοκληρώθηκε» for the viewer's own team, here as well as
+    // in «Οι Εντολές μου»: the same dispatch, the same buttons.
+    div.querySelectorAll('[data-mp-step]').forEach(b => b.addEventListener('click', () => postDispatchAction(b.dataset.mpStep, b.dataset.id, b)));
     if (!MP_CAN_MANAGE) return div;
     div.addEventListener('click', e => {
         const btn = e.target.closest('[data-mp]');
         if (!btn) return;
-        if (btn.dataset.mp === 'save') {
+        if (btn.dataset.mp === 'assign') {
+            mpAssign([p.id], div.querySelector('[data-mp-team]').value, btn);
+        } else if (btn.dataset.mp === 'withdraw') {
+            if (confirm(t('mp.withdraw_confirm', {team: btn.dataset.team}))) mpWithdraw(btn.dataset.dispatch);
+        } else if (btn.dataset.mp === 'save') {
             btn.disabled = true;
             mpPost({
                 action: 'update', id: p.id,
@@ -11787,13 +11827,17 @@ function mpPopupContent(id) {
     return div;
 }
 
-function mpMakeMarker(p) {
-    const icon = L.divIcon({
+function mpIconFor(p) {
+    return L.divIcon({
         className: 'wr-mp-pin-wrap',
-        html: '<div class="wr-mp-pin"><i class="bi bi-geo-alt-fill"></i></div>',
+        html: `<div class="wr-mp-pin is-${p.status || 'free'}"><i class="bi bi-geo-alt-fill"></i></div>`,
         iconSize: [28, 32], iconAnchor: [14, 30], popupAnchor: [0, -28],
     });
-    const marker = L.marker([p.lat, p.lng], {icon, title: p.name, keyboard: false, zIndexOffset: 200});
+}
+
+function mpMakeMarker(p) {
+    const marker = L.marker([p.lat, p.lng], {icon: mpIconFor(p), title: p.name, keyboard: false, zIndexOffset: 200});
+    marker._mpStatus = p.status;
     marker.bindPopup(() => mpPopupContent(p.id), {minWidth: 230, maxWidth: 300});
     return marker;
 }
@@ -11803,6 +11847,7 @@ function mpMakeMarker(p) {
 // in it is never rebuilt under the person typing.
 function mpRender() {
     mpLinkCheckStale();
+    mpSelected.forEach(id => { if (!mapPoints.some(p => p.id === id)) mpSelected.delete(id); });
     if (mapPointsCluster) {
         const seen = new Set();
         const add = [];
@@ -11816,6 +11861,10 @@ function mpRender() {
                 marker.setLatLng([p.lat, p.lng]);
                 marker.options.title = p.name;
                 marker.getElement()?.setAttribute('title', p.name);
+                if (marker._mpStatus !== p.status) {
+                    marker._mpStatus = p.status;
+                    marker.setIcon(mpIconFor(p));
+                }
                 if (marker.isPopupOpen()) {
                     const el = marker.getPopup().getElement();
                     if (!(el && el.contains(document.activeElement))) marker.getPopup().update();
@@ -11908,26 +11957,167 @@ function mpSyncButton() {
     if (count) count.textContent = mpCountText(n);
 }
 
+const mpSelected = new Set();
+let mpStatusFilter = 'all';
+
+function mpStatusBadge(p) {
+    const cls = {free: 'bg-light text-secondary border', active: 'bg-warning text-dark', done: 'bg-success'}[p.status] || 'bg-light text-secondary border';
+    return `<span class="badge ${cls}">${escapeHtml(t('mp.status_' + (p.status || 'free')))}</span>`;
+}
+
+// What a visit has been through so far, newest step last.
+function mpVisitSteps(v) {
+    return [
+        v.assigned ? t('mp.visit_assigned', {time: v.assigned}) : '',
+        v.departed ? t('mp.visit_departed', {time: v.departed}) : '',
+        v.arrived ? t('mp.visit_arrived', {time: v.arrived}) : '',
+        v.completed ? t('mp.visit_completed', {time: v.completed}) : '',
+    ].filter(Boolean).join(' · ');
+}
+
+// Command's view of one point: every team that was sent, with its times and
+// the note it left, and the way to take back one that is still on its way.
+function mpHistoryHtml(p) {
+    const visits = p.visits || [];
+    const teamOptions = teams.map(tm => `<option value="${tm.id}">${escapeHtml(tm.label)}</option>`).join('');
+    return `
+        <hr class="my-2">
+        <div class="small fw-semibold mb-1">${escapeHtml(t('mp.history_title'))}</div>
+        ${visits.length ? visits.map(v => `
+            <div class="small mb-1">
+                <strong>${escapeHtml(v.team_label)}</strong>
+                <span class="badge ${v.state === 'done' ? 'bg-success' : 'bg-warning text-dark'}">${escapeHtml(t(v.state === 'done' ? 'mp.status_done' : 'mp.status_active'))}</span>
+                <div class="text-muted">${escapeHtml(mpVisitSteps(v))}</div>
+                ${v.note ? `<div class="fst-italic">«${escapeHtml(v.note)}»</div>` : ''}
+                ${v.state === 'active' ? `<button type="button" class="btn btn-sm btn-link text-danger p-0" data-mp="withdraw" data-dispatch="${v.dispatch_id}" data-team="${escapeHtml(v.team_label)}">${escapeHtml(t('mp.visit_withdraw'))}</button>` : ''}
+            </div>`).join('') : `<div class="small text-muted mb-1">${escapeHtml(t('mp.history_empty'))}</div>`}
+        <div class="d-flex gap-1 mt-1">
+            <select class="form-select form-select-sm" data-mp-team>${teamOptions || `<option value="">${escapeHtml(t('mp.assign_team_ph'))}</option>`}</select>
+            <button type="button" class="btn btn-sm btn-primary text-nowrap" data-mp="assign"><i class="bi bi-send-fill me-1"></i>${escapeHtml(t('mp.assign_btn'))}</button>
+        </div>`;
+}
+
+// The viewer's own team's open order for this point: where it stands and the
+// next button, the same ones «Οι Εντολές μου» offers.
+function mpMyDispatchHtml(p) {
+    return (dispatches || [])
+        .filter(d => d.map_point_id === p.id && !d.my_completed && (d.can_receive || d.can_depart || d.can_ack || d.can_complete || d.my_departed || d.my_ack))
+        .map(d => {
+            let html = '<div class="mt-2 border-top pt-2">';
+            if (d.my_departed && !d.my_ack) html += `<div class="small text-muted">${escapeHtml(t('dispatch.departed_at_prefix', {time: d.my_departed}))}</div>`;
+            if (d.my_ack) html += `<div class="small text-success">${escapeHtml(t('dispatch.arrived_at_prefix', {time: d.my_ack}))}</div>`;
+            const btn = (step, cls, icon, key) => `<button type="button" class="btn btn-sm ${cls} mt-1 w-100" data-mp-step="${step}" data-id="${d.id}"><i class="bi ${icon} me-1"></i>${escapeHtml(t(key))}</button>`;
+            if (d.can_receive) html += btn('receive', 'btn-warning', 'bi-flag', 'banner.ack_btn');
+            if (d.can_depart) html += btn('depart', 'btn-primary', 'bi-person-walking', 'dispatch.depart_btn');
+            else if (d.can_ack) html += btn('ack', 'btn-success', 'bi-check-lg', 'dispatch.arrival_btn');
+            else if (d.can_complete) html += btn('complete', 'btn-success', 'bi-flag-fill', 'dispatch.complete_btn');
+            return html + '</div>';
+        }).join('');
+}
+
+function mpMatches() {
+    const q = (document.getElementById('mapPointsFilter')?.value || '').trim().toLowerCase();
+    return mapPoints.filter(p =>
+        (mpStatusFilter === 'all' || p.status === mpStatusFilter)
+        && (!q || (p.name + ' ' + (p.note || '')).toLowerCase().includes(q)));
+}
+
+function mpRenderStatusChips() {
+    const box = document.getElementById('mapPointsStatusChips');
+    if (!box) return;
+    const count = key => mapPoints.filter(p => p.status === key).length;
+    const chips = [['all', t('mp.filter_all')], ['free', t('mp.filter_free', {n: count('free')})],
+        ['active', t('mp.filter_active', {n: count('active')})], ['done', t('mp.filter_done', {n: count('done')})]];
+    box.innerHTML = chips.map(([key, label]) =>
+        `<button type="button" class="btn btn-sm ${mpStatusFilter === key ? 'btn-primary' : 'btn-outline-secondary'}" data-mp-status="${key}">${escapeHtml(label)}</button>`).join('');
+}
+
+// The bar that appears once something is ticked: how many, and to which team.
+function mpSyncAssignBar() {
+    const bar = document.getElementById('mapPointsAssignBar');
+    if (!bar) return;
+    bar.classList.toggle('d-none', mpSelected.size === 0);
+    document.getElementById('mapPointsAssignCount').textContent = t('mp.selected_n', {n: mpSelected.size});
+    const select = document.getElementById('mapPointsAssignTeam');
+    const wanted = teams.map(tm => tm.id + ':' + tm.label).join('|');
+    if (select.dataset.sig !== wanted) {
+        const keep = select.value;
+        select.innerHTML = `<option value="">${escapeHtml(t('mp.assign_team_ph'))}</option>`
+            + teams.map(tm => `<option value="${tm.id}">${escapeHtml(tm.label)}</option>`).join('');
+        select.value = keep;
+        select.dataset.sig = wanted;
+    }
+}
+
 function mpRenderList() {
     const list = document.getElementById('mapPointsList');
     if (!list) return;
-    const q = (document.getElementById('mapPointsFilter')?.value || '').trim().toLowerCase();
-    const matches = q ? mapPoints.filter(p => (p.name + ' ' + (p.note || '')).toLowerCase().includes(q)) : mapPoints;
+    mpRenderStatusChips();
+    mpSyncAssignBar();
+    const matches = mpMatches();
     if (!matches.length) {
         list.innerHTML = `<div class="text-muted small py-2">${escapeHtml(t(mapPoints.length ? 'mp.empty' : (MP_CAN_MANAGE ? 'mp.empty_manage' : 'mp.empty')))}</div>`;
         return;
     }
-    list.innerHTML = matches.slice(0, MP_MAX_LIST_ROWS).map(p => `
+    list.innerHTML = matches.slice(0, MP_MAX_LIST_ROWS).map(p => {
+        const last = MP_CAN_MANAGE && p.visits && p.visits.length ? p.visits[p.visits.length - 1] : null;
+        return `
         <div class="list-group-item list-group-item-action py-2" data-mp-focus="${p.id}">
-            <div class="d-flex justify-content-between gap-2">
-                <span class="fw-semibold"><span class="text-muted fw-normal me-1">${mapPoints.indexOf(p) + 1}.</span>${escapeHtml(p.name)}</span>
-                <span class="small text-muted text-nowrap">
-                    ${p.access ? `<i class="bi ${mpAccessIcon(p.access)} ms-1"></i>` : ''}
-                </span>
+            <div class="d-flex align-items-center gap-2">
+                ${MP_CAN_MANAGE ? `<input type="checkbox" class="form-check-input mt-0 flex-shrink-0" data-mp-sel="${p.id}"${mpSelected.has(p.id) ? ' checked' : ''}>` : ''}
+                <span class="fw-semibold flex-grow-1 text-truncate"><span class="text-muted fw-normal me-1">${mapPoints.indexOf(p) + 1}.</span>${escapeHtml(p.name)}</span>
+                ${p.access ? `<i class="bi ${mpAccessIcon(p.access)} text-muted"></i>` : ''}
+                ${mpStatusBadge(p)}
             </div>
+            ${last ? `<div class="small text-muted">${escapeHtml(last.team_label)} · ${escapeHtml(mpVisitSteps(last).split(' · ').pop())}</div>` : ''}
             ${p.note ? `<div class="small text-muted text-truncate">${escapeHtml(p.note)}</div>` : ''}
-        </div>`).join('')
+        </div>`;
+    }).join('')
         + (matches.length > MP_MAX_LIST_ROWS ? `<div class="small text-muted py-2">${escapeHtml(t('mp.list_more', {n: MP_MAX_LIST_ROWS}))}</div>` : '');
+}
+
+// Send points to a team: each becomes that team's order, notified like any
+// dispatch. Used by the ticked rows and by one point's popup.
+function mpAssign(ids, teamId, btn) {
+    if (!teamId) { alert(t('mp.assign_pick')); return Promise.resolve(null); }
+    if (btn) btn.disabled = true;
+    return mpPost({action: 'assign', ids: JSON.stringify(ids), team_id: teamId}).then(res => {
+        if (btn) btn.disabled = false;
+        if (!res || !res.ok) return res;
+        if (res.dispatches) renderDispatches(dispatches = res.dispatches);
+        const team = (teams.find(x => String(x.id) === String(teamId)) || {}).label || '';
+        opToast(res.assigned > 0
+            ? t(res.skipped > 0 ? 'mp.toast_assigned_skipped' : 'mp.toast_assigned', {n: res.assigned, team: team, skipped: res.skipped})
+            : t('mp.toast_assign_none_new'));
+        if (res.assigned > 0) {
+            ids.forEach(id => mpSelected.delete(id));
+            map.closePopup();
+            mpRender();
+        }
+        return res;
+    });
+}
+
+// Take back an order that is still on its way: the dispatch's own withdrawal,
+// which tells the team it no longer stands.
+function mpWithdraw(dispatchId) {
+    const body = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: '<?= $missionId ?>', id: String(dispatchId)});
+    return fetch('mission-dispatch.php', {method: 'POST', body}).then(r => r.json()).then(result => {
+        if (!result.ok) { alert(result.error || t('common.failed')); return; }
+        map.closePopup();
+        renderDispatches(dispatches = dispatches.filter(d => String(d.id) !== String(dispatchId)));
+        if (typeof renderAckTracker === 'function') renderAckTracker([]);
+        mpRefresh();
+    }).catch(() => alert(t('common.send_failed')));
+}
+
+// «Οι Εντολές μου» and the order popup send the viewer to the point; the point's
+// own pin carries the order now, so that is what opens.
+function mpOpenPopupFor(pointId) {
+    const marker = mapPointMarkers.get(pointId);
+    if (!marker || !mapPointsCluster) return;
+    if (!map.hasLayer(mapPointsCluster)) map.addLayer(mapPointsCluster);
+    mapPointsCluster.zoomToShowLayer(marker, () => marker.openPopup());
 }
 
 // Take the map to the point and open it (or, without an id, frame them all).
@@ -12150,11 +12340,37 @@ function mpLinkDraw() {
         if (mapPointsShown) map.addLayer(mapPointsCluster); else map.removeLayer(mapPointsCluster);
     });
     filter.addEventListener('input', mpRenderList);
+    document.getElementById('mapPointsStatusChips').addEventListener('click', e => {
+        const chip = e.target.closest('[data-mp-status]');
+        if (!chip) return;
+        mpStatusFilter = chip.dataset.mpStatus;
+        mpRenderList();
+    });
+    const assignBtn = document.getElementById('mapPointsAssignBtn');
+    if (assignBtn) {
+        document.getElementById('mapPointsSelectAll').addEventListener('click', () => {
+            mpMatches().slice(0, <?= (int) MAP_POINT_ASSIGN_MAX ?>).forEach(p => mpSelected.add(p.id));
+            mpRenderList();
+        });
+        document.getElementById('mapPointsSelectNone').addEventListener('click', () => { mpSelected.clear(); mpRenderList(); });
+        assignBtn.addEventListener('click', () => {
+            // In the order they are listed, which is the order they are sent in.
+            const ids = mapPoints.filter(p => mpSelected.has(p.id)).map(p => p.id).slice(0, <?= (int) MAP_POINT_ASSIGN_MAX ?>);
+            mpAssign(ids, document.getElementById('mapPointsAssignTeam').value, assignBtn);
+        });
+    }
     const linkSwitch = document.getElementById('mapPointsLinkSwitch');
     linkSwitch.addEventListener('change', () => { if (linkSwitch.checked) mpLinkDraw(); else mpLinkClear(); });
     document.getElementById('mapPointsLinkDraw').addEventListener('click', mpLinkDraw);
     document.getElementById('mapPointsLinkClear').addEventListener('click', mpLinkClear);
     list.addEventListener('click', e => {
+        const tick = e.target.closest('[data-mp-sel]');
+        if (tick) {
+            const id = Number(tick.dataset.mpSel);
+            if (tick.checked) mpSelected.add(id); else mpSelected.delete(id);
+            mpSyncAssignBar();
+            return;
+        }
         const row = e.target.closest('[data-mp-focus]');
         if (row) mpFocus(Number(row.dataset.mpFocus));
     });
@@ -15434,10 +15650,16 @@ function opGotoMap(m, afterAck) {
         // the receipt has landed: its reply re-renders the layer and closes
         // any popup open at that moment.
         if (m.kind === 'dispatch' && dispatchLayer) {
-            mapOverlayEnsureShown('dispatch');
-            Promise.resolve(afterAck).then(() => dispatchLayer.eachLayer(layer => {
-                if (String(layer.dispatchId) === String(m.id)) layer.openPopup();
-            }));
+            const fromPoint = (dispatches || []).find(d => String(d.id) === String(m.id) && d.map_point_id);
+            if (fromPoint) {
+                // An order made from a map point has no pin of its own.
+                Promise.resolve(afterAck).then(() => mpOpenPopupFor(fromPoint.map_point_id));
+            } else {
+                mapOverlayEnsureShown('dispatch');
+                Promise.resolve(afterAck).then(() => dispatchLayer.eachLayer(layer => {
+                    if (String(layer.dispatchId) === String(m.id)) layer.openPopup();
+                }));
+            }
         }
     }, 200);
 }

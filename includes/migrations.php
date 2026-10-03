@@ -7600,6 +7600,31 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 181,
+            'description' => 'Map points can be assigned to a team (v3.364.0): mission_dispatch_points.map_point_id links a dispatch to the imported point it was made from (ON DELETE SET NULL, so removing a point leaves the order standing), and mission_dispatch_progress.completed_note is the note a team leaves when it completes one.',
+            'up' => function () {
+                if (!dbColumnExists('mission_dispatch_points', 'map_point_id')) {
+                    dbExecute("ALTER TABLE mission_dispatch_points ADD COLUMN map_point_id INT UNSIGNED NULL AFTER incident_id");
+                    dbExecute("ALTER TABLE mission_dispatch_points ADD INDEX idx_dispatch_map_point (map_point_id)");
+                }
+                // The foreign key on its own statement: MariaDB refuses to add a
+                // column and a key on it in one ALTER (errno 1823).
+                $fk = dbFetchOne(
+                    "SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_dispatch_points'
+                       AND CONSTRAINT_NAME = 'fk_dispatch_map_point'"
+                );
+                if (!$fk) {
+                    dbExecute("ALTER TABLE mission_dispatch_points ADD CONSTRAINT fk_dispatch_map_point
+                               FOREIGN KEY (map_point_id) REFERENCES mission_map_points(id) ON DELETE SET NULL");
+                }
+                if (!dbColumnExists('mission_dispatch_progress', 'completed_note')) {
+                    dbExecute("ALTER TABLE mission_dispatch_progress ADD COLUMN completed_note VARCHAR(500) NULL AFTER completed_by");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

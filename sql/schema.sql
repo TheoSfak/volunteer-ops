@@ -3212,4 +3212,14 @@ CREATE TABLE IF NOT EXISTS `mission_map_points` (
     FOREIGN KEY (`updated_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- MAP POINTS ASSIGNED TO TEAMS (v3.364.0). A point sent to a team is an ordinary
+-- dispatch (so notice, popup, steps and the command staff's alerts all come from
+-- the dispatch code) linked back to its point; the point's history is the list
+-- of dispatches that carry its id.
+ALTER TABLE `mission_dispatch_points` ADD COLUMN `map_point_id` INT UNSIGNED NULL AFTER `incident_id`;
+ALTER TABLE `mission_dispatch_points` ADD INDEX `idx_dispatch_map_point` (`map_point_id`);
+ALTER TABLE `mission_dispatch_points` ADD CONSTRAINT `fk_dispatch_map_point`
+    FOREIGN KEY (`map_point_id`) REFERENCES `mission_map_points`(`id`) ON DELETE SET NULL;
+ALTER TABLE `mission_dispatch_progress` ADD COLUMN `completed_note` VARCHAR(500) NULL AFTER `completed_by`;
+
 SET FOREIGN_KEY_CHECKS = 1;

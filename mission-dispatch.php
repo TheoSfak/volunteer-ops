@@ -83,7 +83,10 @@ if (in_array($action, ['depart', 'ack', 'complete'], true)) {
     // Shared with mobile-order-ack.php: «Έφτασα» pressed on the phone's
     // «Έφτασες;» notification.
     $step = ['depart' => 'depart', 'ack' => 'arrive', 'complete' => 'complete'][$action];
-    $error = advanceMissionDispatch($mission, (int) post('id'), (int) $userId, $user['name'], $step);
+    // A note on completing (v3.364.0): for a point sent from the map's imported
+    // points, but accepted for any dispatch.
+    $note = $step === 'complete' ? mb_substr(trim((string) post('note')), 0, 500) : null;
+    $error = advanceMissionDispatch($mission, (int) post('id'), (int) $userId, $user['name'], $step, null, $note);
     if ($error !== null) {
         echo json_encode(['ok' => false, 'error' => $error]);
         exit;

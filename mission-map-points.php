@@ -47,7 +47,7 @@ if ($action !== 'connect') {
 
 $missionId = (int) post('mission_id');
 $mission = dbFetchOne(
-    "SELECT id, responsible_user_id FROM missions
+    "SELECT id, title, responsible_user_id FROM missions
      WHERE id = ? AND status = ? AND show_in_ops = 1 AND deleted_at IS NULL",
     [$missionId, STATUS_OPEN]
 );
@@ -68,10 +68,10 @@ if (!$canManage && !$isApprovedParticipant) {
     exit;
 }
 
-$answer = function (array $extra = []) use ($missionId) {
+$answer = function (array $extra = []) use ($missionId, $canManage) {
     return json_encode(array_merge([
         'ok' => true,
-        'mapPoints' => loadMissionMapPoints($missionId),
+        'mapPoints' => loadMissionMapPoints($missionId, $canManage),
         'mapPointsVersion' => missionMapPointsVersion($missionId),
     ], $extra), JSON_UNESCAPED_UNICODE);
 };
@@ -171,6 +171,27 @@ if ($action === 'preview' || $action === 'import') {
         logAudit('map_points_imported', 'missions', $missionId, null, ['added' => $result['added'], 'duplicates' => $result['duplicates'], 'invalid' => $summary['invalid']]);
     }
     echo $answer(['summary' => $summary, 'added' => $result['added'], 'duplicates' => $result['duplicates'], 'overLimit' => $result['over_limit']]);
+    exit;
+}
+
+if ($action === 'assign') {
+    $ids = json_decode((string) post('ids'), true);
+    if (!is_array($ids) || !$ids || count($ids) > MAP_POINT_ASSIGN_MAX) {
+        echo json_encode(['ok' => false, 'error' => t('mp.err_assign_none')]);
+        exit;
+    }
+    $user = getCurrentUser();
+    $result = assignMapPointsToTeam($mission, (int) post('team_id'), $ids, $userId, (string) ($user['name'] ?? ''));
+    if (isset($result['error'])) {
+        echo json_encode(['ok' => false, 'error' => $result['error']]);
+        exit;
+    }
+    echo $answer([
+        'assigned' => $result['assigned'],
+        'skipped' => $result['skipped'],
+        // The page's own order list, so the new orders show at once.
+        'dispatches' => loadMissionDispatchesForUser($missionId, $userId, true, $isApprovedParticipant),
+    ]);
     exit;
 }
 

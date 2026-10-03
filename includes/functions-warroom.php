@@ -854,7 +854,7 @@ function loadDispatchProgress(array $dispatchIds): array {
     }
     $placeholders = implode(',', array_fill(0, count($dispatchIds), '?'));
     $rows = dbFetchAll(
-        "SELECT p.dispatch_id, p.team_id, p.scope_key, p.departed_at, p.arrived_at, p.completed_at,
+        "SELECT p.dispatch_id, p.team_id, p.scope_key, p.departed_at, p.arrived_at, p.completed_at, p.completed_note,
                 mt.codename, mt.team_number, su.name AS solo_name
          FROM mission_dispatch_progress p
          LEFT JOIN mission_teams mt ON mt.id = p.team_id
@@ -871,6 +871,7 @@ function loadDispatchProgress(array $dispatchIds): array {
             'departed'  => $hm($row['departed_at']),
             'arrived'   => $hm($row['arrived_at']),
             'completed' => $hm($row['completed_at']),
+            'note'      => $row['completed_note'] !== null && $row['completed_note'] !== '' ? $row['completed_note'] : null,
             'arrived_raw' => $row['arrived_at'],
         ];
     }
@@ -891,7 +892,7 @@ function loadDispatchProgress(array $dispatchIds): array {
  */
 function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canManageWarRoom, bool $isApprovedParticipant): array {
     $rows = dbFetchAll(
-        "SELECT d.id, d.team_id, d.type, d.geo, d.label, d.ring_index, d.incident_id, mt.codename, mt.team_number, mt.color
+        "SELECT d.id, d.team_id, d.type, d.geo, d.label, d.ring_index, d.incident_id, d.map_point_id, mt.codename, mt.team_number, mt.color
          FROM mission_dispatch_points d
          LEFT JOIN mission_teams mt ON mt.id = d.team_id
          WHERE d.mission_id = ?
@@ -1035,6 +1036,9 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             'label'       => $row['label'],
             'ring_index'  => $row['ring_index'] !== null ? (int) $row['ring_index'] : null,
             'incident'    => $row['incident_id'] !== null ? ($incidentsById[(int) $row['incident_id']] ?? null) : null,
+            // The imported map point this was made from, if any (v3.364.0): the
+            // map shows that point's own pin rather than a second one.
+            'map_point_id' => $row['map_point_id'] !== null ? (int) $row['map_point_id'] : null,
             'team_id'     => $teamId,
             'team_label'  => $teamId ? teamLabel($row['codename'], $row['team_number']) : t('common.all_teams'),
             'team_color_bg' => $teamColorBg,
@@ -3739,7 +3743,7 @@ function notifyDispatchArrival(int $missionId, string $missionTitle, ?int $respo
  * a change in the state of the operation and gets the banner, like arrival.
  * Moved here with notifyDispatchArrival() from mission-dispatch.php (v3.333.0).
  */
-function notifyDispatchStep(string $step, int $missionId, string $missionTitle, ?int $responsibleUserId, array $dispatch, ?string $teamLabel, string $actorName, int $actorId): void {
+function notifyDispatchStep(string $step, int $missionId, string $missionTitle, ?int $responsibleUserId, array $dispatch, ?string $teamLabel, string $actorName, int $actorId, ?string $note = null): void {
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
     $labelPart = $dispatch['label'] ? ' «' . $dispatch['label'] . '»' : '';
     $loud = $step === 'complete';
@@ -3751,6 +3755,10 @@ function notifyDispatchStep(string $step, int $missionId, string $missionTitle, 
         $kind = t($dispatch['type'] === 'point' ? 'dispatch.kind_for_point' : 'dispatch.kind_for_area', [], $lang);
         $who = $teamLabel ? t('dispatch.team_label_prefix', ['team' => $teamLabel], $lang) : $actorName;
         $message = t('dispatch.' . $step . '_message', ['who' => $who, 'kind' => $kind, 'label_part' => $labelPart, 'mission' => $missionTitle], $lang);
+        // What the team wrote on completing (v3.364.0).
+        if ($loud && $note !== null && $note !== '') {
+            $message .= ' — «' . $note . '»';
+        }
         $pushData = [
             'url' => $warRoomUrl,
             'tag' => 'dispatch-' . $step . '-mission-' . $missionId,
@@ -3779,7 +3787,7 @@ function notifyDispatchStep(string $step, int $missionId, string $missionTitle, 
  * that the user is an approved participant. Returns null on success, else the
  * error to show.
  */
-function advanceMissionDispatch(array $mission, int $dispatchId, int $userId, string $userName, string $step, ?string $via = null): ?string {
+function advanceMissionDispatch(array $mission, int $dispatchId, int $userId, string $userName, string $step, ?string $via = null, ?string $note = null): ?string {
     $missionId = (int) $mission['id'];
     $dispatch = dbFetchOne("SELECT id, team_id, label, type FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$dispatchId, $missionId]);
     if (!$dispatch) {
@@ -3808,6 +3816,14 @@ function advanceMissionDispatch(array $mission, int $dispatchId, int $userId, st
         [$dispatchId, $myTeamId ?: $userId]
     );
     $recorded = recordDispatchProgress($dispatchId, $myTeamId, $userId, $step);
+    // The note a team leaves on completing (v3.364.0), kept on the row that
+    // says when, and only by the press that recorded the completion.
+    if ($note !== null && $note !== '' && in_array('complete', $recorded, true)) {
+        dbExecute(
+            "UPDATE mission_dispatch_progress SET completed_note = ? WHERE dispatch_id = ? AND scope_key = ?",
+            [mb_substr($note, 0, 500), $dispatchId, dispatchProgressScopeKey($myTeamId, $userId)]
+        );
+    }
     // A team that said «Δεν μπορώ» and is now moving on it after all.
     resolveOrderDeclineOnProgress('dispatch', $dispatchId, dispatchProgressScopeKey($myTeamId, $userId), $userId);
 
@@ -3843,7 +3859,7 @@ function advanceMissionDispatch(array $mission, int $dispatchId, int $userId, st
             if ($step === 'arrive') {
                 notifyDispatchArrival($missionId, $mission['title'], $responsibleUserId, $dispatch, $teamLabel, $userName, $userId);
             } else {
-                notifyDispatchStep($step, $missionId, $mission['title'], $responsibleUserId, $dispatch, $teamLabel, $userName, $userId);
+                notifyDispatchStep($step, $missionId, $mission['title'], $responsibleUserId, $dispatch, $teamLabel, $userName, $userId, $note);
             }
         }
     }

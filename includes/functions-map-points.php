@@ -316,21 +316,81 @@ function importMissionMapPoints(int $missionId, array $rows, int $userId): array
  * pasted, which is also the order «Σύνδεση σημείων» joins them in. No raw
  * timestamps, the page compares by JSON.
  */
-function loadMissionMapPoints(int $missionId): array {
+function loadMissionMapPoints(int $missionId, bool $withHistory = false): array {
     $rows = dbFetchAll(
         "SELECT id, name, lat, lng, elevation_m, access, note
          FROM mission_map_points WHERE mission_id = ? ORDER BY id ASC",
         [$missionId]
     );
-    return array_map(static fn(array $r) => [
-        'id'        => (int) $r['id'],
-        'name'      => (string) $r['name'],
-        'lat'       => (float) $r['lat'],
-        'lng'       => (float) $r['lng'],
-        'elevation' => $r['elevation_m'] !== null ? (int) $r['elevation_m'] : null,
-        'access'    => $r['access'] ?: null,
-        'note'      => $r['note'] !== null && $r['note'] !== '' ? (string) $r['note'] : null,
-    ], $rows);
+    $visits = mapPointVisits($missionId);
+    return array_map(static function (array $r) use ($visits, $withHistory) {
+        $v = $visits[(int) $r['id']] ?? [];
+        $status = 'free';
+        foreach ($v as $visit) {
+            if ($visit['state'] === 'active') {
+                $status = 'active';
+            } elseif ($status === 'free') {
+                $status = 'done';
+            }
+        }
+        $point = [
+            'id'        => (int) $r['id'],
+            'name'      => (string) $r['name'],
+            'lat'       => (float) $r['lat'],
+            'lng'       => (float) $r['lng'],
+            'elevation' => $r['elevation_m'] !== null ? (int) $r['elevation_m'] : null,
+            'access'    => $r['access'] ?: null,
+            'note'      => $r['note'] !== null && $r['note'] !== '' ? (string) $r['note'] : null,
+            // free (no team sent yet), active (a team is on it) or done (every
+            // team sent has finished). Everybody sees this; the history below
+            // is command's.
+            'status'    => $status,
+        ];
+        if ($withHistory) {
+            $point['visits'] = $v;
+        }
+        return $point;
+    }, $rows);
+}
+
+/**
+ * Every team that was sent to each point, oldest first, for command's view of a
+ * point: [point_id => [visit, ...]]. A visit is the dispatch made from the
+ * point plus its team's own steps, as the teams pressed them
+ * (mission_dispatch_progress), with the note left on completing. Times are
+ * 'H:i', or 'd/m H:i' when not today: a point can be revisited on another day.
+ */
+function mapPointVisits(int $missionId): array {
+    if (!dbColumnExists('mission_dispatch_points', 'map_point_id')) {
+        return [];
+    }
+    $rows = dbFetchAll(
+        "SELECT d.id AS dispatch_id, d.map_point_id, d.team_id, d.created_at,
+                mt.codename, mt.team_number,
+                p.departed_at, p.arrived_at, p.completed_at, p.completed_note
+         FROM mission_dispatch_points d
+         LEFT JOIN mission_teams mt ON mt.id = d.team_id
+         LEFT JOIN mission_dispatch_progress p ON p.dispatch_id = d.id AND p.scope_key = CONCAT('t', d.team_id)
+         WHERE d.mission_id = ? AND d.map_point_id IS NOT NULL
+         ORDER BY d.id",
+        [$missionId]
+    );
+    $clock = static fn($ts) => $ts ? date(date('Y-m-d', strtotime($ts)) === date('Y-m-d') ? 'H:i' : 'd/m H:i', strtotime($ts)) : null;
+    $out = [];
+    foreach ($rows as $r) {
+        $out[(int) $r['map_point_id']][] = [
+            'dispatch_id' => (int) $r['dispatch_id'],
+            'team_id'     => $r['team_id'] !== null ? (int) $r['team_id'] : null,
+            'team_label'  => $r['codename'] !== null ? teamLabel($r['codename'], $r['team_number']) : '—',
+            'state'       => $r['completed_at'] ? 'done' : 'active',
+            'assigned'    => $clock($r['created_at']),
+            'departed'    => $clock($r['departed_at']),
+            'arrived'     => $clock($r['arrived_at']),
+            'completed'   => $clock($r['completed_at']),
+            'note'        => $r['completed_note'] !== null && $r['completed_note'] !== '' ? (string) $r['completed_note'] : null,
+        ];
+    }
+    return $out;
 }
 
 /**
@@ -344,7 +404,21 @@ function missionMapPointsVersion(int $missionId): string {
          FROM mission_map_points WHERE mission_id = ?",
         [$missionId]
     );
-    return $r['c'] . '.' . $r['mx'] . '.' . preg_replace('/\D/', '', (string) $r['mu']);
+    $version = $r['c'] . '.' . $r['mx'] . '.' . preg_replace('/\D/', '', (string) $r['mu']);
+    // A team being sent to a point, or pressing a step on it, changes what the
+    // map shows (pin colour, history) without touching the point itself.
+    if (dbColumnExists('mission_dispatch_points', 'map_point_id')) {
+        $d = dbFetchOne(
+            "SELECT COUNT(DISTINCT d.id) AS c, COALESCE(MAX(d.id), 0) AS mx,
+                    COALESCE(MAX(p.departed_at), '') AS a, COALESCE(MAX(p.arrived_at), '') AS b, COALESCE(MAX(p.completed_at), '') AS f
+             FROM mission_dispatch_points d
+             LEFT JOIN mission_dispatch_progress p ON p.dispatch_id = d.id
+             WHERE d.mission_id = ? AND d.map_point_id IS NOT NULL",
+            [$missionId]
+        );
+        $version .= '/' . $d['c'] . '.' . $d['mx'] . '.' . preg_replace('/\D/', '', $d['a'] . $d['b'] . $d['f']);
+    }
+    return $version;
 }
 
 /** Change one point's details. False when the point is not on this mission. */
@@ -444,4 +518,121 @@ function mapPointsLinkLegs(array $points, string $mode, string $apiKey, ?callabl
         $legs[] = $leg;
     }
     return ['legs' => $legs, 'meters' => $meters, 'minutes' => $minutes, 'unrouted' => $unrouted];
+}
+
+/** One assignment sends at most this many points to a team. */
+const MAP_POINT_ASSIGN_MAX = 50;
+
+/**
+ * Send imported points to a team: each becomes an ordinary dispatch point for
+ * that team (label = the point's name, linked back by map_point_id), so the
+ * team gets the same notice and popup as for any dispatch, presses the same
+ * «Ξεκινάω / Έφτασα / Ολοκληρώθηκε», and command staff are alerted the same way.
+ * The point stays available: another team can be sent later, each with its own
+ * record. A point the same team already has open is skipped.
+ *
+ * One notification for the whole batch rather than one per point: forty points
+ * must not be forty alarms on one phone.
+ *
+ * @param array $mission the open mission's row (id, title)
+ * @param array<int, int> $pointIds in the order to send them
+ * @return array{error?: string, assigned: int, skipped: int, dispatch_ids: array<int, int>}
+ */
+function assignMapPointsToTeam(array $mission, int $teamId, array $pointIds, int $userId, string $userName): array {
+    $missionId = (int) $mission['id'];
+    $team = dbFetchOne("SELECT id, codename, team_number FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
+    if (!$team) {
+        return ['error' => t('common.team_not_found'), 'assigned' => 0, 'skipped' => 0, 'dispatch_ids' => []];
+    }
+    $ids = array_slice(array_values(array_unique(array_filter(array_map('intval', $pointIds)))), 0, MAP_POINT_ASSIGN_MAX);
+    if (!$ids) {
+        return ['error' => t('mp.err_assign_none'), 'assigned' => 0, 'skipped' => 0, 'dispatch_ids' => []];
+    }
+    $in = implode(',', array_fill(0, count($ids), '?'));
+    $points = [];
+    foreach (dbFetchAll("SELECT id, name, lat, lng FROM mission_map_points WHERE mission_id = ? AND id IN ($in)", array_merge([$missionId], $ids)) as $p) {
+        $points[(int) $p['id']] = $p;
+    }
+
+    $dispatchIds = [];
+    $labels = [];
+    $skipped = 0;
+    foreach ($ids as $id) {
+        if (!isset($points[$id])) {
+            continue;
+        }
+        $open = (int) dbFetchValue(
+            "SELECT COUNT(*) FROM mission_dispatch_points d
+             LEFT JOIN mission_dispatch_progress p ON p.dispatch_id = d.id AND p.scope_key = CONCAT('t', d.team_id)
+             WHERE d.map_point_id = ? AND d.team_id = ? AND p.completed_at IS NULL",
+            [$id, $teamId]
+        );
+        if ($open > 0) {
+            $skipped++;
+            continue;
+        }
+        $dispatchId = (int) dbInsert(
+            "INSERT INTO mission_dispatch_points (mission_id, team_id, type, geo, label, map_point_id, created_by, created_at)
+             VALUES (?, ?, 'point', ?, ?, ?, ?, NOW())",
+            [$missionId, $teamId, json_encode(['lat' => (float) $points[$id]['lat'], 'lng' => (float) $points[$id]['lng']]), mb_substr((string) $points[$id]['name'], 0, 255), $id, $userId]
+        );
+        logAudit('create_mission_dispatch', 'mission_dispatch_points', $dispatchId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'type' => 'point', 'map_point_id' => $id]);
+        $dispatchIds[] = $dispatchId;
+        $labels[] = (string) $points[$id]['name'];
+    }
+
+    if ($dispatchIds) {
+        notifyMapPointsAssigned($mission, $team, $dispatchIds, $labels, $userId, $userName);
+    }
+    return ['assigned' => count($dispatchIds), 'skipped' => $skipped, 'dispatch_ids' => $dispatchIds];
+}
+
+/**
+ * Tell the team (and the admins watching) that points were assigned. Mirrors
+ * mission-dispatch.php's own create notification: the team gets the banner and
+ * sound and its popup opens on the first point; a system administrator who is
+ * not on the team gets the same as a third-person line, without the banner.
+ */
+function notifyMapPointsAssigned(array $mission, array $team, array $dispatchIds, array $labels, int $actorId, string $actorName): void {
+    $missionId = (int) $mission['id'];
+    $teamId = (int) $team['id'];
+    $teamLabel = teamLabel($team['codename'], $team['team_number']);
+    $n = count($dispatchIds);
+    $shown = array_slice($labels, 0, 3);
+    $labelList = implode(', ', $shown) . ($n > count($shown) ? '…' : '');
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+
+    $recipientIds = actionRoomNotifyRecipientIds($missionId, $teamId, $actorId);
+    $langs = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langs[$recipientId] ?? DEFAULT_LANGUAGE;
+        $message = $n === 1
+            ? t('dispatch.create_notify_message', ['mission' => $mission['title'], 'kind' => t('dispatch.a_point', [], $lang), 'label_suffix' => ' (' . $labels[0] . ')'], $lang)
+            : t('mp.assign_notify_message', ['mission' => $mission['title'], 'n' => $n, 'labels' => $labelList], $lang);
+        sendNotification($recipientId, t('dispatch.create_notify_title_point', [], $lang), $message, 'info', 'mission_dispatch_point', [
+            'url' => $warRoomUrl,
+            'tag' => 'dispatch-point-mission-' . $missionId,
+            'bannerMission' => $missionId,
+            'dispatchId' => (int) $dispatchIds[0],
+        ]);
+    }
+
+    $bystanders = array_values(array_diff(getSystemAdminIds($actorId), $recipientIds));
+    if ($bystanders) {
+        $fyiLangs = getUserLanguages($bystanders);
+        foreach ($bystanders as $adminId) {
+            $lang = $fyiLangs[$adminId] ?? DEFAULT_LANGUAGE;
+            $message = t('dispatch.create_admin_fyi', [
+                'actor' => $actorName,
+                'kind' => t('dispatch.a_point', [], $lang),
+                'mission' => $mission['title'],
+                'label_suffix' => ' (' . $labelList . ')',
+                'target' => $teamLabel,
+            ], $lang);
+            sendNotification($adminId, t('dispatch.create_notify_title_point', [], $lang), $message, 'info', '', [
+                'url' => $warRoomUrl,
+                'tag' => 'dispatch-point-mission-' . $missionId,
+            ]);
+        }
+    }
 }
