@@ -7575,6 +7575,31 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 180,
+            'description' => 'Add mission_map_points: reference points command imports for one mission (pasted list or CSV) and shows as pins on the Action Room map, each with an altitude, how to get there (foot / vehicle / both) and a note (v3.361.0).',
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_map_points (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    name VARCHAR(120) NOT NULL,
+                    lat DECIMAL(10, 8) NOT NULL,
+                    lng DECIMAL(11, 8) NOT NULL,
+                    elevation_m SMALLINT NULL COMMENT 'Altitude in metres',
+                    access ENUM('foot','vehicle','both') NULL COMMENT 'How to get there',
+                    note TEXT NULL,
+                    created_by INT UNSIGNED NULL,
+                    created_at DATETIME NOT NULL,
+                    updated_by INT UNSIGNED NULL,
+                    updated_at DATETIME NULL,
+                    INDEX idx_map_points_mission (mission_id),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

@@ -1588,6 +1588,9 @@ if (get('ajax') === '1') {
     // The Συντονιστικό. Null until command places it, so the page reads the
     // key with `in`, like triage.
     $commandPost = ($canManageWarRoom || $isApprovedParticipant) ? loadMissionCommandPost($missionId) : null;
+    // Only the version of the imported map points rides the poll; a page whose
+    // copy differs asks mission-map-points.php for the list.
+    $mapPointsVersion = ($canManageWarRoom || $isApprovedParticipant) ? missionMapPointsVersion($missionId) : null;
     $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
     // Command staff only, same as $sosAlerts: a volunteer's tab must not
     // carry other people's voice messages, and has nothing to do with them.
@@ -1664,6 +1667,7 @@ if (get('ajax') === '1') {
         'incidents' => $incidents,
         'triage' => $triage,
         'commandPost' => $commandPost,
+        'mapPointsVersion' => $mapPointsVersion,
         'sosAlerts' => $sosAlerts,
         'voiceMessages' => $voiceMessages,
         'pointsOfInterest' => $pointsOfInterest,
@@ -1803,6 +1807,10 @@ $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncid
 $triage = ($canManageWarRoom || $isApprovedParticipant) ? loadTriageStateForMission($missionId, $canManageWarRoom, (int) $user['id']) : null;
 // The Συντονιστικό: everybody on the operation sees it (null until placed).
 $commandPost = ($canManageWarRoom || $isApprovedParticipant) ? loadMissionCommandPost($missionId) : null;
+// Imported reference points (v3.361.0), for command and the participants.
+$mapPointsVisible = $canManageWarRoom || $isApprovedParticipant;
+$mapPoints = $mapPointsVisible ? loadMissionMapPoints($missionId) : [];
+$mapPointsVersion = $mapPointsVisible ? missionMapPointsVersion($missionId) : null;
 $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
 $voiceMessages = $canManageWarRoom ? loadUnacknowledgedVoiceMessagesForMission($missionId) : [];
 $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
@@ -3615,6 +3623,17 @@ include __DIR__ . '/includes/header.php';
     .leaflet-bar.wr-cp-control.is-unset a { background: #fffbeb; }
     .leaflet-bar.wr-cp-control.is-unset a:hover { background: #fef3c7; }
     .wr-cp-flag { color: #d97706; }
+    /* Σημεία χάρτη (v3.361.0): teal pins, so they are never mistaken for the
+       amber command post, the purple dispatches or the blue clue pins. */
+    .leaflet-bar.wr-mp-control a, .leaflet-touch .leaflet-bar.wr-mp-control a { display: flex; align-items: center; justify-content: center; gap: 5px; width: auto; min-width: 30px; padding: 0 7px; color: #0f172a; font: 600 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif; white-space: nowrap; }
+    .wr-mp-control a .bi { color: #0d9488; font-size: 15px; }
+    .wr-mp-control .wr-mp-count { background: #0d9488; color: #fff; border-radius: 9px; padding: 1px 6px; font-size: 11px; }
+    .wr-mp-pin-wrap { background: none; border: 0; }
+    .wr-mp-pin { color: #0d9488; font-size: 30px; line-height: 1; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 1px 4px rgba(0,0,0,.55); }
+    .wr-mp-flag { color: #0d9488; }
+    .wr-mp-popup textarea, .wr-mp-popup input, .wr-mp-popup select { font-size: 13px; }
+    #mapPointsText { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; white-space: pre; overflow: auto; }
+    #mapPointsList .list-group-item { cursor: pointer; }
     /* Its own colours: the theme leaves .alert without a background, which
        over a busy map made the hint unreadable. And no entrance animation:
        the theme's fadeInUp animates transform, so the hint slid in off-centre
@@ -6262,6 +6281,45 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
     </div>
 </div>
 
+<?php if ($mapPointsVisible): ?>
+<?php // Σημεία χάρτη (v3.361.0): the list of imported points for everybody, and for command the way to import more. ?>
+<div class="modal fade" id="mapPointsModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-scrollable modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-geo-alt-fill me-1" style="color:#0d9488"></i><?= h(t('mp.modal_title')) ?> <span class="badge bg-secondary ms-1" id="mapPointsCount"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" id="mapPointsShowToggle" checked>
+                    <label class="form-check-label small" for="mapPointsShowToggle"><?= h(t('mp.show_on_map')) ?></label>
+                </div>
+                <input type="search" class="form-control form-control-sm mb-2" id="mapPointsFilter" placeholder="<?= h(t('mp.filter_placeholder')) ?>" autocomplete="off">
+                <div id="mapPointsList" class="list-group list-group-flush mb-3"></div>
+                <?php if ($canManageWarRoom): ?>
+                <div class="border-top pt-3" id="mapPointsImport">
+                    <h6 class="mb-1"><i class="bi bi-upload me-1"></i><?= h(t('mp.import_title')) ?></h6>
+                    <div class="small text-muted mb-2"><?= h(t('mp.import_help')) ?></div>
+                    <textarea class="form-control mb-2" id="mapPointsText" rows="6" spellcheck="false" wrap="off"></textarea>
+                    <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                        <label class="btn btn-sm btn-outline-secondary mb-0">
+                            <i class="bi bi-file-earmark-arrow-up me-1"></i><?= h(t('mp.file_btn')) ?>
+                            <input type="file" id="mapPointsFile" accept=".csv,.txt,text/csv,text/plain" class="d-none">
+                        </label>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="mapPointsCheckBtn"><?= h(t('mp.check_btn')) ?></button>
+                        <button type="button" class="btn btn-sm btn-primary" id="mapPointsImportBtn" disabled><i class="bi bi-geo-alt-fill me-1"></i><?= h(t('mp.import_btn')) ?></button>
+                        <button type="button" class="btn btn-sm btn-outline-danger ms-auto" id="mapPointsClearBtn"><i class="bi bi-trash3 me-1"></i><?= h(t('mp.clear_btn')) ?></button>
+                    </div>
+                    <div id="mapPointsPreview" class="small"></div>
+                </div>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <?php
 // «Νέο συμβάν εδώ» from the live map's right-click menu: the field form's
 // fields, but the place is the clicked point rather than the reporter's own
@@ -6628,6 +6686,13 @@ let commandPost = <?= json_encode($commandPost, JSON_UNESCAPED_UNICODE) ?>;
 // Its own copy of canManageWarRoom: CAN_MANAGE_WAR_ROOM is declared further
 // down than the map code that first draws the command post.
 const CP_CAN_MANAGE = <?= json_encode($canManageWarRoom) ?>;
+// Σημεία χάρτη (v3.361.0): the imported reference points and their version.
+// Same early copy of the permission as above, for the same reason.
+let mapPoints = <?= json_encode($mapPoints, JSON_UNESCAPED_UNICODE) ?>;
+let mapPointsVersion = <?= json_encode($mapPointsVersion) ?>;
+const MP_VISIBLE = <?= json_encode($mapPointsVisible) ?>;
+const MP_CAN_MANAGE = CP_CAN_MANAGE;
+const MP_MAX_LIST_ROWS = 150;
 // A move shorter than this is announced to nobody (COMMAND_POST_NOTIFY_MIN_M).
 const CP_NOTIFY_MIN_M = <?= (int) COMMAND_POST_NOTIFY_MIN_M ?>;
 // Following a device: past this the device's last fix counts as old — the
@@ -10386,6 +10451,7 @@ function mapGesturePoint(e) {
     if (missionLocation.lat) consider(missionLocation.lat, missionLocation.lng, t('map.mission_point_label'));
     // «Ποια ομάδα είναι πιο κοντά» to the command post, measured from it.
     if (commandPost) consider(commandPost.lat, commandPost.lng, t('cp.label'));
+    if (mapPointsShown) mapPoints.forEach(p => consider(p.lat, p.lng, p.name));
     return best || {lat: e.latlng.lat, lng: e.latlng.lng, label: null};
 }
 
@@ -10427,6 +10493,7 @@ function openMapContextMenu(point, touch) {
             document.getElementById('mapIncidentModal') ? item('cmd-incident', 'bi-heart-pulse-fill', t('measure.cmd_incident')) : '',
             item('cmd-note', 'bi-fonts', t('measure.cmd_note')),
             item('cmd-cp', 'bi-house-gear-fill', t(commandPost ? 'cp.ctx_move' : 'cp.ctx_set')),
+            MP_VISIBLE ? item('cmd-mp', 'bi-geo-alt-fill', t('mp.ctx_new')) : '',
         ].join('')
         : '';
     const sectorLines = mapSectorsAt(point.lat, point.lng)
@@ -10462,6 +10529,7 @@ function openMapContextMenu(point, touch) {
         else if (action === 'cmd-incident') mapCommandIncident(point);
         else if (action === 'cmd-note') openTextAnnotationPopup(L.latLng(point.lat, point.lng));
         else if (action === 'cmd-cp') cpPlace(point.lat, point.lng);
+        else if (action === 'cmd-mp') mpAddHere(point);
     });
     // The height fills in when it arrives, and the line simply goes away if
     // it cannot be had — it is a detail of the point, not worth an error.
@@ -11582,6 +11650,408 @@ document.addEventListener('keydown', e => {
 });
 
 renderCommandPost(commandPost);
+
+// ── Σημεία χάρτη (imported reference points, v3.361.0) ───────────────────────
+// Points command loads from a list it already has (pasted, or a CSV file read
+// into the same box): caves, springs, trailheads, vehicle gates. Everybody on
+// the operation sees them as teal pins with their altitude, how to get there
+// and a note, and gets directions; command edits or deletes a point from its
+// popup. The poll carries only mapPointsVersion; when it differs from ours the
+// list is fetched (mpRefresh). Server side: includes/functions-map-points.php,
+// mission-map-points.php.
+const MP_KEY_ON = 'wr_mappoints_on';
+let mapPointsShown = true;
+try { mapPointsShown = localStorage.getItem(MP_KEY_ON) !== '0'; } catch (e) {}
+let mapPointsCluster = null;
+const mapPointMarkers = new Map();   // id -> marker
+const mapPointSigs = new Map();      // id -> JSON of what the marker was drawn from
+let mpRefreshing = false;
+let mpImportReady = false;           // the text in the box has been checked and has points to add
+if (map && MP_VISIBLE) {
+    // Its own cluster group, like the OSM layer: a few hundred pins at one
+    // zoom level would hide the map.
+    mapPointsCluster = L.markerClusterGroup({chunkedLoading: true, showCoverageOnHover: false, maxClusterRadius: 40, disableClusteringAtZoom: 17});
+    if (mapPointsShown) map.addLayer(mapPointsCluster);
+}
+
+function mpAccessIcon(access) {
+    return access === 'vehicle' ? 'bi-truck' : (access === 'foot' ? 'bi-person-walking' : 'bi-signpost-split');
+}
+
+function mpPopupContent(id) {
+    const p = mapPoints.find(x => x.id === id);
+    const div = document.createElement('div');
+    div.className = 'wr-mp-popup';
+    if (!p) return div;
+    div.innerHTML = `
+        <div class="fw-semibold"><i class="bi bi-geo-alt-fill me-1 wr-mp-flag"></i>${escapeHtml(p.name)}</div>
+        ${p.elevation !== null ? `<div class="small"><i class="bi bi-triangle-fill me-1 text-muted"></i>${escapeHtml(t('mp.popup_elevation', {m: p.elevation}))}</div>` : ''}
+        ${p.access ? `<div class="small"><i class="bi ${mpAccessIcon(p.access)} me-1 text-muted"></i>${escapeHtml(t('mp.access_' + p.access))}</div>` : ''}
+        ${p.note ? `<div class="mt-1" style="white-space:pre-wrap">${escapeHtml(p.note)}</div>` : ''}
+        <div class="small text-muted mt-1">${p.lat.toFixed(5)}, ${p.lng.toFixed(5)}</div>
+        ${navigationBtnHtml(p.lat, p.lng, {block: true})}
+        ${MP_CAN_MANAGE ? `
+        <hr class="my-2">
+        <label class="form-label small fw-semibold mb-0">${escapeHtml(t('mp.f_name'))}</label>
+        <input type="text" class="form-control form-control-sm mb-1" data-mp-name maxlength="120" value="${escapeHtml(p.name)}">
+        <div class="d-flex gap-2 mb-1">
+            <div style="flex:1;min-width:0">
+                <label class="form-label small fw-semibold mb-0">${escapeHtml(t('mp.f_elevation'))}</label>
+                <input type="text" inputmode="numeric" class="form-control form-control-sm" data-mp-ele maxlength="6" value="${p.elevation !== null ? p.elevation : ''}">
+            </div>
+            <div style="flex:1.4;min-width:0">
+                <label class="form-label small fw-semibold mb-0">${escapeHtml(t('mp.f_access'))}</label>
+                <select class="form-select form-select-sm" data-mp-access>
+                    <option value="">${escapeHtml(t('mp.access_opt_none'))}</option>
+                    ${['foot', 'vehicle', 'both'].map(a => `<option value="${a}"${p.access === a ? ' selected' : ''}>${escapeHtml(t('mp.access_opt_' + a))}</option>`).join('')}
+                </select>
+            </div>
+        </div>
+        <label class="form-label small fw-semibold mb-0">${escapeHtml(t('mp.f_note'))}</label>
+        <textarea class="form-control form-control-sm mb-2" data-mp-note rows="3" maxlength="2000" placeholder="${escapeHtml(t('mp.f_note_ph'))}">${escapeHtml(p.note || '')}</textarea>
+        <div class="d-flex gap-1">
+            <button type="button" class="btn btn-sm btn-primary flex-grow-1" data-mp="save"><i class="bi bi-check-lg me-1"></i>${escapeHtml(t('mp.save_btn'))}</button>
+            <button type="button" class="btn btn-sm btn-outline-danger" data-mp="delete"><i class="bi bi-trash3 me-1"></i>${escapeHtml(t('mp.delete_btn'))}</button>
+        </div>` : ''}`;
+    if (!MP_CAN_MANAGE) return div;
+    div.addEventListener('click', e => {
+        const btn = e.target.closest('[data-mp]');
+        if (!btn) return;
+        if (btn.dataset.mp === 'save') {
+            btn.disabled = true;
+            mpPost({
+                action: 'update', id: p.id,
+                name: div.querySelector('[data-mp-name]').value,
+                elevation: div.querySelector('[data-mp-ele]').value,
+                access: div.querySelector('[data-mp-access]').value,
+                note: div.querySelector('[data-mp-note]').value,
+            }).then(res => {
+                btn.disabled = false;
+                if (res && res.ok) opToast(t('mp.toast_saved'));
+            });
+            // Focus leaves the popup so the render that follows the answer
+            // may refresh it (mpRender never rewrites a form being typed in).
+            btn.blur();
+        } else if (btn.dataset.mp === 'delete' && confirm(t('mp.delete_confirm', {name: p.name}))) {
+            map.closePopup();
+            mpPost({action: 'delete', id: p.id}).then(res => { if (res && res.ok) opToast(t('mp.toast_deleted')); });
+        }
+    });
+    return div;
+}
+
+function mpMakeMarker(p) {
+    const icon = L.divIcon({
+        className: 'wr-mp-pin-wrap',
+        html: '<div class="wr-mp-pin"><i class="bi bi-geo-alt-fill"></i></div>',
+        iconSize: [28, 32], iconAnchor: [14, 30], popupAnchor: [0, -28],
+    });
+    const marker = L.marker([p.lat, p.lng], {icon, title: p.name, keyboard: false, zIndexOffset: 200});
+    marker.bindPopup(() => mpPopupContent(p.id), {minWidth: 230, maxWidth: 300});
+    return marker;
+}
+
+// Draws what is new, moves what changed, takes off what is gone. A marker
+// whose data did not change is left alone, and an open popup with the cursor
+// in it is never rebuilt under the person typing.
+function mpRender() {
+    if (mapPointsCluster) {
+        const seen = new Set();
+        const add = [];
+        mapPoints.forEach(p => {
+            seen.add(p.id);
+            const sig = JSON.stringify(p);
+            const marker = mapPointMarkers.get(p.id);
+            if (marker && mapPointSigs.get(p.id) === sig) return;
+            if (marker) {
+                mapPointSigs.set(p.id, sig);
+                marker.setLatLng([p.lat, p.lng]);
+                marker.options.title = p.name;
+                marker.getElement()?.setAttribute('title', p.name);
+                if (marker.isPopupOpen()) {
+                    const el = marker.getPopup().getElement();
+                    if (!(el && el.contains(document.activeElement))) marker.getPopup().update();
+                }
+                return;
+            }
+            const created = mpMakeMarker(p);
+            mapPointMarkers.set(p.id, created);
+            mapPointSigs.set(p.id, sig);
+            add.push(created);
+        });
+        mapPointMarkers.forEach((marker, id) => {
+            if (seen.has(id)) return;
+            mapPointsCluster.removeLayer(marker);
+            mapPointMarkers.delete(id);
+            mapPointSigs.delete(id);
+        });
+        if (add.length) mapPointsCluster.addLayers(add);
+    }
+    mpSyncButton();
+    mpRenderList();
+}
+
+function mpCountText(n) {
+    return n === 1 ? t('mp.count_one') : t('mp.count_many', {n: n});
+}
+
+function mpAdopt(res) {
+    if (!res || !Array.isArray(res.mapPoints)) return;
+    mapPoints = res.mapPoints;
+    mapPointsVersion = res.mapPointsVersion;
+    mpRender();
+}
+
+function mpPost(fields) {
+    const body = new URLSearchParams(Object.assign({csrf_token: csrfToken, mission_id: '<?= $missionId ?>'}, fields));
+    return fetchWithTimeout('mission-map-points.php', {method: 'POST', body}, FIELD_POST_TIMEOUT_MS)
+        .then(r => { if (!checkSessionAlive(r)) return null; return r.json(); })
+        .then(res => {
+            if (!res) return null;
+            if (!res.ok) { alert(res.error || t('common.failed')); return res; }
+            mpAdopt(res);
+            return res;
+        })
+        .catch(() => { alert(t('common.send_failed')); return null; });
+}
+
+// The poll saw another version than ours: someone changed the points.
+function mpRefresh() {
+    if (mpRefreshing || !MP_VISIBLE) return;
+    mpRefreshing = true;
+    const body = new URLSearchParams({csrf_token: csrfToken, mission_id: '<?= $missionId ?>', action: 'list'});
+    fetchWithTimeout('mission-map-points.php', {method: 'POST', body}, FIELD_POST_TIMEOUT_MS)
+        .then(r => { if (!checkSessionAlive(r)) return null; return r.json(); })
+        .then(res => { if (res && res.ok) mpAdopt(res); })
+        .catch(() => {})
+        .finally(() => { mpRefreshing = false; });
+}
+
+// The button on the map, under the command post's.
+const MapPointsControl = L.Control.extend({
+    options: {position: 'topleft'},
+    onAdd: function () {
+        const bar = L.DomUtil.create('div', 'leaflet-bar leaflet-control wr-mp-control');
+        const a = L.DomUtil.create('a', '', bar);
+        a.id = 'mapPointsBtn';
+        a.href = '#';
+        a.setAttribute('role', 'button');
+        L.DomEvent.disableClickPropagation(bar);
+        L.DomEvent.on(a, 'click', e => {
+            L.DomEvent.preventDefault(e);
+            const modalEl = document.getElementById('mapPointsModal');
+            if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        });
+        return bar;
+    },
+});
+if (map && MP_VISIBLE) new MapPointsControl().addTo(map);
+
+function mpSyncButton() {
+    const btn = document.getElementById('mapPointsBtn');
+    const n = mapPoints.length;
+    if (btn) {
+        btn.parentElement.classList.toggle('d-none', n === 0 && !MP_CAN_MANAGE);
+        btn.title = t('mp.btn_title');
+        btn.setAttribute('aria-label', t('mp.btn_title'));
+        btn.innerHTML = '<i class="bi bi-geo-alt-fill"></i>' + (n ? `<span class="wr-mp-count">${n}</span>` : `<span>${escapeHtml(t('mp.label'))}</span>`);
+    }
+    const count = document.getElementById('mapPointsCount');
+    if (count) count.textContent = mpCountText(n);
+}
+
+function mpRenderList() {
+    const list = document.getElementById('mapPointsList');
+    if (!list) return;
+    const q = (document.getElementById('mapPointsFilter')?.value || '').trim().toLowerCase();
+    const matches = q ? mapPoints.filter(p => (p.name + ' ' + (p.note || '')).toLowerCase().includes(q)) : mapPoints;
+    if (!matches.length) {
+        list.innerHTML = `<div class="text-muted small py-2">${escapeHtml(t(mapPoints.length ? 'mp.empty' : (MP_CAN_MANAGE ? 'mp.empty_manage' : 'mp.empty')))}</div>`;
+        return;
+    }
+    list.innerHTML = matches.slice(0, MP_MAX_LIST_ROWS).map(p => `
+        <div class="list-group-item list-group-item-action py-2" data-mp-focus="${p.id}">
+            <div class="d-flex justify-content-between gap-2">
+                <span class="fw-semibold">${escapeHtml(p.name)}</span>
+                <span class="small text-muted text-nowrap">
+                    ${p.elevation !== null ? escapeHtml(t('mp.popup_elevation', {m: p.elevation})) : ''}
+                    ${p.access ? `<i class="bi ${mpAccessIcon(p.access)} ms-1"></i>` : ''}
+                </span>
+            </div>
+            ${p.note ? `<div class="small text-muted text-truncate">${escapeHtml(p.note)}</div>` : ''}
+        </div>`).join('')
+        + (matches.length > MP_MAX_LIST_ROWS ? `<div class="small text-muted py-2">${escapeHtml(t('mp.list_more', {n: MP_MAX_LIST_ROWS}))}</div>` : '');
+}
+
+// Take the map to the point and open it (or, without an id, frame them all).
+// Like cpFocus(): from another tab the map must be on screen first, and is
+// measured at 0x0 until then.
+function mpFocus(id, opts) {
+    if (!map) return;
+    const p = id ? mapPoints.find(x => x.id === id) : null;
+    if (id && !p) return;
+    if (!mapPointsShown && mapPointsCluster) {
+        mapPointsShown = true;
+        try { localStorage.setItem(MP_KEY_ON, '1'); } catch (e) {}
+        map.addLayer(mapPointsCluster);
+        const toggle = document.getElementById('mapPointsShowToggle');
+        if (toggle) toggle.checked = true;
+    }
+    const go = () => {
+        const mapCardEl = document.getElementById('mapCard');
+        if (!(mapCardEl && mapCardEl.classList.contains('map-fullscreen-active'))) {
+            if (document.body.classList.contains('wr-tabs-ready')) opGotoTab('map');
+            else scrollToCard('mapCard');
+        }
+        setTimeout(() => {
+            map.invalidateSize();
+            if (p) {
+                map.setView([p.lat, p.lng], Math.max(map.getZoom(), 16));
+                const marker = mapPointMarkers.get(p.id);
+                setTimeout(() => {
+                    if (!marker || !mapPointsCluster) return;
+                    mapPointsCluster.zoomToShowLayer(marker, () => marker.openPopup());
+                }, 350);
+            } else if (mapPoints.length) {
+                map.fitBounds(L.latLngBounds(mapPoints.map(x => [x.lat, x.lng])), {padding: [40, 40], maxZoom: 16});
+            }
+        }, 200);
+    };
+    const modalEl = document.getElementById('mapPointsModal');
+    if (modalEl && modalEl.classList.contains('show')) {
+        modalEl.addEventListener('hidden.bs.modal', go, {once: true});
+        bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+    } else {
+        go();
+    }
+}
+
+// «Νέο σημείο εδώ» from the right-click menu: one line through the same
+// import, quoted and tab-separated so a name with a comma stays a name.
+function mpAddHere(point) {
+    const name = prompt(t('mp.ctx_prompt'), point.label || '');
+    if (name === null) return;
+    const clean = name.replace(/[\t\r\n]+/g, ' ').trim().replace(/"/g, '""');
+    const text = point.lat.toFixed(7) + '\t' + point.lng.toFixed(7) + '\t"' + clean + '"';
+    mpPost({action: 'import', text}).then(res => {
+        if (!res || !res.ok || !res.added) return;
+        const created = mapPoints.find(x => Math.abs(x.lat - point.lat) < 1e-6 && Math.abs(x.lng - point.lng) < 1e-6);
+        if (created) mpFocus(created.id);
+    });
+}
+
+function mpReadFile(file) {
+    return new Promise((resolve, reject) => {
+        const first = new FileReader();
+        first.onerror = reject;
+        first.onload = () => {
+            const text = String(first.result || '');
+            // Excel's Greek CSV is often Windows-1253, which UTF-8 cannot read.
+            if (!text.includes('�')) { resolve(text); return; }
+            const second = new FileReader();
+            second.onerror = reject;
+            second.onload = () => resolve(String(second.result || ''));
+            second.readAsText(file, 'windows-1253');
+        };
+        first.readAsText(file, 'utf-8');
+    });
+}
+
+function mpShowPreview(summary, extraLine) {
+    const box = document.getElementById('mapPointsPreview');
+    if (!box) return;
+    const problems = (summary && summary.problems) || [];
+    box.innerHTML =
+        (extraLine ? `<div class="fw-semibold mb-1">${escapeHtml(extraLine)}</div>` : '')
+        + (summary && summary.valid ? `<div class="text-success">${escapeHtml(t('mp.preview_ok', {valid: summary.valid}))}</div>` : '')
+        + (summary && summary.invalid ? `<div class="text-danger mt-1">${escapeHtml(t('mp.preview_bad', {invalid: summary.invalid}))}</div>
+            <ul class="mb-0 ps-3">${problems.map(x => `<li>${escapeHtml(t('mp.problem_line', {line: x.line, reason: x.reason, text: x.text}))}</li>`).join('')}</ul>` : '');
+}
+
+(function wireMapPointsModal() {
+    const modalEl = document.getElementById('mapPointsModal');
+    if (!modalEl) return;
+    const toggle = document.getElementById('mapPointsShowToggle');
+    const filter = document.getElementById('mapPointsFilter');
+    const list = document.getElementById('mapPointsList');
+    toggle.checked = mapPointsShown;
+    toggle.addEventListener('change', () => {
+        mapPointsShown = toggle.checked;
+        try { localStorage.setItem(MP_KEY_ON, mapPointsShown ? '1' : '0'); } catch (e) {}
+        if (!mapPointsCluster) return;
+        if (mapPointsShown) map.addLayer(mapPointsCluster); else map.removeLayer(mapPointsCluster);
+    });
+    filter.addEventListener('input', mpRenderList);
+    list.addEventListener('click', e => {
+        const row = e.target.closest('[data-mp-focus]');
+        if (row) mpFocus(Number(row.dataset.mpFocus));
+    });
+    modalEl.addEventListener('show.bs.modal', () => { toggle.checked = mapPointsShown; mpRenderList(); });
+
+    const text = document.getElementById('mapPointsText');
+    if (!text) return;   // not command: the list only
+    const fileInput = document.getElementById('mapPointsFile');
+    const checkBtn = document.getElementById('mapPointsCheckBtn');
+    const importBtn = document.getElementById('mapPointsImportBtn');
+    const clearBtn = document.getElementById('mapPointsClearBtn');
+    text.placeholder = t('mp.import_placeholder');
+    const resetImport = () => {
+        mpImportReady = false;
+        importBtn.disabled = true;
+        importBtn.innerHTML = '<i class="bi bi-geo-alt-fill me-1"></i>' + escapeHtml(t('mp.import_btn'));
+    };
+    text.addEventListener('input', () => { resetImport(); document.getElementById('mapPointsPreview').innerHTML = ''; });
+    fileInput.addEventListener('change', () => {
+        const file = fileInput.files && fileInput.files[0];
+        if (!file) return;
+        mpReadFile(file).then(content => {
+            text.value = content;
+            resetImport();
+            checkBtn.click();
+        }).catch(() => alert(t('mp.file_failed')));
+        fileInput.value = '';
+    });
+    checkBtn.addEventListener('click', () => {
+        if (!text.value.trim()) { alert(t('mp.err_empty')); return; }
+        checkBtn.disabled = true;
+        mpPost({action: 'preview', text: text.value}).then(res => {
+            checkBtn.disabled = false;
+            if (!res || !res.ok) return;
+            mpShowPreview(res.summary);
+            mpImportReady = res.summary.valid > 0;
+            importBtn.disabled = !mpImportReady;
+            if (mpImportReady) importBtn.innerHTML = '<i class="bi bi-geo-alt-fill me-1"></i>' + escapeHtml(t('mp.import_btn_n', {n: res.summary.valid}));
+        });
+    });
+    importBtn.addEventListener('click', () => {
+        if (!mpImportReady) return;
+        importBtn.disabled = true;
+        mpPost({action: 'import', text: text.value}).then(res => {
+            if (!res || !res.ok) { importBtn.disabled = !mpImportReady; return; }
+            resetImport();
+            const message = res.added > 0
+                ? t(res.duplicates > 0 ? 'mp.toast_imported_dupes' : 'mp.toast_imported', {n: res.added, dupes: res.duplicates})
+                : t('mp.toast_nothing_new');
+            opToast(message);
+            if (res.overLimit) alert(t('mp.toast_over_limit', {max: <?= (int) MAP_POINT_MAX_PER_MISSION ?>}));
+            text.value = '';
+            // A clean import shows the result on the map at once; skipped
+            // lines keep the box open so they can be read and fixed.
+            if (res.summary.invalid === 0) {
+                document.getElementById('mapPointsPreview').innerHTML = '';
+                if (res.added > 0) mpFocus(null);
+            } else {
+                mpShowPreview({valid: 0, invalid: res.summary.invalid, problems: res.summary.problems}, message);
+            }
+        });
+    });
+    clearBtn.addEventListener('click', () => {
+        if (!mapPoints.length || !confirm(t('mp.clear_confirm', {n: mapPoints.length}))) return;
+        mpPost({action: 'clear'}).then(res => { if (res && res.ok) opToast(t('mp.toast_cleared')); });
+    });
+})();
+
+mpRender();
 
 function updateMissingPersonLocationPreview() {
     // Guards every lookup, not just the first — none of these ids exist in
@@ -23741,6 +24211,8 @@ function pollWarRoomData() {
         if ('triage' in data) renderTriage(data.triage);
         // `in` as well: null means command has not placed it, or took it off.
         if ('commandPost' in data) renderCommandPost(data.commandPost);
+        // Someone changed the imported map points: fetch the list.
+        if (data.mapPointsVersion && data.mapPointsVersion !== mapPointsVersion) mpRefresh();
         if (data.sosAlerts) {
             renderSosAlerts(sosAlerts = data.sosAlerts);
             updateSosAlarmState(sosAlerts);
