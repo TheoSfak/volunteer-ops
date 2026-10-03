@@ -808,6 +808,27 @@ function dispatchProgressScopeKey(?int $teamId, int $userId): string {
 }
 
 /**
+ * Keep a record of a dispatch command takes back (v3.364.1). Deleting the
+ * dispatch removes its rows, and the activity timeline is built from those rows,
+ * so without this a withdrawal left nothing: not that it was taken back, and not
+ * even that it had been sent. Call it BEFORE the DELETE.
+ */
+function logDispatchWithdrawal(int $dispatchId, int $missionId, int $userId): void {
+    $row = dbFetchOne(
+        "SELECT type, label, team_id, created_at, created_by FROM mission_dispatch_points WHERE id = ? AND mission_id = ?",
+        [$dispatchId, $missionId]
+    );
+    if (!$row) {
+        return;
+    }
+    dbInsert(
+        "INSERT INTO mission_dispatch_withdrawals (mission_id, dispatch_type, label, team_id, sent_at, sent_by, withdrawn_at, withdrawn_by)
+         VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)",
+        [$missionId, $row['type'], $row['label'], $row['team_id'], $row['created_at'], $row['created_by'], $userId]
+    );
+}
+
+/**
  * Records one team step on a dispatch and returns the steps THIS call was the
  * first to record, in order — e.g. ['depart', 'arrive'] when a team pressed
  * «Έφτασα» without ever pressing «Ξεκινάω». Earlier steps are backfilled rather
@@ -10362,6 +10383,26 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
                 . ($row['label'] ? ' — «' . h($row['label']) . '»' : ''),
             'ts'   => strtotime($row['created_at']),
         ];
+    }
+
+    // Withdrawn dispatches (v3.364.1): their own rows, and the "sent" line above,
+    // are gone, so both come from the withdrawal record.
+    $withdrawnRows = dbFetchAll(
+        "SELECT d.dispatch_type, d.label, d.sent_at, d.withdrawn_at, d.team_id, mt.codename, mt.team_number,
+                su.name AS sender_name, wu.name AS withdrawer_name
+         FROM mission_dispatch_withdrawals d
+         LEFT JOIN mission_teams mt ON mt.id = d.team_id
+         LEFT JOIN users su ON su.id = d.sent_by
+         LEFT JOIN users wu ON wu.id = d.withdrawn_by
+         WHERE d.mission_id = ?" . $dispatchScope,
+        array_merge([$missionId], $dispatchBinds)
+    );
+    foreach ($withdrawnRows as $row) {
+        $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : 'όλες τις ομάδες';
+        $kind = $row['dispatch_type'] === 'point' ? 'σημείο' : 'περιοχή';
+        $suffix = $row['label'] ? ' — «' . h($row['label']) . '»' : '';
+        $events[] = ['icon' => '📍', 'text' => h($row['sender_name'] ?? '—') . ' έστειλε ' . $kind . ' στη ' . h($teamLabel) . $suffix, 'ts' => strtotime($row['sent_at'])];
+        $events[] = ['icon' => '↩️', 'text' => h($row['withdrawer_name'] ?? '—') . ' ανακάλεσε ' . $kind . ' από τη ' . h($teamLabel) . $suffix, 'ts' => strtotime($row['withdrawn_at'])];
     }
 
     $receivedRows = dbFetchAll(

@@ -261,6 +261,8 @@ if ($action === 'delete') {
     }
     // Before the DELETE: afterwards nothing says who it went to.
     $withdrawn = withdrawnDispatchLines($missionId, [$dispatchId], (int) $userId);
+    // And so the activity timeline still says it was sent, and that it was taken back.
+    logDispatchWithdrawal($dispatchId, $missionId, (int) $userId);
     dbExecute("DELETE FROM mission_dispatch_points WHERE id = ?", [$dispatchId]);
     logAudit('delete_mission_dispatch', 'mission_dispatch_points', $dispatchId, null, ['mission_id' => $missionId]);
     // Deleting it is command's answer to a «Δεν μπορώ» on it; the rows stay

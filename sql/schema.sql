@@ -3222,4 +3222,24 @@ ALTER TABLE `mission_dispatch_points` ADD CONSTRAINT `fk_dispatch_map_point`
     FOREIGN KEY (`map_point_id`) REFERENCES `mission_map_points`(`id`) ON DELETE SET NULL;
 ALTER TABLE `mission_dispatch_progress` ADD COLUMN `completed_note` VARCHAR(500) NULL AFTER `completed_by`;
 
+-- WITHDRAWN DISPATCHES (v3.364.1). Deleting a dispatch removes its rows and with
+-- them its line in the activity timeline; this keeps the record of what was sent
+-- and taken back.
+CREATE TABLE IF NOT EXISTS `mission_dispatch_withdrawals` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `dispatch_type` ENUM('point','polygon') NOT NULL,
+    `label` VARCHAR(255) NULL,
+    `team_id` INT UNSIGNED NULL,
+    `sent_at` DATETIME NOT NULL,
+    `sent_by` INT UNSIGNED NULL,
+    `withdrawn_at` DATETIME NOT NULL,
+    `withdrawn_by` INT UNSIGNED NULL,
+    INDEX `idx_dispatch_withdrawn_mission` (`mission_id`, `withdrawn_at`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`sent_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`withdrawn_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

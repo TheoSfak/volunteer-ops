@@ -122,6 +122,38 @@ foreach ($sentRows as $row) {
     ];
 }
 
+// ── dispatch withdrawn (v3.364.1) ───────────────────────────────────────────
+// A withdrawn dispatch's own rows are gone, and its "sent" line with them, so
+// both come from the withdrawal record: it was sent, and it was taken back.
+$withdrawnRows = dbFetchAll(
+    "SELECT d.dispatch_type, d.label, d.sent_at, d.withdrawn_at, d.team_id, mt.codename, mt.team_number,
+            su.name AS sender_name, wu.name AS withdrawer_name
+     FROM mission_dispatch_withdrawals d
+     LEFT JOIN mission_teams mt ON mt.id = d.team_id
+     LEFT JOIN users su ON su.id = d.sent_by
+     LEFT JOIN users wu ON wu.id = d.withdrawn_by
+     WHERE d.mission_id = ? AND $dispatchScopeSql
+     ORDER BY d.withdrawn_at DESC LIMIT 200",
+    [$missionId, $isAdminParam, $userId]
+);
+foreach ($withdrawnRows as $row) {
+    $teamLabel = $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.to_all_teams', [], $viewerLang);
+    $kind = t($row['dispatch_type'] === 'point' ? 'history.kind_point' : 'history.kind_area', [], $viewerLang);
+    $labelSuffix = $row['label'] ? t('history.label_suffix_dash', ['label' => h($row['label'])], $viewerLang) : '';
+    $events[] = [
+        'icon' => '📍',
+        'text' => t('history.dispatch_sent', ['actor' => h($row['sender_name'] ?? '—'), 'kind' => $kind, 'team' => h($teamLabel), 'label_suffix' => $labelSuffix], $viewerLang),
+        'time' => date('d/m H:i', strtotime($row['sent_at'])),
+        'ts'   => strtotime($row['sent_at']),
+    ];
+    $events[] = [
+        'icon' => '↩️',
+        'text' => t('history.dispatch_withdrawn', ['actor' => h($row['withdrawer_name'] ?? '—'), 'kind' => $kind, 'team' => h($teamLabel), 'label_suffix' => $labelSuffix], $viewerLang),
+        'time' => date('d/m H:i', strtotime($row['withdrawn_at'])),
+        'ts'   => strtotime($row['withdrawn_at']),
+    ];
+}
+
 // ── dispatch received ("Ελήφθη") ─────────────────────────────────────────────
 $receivedRows = dbFetchAll(
     "SELECT rc.created_at, d.team_id, d.label, mt.codename, mt.team_number, u.name AS actor_name

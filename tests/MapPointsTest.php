@@ -570,4 +570,42 @@ final class MapPointsTest extends TestCase
         $messages = array_column(dbFetchAll("SELECT message FROM notifications WHERE user_id = ? ORDER BY id", [$this->userId]), 'message');
         $this->assertNotEmpty(array_filter($messages, fn($x) => str_contains($x, '«Βρέθηκε ένα γάντι»')), 'the completion notice carries the note');
     }
+
+    public function testAWithdrawnOrderStaysInTheActivityTimelineAsSentAndTakenBack(): void
+    {
+        $points = $this->seedPoints();
+        $team = $this->makeTeam('Alpha', 1, [$this->makeMember('Μ')]);
+        $d = assignMapPointsToTeam($this->missionRow(), $team, [$points['Α']['id']], $this->userId, 'Σ')['dispatch_ids'][0];
+
+        // What mission-dispatch.php's delete does: record, then remove.
+        logDispatchWithdrawal($d, $this->missionId, $this->userId);
+        dbExecute("DELETE FROM mission_dispatch_points WHERE id = ?", [$d]);
+
+        $texts = array_column(loadMissionActivityEventsForReport($this->missionId), 'text');
+        $sent = array_values(array_filter($texts, fn($x) => str_contains($x, 'έστειλε σημείο στη Alpha 1') && str_contains($x, '«Α»')));
+        $taken = array_values(array_filter($texts, fn($x) => str_contains($x, 'ανακάλεσε σημείο από τη Alpha 1') && str_contains($x, '«Α»')));
+        $this->assertCount(1, $sent, 'the sent line survives the deletion');
+        $this->assertCount(1, $taken, 'and the withdrawal is on record');
+    }
+
+    public function testAnotherTeamsMemberDoesNotSeeAWithdrawalOfOrdersNotTheirs(): void
+    {
+        $points = $this->seedPoints();
+        $team = $this->makeTeam('Alpha', 1, [$this->makeMember('Μ')]);
+        $outsider = $this->makeMember('Άλλος');
+        $other = $this->makeTeam('Bravo', 2, [$outsider]);
+        $d = assignMapPointsToTeam($this->missionRow(), $team, [$points['Α']['id']], $this->userId, 'Σ')['dispatch_ids'][0];
+        logDispatchWithdrawal($d, $this->missionId, $this->userId);
+        dbExecute("DELETE FROM mission_dispatch_points WHERE id = ?", [$d]);
+
+        $texts = array_column(loadMissionActivityEventsForReport($this->missionId, false, $outsider), 'text');
+        $this->assertSame([], array_values(array_filter($texts, fn($x) => str_contains($x, 'ανακάλεσε'))));
+        $this->assertNotEmpty($other);
+    }
+
+    public function testWithdrawingNothingRecordsNothing(): void
+    {
+        logDispatchWithdrawal(999999, $this->missionId, $this->userId);
+        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_dispatch_withdrawals WHERE mission_id = ?", [$this->missionId]));
+    }
 }

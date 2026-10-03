@@ -7625,6 +7625,29 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 182,
+            'description' => 'Log a withdrawn dispatch (v3.364.1): mission_dispatch_withdrawals keeps what was sent, to which team, by whom and when, and who took it back and when. Deleting a dispatch removed its rows, and with them its "sent" line in the activity timeline, so a withdrawal left no trace at all.',
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_dispatch_withdrawals (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    dispatch_type ENUM('point','polygon') NOT NULL,
+                    label VARCHAR(255) NULL,
+                    team_id INT UNSIGNED NULL,
+                    sent_at DATETIME NOT NULL,
+                    sent_by INT UNSIGNED NULL,
+                    withdrawn_at DATETIME NOT NULL,
+                    withdrawn_by INT UNSIGNED NULL,
+                    INDEX idx_dispatch_withdrawn_mission (mission_id, withdrawn_at),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE SET NULL,
+                    FOREIGN KEY (sent_by) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (withdrawn_by) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
