@@ -312,12 +312,14 @@ function importMissionMapPoints(int $missionId, array $rows, int $userId): array
 }
 
 /**
- * What the map draws. No raw timestamps, the page compares by JSON.
+ * What the map draws, in the order the points were imported: the list as it was
+ * pasted, which is also the order «Σύνδεση σημείων» joins them in. No raw
+ * timestamps, the page compares by JSON.
  */
 function loadMissionMapPoints(int $missionId): array {
     $rows = dbFetchAll(
         "SELECT id, name, lat, lng, elevation_m, access, note
-         FROM mission_map_points WHERE mission_id = ? ORDER BY name ASC, id ASC",
+         FROM mission_map_points WHERE mission_id = ? ORDER BY id ASC",
         [$missionId]
     );
     return array_map(static fn(array $r) => [
@@ -375,4 +377,71 @@ function deleteMissionMapPoint(int $missionId, int $id): bool {
 /** Remove every point of the mission; how many went. */
 function clearMissionMapPoints(int $missionId): int {
     return (int) dbExecute("DELETE FROM mission_map_points WHERE mission_id = ?", [$missionId]);
+}
+
+/** One connection joins at most this many points (so one less legs). */
+const MAP_POINT_LINK_MAX = 25;
+/** Routed legs one person may ask for, over the window below (two full chains). */
+const MAP_POINT_LINK_RATE_MAX = 60;
+const MAP_POINT_LINK_RATE_WINDOW = 600;
+
+/**
+ * The points a connection is made from, in import order: all of them, or only
+ * those that can be reached on foot ('foot': foot and both) or by vehicle
+ * ('vehicle': vehicle and both). A point with no access stated is only in 'all'.
+ */
+function mapPointsForLinking(int $missionId, string $filter): array {
+    $points = loadMissionMapPoints($missionId);
+    if ($filter === 'foot' || $filter === 'vehicle') {
+        $points = array_values(array_filter($points, fn($p) => $p['access'] === $filter || $p['access'] === 'both'));
+    }
+    return $points;
+}
+
+/**
+ * Route each point to the next, by road or path (Google), not as the crow flies.
+ *
+ * $mode 'foot' asks Google for walking routes, 'vehicle' for driving ones. One
+ * request per leg, run in parallel by routeDistanceRunJobs(); a leg Google
+ * finds no way for comes back with no shape and is counted in `unrouted`
+ * instead of being drawn as a straight line. $runner has routeDistanceRunJobs()'s
+ * shape and is only there so a test can stand in for Google.
+ *
+ * @param array<int, array> $points loadMissionMapPoints() rows, at most MAP_POINT_LINK_MAX
+ * @return array{legs: array<int, array>, meters: int, minutes: int, unrouted: int}
+ */
+function mapPointsLinkLegs(array $points, string $mode, string $apiKey, ?callable $runner = null): array {
+    $points = array_values(array_slice($points, 0, MAP_POINT_LINK_MAX));
+    $provider = ['name' => 'google', 'mode' => $mode === 'vehicle' ? 'driving' : 'walking', 'key' => $apiKey];
+    $jobs = [];
+    for ($i = 0; $i + 1 < count($points); $i++) {
+        $jobs["leg:$i"] = [
+            'provider' => $provider,
+            'leg'      => [$points[$i]['lat'], $points[$i]['lng'], $points[$i + 1]['lat'], $points[$i + 1]['lng']],
+            'geometry' => true,
+        ];
+    }
+    $failed = [];
+    $runner = $runner ?? 'routeDistanceRunJobs';
+    $routed = $jobs ? $runner($jobs, $failed) : [];
+
+    $legs = [];
+    $meters = 0;
+    $minutes = 0;
+    $unrouted = 0;
+    for ($i = 0; $i + 1 < count($points); $i++) {
+        $r = $routed["leg:$i"] ?? null;
+        $leg = ['from_id' => $points[$i]['id'], 'to_id' => $points[$i + 1]['id'], 'meters' => null, 'minutes' => null, 'points' => null];
+        if ($r !== null && !empty($r['points'])) {
+            $leg['meters'] = (int) $r['meters'];
+            $leg['minutes'] = (int) $r['minutes'];
+            $leg['points'] = routeDistanceSimplify($r['points']);
+            $meters += $leg['meters'];
+            $minutes += $leg['minutes'];
+        } else {
+            $unrouted++;
+        }
+        $legs[] = $leg;
+    }
+    return ['legs' => $legs, 'meters' => $meters, 'minutes' => $minutes, 'unrouted' => $unrouted];
 }

@@ -5,6 +5,9 @@
  *
  *   list     the mission's points, for the page to adopt (every approved
  *            participant, and command staff)
+ *   connect  road routes (Google) joining the points in import order, at most
+ *            MAP_POINT_LINK_MAX of them; open to everyone who can see the
+ *            points, and counted per person because every leg is billed
  *   preview  read a pasted list and say what would be imported, change nothing
  *   import   read a pasted list and add its points
  *   update   one point's name, altitude, access and note
@@ -17,6 +20,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/route-distance.php';
 requireLogin();
 
 header('Content-Type: application/json');
@@ -33,9 +37,13 @@ if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', 
     exit;
 }
 
-// Nothing below writes the session, and an import of a few hundred lines must
-// not hold the lock the same browser's poll is waiting on.
-session_write_close();
+// Nothing below writes the session except the connect quota, and an import of
+// a few hundred lines must not hold the lock the same browser's poll is waiting
+// on. `connect` releases it itself, after counting its legs.
+$action = post('action');
+if ($action !== 'connect') {
+    session_write_close();
+}
 
 $missionId = (int) post('mission_id');
 $mission = dbFetchOne(
@@ -60,8 +68,6 @@ if (!$canManage && !$isApprovedParticipant) {
     exit;
 }
 
-$action = post('action');
-
 $answer = function (array $extra = []) use ($missionId) {
     return json_encode(array_merge([
         'ok' => true,
@@ -72,6 +78,50 @@ $answer = function (array $extra = []) use ($missionId) {
 
 if ($action === 'list') {
     echo $answer();
+    exit;
+}
+
+if ($action === 'connect') {
+    $apiKey = trim((string) getSetting('google_maps_api_key', ''));
+    if ($apiKey === '' || !routeDistanceAvailable()) {
+        echo json_encode(['ok' => false, 'error' => t('mp.link_no_google')]);
+        exit;
+    }
+    $filter = in_array(post('filter'), ['foot', 'vehicle'], true) ? post('filter') : 'all';
+    $mode = post('mode') === 'vehicle' ? 'vehicle' : 'foot';
+    $all = mapPointsForLinking($missionId, $filter);
+    $used = array_slice($all, 0, MAP_POINT_LINK_MAX);
+    if (count($used) < 2) {
+        echo json_encode(['ok' => false, 'error' => t('mp.link_need_two')]);
+        exit;
+    }
+
+    // Counted in the session, like the measuring tool's own limit, before the
+    // session is released: every leg is a call billed to the organisation.
+    $now = time();
+    $key = 'map_points_link_' . $missionId;
+    $calls = array_values(array_filter((array) ($_SESSION[$key] ?? []), fn($ts) => is_int($ts) && $ts > $now - MAP_POINT_LINK_RATE_WINDOW));
+    $cost = count($used) - 1;
+    if (count($calls) + $cost > MAP_POINT_LINK_RATE_MAX) {
+        $wait = max(1, MAP_POINT_LINK_RATE_WINDOW - ($now - ($calls[0] ?? $now)));
+        echo json_encode(['ok' => false, 'error' => t('mp.err_rate', ['n' => (int) ceil($wait / 60)])]);
+        exit;
+    }
+    $_SESSION[$key] = array_merge($calls, array_fill(0, $cost, $now));
+    session_write_close();
+
+    $result = mapPointsLinkLegs($used, $mode, $apiKey);
+    echo json_encode([
+        'ok' => true,
+        'mode' => $mode,
+        'filter' => $filter,
+        'total' => count($all),
+        'used' => count($used),
+        'legs' => $result['legs'],
+        'meters' => $result['meters'],
+        'minutes' => $result['minutes'],
+        'unrouted' => $result['unrouted'],
+    ], JSON_UNESCAPED_UNICODE);
     exit;
 }
 

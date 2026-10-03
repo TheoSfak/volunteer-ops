@@ -1811,6 +1811,9 @@ $commandPost = ($canManageWarRoom || $isApprovedParticipant) ? loadMissionComman
 $mapPointsVisible = $canManageWarRoom || $isApprovedParticipant;
 $mapPoints = $mapPointsVisible ? loadMissionMapPoints($missionId) : [];
 $mapPointsVersion = $mapPointsVisible ? missionMapPointsVersion($missionId) : null;
+// Joining the points by road needs the organisation's Google key and cURL
+// (checked inline: route-distance.php is not part of the bootstrap chain).
+$mapPointsRouting = trim((string) getSetting('google_maps_api_key', '')) !== '' && function_exists('curl_init') && function_exists('curl_multi_init');
 $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
 $voiceMessages = $canManageWarRoom ? loadUnacknowledgedVoiceMessagesForMission($missionId) : [];
 $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
@@ -6301,6 +6304,37 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                 </div>
                 <input type="search" class="form-control form-control-sm mb-2" id="mapPointsFilter" placeholder="<?= h(t('mp.filter_placeholder')) ?>" autocomplete="off">
                 <div id="mapPointsList" class="list-group list-group-flush mb-3"></div>
+                <div class="border-top pt-3 mb-3" id="mapPointsLink">
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="mapPointsLinkSwitch">
+                        <label class="form-check-label fw-semibold" for="mapPointsLinkSwitch"><i class="bi bi-bezier2 me-1"></i><?= h(t('mp.link_title')) ?></label>
+                    </div>
+                    <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                        <span class="small text-muted" style="width:70px"><?= h(t('mp.link_points')) ?></span>
+                        <input type="radio" class="btn-check" name="mpLinkFilter" id="mpLinkFilterAll" value="all" checked>
+                        <label class="btn btn-sm btn-outline-secondary" for="mpLinkFilterAll"><?= h(t('mp.link_all')) ?></label>
+                        <input type="radio" class="btn-check" name="mpLinkFilter" id="mpLinkFilterFoot" value="foot">
+                        <label class="btn btn-sm btn-outline-secondary" for="mpLinkFilterFoot"><?= h(t('mp.link_foot_only')) ?></label>
+                        <input type="radio" class="btn-check" name="mpLinkFilter" id="mpLinkFilterVehicle" value="vehicle">
+                        <label class="btn btn-sm btn-outline-secondary" for="mpLinkFilterVehicle"><?= h(t('mp.link_vehicle_only')) ?></label>
+                    </div>
+                    <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                        <span class="small text-muted" style="width:70px"><?= h(t('mp.link_mode')) ?></span>
+                        <input type="radio" class="btn-check" name="mpLinkMode" id="mpLinkModeFoot" value="foot" checked>
+                        <label class="btn btn-sm btn-outline-secondary" for="mpLinkModeFoot"><i class="bi bi-person-walking me-1"></i><?= h(t('mp.link_mode_foot')) ?></label>
+                        <input type="radio" class="btn-check" name="mpLinkMode" id="mpLinkModeVehicle" value="vehicle">
+                        <label class="btn btn-sm btn-outline-secondary" for="mpLinkModeVehicle"><i class="bi bi-truck me-1"></i><?= h(t('mp.link_mode_vehicle')) ?></label>
+                    </div>
+                    <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                        <span class="small text-muted" style="width:70px"><?= h(t('mp.link_order')) ?></span>
+                        <span class="badge text-bg-light border fw-normal"><?= h(t('mp.link_order_list', ['max' => MAP_POINT_LINK_MAX])) ?></span>
+                    </div>
+                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                        <button type="button" class="btn btn-sm btn-primary" id="mapPointsLinkDraw"><i class="bi bi-bezier2 me-1"></i><?= h(t('mp.link_draw')) ?></button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="mapPointsLinkClear"><?= h(t('mp.link_clear')) ?></button>
+                    </div>
+                    <div class="small mt-2" id="mapPointsLinkSummary"></div>
+                </div>
                 <?php if ($canManageWarRoom): ?>
                 <div class="border-top pt-3" id="mapPointsImport">
                     <h6 class="mb-1"><i class="bi bi-upload me-1"></i><?= h(t('mp.import_title')) ?></h6>
@@ -6695,6 +6729,8 @@ const CP_CAN_MANAGE = <?= json_encode($canManageWarRoom) ?>;
 let mapPoints = <?= json_encode($mapPoints, JSON_UNESCAPED_UNICODE) ?>;
 let mapPointsVersion = <?= json_encode($mapPointsVersion) ?>;
 const MP_VISIBLE = <?= json_encode($mapPointsVisible) ?>;
+const MP_ROUTING = <?= json_encode($mapPointsRouting) ?>;
+const MP_LINK_MAX = <?= (int) MAP_POINT_LINK_MAX ?>;
 const MP_CAN_MANAGE = CP_CAN_MANAGE;
 const MP_MAX_LIST_ROWS = 150;
 // A move shorter than this is announced to nobody (COMMAND_POST_NOTIFY_MIN_M).
@@ -11767,6 +11803,7 @@ function mpMakeMarker(p) {
 // whose data did not change is left alone, and an open popup with the cursor
 // in it is never rebuilt under the person typing.
 function mpRender() {
+    mpLinkCheckStale();
     if (mapPointsCluster) {
         const seen = new Set();
         const add = [];
@@ -11884,7 +11921,7 @@ function mpRenderList() {
     list.innerHTML = matches.slice(0, MP_MAX_LIST_ROWS).map(p => `
         <div class="list-group-item list-group-item-action py-2" data-mp-focus="${p.id}">
             <div class="d-flex justify-content-between gap-2">
-                <span class="fw-semibold">${escapeHtml(p.name)}</span>
+                <span class="fw-semibold"><span class="text-muted fw-normal me-1">${mapPoints.indexOf(p) + 1}.</span>${escapeHtml(p.name)}</span>
                 <span class="small text-muted text-nowrap">
                     ${p.access ? `<i class="bi ${mpAccessIcon(p.access)} ms-1"></i>` : ''}
                 </span>
@@ -11901,7 +11938,7 @@ function mpFocus(id, opts) {
     if (!map) return;
     const p = id ? mapPoints.find(x => x.id === id) : null;
     if (id && !p) return;
-    if (!mapPointsShown && mapPointsCluster) {
+    if (!mapPointsShown && mapPointsCluster && !(opts && opts.bounds)) {
         mapPointsShown = true;
         try { localStorage.setItem(MP_KEY_ON, '1'); } catch (e) {}
         map.addLayer(mapPointsCluster);
@@ -11923,6 +11960,8 @@ function mpFocus(id, opts) {
                     if (!marker || !mapPointsCluster) return;
                     mapPointsCluster.zoomToShowLayer(marker, () => marker.openPopup());
                 }, 350);
+            } else if (opts && opts.bounds) {
+                map.fitBounds(opts.bounds, {padding: [40, 40], maxZoom: 17});
             } else if (mapPoints.length) {
                 map.fitBounds(L.latLngBounds(mapPoints.map(x => [x.lat, x.lng])), {padding: [40, 40], maxZoom: 16});
             }
@@ -11979,6 +12018,125 @@ function mpShowPreview(summary, extraLine) {
             <ul class="mb-0 ps-3">${problems.map(x => `<li>${escapeHtml(t('mp.problem_line', {line: x.line, reason: x.reason, text: x.text}))}</li>`).join('')}</ul>` : '');
 }
 
+// ── Σύνδεση σημείων: road routes joining the points in list order ──────────
+// Google routes (walking or driving), one leg from each point to the next, at
+// most MP_LINK_MAX points, from the list as it was imported. A leg Google finds
+// no way for is left out and counted, never drawn as a straight line. The lines
+// are this viewer's own view and are not stored; they are taken off as soon as
+// the points they join change.
+const MP_LINK_COLORS = {foot: '#D85A30', vehicle: '#378ADD'};
+let mpLinkLayer = null;
+let mpLinkState = null;     // {sig, summary}
+let mpLinkBusy = false;
+
+function mpLinkSigOf(ids) {
+    return ids.map(id => {
+        const p = mapPoints.find(x => x.id === id);
+        return p ? id + ':' + p.lat + ',' + p.lng : id + ':gone';
+    }).join('|');
+}
+
+function mpLinkEls() {
+    return {
+        sw: document.getElementById('mapPointsLinkSwitch'),
+        summary: document.getElementById('mapPointsLinkSummary'),
+        draw: document.getElementById('mapPointsLinkDraw'),
+    };
+}
+
+function mpTimeText(min) {
+    const h = Math.floor(min / 60), m = min % 60;
+    return h > 0 ? `${h} ${t('mp.unit_h')} ${m} ${t('mp.unit_min')}` : `${m} ${t('mp.unit_min')}`;
+}
+
+function mpKmText(meters) {
+    return (meters / 1000).toLocaleString(jsLocale, {minimumFractionDigits: 1, maximumFractionDigits: 1});
+}
+
+function mpLinkClear() {
+    if (mpLinkLayer && map) map.removeLayer(mpLinkLayer);
+    mpLinkLayer = null;
+    mpLinkState = null;
+    const el = mpLinkEls();
+    if (el.sw) el.sw.checked = false;
+    if (el.summary) el.summary.innerHTML = '';
+}
+
+// Called with every render of the points: lines joining points that have since
+// moved, gone or been added are no longer a true picture.
+function mpLinkCheckStale() {
+    if (!mpLinkState) return;
+    if (mpLinkSigOf(mpLinkState.ids) !== mpLinkState.sig) {
+        mpLinkClear();
+        opToast(t('mp.link_stale'));
+    }
+}
+
+function mpLinkSummaryHtml(res, drawnLegs) {
+    const lines = [];
+    if (drawnLegs > 0) {
+        lines.push(`<div class="text-success fw-semibold">${escapeHtml(t('mp.link_summary', {legs: drawnLegs, km: mpKmText(res.meters), time: mpTimeText(res.minutes)}))}</div>`);
+    }
+    if (res.total > res.used) lines.push(`<div class="text-muted">${escapeHtml(t('mp.link_capped', {used: res.used, total: res.total}))}</div>`);
+    if (res.unrouted > 0) lines.push(`<div class="text-warning-emphasis">${escapeHtml(t('mp.link_unrouted', {n: res.unrouted}))}</div>`);
+    return lines.join('');
+}
+
+function mpLinkRender(res) {
+    if (mpLinkLayer && map) map.removeLayer(mpLinkLayer);
+    const color = MP_LINK_COLORS[res.mode] || MP_LINK_COLORS.foot;
+    const layer = L.layerGroup();
+    const bounds = [];
+    const ids = [];
+    let drawn = 0;
+    res.legs.forEach(leg => {
+        if (!ids.includes(leg.from_id)) ids.push(leg.from_id);
+        if (!ids.includes(leg.to_id)) ids.push(leg.to_id);
+        if (!leg.points || leg.points.length < 2) return;
+        drawn++;
+        leg.points.forEach(pt => bounds.push(pt));
+        const from = mapPoints.find(x => x.id === leg.from_id), to = mapPoints.find(x => x.id === leg.to_id);
+        L.polyline(leg.points, {color, weight: 4, opacity: 0.9, dashArray: res.mode === 'foot' ? '9 6' : null, lineCap: 'round', lineJoin: 'round'})
+            .bindPopup(() => '<div class="fw-semibold">' + escapeHtml((from ? from.name : '') + ' → ' + (to ? to.name : '')) + '</div>'
+                + '<div class="small">' + escapeHtml(t('mp.link_leg_line', {km: mpKmText(leg.meters), time: mpTimeText(leg.minutes)})) + '</div>')
+            .addTo(layer);
+    });
+    mpLinkLayer = layer.addTo(map);
+    mpLinkState = {ids, sig: mpLinkSigOf(ids)};
+    const el = mpLinkEls();
+    if (el.sw) el.sw.checked = true;
+    if (el.summary) el.summary.innerHTML = mpLinkSummaryHtml(res, drawn) || `<div class="text-warning-emphasis">${escapeHtml(t('mp.link_unrouted', {n: res.unrouted}))}</div>`;
+    if (drawn > 0) {
+        opToast(t('mp.link_summary', {legs: drawn, km: mpKmText(res.meters), time: mpTimeText(res.minutes)}));
+        mpFocus(null, {bounds: L.latLngBounds(bounds)});
+    }
+}
+
+function mpLinkDraw() {
+    const el = mpLinkEls();
+    if (!MP_ROUTING) {
+        alert(t('mp.link_no_google'));
+        if (el.sw) el.sw.checked = false;
+        return;
+    }
+    if (mpLinkBusy) return;
+    mpLinkBusy = true;
+    if (el.draw) el.draw.disabled = true;
+    if (el.summary) el.summary.innerHTML = `<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>${escapeHtml(t('mp.link_loading'))}</span>`;
+    const filter = document.querySelector('input[name="mpLinkFilter"]:checked')?.value || 'all';
+    const mode = document.querySelector('input[name="mpLinkMode"]:checked')?.value || 'foot';
+    mpPost({action: 'connect', filter, mode}).then(res => {
+        mpLinkBusy = false;
+        if (el.draw) el.draw.disabled = false;
+        if (!res || !res.ok) {
+            if (el.summary) el.summary.innerHTML = '';
+            if (el.sw) el.sw.checked = !!mpLinkState;
+            return;
+        }
+        mpLinkRender(res);
+    });
+}
+
 (function wireMapPointsModal() {
     const modalEl = document.getElementById('mapPointsModal');
     if (!modalEl) return;
@@ -11993,6 +12151,10 @@ function mpShowPreview(summary, extraLine) {
         if (mapPointsShown) map.addLayer(mapPointsCluster); else map.removeLayer(mapPointsCluster);
     });
     filter.addEventListener('input', mpRenderList);
+    const linkSwitch = document.getElementById('mapPointsLinkSwitch');
+    linkSwitch.addEventListener('change', () => { if (linkSwitch.checked) mpLinkDraw(); else mpLinkClear(); });
+    document.getElementById('mapPointsLinkDraw').addEventListener('click', mpLinkDraw);
+    document.getElementById('mapPointsLinkClear').addEventListener('click', mpLinkClear);
     list.addEventListener('click', e => {
         const row = e.target.closest('[data-mp-focus]');
         if (row) mpFocus(Number(row.dataset.mpFocus));

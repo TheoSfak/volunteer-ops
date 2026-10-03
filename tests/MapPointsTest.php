@@ -254,4 +254,105 @@ final class MapPointsTest extends TestCase
         dbExecute("DELETE FROM missions WHERE id = ?", [$this->missionId]);
         $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_map_points WHERE mission_id = ?", [$this->missionId]));
     }
+
+    public function testPointsComeBackInImportOrderNotByName(): void
+    {
+        importMissionMapPoints($this->missionId, parseMapPointText("35.1,24.1,Ωμέγα
+35.2,24.2,Άλφα
+35.3,24.3,Βήτα
+")['rows'], $this->userId);
+        $this->assertSame(['Ωμέγα', 'Άλφα', 'Βήτα'], array_column(loadMissionMapPoints($this->missionId), 'name'));
+    }
+
+    public function testLinkingFilterKeepsFootAndBothOrVehicleAndBoth(): void
+    {
+        importMissionMapPoints($this->missionId, parseMapPointText("lat,lng,name,access
+35.1,24.1,P,foot
+35.2,24.2,V,vehicle
+35.3,24.3,B,both
+35.4,24.4,N,
+")['rows'], $this->userId);
+        $this->assertSame(['P', 'V', 'B', 'N'], array_column(mapPointsForLinking($this->missionId, 'all'), 'name'));
+        $this->assertSame(['P', 'B'], array_column(mapPointsForLinking($this->missionId, 'foot'), 'name'));
+        $this->assertSame(['V', 'B'], array_column(mapPointsForLinking($this->missionId, 'vehicle'), 'name'));
+    }
+
+    /** A stand-in for Google: every leg answers with a two-point shape, except the keys in $noRoute. */
+    private function fakeRouter(array $noRoute = [], array &$seen = []): callable
+    {
+        return function (array $jobs, ?array &$failed) use ($noRoute, &$seen) {
+            $failed = [];
+            $out = [];
+            foreach ($jobs as $key => $job) {
+                $seen[$key] = $job;
+                if (in_array($key, $noRoute, true)) {
+                    continue;
+                }
+                [$a, $b, $c, $d] = $job['leg'];
+                $out[$key] = ['meters' => 1000, 'minutes' => 10, 'points' => [[$a, $b], [$c, $d]], 'source' => 'google', 'mode' => $job['provider']['mode']];
+            }
+            return $out;
+        };
+    }
+
+    public function testLinkingRoutesEachPointToTheNextInListOrder(): void
+    {
+        importMissionMapPoints($this->missionId, parseMapPointText("35.1,24.1,A
+35.2,24.2,B
+35.3,24.3,C
+")['rows'], $this->userId);
+        $points = loadMissionMapPoints($this->missionId);
+        $seen = [];
+        $r = mapPointsLinkLegs($points, 'foot', 'KEY', $this->fakeRouter([], $seen));
+
+        $this->assertCount(2, $r['legs']);
+        $this->assertSame([$points[0]['id'], $points[1]['id']], [$r['legs'][0]['from_id'], $r['legs'][0]['to_id']]);
+        $this->assertSame([$points[1]['id'], $points[2]['id']], [$r['legs'][1]['from_id'], $r['legs'][1]['to_id']]);
+        $this->assertSame(2000, $r['meters']);
+        $this->assertSame(20, $r['minutes']);
+        $this->assertSame(0, $r['unrouted']);
+        $this->assertSame('walking', $seen['leg:0']['provider']['mode']);
+        $this->assertSame('google', $seen['leg:0']['provider']['name']);
+        $this->assertTrue($seen['leg:0']['geometry']);
+        $this->assertSame([35.1, 24.1, 35.2, 24.2], $seen['leg:0']['leg']);
+
+        $seen = [];
+        mapPointsLinkLegs($points, 'vehicle', 'KEY', $this->fakeRouter([], $seen));
+        $this->assertSame('driving', $seen['leg:0']['provider']['mode']);
+    }
+
+    public function testALegWithNoRouteIsCountedNotDrawnAsAStraightLine(): void
+    {
+        importMissionMapPoints($this->missionId, parseMapPointText("35.1,24.1,A
+35.2,24.2,B
+35.3,24.3,C
+")['rows'], $this->userId);
+        $r = mapPointsLinkLegs(loadMissionMapPoints($this->missionId), 'foot', 'KEY', $this->fakeRouter(['leg:0']));
+        $this->assertSame(1, $r['unrouted']);
+        $this->assertNull($r['legs'][0]['points']);
+        $this->assertNull($r['legs'][0]['meters']);
+        $this->assertNotNull($r['legs'][1]['points']);
+        $this->assertSame(1000, $r['meters']);
+    }
+
+    public function testLinkingStopsAtTwentyFivePoints(): void
+    {
+        $rows = [];
+        for ($i = 0; $i < 40; $i++) {
+            $rows[] = ['lat' => 35.0 + $i / 1000, 'lng' => 24.0, 'name' => 'P' . $i, 'elevation' => null, 'access' => null, 'note' => null];
+        }
+        importMissionMapPoints($this->missionId, $rows, $this->userId);
+        $r = mapPointsLinkLegs(loadMissionMapPoints($this->missionId), 'foot', 'KEY', $this->fakeRouter());
+        $this->assertSame(MAP_POINT_LINK_MAX - 1, count($r['legs']));
+        $this->assertSame(25, MAP_POINT_LINK_MAX);
+    }
+
+    public function testNothingToConnectWithFewerThanTwoPoints(): void
+    {
+        importMissionMapPoints($this->missionId, parseMapPointText("35.1,24.1,A
+")['rows'], $this->userId);
+        $r = mapPointsLinkLegs(loadMissionMapPoints($this->missionId), 'foot', 'KEY', $this->fakeRouter());
+        $this->assertSame([], $r['legs']);
+        $this->assertSame(0, $r['unrouted']);
+    }
 }
