@@ -72,6 +72,7 @@ $answer = function (array $extra = []) use ($missionId, $canManage) {
     return json_encode(array_merge([
         'ok' => true,
         'mapPoints' => loadMissionMapPoints($missionId, $canManage),
+        'mapPointRoute' => loadMapPointRoute($missionId),
         'mapPointsVersion' => missionMapPointsVersion($missionId),
     ], $extra), JSON_UNESCAPED_UNICODE);
 };
@@ -82,6 +83,13 @@ if ($action === 'list') {
 }
 
 if ($action === 'connect') {
+    // Command draws the route and it is kept for the whole operation (v3.365.0):
+    // everybody sees it, so one person asking is one set of billed legs, not one
+    // per viewer.
+    if (!$canManage) {
+        echo json_encode(['ok' => false, 'error' => t('mp.err_manage')]);
+        exit;
+    }
     $apiKey = trim((string) getSetting('google_maps_api_key', ''));
     if ($apiKey === '' || !routeDistanceAvailable()) {
         echo json_encode(['ok' => false, 'error' => t('mp.link_no_google')]);
@@ -111,17 +119,25 @@ if ($action === 'connect') {
     session_write_close();
 
     $result = mapPointsLinkLegs($used, $mode, $apiKey);
-    echo json_encode([
-        'ok' => true,
-        'mode' => $mode,
-        'filter' => $filter,
-        'total' => count($all),
-        'used' => count($used),
-        'legs' => $result['legs'],
-        'meters' => $result['meters'],
-        'minutes' => $result['minutes'],
-        'unrouted' => $result['unrouted'],
-    ], JSON_UNESCAPED_UNICODE);
+    saveMapPointRoute($missionId, [
+        'mode' => $mode, 'filter' => $filter, 'total' => count($all), 'used' => count($used),
+        'legs' => $result['legs'], 'meters' => $result['meters'], 'minutes' => $result['minutes'], 'unrouted' => $result['unrouted'],
+    ], $userId);
+    logAudit('map_points_route_drawn', 'missions', $missionId, null, ['mode' => $mode, 'points' => count($used), 'unrouted' => $result['unrouted']]);
+    // The route is kept for everyone; the answer carries it back to the drawer too.
+    echo $answer();
+    exit;
+}
+
+if ($action === 'route_clear') {
+    if (!$canManage) {
+        echo json_encode(['ok' => false, 'error' => t('mp.err_manage')]);
+        exit;
+    }
+    if (clearMapPointRoute($missionId)) {
+        logAudit('map_points_route_cleared', 'missions', $missionId);
+    }
+    echo $answer();
     exit;
 }
 

@@ -3242,4 +3242,22 @@ CREATE TABLE IF NOT EXISTS `mission_dispatch_withdrawals` (
     FOREIGN KEY (`withdrawn_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- SHARED ROAD ROUTE BETWEEN A MISSION'S MAP POINTS (v3.365.0). The one route
+-- command drew; every participant sees it.
+CREATE TABLE IF NOT EXISTS `mission_map_point_routes` (
+    `mission_id` INT UNSIGNED NOT NULL PRIMARY KEY,
+    `mode` ENUM('foot','vehicle') NOT NULL,
+    `filter_kind` VARCHAR(10) NOT NULL DEFAULT 'all',
+    `total_points` INT UNSIGNED NOT NULL DEFAULT 0,
+    `used_points` INT UNSIGNED NOT NULL DEFAULT 0,
+    `meters` INT UNSIGNED NOT NULL DEFAULT 0,
+    `minutes` INT UNSIGNED NOT NULL DEFAULT 0,
+    `unrouted` INT UNSIGNED NOT NULL DEFAULT 0,
+    `legs` MEDIUMTEXT NOT NULL COMMENT 'JSON: from_id, to_id, meters, minutes, points[] per leg',
+    `created_by` INT UNSIGNED NULL,
+    `created_at` DATETIME NOT NULL,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

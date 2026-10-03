@@ -418,6 +418,11 @@ function missionMapPointsVersion(int $missionId): string {
         );
         $version .= '/' . $d['c'] . '.' . $d['mx'] . '.' . preg_replace('/\D/', '', $d['a'] . $d['b'] . $d['f']);
     }
+    // The shared road route (v3.365.0): drawn, redrawn or taken off.
+    if (dbColumnExists('mission_map_point_routes', 'mission_id')) {
+        $stamp = dbFetchValue("SELECT created_at FROM mission_map_point_routes WHERE mission_id = ?", [$missionId]);
+        $version .= '/r' . ($stamp ? preg_replace('/\D/', '', (string) $stamp) : '0');
+    }
     return $version;
 }
 
@@ -635,4 +640,73 @@ function notifyMapPointsAssigned(array $mission, array $team, array $dispatchIds
             ]);
         }
     }
+}
+
+/**
+ * Keep the route command drew as THE route of the mission, for everybody to see.
+ * One per mission: drawing again replaces it. $result is mapPointsLinkLegs()'s
+ * answer plus the mode, filter and counts the endpoint knows.
+ */
+function saveMapPointRoute(int $missionId, array $result, int $userId): void {
+    dbExecute("DELETE FROM mission_map_point_routes WHERE mission_id = ?", [$missionId]);
+    dbInsert(
+        "INSERT INTO mission_map_point_routes
+            (mission_id, mode, filter_kind, total_points, used_points, meters, minutes, unrouted, legs, created_by, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+        [
+            $missionId, $result['mode'] === 'vehicle' ? 'vehicle' : 'foot', (string) $result['filter'],
+            (int) $result['total'], (int) $result['used'], (int) $result['meters'], (int) $result['minutes'], (int) $result['unrouted'],
+            json_encode($result['legs'], JSON_UNESCAPED_UNICODE), $userId,
+        ]
+    );
+}
+
+function clearMapPointRoute(int $missionId): bool {
+    return dbExecute("DELETE FROM mission_map_point_routes WHERE mission_id = ?", [$missionId]) > 0;
+}
+
+/**
+ * The mission's shared route as the page draws it, or null when there is none.
+ * A route whose points have since been deleted is not a true picture of the
+ * ground any more, so it is dropped here rather than shown: coordinates of a
+ * point never change, only its existence does.
+ */
+function loadMapPointRoute(int $missionId): ?array {
+    $row = dbFetchOne(
+        "SELECT r.*, u.name AS by_name FROM mission_map_point_routes r LEFT JOIN users u ON u.id = r.created_by WHERE r.mission_id = ?",
+        [$missionId]
+    );
+    if (!$row) {
+        return null;
+    }
+    $legs = json_decode((string) $row['legs'], true);
+    if (!is_array($legs)) {
+        clearMapPointRoute($missionId);
+        return null;
+    }
+    $ids = [];
+    foreach ($legs as $leg) {
+        $ids[(int) $leg['from_id']] = true;
+        $ids[(int) $leg['to_id']] = true;
+    }
+    if ($ids) {
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $have = (int) dbFetchValue("SELECT COUNT(*) FROM mission_map_points WHERE mission_id = ? AND id IN ($in)", array_merge([$missionId], array_keys($ids)));
+        if ($have !== count($ids)) {
+            clearMapPointRoute($missionId);
+            return null;
+        }
+    }
+    return [
+        'stamp'    => preg_replace('/\D/', '', (string) $row['created_at']),
+        'mode'     => $row['mode'],
+        'filter'   => $row['filter_kind'],
+        'total'    => (int) $row['total_points'],
+        'used'     => (int) $row['used_points'],
+        'meters'   => (int) $row['meters'],
+        'minutes'  => (int) $row['minutes'],
+        'unrouted' => (int) $row['unrouted'],
+        'legs'     => $legs,
+        'by'       => $row['by_name'],
+    ];
 }

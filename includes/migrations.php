@@ -7648,6 +7648,28 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 183,
+            'description' => 'The road routes joining a mission\'s map points are shared (v3.365.0): mission_map_point_routes holds the one route command drew for the mission, so every participant sees it, not only the person who asked for it.',
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_map_point_routes (
+                    mission_id INT UNSIGNED NOT NULL PRIMARY KEY,
+                    mode ENUM('foot','vehicle') NOT NULL,
+                    filter_kind VARCHAR(10) NOT NULL DEFAULT 'all',
+                    total_points INT UNSIGNED NOT NULL DEFAULT 0,
+                    used_points INT UNSIGNED NOT NULL DEFAULT 0,
+                    meters INT UNSIGNED NOT NULL DEFAULT 0,
+                    minutes INT UNSIGNED NOT NULL DEFAULT 0,
+                    unrouted INT UNSIGNED NOT NULL DEFAULT 0,
+                    legs MEDIUMTEXT NOT NULL COMMENT 'JSON: from_id, to_id, meters, minutes, points[] per leg',
+                    created_by INT UNSIGNED NULL,
+                    created_at DATETIME NOT NULL,
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

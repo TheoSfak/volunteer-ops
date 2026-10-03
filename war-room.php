@@ -1811,6 +1811,7 @@ $commandPost = ($canManageWarRoom || $isApprovedParticipant) ? loadMissionComman
 $mapPointsVisible = $canManageWarRoom || $isApprovedParticipant;
 $mapPoints = $mapPointsVisible ? loadMissionMapPoints($missionId, $canManageWarRoom) : [];
 $mapPointsVersion = $mapPointsVisible ? missionMapPointsVersion($missionId) : null;
+$mapPointRoute = $mapPointsVisible ? loadMapPointRoute($missionId) : null;
 // Joining the points by road needs the organisation's Google key and cURL
 // (checked inline: route-distance.php is not part of the bootstrap chain).
 $mapPointsRouting = trim((string) getSetting('google_maps_api_key', '')) !== '' && function_exists('curl_init') && function_exists('curl_multi_init');
@@ -6318,11 +6319,13 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                 </div>
                 <?php endif; ?>
                 <div id="mapPointsList" class="list-group list-group-flush mb-3"></div>
-                <div class="border-top pt-3 mb-3" id="mapPointsLink">
+                <div class="border-top pt-3 mb-3<?= $canManageWarRoom ? '' : ' d-none' ?>" id="mapPointsLink">
                     <div class="form-check form-switch mb-2">
-                        <input class="form-check-input" type="checkbox" id="mapPointsLinkSwitch">
-                        <label class="form-check-label fw-semibold" for="mapPointsLinkSwitch"><i class="bi bi-bezier2 me-1"></i><?= h(t('mp.link_title')) ?></label>
+                        <input class="form-check-input" type="checkbox" id="mapPointsLinkSwitch" checked>
+                        <label class="form-check-label fw-semibold" for="mapPointsLinkSwitch"><i class="bi bi-bezier2 me-1"></i><?= h(t('mp.link_show')) ?></label>
                     </div>
+                    <?php if ($canManageWarRoom): ?>
+                    <div class="small fw-semibold mb-2"><?= h(t('mp.link_title')) ?></div>
                     <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
                         <span class="small text-muted" style="width:70px"><?= h(t('mp.link_points')) ?></span>
                         <input type="radio" class="btn-check" name="mpLinkFilter" id="mpLinkFilterAll" value="all" checked>
@@ -6347,6 +6350,8 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                         <button type="button" class="btn btn-sm btn-primary" id="mapPointsLinkDraw"><i class="bi bi-bezier2 me-1"></i><?= h(t('mp.link_draw')) ?></button>
                         <button type="button" class="btn btn-sm btn-outline-secondary" id="mapPointsLinkClear"><?= h(t('mp.link_clear')) ?></button>
                     </div>
+                    <div class="small text-muted mt-1"><?= h(t('mp.link_shared_note')) ?></div>
+                    <?php endif; ?>
                     <div class="small mt-2" id="mapPointsLinkSummary"></div>
                 </div>
                 <?php if ($canManageWarRoom): ?>
@@ -6742,6 +6747,8 @@ const CP_CAN_MANAGE = <?= json_encode($canManageWarRoom) ?>;
 // Same early copy of the permission as above, for the same reason.
 let mapPoints = <?= json_encode($mapPoints, JSON_UNESCAPED_UNICODE) ?>;
 let mapPointsVersion = <?= json_encode($mapPointsVersion) ?>;
+// The road route command drew between the points, shared with everybody (or null).
+let mapPointRoute = <?= json_encode($mapPointRoute, JSON_UNESCAPED_UNICODE) ?>;
 const MP_VISIBLE = <?= json_encode($mapPointsVisible) ?>;
 const MP_ROUTING = <?= json_encode($mapPointsRouting) ?>;
 const MP_LINK_MAX = <?= (int) MAP_POINT_LINK_MAX ?>;
@@ -11846,7 +11853,6 @@ function mpMakeMarker(p) {
 // whose data did not change is left alone, and an open popup with the cursor
 // in it is never rebuilt under the person typing.
 function mpRender() {
-    mpLinkCheckStale();
     mpSelected.forEach(id => { if (!mapPoints.some(p => p.id === id)) mpSelected.delete(id); });
     if (mapPointsCluster) {
         const seen = new Set();
@@ -11886,6 +11892,7 @@ function mpRender() {
     }
     mpSyncButton();
     mpRenderList();
+    mpRouteApply();
 }
 
 function mpCountText(n) {
@@ -11896,6 +11903,7 @@ function mpAdopt(res) {
     if (!res || !Array.isArray(res.mapPoints)) return;
     mapPoints = res.mapPoints;
     mapPointsVersion = res.mapPointsVersion;
+    if ('mapPointRoute' in res) mapPointRoute = res.mapPointRoute;
     mpRender();
 }
 
@@ -12210,23 +12218,22 @@ function mpShowPreview(summary, extraLine) {
 // ── Σύνδεση σημείων: road routes joining the points in list order ──────────
 // Google routes (walking or driving), one leg from each point to the next, at
 // most MP_LINK_MAX points, from the list as it was imported. A leg Google finds
-// no way for is left out and counted, never drawn as a straight line. The lines
-// are this viewer's own view and are not stored; they are taken off as soon as
-// the points they join change.
+// no way for is left out and counted, never drawn as a straight line.
+// Command asks for it and it is kept for the whole mission (v3.365.0): it
+// arrives with the points, so every participant sees what command drew, and
+// anybody can switch the lines off on their own screen. It is taken off when
+// command removes it or a point it joins is deleted.
 const MP_LINK_COLORS = {foot: '#D85A30', vehicle: '#378ADD'};
 let mpLinkLayer = null;
-let mpLinkState = null;     // {sig, summary}
+let mpRouteDrawnStamp = null;   // the stamp of the route on the map now
+let mpLinkHidden = false;       // this viewer switched the lines off
 let mpLinkBusy = false;
-
-function mpLinkSigOf(ids) {
-    return ids.map(id => {
-        const p = mapPoints.find(x => x.id === id);
-        return p ? id + ':' + p.lat + ',' + p.lng : id + ':gone';
-    }).join('|');
-}
+let mpDrawing = false;          // I am the one who asked for the route just now
+let mpRouteSeen = false;        // the page has finished loading (a route arriving later is news)
 
 function mpLinkEls() {
     return {
+        box: document.getElementById('mapPointsLink'),
         sw: document.getElementById('mapPointsLinkSwitch'),
         summary: document.getElementById('mapPointsLinkSummary'),
         draw: document.getElementById('mapPointsLinkDraw'),
@@ -12242,88 +12249,98 @@ function mpKmText(meters) {
     return (meters / 1000).toLocaleString(jsLocale, {minimumFractionDigits: 1, maximumFractionDigits: 1});
 }
 
-function mpLinkClear() {
-    if (mpLinkLayer && map) map.removeLayer(mpLinkLayer);
-    mpLinkLayer = null;
-    mpLinkState = null;
-    const el = mpLinkEls();
-    if (el.sw) el.sw.checked = false;
-    if (el.summary) el.summary.innerHTML = '';
-}
-
-// Called with every render of the points: lines joining points that have since
-// moved, gone or been added are no longer a true picture.
-function mpLinkCheckStale() {
-    if (!mpLinkState) return;
-    if (mpLinkSigOf(mpLinkState.ids) !== mpLinkState.sig) {
-        mpLinkClear();
-        opToast(t('mp.link_stale'));
-    }
-}
-
-function mpLinkSummaryHtml(res, drawnLegs) {
+function mpLinkSummaryHtml(route, drawnLegs) {
     const lines = [];
     if (drawnLegs > 0) {
-        lines.push(`<div class="text-success fw-semibold">${escapeHtml(t('mp.link_summary', {legs: drawnLegs, km: mpKmText(res.meters), time: mpTimeText(res.minutes)}))}</div>`);
+        lines.push(`<div class="text-success fw-semibold">${escapeHtml(t('mp.link_summary', {legs: drawnLegs, km: mpKmText(route.meters), time: mpTimeText(route.minutes)}))}</div>`);
     }
-    if (res.total > res.used) lines.push(`<div class="text-muted">${escapeHtml(t('mp.link_capped', {used: res.used, total: res.total}))}</div>`);
-    if (res.unrouted > 0) lines.push(`<div class="text-warning-emphasis">${escapeHtml(t('mp.link_unrouted', {n: res.unrouted}))}</div>`);
+    if (route.total > route.used) lines.push(`<div class="text-muted">${escapeHtml(t('mp.link_capped', {used: route.used, total: route.total}))}</div>`);
+    if (route.unrouted > 0) lines.push(`<div class="text-warning-emphasis">${escapeHtml(t('mp.link_unrouted', {n: route.unrouted}))}</div>`);
     return lines.join('');
 }
 
-function mpLinkRender(res) {
+// Build the lines of the mission's route; returns how many legs were drawn.
+function mpLinkBuildLayer(route) {
     if (mpLinkLayer && map) map.removeLayer(mpLinkLayer);
-    const color = MP_LINK_COLORS[res.mode] || MP_LINK_COLORS.foot;
+    const color = MP_LINK_COLORS[route.mode] || MP_LINK_COLORS.foot;
     const layer = L.layerGroup();
-    const bounds = [];
-    const ids = [];
     let drawn = 0;
-    res.legs.forEach(leg => {
-        if (!ids.includes(leg.from_id)) ids.push(leg.from_id);
-        if (!ids.includes(leg.to_id)) ids.push(leg.to_id);
+    route.legs.forEach(leg => {
         if (!leg.points || leg.points.length < 2) return;
         drawn++;
-        leg.points.forEach(pt => bounds.push(pt));
         const from = mapPoints.find(x => x.id === leg.from_id), to = mapPoints.find(x => x.id === leg.to_id);
-        L.polyline(leg.points, {color, weight: 4, opacity: 0.9, dashArray: res.mode === 'foot' ? '9 6' : null, lineCap: 'round', lineJoin: 'round'})
+        L.polyline(leg.points, {color, weight: 4, opacity: 0.9, dashArray: route.mode === 'foot' ? '9 6' : null, lineCap: 'round', lineJoin: 'round'})
             .bindPopup(() => '<div class="fw-semibold">' + escapeHtml((from ? from.name : '') + ' → ' + (to ? to.name : '')) + '</div>'
                 + '<div class="small">' + escapeHtml(t('mp.link_leg_line', {km: mpKmText(leg.meters), time: mpTimeText(leg.minutes)})) + '</div>')
             .addTo(layer);
     });
-    mpLinkLayer = layer.addTo(map);
-    mpLinkState = {ids, sig: mpLinkSigOf(ids)};
+    mpLinkLayer = layer;
+    return drawn;
+}
+
+// Make the map and the section say what the mission's route is now: draw a new
+// one, take a removed one off, honour this viewer's own switch.
+function mpRouteApply() {
     const el = mpLinkEls();
-    if (el.sw) el.sw.checked = true;
-    if (el.summary) el.summary.innerHTML = mpLinkSummaryHtml(res, drawn) || `<div class="text-warning-emphasis">${escapeHtml(t('mp.link_unrouted', {n: res.unrouted}))}</div>`;
-    if (drawn > 0) {
-        opToast(t('mp.link_summary', {legs: drawn, km: mpKmText(res.meters), time: mpTimeText(res.minutes)}));
-        mpFocus(null, {bounds: L.latLngBounds(bounds)});
+    const route = mapPointRoute;
+    if (!route) {
+        if (mpLinkLayer && map) map.removeLayer(mpLinkLayer);
+        mpLinkLayer = null;
+        mpRouteDrawnStamp = null;
+        if (el.box && !MP_CAN_MANAGE) el.box.classList.add('d-none');
+        if (el.summary) el.summary.innerHTML = '';
+        return;
+    }
+    if (el.box) el.box.classList.remove('d-none');
+    if (mpRouteDrawnStamp !== route.stamp) {
+        const drawn = mpLinkBuildLayer(route);
+        mpRouteDrawnStamp = route.stamp;
+        mpLinkHidden = false;
+        if (el.summary) el.summary.innerHTML = mpLinkSummaryHtml(route, drawn)
+            || `<div class="text-warning-emphasis">${escapeHtml(t('mp.link_unrouted', {n: route.unrouted}))}</div>`;
+        if (mpRouteSeen && !mpDrawing && drawn > 0) opToast(t('mp.link_shared_toast'));
+    }
+    if (el.sw) el.sw.checked = !mpLinkHidden;
+    if (mpLinkLayer && map) {
+        if (mpLinkHidden) map.removeLayer(mpLinkLayer);
+        else if (!map.hasLayer(mpLinkLayer)) mpLinkLayer.addTo(map);
     }
 }
 
+// Command: ask for the route; the server keeps it and everybody gets it.
 function mpLinkDraw() {
-    const el = mpLinkEls();
-    if (!MP_ROUTING) {
-        alert(t('mp.link_no_google'));
-        if (el.sw) el.sw.checked = false;
-        return;
-    }
+    if (!MP_CAN_MANAGE) return;
+    if (!MP_ROUTING) { alert(t('mp.link_no_google')); return; }
     if (mpLinkBusy) return;
     mpLinkBusy = true;
+    mpDrawing = true;
+    const el = mpLinkEls();
     if (el.draw) el.draw.disabled = true;
     if (el.summary) el.summary.innerHTML = `<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span>${escapeHtml(t('mp.link_loading'))}</span>`;
     const filter = document.querySelector('input[name="mpLinkFilter"]:checked')?.value || 'all';
     const mode = document.querySelector('input[name="mpLinkMode"]:checked')?.value || 'foot';
     mpPost({action: 'connect', filter, mode}).then(res => {
         mpLinkBusy = false;
+        mpDrawing = false;
         if (el.draw) el.draw.disabled = false;
-        if (!res || !res.ok) {
-            if (el.summary) el.summary.innerHTML = '';
-            if (el.sw) el.sw.checked = !!mpLinkState;
-            return;
+        // mpPost has adopted the answer, route included; a refusal leaves the old one.
+        mpRouteDrawnStamp = null;
+        mpRouteApply();
+        if (!res || !res.ok || !mapPointRoute) return;
+        const bounds = [];
+        mapPointRoute.legs.forEach(leg => (leg.points || []).forEach(pt => bounds.push(pt)));
+        if (bounds.length) {
+            opToast(t('mp.link_summary', {legs: mapPointRoute.legs.length - mapPointRoute.unrouted, km: mpKmText(mapPointRoute.meters), time: mpTimeText(mapPointRoute.minutes)}));
+            mpFocus(null, {bounds: L.latLngBounds(bounds)});
         }
-        mpLinkRender(res);
     });
+}
+
+// Command: take the route off for everybody.
+function mpLinkClear() {
+    if (!MP_CAN_MANAGE) return;
+    mpDrawing = true;
+    mpPost({action: 'route_clear'}).then(() => { mpDrawing = false; });
 }
 
 (function wireMapPointsModal() {
@@ -12360,9 +12377,9 @@ function mpLinkDraw() {
         });
     }
     const linkSwitch = document.getElementById('mapPointsLinkSwitch');
-    linkSwitch.addEventListener('change', () => { if (linkSwitch.checked) mpLinkDraw(); else mpLinkClear(); });
-    document.getElementById('mapPointsLinkDraw').addEventListener('click', mpLinkDraw);
-    document.getElementById('mapPointsLinkClear').addEventListener('click', mpLinkClear);
+    linkSwitch.addEventListener('change', () => { mpLinkHidden = !linkSwitch.checked; mpRouteApply(); });
+    document.getElementById('mapPointsLinkDraw')?.addEventListener('click', mpLinkDraw);
+    document.getElementById('mapPointsLinkClear')?.addEventListener('click', mpLinkClear);
     list.addEventListener('click', e => {
         const tick = e.target.closest('[data-mp-sel]');
         if (tick) {
@@ -12440,6 +12457,7 @@ function mpLinkDraw() {
 })();
 
 mpRender();
+mpRouteSeen = true;
 
 function updateMissingPersonLocationPreview() {
     // Guards every lookup, not just the first — none of these ids exist in

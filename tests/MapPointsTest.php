@@ -608,4 +608,83 @@ final class MapPointsTest extends TestCase
         logDispatchWithdrawal(999999, $this->missionId, $this->userId);
         $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_dispatch_withdrawals WHERE mission_id = ?", [$this->missionId]));
     }
+
+    // ── The shared road route (v3.365.0) ────────────────────────────────────
+
+    private function drawRoute(array $points, string $mode = 'foot'): array
+    {
+        $result = mapPointsLinkLegs($points, $mode, 'KEY', $this->fakeRouter());
+        saveMapPointRoute($this->missionId, [
+            'mode' => $mode, 'filter' => 'all', 'total' => count($points), 'used' => count($points),
+            'legs' => $result['legs'], 'meters' => $result['meters'], 'minutes' => $result['minutes'], 'unrouted' => $result['unrouted'],
+        ], $this->userId);
+        return $result;
+    }
+
+    public function testTheRouteCommandDrewIsKeptForEveryone(): void
+    {
+        $this->assertNull(loadMapPointRoute($this->missionId));
+        $this->seedPoints();
+        $this->drawRoute(loadMissionMapPoints($this->missionId));
+
+        $route = loadMapPointRoute($this->missionId);
+        $this->assertNotNull($route);
+        $this->assertSame('foot', $route['mode']);
+        $this->assertCount(2, $route['legs']);
+        $this->assertSame(2000, $route['meters']);
+        $this->assertSame(20, $route['minutes']);
+        $this->assertSame(3, $route['used']);
+        $this->assertNotEmpty($route['legs'][0]['points']);
+        $this->assertNotSame('', $route['stamp']);
+    }
+
+    public function testDrawingAgainReplacesTheRouteAndClearingRemovesIt(): void
+    {
+        $this->seedPoints();
+        $points = loadMissionMapPoints($this->missionId);
+        $this->drawRoute($points, 'foot');
+        $this->drawRoute($points, 'vehicle');
+        $this->assertSame('vehicle', loadMapPointRoute($this->missionId)['mode']);
+        $this->assertSame(1, (int) dbFetchValue("SELECT COUNT(*) FROM mission_map_point_routes WHERE mission_id = ?", [$this->missionId]));
+
+        $this->assertTrue(clearMapPointRoute($this->missionId));
+        $this->assertNull(loadMapPointRoute($this->missionId));
+        $this->assertFalse(clearMapPointRoute($this->missionId));
+    }
+
+    public function testARouteWhosePointWasDeletedIsDroppedNotShown(): void
+    {
+        $this->seedPoints();
+        $points = loadMissionMapPoints($this->missionId);
+        $this->drawRoute($points);
+        deleteMissionMapPoint($this->missionId, $points[1]['id']);
+        $this->assertNull(loadMapPointRoute($this->missionId));
+        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_map_point_routes WHERE mission_id = ?", [$this->missionId]));
+    }
+
+    public function testARoutesLegWithNoRouteIsKeptAsSuchNotAsALine(): void
+    {
+        $this->seedPoints();
+        $points = loadMissionMapPoints($this->missionId);
+        $result = mapPointsLinkLegs($points, 'foot', 'KEY', $this->fakeRouter(['leg:0']));
+        saveMapPointRoute($this->missionId, [
+            'mode' => 'foot', 'filter' => 'all', 'total' => 3, 'used' => 3,
+            'legs' => $result['legs'], 'meters' => $result['meters'], 'minutes' => $result['minutes'], 'unrouted' => $result['unrouted'],
+        ], $this->userId);
+        $route = loadMapPointRoute($this->missionId);
+        $this->assertSame(1, $route['unrouted']);
+        $this->assertNull($route['legs'][0]['points']);
+    }
+
+    public function testTheVersionChangesWhenTheRouteIsDrawnAndWhenItIsRemoved(): void
+    {
+        $this->seedPoints();
+        $v0 = missionMapPointsVersion($this->missionId);
+        $this->drawRoute(loadMissionMapPoints($this->missionId));
+        $v1 = missionMapPointsVersion($this->missionId);
+        $this->assertNotSame($v0, $v1);
+        clearMapPointRoute($this->missionId);
+        $this->assertNotSame($v1, missionMapPointsVersion($this->missionId));
+        $this->assertSame($v0, missionMapPointsVersion($this->missionId), 'back to how it was with no route');
+    }
 }
