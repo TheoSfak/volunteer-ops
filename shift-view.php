@@ -666,6 +666,11 @@ include __DIR__ . '/includes/header.php';
                 <i class="bi bi-qr-code me-1"></i>QR Check-in
             </button>
         <?php endif; ?>
+        <?php if (isAdmin() || hasPagePermission('missions_manage') || (int) $shift['responsible_user_id'] === (int) $user['id']): ?>
+            <a href="shift-participants-print.php?id=<?= $id ?>" target="_blank" class="btn btn-outline-secondary">
+                <i class="bi bi-printer me-1"></i>Εκτύπωση συμμετεχόντων
+            </a>
+        <?php endif; ?>
         <?php if ($canManage): ?>
             <a href="shift-form.php?id=<?= $id ?>" class="btn btn-outline-primary">
                 <i class="bi bi-pencil me-1"></i>Επεξεργασία
