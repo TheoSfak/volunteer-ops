@@ -863,3 +863,56 @@ function leaderboardTop(int $limit = 5): array {
          ORDER BY t.total_points DESC, t.name ASC"
     );
 }
+
+/**
+ * Lifetime hours per volunteer: the same measure the municipality report ranks
+ * by (attended participations in missions that are not deleted, summed
+ * actual_hours), over all time. Only people with at least one attended
+ * participation appear, exactly like that report's volunteer list, and only
+ * active, not-deleted users.
+ *
+ * SQL derived table shared by hoursRankPosition() and hoursRankTop(), so the
+ * dashboard's rank card and its top list cannot drift apart.
+ */
+function hoursRankSql(): string {
+    return "SELECT u.id, u.name, u.total_points,
+                   COUNT(DISTINCT pr.id) AS shifts_count,
+                   COALESCE(SUM(pr.actual_hours), 0) AS total_hours
+              FROM users u
+              JOIN participation_requests pr ON pr.volunteer_id = u.id AND pr.attended = 1
+              JOIN shifts s ON pr.shift_id = s.id
+              JOIN missions m ON s.mission_id = m.id AND m.deleted_at IS NULL
+             WHERE u.is_active = 1 AND u.deleted_at IS NULL
+             GROUP BY u.id, u.name, u.total_points";
+}
+
+/**
+ * Where somebody stands by volunteering hours, and out of how many people have
+ * any. Order is total_hours DESC, name ASC — the municipality report's order.
+ *
+ * Returns ['rank' => int, 'total' => int, 'hours' => float], or null for
+ * somebody with no attended participation yet (not on this board).
+ */
+function hoursRankPosition(int $userId): ?array {
+    $board = hoursRankSql();
+    $me = dbFetchOne("SELECT name, total_hours FROM ({$board}) b WHERE b.id = ?", [$userId]);
+    if (!$me) {
+        return null;
+    }
+    $ahead = (int) dbFetchValue(
+        "SELECT COUNT(*) FROM ({$board}) b
+          WHERE b.total_hours > ? OR (b.total_hours = ? AND b.name < ?)",
+        [$me['total_hours'], $me['total_hours'], $me['name']]
+    );
+    $total = (int) dbFetchValue("SELECT COUNT(*) FROM ({$board}) b");
+    return ['rank' => $ahead + 1, 'total' => $total, 'hours' => (float) $me['total_hours']];
+}
+
+/**
+ * The first rows of the hours ranking, in the order hoursRankPosition() counts
+ * them, for the dashboard's «Κορυφαίοι Εθελοντές».
+ */
+function hoursRankTop(int $limit = 5): array {
+    $limit = max(1, min(100, $limit));
+    return dbFetchAll(hoursRankSql() . " ORDER BY total_hours DESC, u.name ASC LIMIT {$limit}");
+}

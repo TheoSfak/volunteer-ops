@@ -322,9 +322,9 @@ if (isAdmin()) {
         ];
     }
 
-    // The top of the leaderboard itself — the same list, order and crowd as
-    // leaderboard.php, so a place in this widget is that person's place there.
-    $topVolunteers = leaderboardTop(5);
+    // Ranked by volunteering hours, like the municipality report's volunteer
+    // list — see hoursRankTop(). The rank card below uses the same board.
+    $topVolunteers = hoursRankTop(5);
     
     // Recent missions
     $recentMissions = dbFetchAll(
@@ -485,13 +485,12 @@ if (isAdmin()) {
         $tepColor = $tepHours >= $tepGoal ? 'success' : ($tepHours >= 25 ? 'info' : ($tepHours >= 10 ? 'warning' : 'danger'));
     }
 
-    // Leaderboard rank
-    // The leaderboard's own position, not a count of its own: this card used to
-    // count volunteers and shift leaders only, and read differently from the
-    // leaderboard page it links to. See leaderboardPosition().
-    $leaderboardPosition = leaderboardPosition((int) $user['id']);
-    $leaderboardRank = $leaderboardPosition['rank'] ?? 0;
-    $leaderboardTotal = $leaderboardPosition['total'] ?? 0;
+    // Rank by volunteering hours — the measure the municipality report ranks by.
+    // Null until the user has an attended participation. See hoursRankPosition().
+    $hoursPosition = hoursRankPosition((int) $user['id']);
+    $leaderboardRank = $hoursPosition['rank'] ?? 0;
+    $leaderboardTotal = $hoursPosition['total'] ?? 0;
+    $leaderboardHours = $hoursPosition['hours'] ?? 0.0;
 
     // Recent achievements & next to earn
     $recentAchievements = [];
@@ -2247,9 +2246,20 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
                 <h5><i class="bi bi-trophy text-warning me-2"></i>Κατάταξη</h5>
             </div>
             <div class="card-body text-center py-4">
+                <?php if ($leaderboardRank > 0): ?>
                 <div style="font-size:2.8rem; font-weight:800; color:#7c3aed; line-height:1;">#<?= $leaderboardRank ?></div>
-                <div class="text-muted mt-1">από <?= $leaderboardTotal ?> μέλη</div>
-                <div class="text-muted small">βάσει συνολικών πόντων</div>
+                <div class="text-muted mt-1">από <?= $leaderboardTotal ?> εθελοντές</div>
+                <div class="text-muted small">βάσει ωρών εθελοντισμού</div>
+                <div class="mt-3">
+                    <span class="badge bg-primary fs-6">
+                        <i class="bi bi-clock-fill me-1"></i><?= number_format($leaderboardHours, 1) ?> ώρες
+                    </span>
+                </div>
+                <?php else: ?>
+                <div style="font-size:2.8rem; font-weight:800; color:#7c3aed; line-height:1;">—</div>
+                <div class="text-muted mt-1">Δεν έχεις ακόμη καταγεγραμμένες ώρες</div>
+                <div class="text-muted small">η κατάταξη είναι βάσει ωρών εθελοντισμού</div>
+                <?php endif; ?>
                 <?php if (getSetting('points_enabled', '1') === '1'): ?>
                 <div class="mt-3">
                     <span class="badge bg-warning text-dark fs-6">
@@ -2257,7 +2267,7 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
                     </span>
                 </div>
                 <?php endif; ?>
-                <a href="leaderboard.php" class="btn btn-sm btn-outline-secondary mt-3">Δες Κατάταξη</a>
+                <a href="leaderboard.php" class="btn btn-sm btn-outline-secondary mt-3">Κατάταξη πόντων</a>
             </div>
         </div>
     </div>
