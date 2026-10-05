@@ -154,6 +154,14 @@ if (get('thumb') === '1') {
     // broken tile in the gallery.
 }
 
+// A video the retention sweep removed (purgeExpiredMissionVideos()): 410 Gone
+// says "this existed and was deleted on purpose", which a 404 does not. Only
+// reached for the full file; the poster frame above is kept on purpose.
+if (!empty($photo['file_purged_at'])) {
+    http_response_code(410);
+    exit(t('media.video_deleted'));
+}
+
 $filePath = __DIR__ . '/uploads/mission-photos/' . basename($photo['stored_name']);
 if (!is_file($filePath) || !is_readable($filePath)) {
     http_response_code(404);

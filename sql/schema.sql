@@ -2691,6 +2691,11 @@ ALTER TABLE `mission_photos`
 ALTER TABLE `mission_photos`
     ADD COLUMN `thumb_stored_name` VARCHAR(255) NULL AFTER `stored_name`;
 
+-- When the retention sweep removed the media FILE (videos, 30 days after the
+-- mission closes). The row, poster frame and note stay. NULL = file still there.
+ALTER TABLE `mission_photos`
+    ADD COLUMN `file_purged_at` TIMESTAMP NULL DEFAULT NULL;
+
 -- =============================================
 -- MISSION MISSING PERSONS (War Room: one profile per mission — name, age,
 -- description, clothing, photo, last-seen location+time — backing the

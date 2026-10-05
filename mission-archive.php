@@ -154,15 +154,35 @@ $reviewHtml = renderMissionReviewCards(
     $user['language'] ?? DEFAULT_LANGUAGE
 );
 
+// Every photo and video, oldest first. The files themselves are served by
+// mission-photo-view.php, which already answers for finished missions to the
+// same audience (command staff). Videos older than the retention window have
+// had their FILE removed (purgeExpiredMissionVideos()); their tile stays.
+$media = loadMissionMediaForArchive($missionId);
+$videoRetentionDays = missionVideoRetentionDays();
+$mediaForMap = [];
+foreach ($media as $m) {
+    if ($m['lat'] !== null && $m['lng'] !== null) {
+        $mediaForMap[] = [
+            'id' => $m['id'], 'video' => $m['media_type'] === 'video', 'purged' => $m['purged'],
+            'thumb' => $m['has_thumb'] || $m['media_type'] === 'photo',
+            'lat' => $m['lat'], 'lng' => $m['lng'],
+            'meta' => trim(implode(' · ', array_filter([$m['team_label'], $m['user_name'], $m['time']]))),
+        ];
+    }
+}
+
 $archive = [
     'missionId' => $missionId,
     'dispatches' => $dispatches, 'areas' => $areas, 'sectors' => $sectors,
     'routes' => $routes, 'incidents' => $incidents, 'mapPoints' => $mapPoints,
+    'media' => $mediaForMap,
 ];
 $jsKeys = [
     'archive.loading', 'archive.load_failed', 'archive.no_trails', 'archive.timeline_empty', 'archive.speed',
     'archive.auto_suffix', 'archive.route_popup', 'archive.waypoint_popup',
     'archive.view_street', 'archive.view_topo', 'archive.view_satellite',
+    'archive.media_video_gone',
 ];
 $jsStrings = [];
 foreach ($jsKeys as $key) $jsStrings[$key] = t($key);
@@ -182,6 +202,15 @@ include __DIR__ . '/includes/header.php';
     #archiveMap { height: 68vh; min-height: 380px; border-radius: 10px; }
     #archiveEventLog { max-height: 68vh; overflow-y: auto; }
     .ar-pin { width: 14px; height: 14px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 4px #0009; }
+    .ar-tile { position: relative; display: block; width: 100%; aspect-ratio: 4 / 3; padding: 0; border: 0; border-radius: 8px; overflow: hidden; background: #1e293b; cursor: pointer; }
+    .ar-tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .ar-tile-blank { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; color: #94a3b8; font-size: 2rem; }
+    .ar-tile-play { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 2.2rem; text-shadow: 0 1px 6px #000a; }
+    .ar-tile-gone { cursor: default; }
+    .ar-tile-gone img { filter: grayscale(1) brightness(.55); }
+    .ar-tile-badge { position: absolute; left: 0; right: 0; bottom: 0; padding: 3px 6px; background: #000b; color: #fff; font-size: .72rem; text-align: center; }
+    .ar-tile-cap { line-height: 1.25; margin-top: 2px; }
+    #archiveMediaBody img, #archiveMediaBody video { max-width: 100%; max-height: 75vh; }
 </style>
 
 <div class="container-fluid px-0">
@@ -230,6 +259,7 @@ include __DIR__ . '/includes/header.php';
                     <label class="form-check-label"><input type="checkbox" class="form-check-input me-1" data-layer="routes" checked><?= h(t('archive.layer_routes')) ?></label>
                     <label class="form-check-label"><input type="checkbox" class="form-check-input me-1" data-layer="incidents" checked><?= h(t('archive.layer_incidents')) ?></label>
                     <label class="form-check-label"><input type="checkbox" class="form-check-input me-1" data-layer="points" checked><?= h(t('archive.layer_points')) ?></label>
+                    <label class="form-check-label"><input type="checkbox" class="form-check-input me-1" data-layer="media" checked><?= h(t('archive.layer_media')) ?></label>
                 </div>
                 <div id="archiveMap"></div>
                 <div class="d-none align-items-center gap-2 mt-2" id="archiveReplayBar">
@@ -251,6 +281,57 @@ include __DIR__ . '/includes/header.php';
         <?php /* built by renderMissionReviewCards(); every value inside is escaped there */ ?>
         <div class="col-lg-6"><?= $reviewHtml['incidents'] ?></div>
         <div class="col-lg-6"><?= $reviewHtml['shortages'] ?></div>
+    </div>
+
+    <div class="ar-card" id="archiveMedia">
+        <h2><i class="bi bi-images me-1"></i><?= h(t('archive.media_title')) ?> <span class="badge bg-secondary"><?= count($media) ?></span></h2>
+        <?php if ($videoRetentionDays > 0): ?>
+            <p class="small text-muted mb-2"><i class="bi bi-info-circle me-1"></i><?= h(t('archive.media_retention', ['days' => $videoRetentionDays])) ?></p>
+        <?php endif; ?>
+        <?php if (!$media): ?>
+            <p class="text-muted small mb-0"><?= h(t('archive.media_none')) ?></p>
+        <?php else: ?>
+        <div class="row g-2">
+            <?php foreach ($media as $m):
+                $isVideo = $m['media_type'] === 'video';
+                $meta = trim(implode(' · ', array_filter([$m['team_label'], $m['user_name'], $m['time']])));
+                $thumbUrl = 'mission-photo-view.php?id=' . $m['id'] . '&amp;thumb=1';
+            ?>
+            <div class="col-6 col-md-3 col-xl-2">
+                <button type="button" class="ar-tile<?= $m['purged'] ? ' ar-tile-gone' : '' ?>"
+                        data-id="<?= $m['id'] ?>" data-video="<?= $isVideo ? '1' : '0' ?>" data-purged="<?= $m['purged'] ? '1' : '0' ?>"
+                        data-meta="<?= h($meta) ?>" <?= $m['purged'] ? 'disabled' : '' ?>>
+                    <?php if ($m['has_thumb'] || !$isVideo): ?>
+                        <img src="<?= $thumbUrl ?>" loading="lazy" alt="">
+                    <?php else: ?>
+                        <span class="ar-tile-blank"><i class="bi bi-camera-reels"></i></span>
+                    <?php endif; ?>
+                    <?php if ($isVideo): ?><span class="ar-tile-play"><i class="bi bi-play-circle-fill"></i></span><?php endif; ?>
+                    <?php if ($m['purged']): ?><span class="ar-tile-badge"><?= h(t('archive.media_video_gone')) ?></span><?php endif; ?>
+                </button>
+                <div class="small text-muted ar-tile-cap"><?= h($meta) ?></div>
+                <?php if ($m['context'] !== null): ?><div class="small ar-tile-cap"><?= h(mb_strimwidth($m['context'], 0, 70, '…')) ?></div><?php endif; ?>
+                <?php if ($m['expires'] !== null): ?><div class="small text-warning-emphasis ar-tile-cap"><i class="bi bi-hourglass-split"></i> <?= h(t('archive.media_video_expires', ['date' => $m['expires']])) ?></div><?php endif; ?>
+            </div>
+            <?php endforeach; ?>
+        </div>
+        <?php endif; ?>
+    </div>
+
+    <?php /* Read-only viewer: shows one photo or plays one video, nothing else. */ ?>
+    <div class="modal fade" id="archiveMediaModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header py-2">
+                    <div class="small text-muted" id="archiveMediaMeta"></div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="<?= h(t('archive.media_close')) ?>"></button>
+                </div>
+                <div class="modal-body text-center p-2" id="archiveMediaBody"></div>
+                <div class="modal-footer py-2">
+                    <a href="#" id="archiveMediaDownload" class="btn btn-outline-secondary btn-sm" download><i class="bi bi-download me-1"></i><?= h(t('archive.media_download')) ?></a>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -274,7 +355,7 @@ include __DIR__ . '/includes/header.php';
     map.setView([35.34, 25.14], 10);
 
     // ── Static geometry, one group per toggle ────────────────────────────────
-    const groups = {dispatch: L.layerGroup(), sectors: L.layerGroup(), routes: L.layerGroup(), incidents: L.layerGroup(), points: L.layerGroup()};
+    const groups = {dispatch: L.layerGroup(), sectors: L.layerGroup(), routes: L.layerGroup(), incidents: L.layerGroup(), points: L.layerGroup(), media: L.layerGroup()};
     const staticBounds = [];
     const extend = (lat, lng) => staticBounds.push([lat, lng]);
 
@@ -319,6 +400,22 @@ include __DIR__ . '/includes/header.php';
     ARCHIVE.mapPoints.forEach(p => {
         L.circleMarker([p.lat, p.lng], {radius: 5, color: '#fff', weight: 1.5, fillColor: pointColor[p.status] || '#6c757d', fillOpacity: 1}).bindTooltip(esc(p.name)).addTo(groups.points);
         extend(p.lat, p.lng);
+    });
+    // Photos/videos with a position: a marker whose popup shows the picture; a
+    // click on the picture opens the same viewer as the gallery tiles below.
+    ARCHIVE.media.forEach(m => {
+        const marker = L.circleMarker([m.lat, m.lng], {radius: 7, color: '#fff', weight: 2, fillColor: m.video ? '#7c3aed' : '#0891b2', fillOpacity: 1}).addTo(groups.media);
+        const pic = m.thumb && !m.purged
+            ? '<img src="mission-photo-view.php?id=' + m.id + '&thumb=1" data-open-media="' + m.id + '" style="width:140px;border-radius:4px;cursor:pointer;display:block;margin-bottom:4px;">'
+            : '';
+        marker.bindPopup(pic + '<span class="small">' + esc(m.meta) + (m.purged ? '<br>' + esc(STR['archive.media_video_gone']) : '') + '</span>');
+        extend(m.lat, m.lng);
+    });
+    map.on('popupopen', e => {
+        const img = e.popup.getElement().querySelector('[data-open-media]');
+        if (!img) return;
+        const tile = document.querySelector('.ar-tile[data-id="' + img.dataset.openMedia + '"]');
+        if (tile) img.addEventListener('click', () => tile.click());
     });
     Object.values(groups).forEach(g => g.addTo(map));
     document.querySelectorAll('[data-layer]').forEach(box => box.addEventListener('change', () => {
@@ -411,6 +508,25 @@ include __DIR__ . '/includes/header.php';
     }
     document.getElementById('archiveShow').addEventListener('click', loadTrails);
     loadTrails();
+
+    // ── Gallery viewer: one photo or one video at a time, read only ──────────
+    const mediaModalEl = document.getElementById('archiveMediaModal');
+    const mediaBody = document.getElementById('archiveMediaBody');
+    document.querySelectorAll('.ar-tile').forEach(tile => tile.addEventListener('click', () => {
+        // Looked up at click time: bootstrap.bundle.js is loaded by the footer,
+        // AFTER this inline script has run, so it does not exist yet up here.
+        const mediaModal = mediaModalEl && window.bootstrap ? bootstrap.Modal.getOrCreateInstance(mediaModalEl) : null;
+        if (!mediaModal || tile.dataset.purged === '1') return;
+        const url = 'mission-photo-view.php?id=' + encodeURIComponent(tile.dataset.id);
+        mediaBody.innerHTML = tile.dataset.video === '1'
+            ? '<video controls autoplay playsinline src="' + url + '"></video>'
+            : '<img src="' + url + '" alt="">';
+        document.getElementById('archiveMediaMeta').textContent = tile.dataset.meta || '';
+        document.getElementById('archiveMediaDownload').href = url;
+        mediaModal.show();
+    }));
+    // Closing the viewer must stop a playing video, not just hide it.
+    if (mediaModalEl) mediaModalEl.addEventListener('hidden.bs.modal', () => { mediaBody.innerHTML = ''; });
 })();
 </script>
 

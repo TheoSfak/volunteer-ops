@@ -7680,6 +7680,16 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 185,
+            'description' => 'Mission videos are deleted 30 days after the mission closes (v3.368.0): mission_photos.file_purged_at records when the video FILE was removed. The row, its poster frame and its note stay, so the archive can say a video existed, who took it and when.',
+            'up' => function () {
+                if (!dbColumnExists('mission_photos', 'file_purged_at')) {
+                    dbExecute("ALTER TABLE mission_photos ADD COLUMN file_purged_at TIMESTAMP NULL DEFAULT NULL COMMENT 'When the media file was removed by the retention sweep; NULL = the file is still there'");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

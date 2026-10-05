@@ -956,7 +956,11 @@ include __DIR__ . '/includes/header.php';
         <?php if (!empty($videos)): ?>
         <div>
             <?php foreach ($videos as $v): ?>
+            <?php if (!empty($v['purged'])): /* removed by the retention sweep: no link to a file that is gone */ ?>
+            <div class="mstats-video-row text-muted"><i class="bi bi-camera-reels"></i> <?= h($v['user_name']) ?> · <?= h($v['time']) ?> <span class="small">(<?= h(t('media.video_deleted')) ?>)</span></div>
+            <?php else: ?>
             <div class="mstats-video-row"><i class="bi bi-camera-reels-fill text-danger"></i><a href="mission-photo-view.php?id=<?= $v['id'] ?>" target="_blank"><?= h($v['user_name']) ?> · <?= h($v['time']) ?></a></div>
+            <?php endif; ?>
             <?php endforeach; ?>
         </div>
         <?php endif; ?>

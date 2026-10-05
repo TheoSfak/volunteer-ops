@@ -73,6 +73,11 @@ echo "\n";
 echo "[10/10] Sweeping old PHP session files...\n";
 include __DIR__ . '/cron_session_cleanup.php';
 echo "\n";
+// 11. Mission video retention: video files are removed 30 days after their
+// mission closes (setting mission_video_retention_days, 0 = off). Photos stay.
+echo "[11] Purging expired mission videos...\n";
+include __DIR__ . '/cron_media_purge.php';
+echo "\n";
 
 echo "==============================================\n";
 echo "All reminders completed successfully!\n";

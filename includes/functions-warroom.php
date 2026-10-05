@@ -1727,7 +1727,7 @@ function loadMissionTrailForMission(int $missionId, int $teamId, bool $includeAu
  */
 function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canManageWarRoom, int $limit = 30): array {
     $rows = dbFetchAll(
-        "SELECT p.id, p.user_id, p.media_type, p.thumb_stored_name, p.lat, p.lng, p.accuracy_m, p.created_at, p.poi_id, p.poi_note,
+        "SELECT p.id, p.user_id, p.media_type, p.thumb_stored_name, p.lat, p.lng, p.accuracy_m, p.created_at, p.poi_id, p.poi_note, p.file_purged_at,
                 u.name AS user_name, u.is_external, u.guest_org_name, u.guest_country_code,
                 COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color,
                 mt.codename, mt.team_number
@@ -1749,6 +1749,8 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
             'id'                 => (int) $row['id'],
             'media_type'         => $row['media_type'],
             'has_thumb'          => $row['thumb_stored_name'] !== null,
+            // The video file was removed by the retention sweep (purgeExpiredMissionVideos()).
+            'purged'             => $row['file_purged_at'] !== null,
             'user_name'          => $row['user_name'],
             'user_id'            => (int) $row['user_id'],
             'is_external'        => (bool) $row['is_external'],
@@ -1765,6 +1767,130 @@ function loadMissionPhotosForUser(int $missionId, int $currentUserId, bool $canM
             'can_delete'         => $canManageWarRoom || (int) $row['user_id'] === $currentUserId,
             'is_poi'             => $row['poi_id'] !== null,
             'poi_note'           => $row['poi_note'],
+        ];
+    }, $rows);
+}
+
+/**
+ * How many days a mission's VIDEOS are kept after the mission closes (setting
+ * mission_video_retention_days, default 30; 0 switches the sweep off). Photos
+ * are not subject to it. See purgeExpiredMissionVideos().
+ */
+function missionVideoRetentionDays(): int {
+    return max(0, min(3650, (int) getSetting('mission_video_retention_days', '30')));
+}
+
+/**
+ * Retention sweep for mission videos, run from the daily cron
+ * (cron_media_purge.php): once a mission is CLOSED or COMPLETED and
+ * missionVideoRetentionDays() days have passed, the video FILES are deleted.
+ * Photos stay. The row, the poster frame (thumb_stored_name) and the note stay
+ * too, with file_purged_at set, so the archive can still say that a video
+ * existed, who took it and when — and so it is not looked at again tomorrow.
+ *
+ * "Since the mission closed" is missions.updated_at: closing a mission always
+ * sets it to NOW(), and there is no closed_at column (the status is changed in
+ * eight places). updated_at is therefore never EARLIER than the real closing
+ * time, so this can only delete late, never early — editing a finished mission
+ * restarts its clock.
+ *
+ * Deletes at most $limit files per run so a long-neglected install cannot spend
+ * the whole cron on it; the next run carries on. A file that cannot be removed
+ * is NOT marked as purged, so it is retried.
+ *
+ * @param string|null $dir  where the files live; tests pass a temp directory
+ * @param int|null    $days retention override; null = the setting. 0 = off.
+ * @return array{days:int, deleted:int, already_gone:int, failed:int}
+ */
+function purgeExpiredMissionVideos(?string $dir = null, int $limit = 200, ?int $days = null): array {
+    $days   = $days ?? missionVideoRetentionDays();
+    $result = ['days' => $days, 'deleted' => 0, 'already_gone' => 0, 'failed' => 0];
+    if ($days === 0) {
+        return $result;
+    }
+    $dir = rtrim($dir ?? (__DIR__ . '/../uploads/mission-photos'), '/\\') . '/';
+
+    $rows = dbFetchAll(
+        "SELECT p.id, p.stored_name
+         FROM mission_photos p
+         JOIN missions m ON m.id = p.mission_id
+         WHERE p.media_type = 'video' AND p.file_purged_at IS NULL
+           AND m.status IN (?, ?) AND m.updated_at < DATE_SUB(NOW(), INTERVAL ? DAY)
+         ORDER BY p.id
+         LIMIT ?",
+        [STATUS_CLOSED, STATUS_COMPLETED, $days, max(1, $limit)]
+    );
+    foreach ($rows as $row) {
+        // basename(): the column is written by the app, but a path that is
+        // ever anything else must not be able to leave this directory.
+        $name = basename((string) $row['stored_name']);
+        $path = $dir . $name;
+        if ($name === '' || !is_file($path)) {
+            $result['already_gone']++;
+        } elseif (@unlink($path)) {
+            $result['deleted']++;
+        } else {
+            $result['failed']++;
+            continue;
+        }
+        dbExecute("UPDATE mission_photos SET file_purged_at = NOW() WHERE id = ?", [(int) $row['id']]);
+    }
+    return $result;
+}
+
+/**
+ * Every photo and video of a mission for the archive (command staff), oldest
+ * first — all of them, unlike loadMissionPhotosForUser()'s newest-30 live
+ * gallery, and including the ones sent in answer to an order or taken at a
+ * route point. A video whose file the retention sweep has removed comes back
+ * with 'purged' => true; one still waiting carries the date it will go.
+ */
+function loadMissionMediaForArchive(int $missionId): array {
+    $mission = dbFetchOne("SELECT status, updated_at FROM missions WHERE id = ?", [$missionId]);
+    $days = missionVideoRetentionDays();
+    $expiresTs = ($mission && $days > 0 && in_array($mission['status'], [STATUS_CLOSED, STATUS_COMPLETED], true))
+        ? strtotime($mission['updated_at'] . " +{$days} days") : null;
+
+    $rows = dbFetchAll(
+        "SELECT p.id, p.media_type, p.thumb_stored_name, p.lat, p.lng, p.accuracy_m, p.created_at, p.poi_id, p.poi_note,
+                p.order_id, p.route_waypoint_id, p.file_purged_at, u.name AS user_name,
+                mt.codename, mt.team_number, o.task_text, w.seq AS waypoint_seq, w.label AS waypoint_label
+         FROM mission_photos p
+         JOIN users u ON u.id = p.user_id
+         LEFT JOIN mission_team_members mtm ON mtm.user_id = p.user_id AND mtm.mission_id = p.mission_id
+         LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
+         LEFT JOIN mission_orders o ON o.id = p.order_id
+         LEFT JOIN mission_route_waypoints w ON w.id = p.route_waypoint_id
+         WHERE p.mission_id = ?
+         ORDER BY p.created_at ASC, p.id ASC",
+        [$missionId]
+    );
+
+    return array_map(function ($row) use ($expiresTs) {
+        $isVideo = $row['media_type'] === 'video';
+        $purged  = $isVideo && $row['file_purged_at'] !== null;
+        // What the item was a response to, in a few words.
+        $context = null;
+        if ($row['route_waypoint_id'] !== null) {
+            $context = trim('#' . (int) $row['waypoint_seq'] . ' ' . (string) $row['waypoint_label']);
+        } elseif ($row['order_id'] !== null) {
+            $context = trim((string) $row['task_text']);
+        } elseif ($row['poi_id'] !== null) {
+            $context = trim((string) $row['poi_note']);
+        }
+        return [
+            'id'          => (int) $row['id'],
+            'media_type'  => $row['media_type'],
+            'has_thumb'   => $row['thumb_stored_name'] !== null,
+            'purged'      => $purged,
+            'expires'     => ($isVideo && !$purged && $expiresTs) ? date('d/m/Y', $expiresTs) : null,
+            'user_name'   => $row['user_name'],
+            'team_label'  => $row['codename'] ? teamLabel($row['codename'], $row['team_number']) : null,
+            'time'        => date('d/m H:i', strtotime($row['created_at'])),
+            'lat'         => $row['lat'] !== null ? (float) $row['lat'] : null,
+            'lng'         => $row['lng'] !== null ? (float) $row['lng'] : null,
+            'context'     => $context !== '' ? $context : null,
+            'is_poi'      => $row['poi_id'] !== null,
         ];
     }, $rows);
 }
