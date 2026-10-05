@@ -150,9 +150,21 @@ if (isPost()) {
     }
 }
 
+// What was recorded during the mission, read-only above the form so the
+// «Συμβάντα / Ατυχήματα» box can be written with it in front of you. Masked:
+// the debrief is a text that gets copied around, so patient names/phones and the
+// staff-only notes follow the same rule as the PDF report. Greek, like the page.
+require_once __DIR__ . '/includes/mission-review-render.php';
+$reviewHtml = renderMissionReviewCards(loadMissionReviewData($id, false, 'el'), 'el');
+
 $clockMission = $mission; // the clock strip names its prefecture (includes/clock-place.php)
 include __DIR__ . '/includes/header.php';
 ?>
+
+<style>
+    .ar-card { background: #fff; border-radius: 14px; box-shadow: 0 2px 10px rgba(0,0,0,.06); padding: 14px 16px; margin-bottom: 16px; }
+    .ar-card h2 { font-size: 1.05rem; font-weight: 700; margin-bottom: 10px; }
+</style>
 
 <div class="container-fluid py-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
@@ -167,6 +179,8 @@ include __DIR__ . '/includes/header.php';
 
     <div class="row">
         <div class="col-lg-8 mx-auto">
+            <?= $reviewHtml['incidents'] ?>
+            <?= $reviewHtml['shortages'] ?>
             <div class="card shadow mb-4">
                 <div class="card-header py-3 bg-light">
                     <h6 class="m-0 font-weight-bold text-primary">

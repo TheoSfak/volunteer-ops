@@ -145,6 +145,15 @@ $mapPoints = array_map(
     loadMissionMapPoints($missionId)
 );
 
+// Incidents and shortage reports in full. Unmasked: this page is command staff
+// only (gate above), the one audience allowed the real patient name, phone and
+// the staff-only notes.
+require_once __DIR__ . '/includes/mission-review-render.php';
+$reviewHtml = renderMissionReviewCards(
+    loadMissionReviewData($missionId, true, $user['language'] ?? DEFAULT_LANGUAGE),
+    $user['language'] ?? DEFAULT_LANGUAGE
+);
+
 $archive = [
     'missionId' => $missionId,
     'dispatches' => $dispatches, 'areas' => $areas, 'sectors' => $sectors,
@@ -236,6 +245,12 @@ include __DIR__ . '/includes/header.php';
                 <div id="archiveEventLog"></div>
             </div>
         </div>
+    </div>
+
+    <div class="row g-3">
+        <?php /* built by renderMissionReviewCards(); every value inside is escaped there */ ?>
+        <div class="col-lg-6"><?= $reviewHtml['incidents'] ?></div>
+        <div class="col-lg-6"><?= $reviewHtml['shortages'] ?></div>
     </div>
 </div>
 

@@ -6424,6 +6424,122 @@ function loadIncidentDetailForMissionReport(int $missionId): array {
 }
 
 /**
+ * Every incident and every shortage report of a finished mission, in full — for
+ * the places that look back at a mission: the archive (mission-archive.php),
+ * the debrief page and the PDF report. Not the live panels' loaders, which keep
+ * only what is still unresolved.
+ *
+ * $unmasked is the audience, decided by the caller: true = command staff in the
+ * archive (real patient name and phone, the staff-only notes); false = the PDF
+ * and the debrief page (patient name/phone masked, notes withheld — the same
+ * privacy rule loadIncidentDetailForMissionReport() documents).
+ *
+ * Labels are produced here in $lang so a Greek-only page (the PDF, the debrief)
+ * is not mixed with the viewer's own language.
+ *
+ * @return array{incidents: array, shortages: array}
+ */
+function loadMissionReviewData(int $missionId, bool $unmasked, string $lang = 'el'): array {
+    $fmt = fn($ts) => $ts ? date('d/m/Y H:i', strtotime($ts)) : null;
+
+    $rows = dbFetchAll(
+        "SELECT i.id, i.incident_type, i.severity, i.is_unknown_patient, i.patient_name, i.phone,
+                i.estimated_age, i.gender, i.notes, i.lat, i.lng, i.accuracy_m,
+                i.outcome, i.outcome_location, i.team_id,
+                i.created_at, i.acknowledged_at, i.resolved_at,
+                u.name AS reporter_name, mt.codename, mt.team_number
+         FROM mission_incidents i
+         JOIN users u ON u.id = i.reporter_id
+         LEFT JOIN mission_teams mt ON mt.id = i.team_id
+         WHERE i.mission_id = ?
+         ORDER BY i.created_at ASC, i.id ASC",
+        [$missionId]
+    );
+    $responders = loadIncidentResponders($missionId, array_column($rows, 'id'));
+
+    $incidents = array_map(function ($row) use ($unmasked, $lang, $fmt, $responders) {
+        $isUnknown  = (bool) $row['is_unknown_patient'];
+        $reportedTs = strtotime($row['created_at']);
+        $name  = trim((string) $row['patient_name']);
+        $phone = trim((string) $row['phone']);
+        return [
+            'id'               => (int) $row['id'],
+            'type_label'       => incidentTypeLabel($row['incident_type'], $lang),
+            'severity'         => $row['severity'],
+            'severity_label'   => incidentSeverityLabel($row['severity'], $lang),
+            'patient'          => $isUnknown ? t('incident.unknown_patient_label', [], $lang)
+                                             : ($name === '' ? null : ($unmasked ? $name : maskPatientName($name))),
+            'phone'            => $isUnknown || $phone === '' ? null : ($unmasked ? $phone : maskPatientPhone($phone)),
+            'estimated_age'    => $row['estimated_age'],
+            'gender_label'     => $row['gender'] ? incidentGenderLabel($row['gender'], $lang) : null,
+            'notes'            => $unmasked && trim((string) $row['notes']) !== '' ? $row['notes'] : null,
+            'lat'              => $row['lat'] !== null ? (float) $row['lat'] : null,
+            'lng'              => $row['lng'] !== null ? (float) $row['lng'] : null,
+            'accuracy_m'       => $row['accuracy_m'] !== null ? (int) round((float) $row['accuracy_m']) : null,
+            'reporter_name'    => $row['reporter_name'],
+            'team_label'       => $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized', [], $lang),
+            'created_at'       => $fmt($row['created_at']),
+            'acknowledged_at'  => $fmt($row['acknowledged_at']),
+            'resolved_at'      => $fmt($row['resolved_at']),
+            'seen_minutes'     => reportMinutesBetween($row['created_at'], $row['acknowledged_at']),
+            'resolved_minutes' => reportMinutesBetween($row['created_at'], $row['resolved_at']),
+            'outcome_label'    => $row['outcome'] ? incidentOutcomeLabel($row['outcome'], $lang) : null,
+            'outcome_location' => $row['outcome_location'],
+            'responders'       => array_map(fn($r) => [
+                'label'          => $r['label'],
+                'sent'           => $r['sent'],
+                'arrived'        => $r['arrived'],
+                'completed'      => $r['completed'],
+                'declined'       => $r['declined'],
+                'arrive_minutes' => $r['arrived_raw'] ? max(0, (int) round((strtotime($r['arrived_raw']) - $reportedTs) / 60)) : null,
+            ], $responders[(int) $row['id']] ?? []),
+        ];
+    }, $rows);
+
+    $shortageRows = dbFetchAll(
+        "SELECT r.id, r.shortage_type, r.severity, r.title, r.description, r.team_id,
+                r.created_at, r.acknowledged_at, r.resolved_at, r.not_resolved_at, r.outcome_note,
+                u.name AS reporter_name, mt.codename, mt.team_number
+         FROM mission_shortage_reports r
+         JOIN users u ON u.id = r.reporter_id
+         LEFT JOIN mission_teams mt ON mt.id = r.team_id
+         WHERE r.mission_id = ?
+         ORDER BY r.created_at ASC, r.id ASC",
+        [$missionId]
+    );
+    $shortages = array_map(function ($row) use ($lang, $fmt) {
+        $status = $row['resolved_at'] ? 'resolved' : ($row['not_resolved_at'] ? 'not_resolved' : ($row['acknowledged_at'] ? 'seen' : 'open'));
+        return [
+            'id'               => (int) $row['id'],
+            'type_label'       => shortageTypeLabel($row['shortage_type'], $lang),
+            'severity'         => $row['severity'],
+            'severity_label'   => shortageSeverityLabel($row['severity'], $lang),
+            'title'            => $row['title'],
+            'description'      => $row['description'],
+            'reporter_name'    => $row['reporter_name'],
+            'team_label'       => $row['team_id'] ? teamLabel($row['codename'], $row['team_number']) : t('history.no_team_capitalized', [], $lang),
+            'status'           => $status,
+            'created_at'       => $fmt($row['created_at']),
+            'acknowledged_at'  => $fmt($row['acknowledged_at']),
+            'resolved_at'      => $fmt($row['resolved_at']),
+            'not_resolved_at'  => $fmt($row['not_resolved_at']),
+            'seen_minutes'     => reportMinutesBetween($row['created_at'], $row['acknowledged_at']),
+            'resolved_minutes' => reportMinutesBetween($row['created_at'], $row['resolved_at'] ?: $row['not_resolved_at']),
+            'outcome_note'     => trim((string) $row['outcome_note']) !== '' ? $row['outcome_note'] : null,
+        ];
+    }, $shortageRows);
+
+    // Worst first within the page, like the report always did; the sort is
+    // stable so equal severities keep their chronological order.
+    $rank = ['critical' => 0, 'high' => 1, 'medium' => 2, 'low' => 3];
+    $bySeverity = fn($a, $b) => ($rank[$a['severity']] ?? 9) <=> ($rank[$b['severity']] ?? 9);
+    usort($incidents, $bySeverity);
+    usort($shortages, $bySeverity);
+
+    return ['incidents' => $incidents, 'shortages' => $shortages];
+}
+
+/**
  * War Room: open (unresolved) SOS alerts for the command-staff alarm overlay +
  * "Ειδοποιήσεις SOS" card. Caller MUST gate this behind $canManageWarRoom before
  * calling — reporter identity and live location are sensitive, this function has

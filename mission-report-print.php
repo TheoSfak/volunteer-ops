@@ -156,12 +156,11 @@ $shortageDetail = array_map(function ($row) {
     $row['resolved_at'] = $row['resolved_at'] ? date('d/m/Y H:i', strtotime($row['resolved_at'])) : null;
     return $row;
 }, $report['shortageDetail']);
-$incidentDetail = array_map(function ($row) {
-    $row['created_at'] = date('d/m/Y H:i', strtotime($row['created_at']));
-    $row['acknowledged_at'] = $row['acknowledged_at'] ? date('d/m/Y H:i', strtotime($row['acknowledged_at'])) : null;
-    $row['resolved_at'] = $row['resolved_at'] ? date('d/m/Y H:i', strtotime($row['resolved_at'])) : null;
-    return $row;
-}, loadIncidentDetailForMissionReport($missionId));
+// Incidents and shortage reports in full for the two cards below. MASKED
+// (patient name/phone) and without the staff-only notes: this PDF leaves the
+// system. Greek, like the rest of the report whatever the viewer's language.
+require_once __DIR__ . '/includes/mission-review-render.php'; // reviewMinutes()
+$reviewData = loadMissionReviewData($missionId, false, 'el');
 // Mass-casualty triage — null (and the whole section skipped) on a mission
 // that never had a Μαζικό Συμβάν. Always masked, never notes.
 $triageReport = loadTriageReportForMission($missionId);
@@ -987,10 +986,13 @@ if ($trActive) {
     <?php if (empty($shortageDetail)): ?>
         <p class="pr-empty">Δεν έχουν υποβληθεί αναφορές έλλειψης.</p>
     <?php else: ?>
-        <?php foreach ($shortageDetail as $d): ?>
-        <div class="event-row">
-            <div><span class="badge badge-<?= SHORTAGE_SEVERITY_COLORS[$d['severity']] ?? 'secondary' ?>"><?= h($d['severity_label']) ?></span> <?= h($d['type_label']) ?> <strong><?= h($d['team_label']) ?></strong> — <?= h($d['reporter_name']) ?> («<?= h($d['title']) ?>»)</div>
-            <div class="event-time">Στάλθηκε <?= $d['sent_at'] ?> · Είδε <?= $d['seen_at'] ? $d['seen_at'] . ' (' . $d['seen_minutes'] . ' λεπ.)' : '—' ?> · Λύθηκε <?= $d['resolved_at'] ? $d['resolved_at'] . ' (' . $d['resolved_minutes'] . ' λεπ.)' : '—' ?></div>
+        <?php /* $reviewData: loadMissionReviewData(), masked — adds the description, the resolution note and the final status the one-liner never had */ ?>
+        <?php foreach ($reviewData['shortages'] as $d): ?>
+        <div class="event-row" style="display:block;">
+            <div><span class="badge badge-<?= SHORTAGE_SEVERITY_COLORS[$d['severity']] ?? 'secondary' ?>"><?= h($d['severity_label']) ?></span> <?= h($d['type_label']) ?> <strong><?= h($d['team_label']) ?></strong> — <?= h($d['reporter_name']) ?> («<?= h($d['title']) ?>») · <strong><?= h(t('review.status_' . $d['status'], [], 'el')) ?></strong></div>
+            <?php if (trim((string) $d['description']) !== ''): ?><div style="font-size:8.5pt;"><?= nl2br(h($d['description'])) ?></div><?php endif; ?>
+            <div class="event-time">Στάλθηκε <?= $d['created_at'] ?> · Είδε <?= $d['acknowledged_at'] ? $d['acknowledged_at'] . ' (' . reviewMinutes($d['seen_minutes'], 'el') . ')' : '—' ?><?php $closedAt = $d['resolved_at'] ?: $d['not_resolved_at']; if ($closedAt): ?> · <?= $d['resolved_at'] ? 'Λύθηκε' : 'Δεν λύθηκε' ?> <?= $closedAt ?> (<?= reviewMinutes($d['resolved_minutes'], 'el') ?>)<?php endif; ?></div>
+            <?php if ($d['outcome_note'] !== null): ?><div class="event-time" style="white-space:normal;">Σημείωση επίλυσης: <?= nl2br(h($d['outcome_note'])) ?></div><?php endif; ?>
         </div>
         <?php endforeach; ?>
     <?php endif; ?>
@@ -998,12 +1000,14 @@ if ($trActive) {
 
 <div class="pr-card">
     <h2>🚑 Περιστατικά &mdash; Ανά Σοβαρότητα</h2>
-    <?php if (empty($incidentDetail)): ?>
+    <?php if (empty($reviewData['incidents'])): ?>
         <p class="pr-empty">Δεν έχουν καταγραφεί περιστατικά.</p>
     <?php else: ?>
-        <?php foreach ($incidentDetail as $d): ?>
-        <div class="event-row">
-            <div><span class="badge badge-<?= SHORTAGE_SEVERITY_COLORS[$d['severity']] ?? 'secondary' ?>"><?= h($d['severity_label']) ?></span> <?= h($d['type_label']) ?> <strong><?= h($d['team_label']) ?></strong> — <?= h($d['reporter_name']) ?> (<?= h($d['who']) ?><?= $d['estimated_age'] || $d['gender_label'] ? ', ' . h(trim($d['estimated_age'] . ' ' . $d['gender_label'])) : '' ?><?= $d['phone'] ? ', ' . h($d['phone']) : '' ?>)</div>
+        <?php foreach ($reviewData['incidents'] as $d): ?>
+        <div class="event-row" style="display:block;">
+            <?php /* patient name/phone are masked and the staff-only notes are absent: loadMissionReviewData(..., unmasked=false) */ ?>
+            <div><span class="badge badge-<?= SHORTAGE_SEVERITY_COLORS[$d['severity']] ?? 'secondary' ?>"><?= h($d['severity_label']) ?></span> <?= h($d['type_label']) ?> <strong><?= h($d['team_label']) ?></strong> — <?= h($d['reporter_name']) ?> (<?= h((string) $d['patient']) ?><?= $d['estimated_age'] || $d['gender_label'] ? ', ' . h(trim($d['estimated_age'] . ' ' . $d['gender_label'])) : '' ?><?= $d['phone'] ? ', ' . h($d['phone']) : '' ?>)</div>
+            <?php if ($d['lat'] !== null && $d['lng'] !== null): ?><div class="event-time" style="white-space:normal;">Θέση <?= number_format($d['lat'], 5, '.', '') ?>, <?= number_format($d['lng'], 5, '.', '') ?><?= $d['accuracy_m'] !== null ? ' (±' . (int) $d['accuracy_m'] . ' μ.)' : '' ?></div><?php endif; ?>
             <div class="event-time">Αναφέρθηκε <?= $d['created_at'] ?> · Είδε <?= $d['acknowledged_at'] ?: '—' ?> · Έκβαση <?= $d['outcome_label'] ? h($d['outcome_label']) . ($d['outcome_location'] ? ' (' . h($d['outcome_location']) . ')' : '') . ' — ' . $d['resolved_at'] : '—' ?></div>
             <?php foreach ($d['responders'] as $r): ?>
             <div class="event-time">🚑 <?= h($r['label']) ?>: <?= $r['declined'] ? 'δεν μπορούσε να πάει' : 'στάλθηκε ' . h($r['sent'])
