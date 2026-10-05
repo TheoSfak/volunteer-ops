@@ -89,19 +89,30 @@ final class HoursRankTest extends TestCase
         $this->assertSame($before, hoursRankPosition($me)['total'], 'people without hours do not enlarge the crowd');
     }
 
-    public function testDeletedMissionsInactiveAndDeletedUsersDoNotCount(): void
+    public function testDeletedMissionsDoNotCount(): void
     {
         $ghost = $this->makeUser('Ghost Mission Hours');
         $this->attend($ghost, 990.0, true, $this->deletedShiftId);
-        $away = $this->makeUser('Deactivated', 0, ['is_active' => 0]);
-        $this->attend($away, 980.0);
-        $gone = $this->makeUser('Deleted', 0, ['deleted_at' => date('Y-m-d H:i:s')]);
-        $this->attend($gone, 970.0);
         $me = $this->makeUser('Me First');
         $this->attend($me, 100.0);
 
         $this->assertNull(hoursRankPosition($ghost));
         $this->assertSame(1, hoursRankPosition($me)['rank']);
+    }
+
+    public function testFormerMembersCountBecauseTheReportCountsThem(): void
+    {
+        // report-municipality.php's volunteer list has no is_active/deleted_at
+        // test; 52 of 55 against its 53 of 58 came from filtering them here.
+        $away = $this->makeUser('Deactivated', 0, ['is_active' => 0]);
+        $this->attend($away, 980.0);
+        $gone = $this->makeUser('Deleted', 0, ['deleted_at' => date('Y-m-d H:i:s')]);
+        $this->attend($gone, 970.0);
+        $me = $this->makeUser('Me Third');
+        $this->attend($me, 100.0);
+
+        $this->assertSame(3, hoursRankPosition($me)['rank']);
+        $this->assertSame(1, hoursRankPosition($away)['rank']);
     }
 
     public function testEqualHoursAreBrokenByNameLikeTheReport(): void

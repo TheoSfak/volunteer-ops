@@ -868,8 +868,12 @@ function leaderboardTop(int $limit = 5): array {
  * Lifetime hours per volunteer: the same measure the municipality report ranks
  * by (attended participations in missions that are not deleted, summed
  * actual_hours), over all time. Only people with at least one attended
- * participation appear, exactly like that report's volunteer list, and only
- * active, not-deleted users.
+ * participation appear, exactly like that report's volunteer list.
+ *
+ * NO is_active / deleted_at test on users, on purpose: the report has none, and
+ * the whole point of this board is that its crowd and position equal the
+ * report's. (v3.368.3 filtered them out and read 52 of 55 against the report's
+ * 53 of 58 — the three missing were people no longer active.)
  *
  * SQL derived table shared by hoursRankPosition() and hoursRankTop(), so the
  * dashboard's rank card and its top list cannot drift apart.
@@ -882,7 +886,6 @@ function hoursRankSql(): string {
               JOIN participation_requests pr ON pr.volunteer_id = u.id AND pr.attended = 1
               JOIN shifts s ON pr.shift_id = s.id
               JOIN missions m ON s.mission_id = m.id AND m.deleted_at IS NULL
-             WHERE u.is_active = 1 AND u.deleted_at IS NULL
              GROUP BY u.id, u.name, u.total_points";
 }
 
