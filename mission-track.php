@@ -27,7 +27,9 @@ $mission = dbFetchOne(
     "SELECT id, title, status, show_in_ops, responsible_user_id FROM missions WHERE id = ? AND deleted_at IS NULL",
     [$missionId]
 );
-if (!$mission || $mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
+// OPEN for the live trail view, CLOSED/COMPLETED for the read-only archive
+// (mission-archive.php). Safe to widen: GET only, command staff only below.
+if (!$mission || !in_array($mission['status'], [STATUS_OPEN, STATUS_CLOSED, STATUS_COMPLETED], true) || empty($mission['show_in_ops'])) {
     echo json_encode(['ok' => false, 'error' => t('common.mission_not_found_or_inactive')]);
     exit;
 }

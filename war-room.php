@@ -128,6 +128,12 @@ if (!$canManageWarRoom && !$isApprovedParticipant) {
     setFlash('error', t('wr.access_denied'));
     redirect('dashboard.php');
 }
+// A finished mission's Action Room is its read-only archive, for command staff
+// (mission-archive.php). Everyone else keeps the warning below.
+if ($canManageWarRoom && !empty($mission['show_in_ops'])
+    && in_array($mission['status'], [STATUS_CLOSED, STATUS_COMPLETED], true)) {
+    redirect('mission-archive.php?id=' . $missionId);
+}
 if ($mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
     setFlash('warning', t('wr.mission_not_active'));
     // Not mission-view.php for a partner-org guest: bootstrap.php's allow-list

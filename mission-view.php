@@ -608,6 +608,14 @@ include __DIR__ . '/includes/header.php';
                 <i class="bi bi-broadcast-pin me-1"></i>Action Room
             </a>
         <?php endif; ?>
+        <?php // A finished mission's Action Room is its read-only archive (mission-archive.php),
+              // command staff only — the same gate as the page itself.
+        if (!empty($mission['show_in_ops']) && in_array($mission['status'], [STATUS_CLOSED, STATUS_COMPLETED], true)
+            && canManageActionRoom($mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, (int) getCurrentUserId())): ?>
+            <a href="mission-archive.php?id=<?= $mission['id'] ?>" class="btn btn-outline-danger">
+                <i class="bi bi-archive me-1"></i><?= h(t('archive.btn_open')) ?>
+            </a>
+        <?php endif; ?>
         <?php // Ποιότητα GPS: also for a CLOSED mission — that is when a drill is
               // analysed, and a closed mission's Action Room redirects here, so
               // without this the page was reachable only by typing its URL. Same
