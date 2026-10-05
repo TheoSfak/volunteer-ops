@@ -94,7 +94,7 @@ include __DIR__ . '/includes/header.php';
         <div class="card stats-card primary">
             <div class="card-body text-center">
                 <h2 class="mb-0">#<?= $rank ?></h2>
-                <small class="text-muted">Κατάταξη (από <?= $totalVolunteers ?>)</small>
+                <small class="text-muted">Κατάταξη πόντων (από <?= $totalVolunteers ?> μέλη)</small>
             </div>
         </div>
     </div>

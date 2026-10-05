@@ -706,6 +706,7 @@ include __DIR__ . '/includes/header.php';
         <i class="bi bi-trophy"></i>
         <span><?= $volunteerListMode === 'all' ? 'Όλοι οι Εθελοντές' : 'Κορυφαίοι 10 Εθελοντές' ?></span>
     </div>
+    <p class="text-muted small mb-2">Κατάταξη κατά ώρες συμμετοχής στην επιλεγμένη περίοδο· περιλαμβάνονται μόνο όσοι έχουν παρουσία σε αυτή. Διαφέρει από την Κατάταξη του dashboard, που είναι βάσει συνολικών πόντων όλων των μελών.</p>
     <div class="report-table-wrap mb-5">
         <table class="report-table">
             <thead>

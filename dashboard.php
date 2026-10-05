@@ -2248,7 +2248,8 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
             </div>
             <div class="card-body text-center py-4">
                 <div style="font-size:2.8rem; font-weight:800; color:#7c3aed; line-height:1;">#<?= $leaderboardRank ?></div>
-                <div class="text-muted mt-1">από <?= $leaderboardTotal ?> εθελοντές</div>
+                <div class="text-muted mt-1">από <?= $leaderboardTotal ?> μέλη</div>
+                <div class="text-muted small">βάσει συνολικών πόντων</div>
                 <?php if (getSetting('points_enabled', '1') === '1'): ?>
                 <div class="mt-3">
                     <span class="badge bg-warning text-dark fs-6">
