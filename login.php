@@ -156,6 +156,10 @@ $rememberAllowed = rememberMeDays() > 0;
                         <span class="input-group-text"><i class="bi bi-lock"></i></span>
                         <input type="password" class="form-control" id="password" name="password"
                                autocomplete="current-password" required<?= $prefillEmail !== '' ? ' autofocus' : '' ?>>
+                        <button type="button" class="btn btn-outline-secondary" id="togglePassword"
+                                aria-label="Εμφάνιση κωδικού" aria-pressed="false" title="Εμφάνιση κωδικού">
+                            <i class="bi bi-eye" id="togglePasswordIcon"></i>
+                        </button>
                     </div>
                 </div>
 
@@ -200,6 +204,29 @@ $rememberAllowed = rememberMeDays() > 0;
     // unsent field reports, they carry no roster data, and a volunteer whose
     // session merely expired mid-mission must not lose them by landing here.
     try { localStorage.removeItem('wr_field_snapshot'); } catch (e) {}
+    // Eye button: show the typed password while it is held visible, hide it
+    // again on the next click (and before the form is submitted).
+    (function () {
+        var input = document.getElementById('password');
+        var btn = document.getElementById('togglePassword');
+        var icon = document.getElementById('togglePasswordIcon');
+        if (!input || !btn || !icon) return;
+        function setVisible(show) {
+            input.type = show ? 'text' : 'password';
+            icon.className = show ? 'bi bi-eye-slash' : 'bi bi-eye';
+            btn.setAttribute('aria-pressed', show ? 'true' : 'false');
+            var label = show ? 'Απόκρυψη κωδικού' : 'Εμφάνιση κωδικού';
+            btn.setAttribute('aria-label', label);
+            btn.title = label;
+        }
+        btn.addEventListener('click', function () {
+            setVisible(input.type === 'password');
+            input.focus();
+        });
+        document.getElementById('loginForm').addEventListener('submit', function () {
+            setVisible(false);
+        });
+    })();
     </script>
 
     <footer class="text-center mt-4 pb-3" style="color:rgba(255,255,255,0.7);font-size:0.82rem">
