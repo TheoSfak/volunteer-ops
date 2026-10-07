@@ -688,13 +688,12 @@ function isTepMission(int $missionTypeId): bool {
 
 /**
  * Return true if the current user can see Τ.Ε.Π. missions.
- * Admins, trainees (TRAINEE_RESCUER), and the responsible person always can.
+ * Every user can (v3.369.0); until then it was admins, trainees and the
+ * responsible person only. Kept as a function so all the list/calendar/view
+ * call sites stay the single switch if the restriction ever returns.
  */
 function canSeeTep(?int $responsibleUserId = null): bool {
-    if (isAdmin()) return true;
-    if (isTraineeRescuer()) return true;
-    if ($responsibleUserId && $responsibleUserId === getCurrentUserId()) return true;
-    return false;
+    return true;
 }
 
 /**
