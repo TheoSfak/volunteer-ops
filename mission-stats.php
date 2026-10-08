@@ -791,6 +791,16 @@ include __DIR__ . '/includes/header.php';
         · Πρώτο θύμα <?= $triageReport['first_victim_at'] ? date('d/m H:i', strtotime($triageReport['first_victim_at'])) : '—' ?>
         · Τελευταίο κόκκινο διακομίστηκε <?= $triageReport['last_red_out_at'] ? date('d/m H:i', strtotime($triageReport['last_red_out_at'])) : '—' ?>
     </div>
+    <?php $triageQualityLines = triageQualityLines($triageReport['quality']); ?>
+    <?php if ($triageQualityLines): ?>
+    <div class="border rounded-3 p-2 mt-2">
+        <div class="fw-semibold small">Πώς πήγε η διαλογή</div>
+        <?php foreach ($triageQualityLines as $line): ?>
+        <div class="small text-muted"><?= h($line) ?></div>
+        <?php endforeach; ?>
+        <div class="small text-muted fst-italic mt-1"><?= h(TRIAGE_QUALITY_NOTE) ?></div>
+    </div>
+    <?php endif; ?>
 </div>
 <?php endif; ?>
 

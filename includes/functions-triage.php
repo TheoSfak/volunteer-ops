@@ -1145,6 +1145,158 @@ function triageActivityText(array $e, ?string $lang = null): string {
  * one row per casualty — always masked, never notes, whoever prints it.
  * Null when the mission never had a Μαζικό Συμβάν.
  */
+/**
+ * How the sorting held up, for the mission report and the stats page.
+ *
+ * There is no ground truth here (we do not learn how anybody did in hospital),
+ * so this is NOT an error rate. Each casualty's FIRST assessment is compared
+ * with their first RE-assessment, the nearest second look:
+ *
+ *   under  - the first look put them lower than the second did (green or
+ *            yellow, then found more urgent): the primary triage probably
+ *            under-called them. under_to_red are the ones then found red.
+ *   over   - the first look put them higher than the second (a reduction can
+ *            also be a real improvement after treatment).
+ *   same   - no change.
+ *   black_changed - first or second assessment was black and the other not:
+ *            kept apart, a dead casualty is not a point on a scale.
+ *
+ * Only a casualty who was assessed twice can show up in under/over, so the
+ * rates are given against the re-assessed AND against everybody.
+ *
+ * $assessments: rows ['victim_id', 'category', 'protocol', 'reason', 'ts'
+ * (unix, field time)] in any order. $transportedAt: victim_id => unix time
+ * the casualty left (only for casualties currently marked transported).
+ *
+ * Returns the counts plus, per colour (by FINAL category), how many minutes
+ * from first assessment to leaving: n, median, max.
+ */
+function triageQualityStats(array $assessments, array $transportedAt): array {
+    $urgency = ['green' => 1, 'yellow' => 2, 'red' => 3];
+    $byVictim = [];
+    foreach ($assessments as $a) {
+        $byVictim[(int) $a['victim_id']][] = $a;
+    }
+    $out = [
+        'victims' => count($byVictim), 'reassessed' => 0,
+        'under' => 0, 'under_to_red' => 0, 'over' => 0, 'same' => 0, 'black_changed' => 0,
+        'secondary' => ['total' => 0, 'accepted' => 0, 'overridden' => 0, 'manual' => 0],
+        'reassess_median_minutes' => null,
+        'transport' => ['red' => ['n' => 0, 'median' => null, 'max' => null], 'yellow' => ['n' => 0, 'median' => null, 'max' => null], 'green' => ['n' => 0, 'median' => null, 'max' => null]],
+    ];
+    $toReassess = [];
+    $toLeave = ['red' => [], 'yellow' => [], 'green' => []];
+    foreach ($byVictim as $victimId => $list) {
+        usort($list, fn($x, $y) => $x['ts'] <=> $y['ts']);
+        foreach ($list as $a) {
+            if (($a['protocol'] ?? '') === 'secondary') {
+                $out['secondary']['total']++;
+                $key = $a['reason'] === 'trts' ? 'accepted' : ($a['reason'] === 'secondary_override' ? 'overridden' : 'manual');
+                $out['secondary'][$key]++;
+            }
+        }
+        $first = $list[0];
+        if (count($list) >= 2) {
+            $second = $list[1];
+            $out['reassessed']++;
+            $toReassess[] = max(0, (int) round(($second['ts'] - $first['ts']) / 60));
+            if (isset($urgency[$first['category']], $urgency[$second['category']])) {
+                $d = $urgency[$second['category']] <=> $urgency[$first['category']];
+                if ($d > 0) {
+                    $out['under']++;
+                    if ($second['category'] === 'red') {
+                        $out['under_to_red']++;
+                    }
+                } elseif ($d < 0) {
+                    $out['over']++;
+                } else {
+                    $out['same']++;
+                }
+            } elseif ($first['category'] !== $second['category']) {
+                $out['black_changed']++;
+            } else {
+                $out['same']++;
+            }
+        }
+        $final = end($list)['category'];
+        if (isset($transportedAt[$victimId], $toLeave[$final])) {
+            $toLeave[$final][] = max(0, (int) round(($transportedAt[$victimId] - $first['ts']) / 60));
+        }
+    }
+    $median = function (array $v): ?int {
+        if (!$v) {
+            return null;
+        }
+        sort($v);
+        $n = count($v);
+        return $n % 2 ? $v[intdiv($n, 2)] : (int) round(($v[$n / 2 - 1] + $v[$n / 2]) / 2);
+    };
+    $out['reassess_median_minutes'] = $median($toReassess);
+    foreach ($toLeave as $cat => $mins) {
+        $out['transport'][$cat] = ['n' => count($mins), 'median' => $median($mins), 'max' => $mins ? max($mins) : null];
+    }
+    return $out;
+}
+
+/**
+ * The words for triageQualityStats(), shared by the mission report and the
+ * stats page (Greek only, like both of them). Plain text, one sentence per
+ * line; the caller escapes. An empty array when nobody was assessed.
+ */
+function triageQualityLines(array $q): array {
+    if ((int) $q['victims'] === 0) {
+        return [];
+    }
+    $pct = fn(int $a, int $b): string => $b > 0 ? (string) round($a * 100 / $b) . '%' : '—';
+    $victim = fn(int $n): string => $n === 1 ? 'θύμα' : 'θύματα';
+    $lines = [];
+    $lines[] = sprintf(
+        '%s %d από %d %s με κάρτα (%s).',
+        $q['reassessed'] === 1 ? 'Επανεκτιμήθηκε' : 'Επανεκτιμήθηκαν', $q['reassessed'], $q['victims'], $victim($q['victims']),
+        $pct($q['reassessed'], $q['victims'])
+    );
+    if ($q['reassessed'] > 0) {
+        $toRed = $q['under_to_red'] === 1 ? ', από τα οποία 1 βρέθηκε κόκκινο' : sprintf(', από τα οποία %d βρέθηκαν κόκκινα', $q['under_to_red']);
+        $lines[] = sprintf(
+            'Η πρώτη εκτίμηση ήταν χαμηλότερη από την πρώτη επανεκτίμηση (πιθανό υπο-triage) σε %d %s (%s των επανεκτιμηθέντων, %s όλων)%s.',
+            $q['under'], $victim($q['under']), $pct($q['under'], $q['reassessed']), $pct($q['under'], $q['victims']),
+            $q['under'] > 0 ? $toRed : ''
+        );
+        $lines[] = sprintf(
+            'Ήταν υψηλότερη (πιθανό υπερ-triage) σε %d (%s των επανεκτιμηθέντων, %s όλων) και αμετάβλητη σε %d.',
+            $q['over'], $pct($q['over'], $q['reassessed']), $pct($q['over'], $q['victims']), $q['same']
+        );
+        if ($q['black_changed'] > 0) {
+            $lines[] = sprintf('Θύματα όπου το μαύρο άλλαξε (ή έγινε μαύρο) στην επανεκτίμηση: %d.', $q['black_changed']);
+        }
+    }
+    $s = $q['secondary'];
+    if ($s['total'] > 0) {
+        $lines[] = sprintf(
+            'Δευτερογενείς εκτιμήσεις (ζωτικά): %d. Ο διασώστης δέχτηκε τη βαθμολογία σε %d, άλλαξε το χρώμα σε %d και διάλεξε χρώμα χωρίς βαθμολογία σε %d.',
+            $s['total'], $s['accepted'], $s['overridden'], $s['manual']
+        );
+    }
+    if ($q['reassess_median_minutes'] !== null) {
+        $lines[] = sprintf('Διάμεσος χρόνος από την πρώτη εκτίμηση ως την πρώτη επανεκτίμηση: %d′.', $q['reassess_median_minutes']);
+    }
+    $names = ['red' => 'Κόκκινα', 'yellow' => 'Κίτρινα', 'green' => 'Πράσινα'];
+    $parts = [];
+    foreach ($names as $cat => $name) {
+        $t = $q['transport'][$cat];
+        if ($t['n'] > 0) {
+            $parts[] = sprintf('%s %d′ / %d′ (%d %s)', $name, $t['median'], $t['max'], $t['n'], $victim($t['n']));
+        }
+    }
+    if ($parts) {
+        $lines[] = 'Από την πρώτη εκτίμηση ως τη διακομιδή (διάμεσος / μέγιστος): ' . implode(' · ', $parts) . '.';
+    }
+    return $lines;
+}
+
+/** What the figures from triageQualityStats() do and do not say. */
+const TRIAGE_QUALITY_NOTE = 'Η σύγκριση γίνεται με την πρώτη επανεκτίμηση και όχι με την πραγματική έκβαση των θυμάτων, άρα δεν δείχνει λάθος. Μια μείωση της κατηγορίας μπορεί να είναι πραγματική βελτίωση μετά από θεραπεία, και μόνο όσοι επανεκτιμήθηκαν μπορούν να εμφανιστούν.';
+
 function loadTriageReportForMission(int $missionId): ?array {
     $state = loadTriageStateForMission($missionId, false, 0);
     if (!$state || (!$state['victims'] && !$state['walking'] && !$state['activated_at'])) {
@@ -1179,7 +1331,30 @@ function loadTriageReportForMission(int $missionId): ?array {
         $v['notes'] = null;
     }
     unset($v);
+
+    $qualityRows = [];
+    foreach (dbFetchAll(
+        "SELECT victim_id, category, protocol, reason, assessed_at FROM mission_triage_assessments
+         WHERE mission_id = ? ORDER BY assessed_at ASC, id ASC",
+        [$missionId]
+    ) as $row) {
+        $qualityRows[] = [
+            'victim_id' => (int) $row['victim_id'], 'category' => $row['category'], 'protocol' => $row['protocol'],
+            'reason' => $row['reason'], 'ts' => strtotime($row['assessed_at']),
+        ];
+    }
+    $leftAt = [];
+    foreach (dbFetchAll(
+        "SELECT s.victim_id, MAX(s.created_at) AS left_at FROM mission_triage_status_log s
+         JOIN mission_triage_victims v ON v.id = s.victim_id AND v.status = 'transported'
+         WHERE s.mission_id = ? AND s.status = 'transported' GROUP BY s.victim_id",
+        [$missionId]
+    ) as $row) {
+        $leftAt[(int) $row['victim_id']] = strtotime($row['left_at']);
+    }
+
     return [
+        'quality'        => triageQualityStats($qualityRows, $leftAt),
         'counts'         => $state['counts'],
         'initial_counts' => $initialCounts,
         'walking'        => $state['walking'],

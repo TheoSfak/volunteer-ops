@@ -1045,6 +1045,16 @@ $triageDt = fn($v) => $v ? date('d/m/Y H:i', strtotime($v)) : '—';
         · Πρώτο θύμα: <?= $triageDt($triageReport['first_victim_at']) ?>
         · Τελευταίο κόκκινο διακομίστηκε: <?= $triageDt($triageReport['last_red_out_at']) ?>
     </div>
+    <?php $triageQualityLines = triageQualityLines($triageReport['quality']); ?>
+    <?php if ($triageQualityLines): ?>
+    <div style="border:1px solid #ddd;border-radius:6px;padding:6px 10px;margin-bottom:8px;">
+        <strong>Πώς πήγε η διαλογή</strong>
+        <?php foreach ($triageQualityLines as $line): ?>
+        <div style="font-size:8.5pt;color:#333;white-space:normal;margin-top:2px;"><?= h($line) ?></div>
+        <?php endforeach; ?>
+        <div style="font-size:8pt;color:#666;font-style:italic;white-space:normal;margin-top:4px;"><?= h(TRIAGE_QUALITY_NOTE) ?></div>
+    </div>
+    <?php endif; ?>
     <?php foreach ($triageReport['victims'] as $v): ?>
     <div class="event-row">
         <div>

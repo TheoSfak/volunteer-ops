@@ -411,5 +411,16 @@ final class TriageRecordTest extends TestCase
         $this->assertSame(1, $report['counts']['red']);
         $this->assertSame(4, $report['walking']);
         $this->assertNotNull($report['last_red_out_at']);
+
+        // The quality figures: the one casualty went yellow -> red on its first
+        // re-look, then left in a vehicle.
+        $q = $report['quality'];
+        $this->assertSame(1, $q['victims']);
+        $this->assertSame(1, $q['reassessed']);
+        $this->assertSame(1, $q['under']);
+        $this->assertSame(1, $q['under_to_red']);
+        $this->assertSame(0, $q['over']);
+        $this->assertSame(1, $q['transport']['red']['n']);
+        $this->assertGreaterThanOrEqual(19, $q['transport']['red']['median'], 'Triaged twenty minutes before it left.');
     }
 }
