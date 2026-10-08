@@ -4175,7 +4175,7 @@ include __DIR__ . '/includes/header.php';
                      renderTriage() for everybody except command, whose form is
                      in the board. -->
                 <div id="triageHazards"></div>
-                <?php if ($isApprovedParticipant): ?>
+                <?php if ($isApprovedParticipant || $canManageWarRoom): /* the server lets command triage too (mission-triage.php) */ ?>
                 <div id="triageFieldControls" class="d-none mb-3">
                     <div class="btn-group w-100 mb-2" role="group" aria-label="<?= t('triage.adult') ?> / <?= t('triage.child') ?>">
                         <input type="radio" class="btn-check" name="triageAgeGroup" id="triageAgeAdult" value="adult" checked>
@@ -6768,7 +6768,7 @@ const canManageIncidents = <?= json_encode($canManageWarRoom) ?>;
 // triage section further down for what reads these.
 let triageState = <?= json_encode($triage, JSON_UNESCAPED_UNICODE) ?>;
 const TRIAGE_CAN_MANAGE = <?= json_encode($canManageWarRoom) ?>;
-const TRIAGE_CAN_FIELD = <?= json_encode($isApprovedParticipant) ?>;
+const TRIAGE_CAN_FIELD = <?= json_encode($isApprovedParticipant || $canManageWarRoom) ?>;
 const TRIAGE_MISSION_ID = <?= $missionId ?>;
 // Server clock minus this device's clock, in seconds, measured once at load.
 // Ages on the board ("waiting 14′") come from server timestamps, and a phone
