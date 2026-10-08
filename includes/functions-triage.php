@@ -634,7 +634,8 @@ function recordTriageAssessment(int $missionId, int $userId, array $in): array {
         $vitals = is_array($in['answers'] ?? null) ? $in['answers'] : [];
         // The T-RTS is validated for adults; a child gets the vitals recorded
         // and the colour from the rescuer.
-        $score = $victim['age_group'] === 'child' ? null : triageSecondaryScore($vitals);
+        // ...and only while the organisation has the suggestion switched on.
+        $score = ($victim['age_group'] === 'child' || !triageTrtsSuggestionEnabled()) ? null : triageSecondaryScore($vitals);
         if ($score) {
             $category = $chosenOk ? $chosen : $score['category'];
             $reason = $category === $score['category'] ? 'trts' : 'secondary_override';
@@ -1054,6 +1055,25 @@ function triageExpectantEnabled(): bool {
 }
 
 /**
+ * Whether the secondary assessment may SUGGEST a colour from the T-RTS
+ * (settings: triage_trts_suggestion_enabled, off by default). With it off the
+ * secondary assessment still records the measurements, but the rescuer picks
+ * the colour and nothing is scored.
+ *
+ * Off by default because NHS England withdrew the tool this score comes from,
+ * the «Triage Sort», on the evidence that it identifies patients who need a
+ * lifesaving intervention poorly (letter of 18 April 2023; full replacement
+ * by 30 June 2024). Until a doctor has said whether the score should stay,
+ * the app does not put a colour in a rescuer's mind from it.
+ *
+ * Read straight from the table, like triageExpectantEnabled(), so it is never
+ * a stale cached value.
+ */
+function triageTrtsSuggestionEnabled(): bool {
+    return (string) dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'triage_trts_suggestion_enabled'") === '1';
+}
+
+/**
  * A casualty is «expectant» only while the flag is on AND the last
  * assessment is still red or yellow: if a later look made them green or
  * black, a stale flag must not keep them out of the counts.
@@ -1251,6 +1271,7 @@ function loadTriageStateForMission(int $missionId, bool $unmasked, int $viewerId
         'counts'        => $counts,
         'expectant'     => $expectant,
         'expectant_enabled' => triageExpectantEnabled(),
+        'trts_enabled'  => triageTrtsSuggestionEnabled(),
         'walking'       => $walking,
         'waiting_red'   => $waitingRed,
         'victims'       => $victims,

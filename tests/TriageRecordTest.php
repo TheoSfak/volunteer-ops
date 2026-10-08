@@ -137,6 +137,7 @@ final class TriageRecordTest extends TestCase
 
     public function testSecondaryTriageScoresTheVitalsAndTheRescuerCanOverrideIt(): void
     {
+        $this->setTriageSetting('triage_trts_suggestion_enabled', '1');
         $first = $this->assess($this->anna, ['victim_uuid' => 'v-sec-0001', 'answers' => ['walk' => false, 'breathing' => true, 'rr_over_30' => true]]);
         $this->assertSame('red', $first['category']);
 
@@ -229,12 +230,51 @@ final class TriageRecordTest extends TestCase
         $this->assertNull(loadTriageStateForMission($this->missionId, false, $this->anna)['sizeup']);
     }
 
+    private function setTriageSetting(string $key, ?string $value): void
+    {
+        dbExecute("DELETE FROM settings WHERE setting_key = ?", [$key]);
+        if ($value !== null) {
+            dbExecute("INSERT INTO settings (setting_key, setting_value) VALUES (?, ?)", [$key, $value]);
+        }
+    }
+
     private function setExpectantSwitch(?string $value): void
     {
-        dbExecute("DELETE FROM settings WHERE setting_key = 'triage_expectant_enabled'");
-        if ($value !== null) {
-            dbExecute("INSERT INTO settings (setting_key, setting_value) VALUES ('triage_expectant_enabled', ?)", [$value]);
-        }
+        $this->setTriageSetting('triage_expectant_enabled', $value);
+    }
+
+    public function testTheColourSuggestionFromTheScoreIsOffUntilTheOrganisationSwitchesItOn(): void
+    {
+        $first = $this->assess($this->anna, ['victim_uuid' => 'v-trts-off-1']);
+        $vitals = ['rr' => 18, 'sbp' => 125, 'gcs' => 15]; // a score of 12: would suggest green
+
+        $this->setTriageSetting('triage_trts_suggestion_enabled', null);
+        $this->assertFalse(triageTrtsSuggestionEnabled());
+        $this->assertFalse(loadTriageStateForMission($this->missionId, true, $this->adminId)['trts_enabled']);
+
+        // Off: complete adult vitals, but no colour is derived. The rescuer has to choose one.
+        $noColour = $this->assess($this->anna, ['victim_uuid' => 'v-trts-off-1', 'protocol' => 'secondary', 'answers' => $vitals]);
+        $this->assertSame('triage.err_answers', $noColour['error']);
+
+        $chosen = $this->assess($this->anna, ['victim_uuid' => 'v-trts-off-1', 'protocol' => 'secondary', 'category' => 'yellow', 'answers' => $vitals]);
+        $this->assertTrue($chosen['ok']);
+        $this->assertSame('yellow', $chosen['category']);
+        $this->assertSame('secondary_manual', $chosen['reason'], 'Not "trts": nothing was scored.');
+        // The measurements are still recorded, without a score.
+        $path = json_decode((string) dbFetchValue("SELECT answers FROM mission_triage_assessments WHERE victim_id = ? ORDER BY id DESC LIMIT 1", [$first['victim_id']]), true);
+        $this->assertSame(['rr' => 18, 'sbp' => 125, 'gcs' => 15], $path);
+
+        // Switched on, the same vitals suggest green again.
+        $this->setTriageSetting('triage_trts_suggestion_enabled', '1');
+        $this->assertTrue(triageTrtsSuggestionEnabled());
+        $this->assertTrue(loadTriageStateForMission($this->missionId, true, $this->adminId)['trts_enabled']);
+        $on = $this->assess($this->anna, ['victim_uuid' => 'v-trts-off-1', 'protocol' => 'secondary', 'answers' => $vitals]);
+        $this->assertSame('green', $on['category']);
+        $this->assertSame('trts', $on['reason']);
+
+        // Anything but '1' is off.
+        $this->setTriageSetting('triage_trts_suggestion_enabled', '0');
+        $this->assertFalse(triageTrtsSuggestionEnabled());
     }
 
     public function testExpectantIsOffUntilTheOrganisationSwitchesItOn(): void

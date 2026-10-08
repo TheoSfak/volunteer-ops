@@ -525,6 +525,7 @@ $actionRoomFields = [
     'search_rings_enabled',
     'osm_layer_enabled',
     'triage_expectant_enabled',
+    'triage_trts_suggestion_enabled',
 ];
 
 if (isPost()) {
@@ -546,7 +547,7 @@ if (isPost()) {
         foreach ($fieldsToUpdate as $field) {
                     $value = isset($_POST[$field]) ? $_POST[$field] : '';
 
-                    if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'osm_layer_enabled', 'triage_expectant_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy', 'war_room_gps_smoothing', 'war_room_native_sampling', 'war_room_native_full_tracking'])) {
+                    if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'osm_layer_enabled', 'triage_expectant_enabled', 'triage_trts_suggestion_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy', 'war_room_gps_smoothing', 'war_room_native_sampling', 'war_room_native_full_tracking'])) {
                         $value = isset($_POST[$field]) ? '1' : '0';
                     }
 
@@ -2556,6 +2557,29 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         <i class="bi bi-shield-lock me-1"></i>
                         Στον δρομολογητή στέλνονται <strong>μόνο δύο ζεύγη συντεταγμένων</strong> —
                         κανένα όνομα, καμία ομάδα, κανένα αναγνωριστικό.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Triage: the colour SUGGESTED by the T-RTS at the secondary assessment. Off until a doctor has said it should stay. -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-calculator me-1"></i>Διαλογή: πρόταση χρώματος από βαθμολογία T-RTS</h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="triage_trts_suggestion_enabled" id="triageTrtsEnabled"
+                               <?= ($settings['triage_trts_suggestion_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="triageTrtsEnabled">
+                            <strong>Στη δευτερογενή εκτίμηση, να προτείνεται χρώμα από τις μετρήσεις (αναπνοές, συστολική πίεση, GCS)</strong>
+                        </label>
+                        <div class="form-text">
+                            Η βαθμολογία είναι το T-RTS, δηλαδή το «Triage Sort» του Ηνωμένου Βασιλείου. Το NHS England το
+                            <strong>αντικατέστησε</strong> (επιστολή 18/4/2023, πλήρης αντικατάσταση έως 30/6/2024) επειδή τα στοιχεία έδειξαν ότι
+                            εντοπίζει φτωχά όσους χρειάζονται παρέμβαση που σώζει ζωή. Κλειστό από προεπιλογή: τότε η δευτερογενής εκτίμηση
+                            <strong>καταγράφει τις μετρήσεις</strong> και ο διασώστης διαλέγει ο ίδιος το χρώμα, χωρίς πρόταση. Ανοίξτε το μόνο αφού
+                            το έχει εγκρίνει γιατρός ή το ΕΚΑΒ. Ό,τι έχει ήδη καταγραφεί με βαθμολογία παραμένει ως έχει.
+                        </div>
                     </div>
                 </div>
             </div>

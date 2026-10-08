@@ -4204,10 +4204,12 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
-<?php if ($isApprovedParticipant): ?>
+<?php if ($isApprovedParticipant || $canManageWarRoom): ?>
 <!-- The triage flow itself: one question per screen, full screen, big
      buttons. Filled by the triageFlow* functions; nothing in here is
-     server-rendered except the shell. -->
+     server-rendered except the shell. Command gets it too, not only an
+     approved participant: the secondary assessment is offered to command
+     (and accepted by the server), and without this shell its button threw. -->
 <div id="triageFlow" class="triage-flow d-none" role="dialog" aria-modal="true" aria-label="<?= t('triage.card_title') ?>"></div>
 <?php endif; ?>
 <?php endif; ?>
@@ -17852,20 +17854,24 @@ function triageVitalsText(vit) {
 function triageRenderSecondary(flow) {
     const v = flow.vitals || {};
     const child = flow.ageGroup === 'child';
+    // A colour is SUGGESTED from the score only for an adult, and only while
+    // the organisation has that switched on (settings). Otherwise this screen
+    // records the measurements and the rescuer picks the colour.
+    const scoring = !child && !!(triageState && triageState.trts_enabled);
     const field = (key, labelKey, max) => `<div class="mb-2">
         <label class="form-label fw-semibold mb-1" for="triageVital_${key}">${escapeHtml(t(labelKey))}</label>
         <input type="number" inputmode="numeric" min="0" max="${max}" step="1" id="triageVital_${key}" data-vital="${key}" class="form-control form-control-lg" value="${v[key] !== undefined ? v[key] : ''}">
     </div>`;
     const el = triageShowFlow(triageHeadHtml(flow) + `<div class="triage-flow-body">
-        <div class="small text-muted">${t('triage.secondary_protocol')} · <span class="triage-code">${escapeHtml(flow.existing.code)}</span></div>
+        <div class="small text-muted">${t(scoring ? 'triage.secondary_protocol' : 'triage.secondary_protocol_record')} · <span class="triage-code">${escapeHtml(flow.existing.code)}</span></div>
         <div class="triage-question">${t('triage.secondary_title')}</div>
-        <div class="triage-hint mb-3">${t('triage.secondary_help')}</div>
+        <div class="triage-hint mb-3">${t(scoring ? 'triage.secondary_help' : 'triage.secondary_help_record')}</div>
         ${child ? `<div class="alert alert-warning py-2 small">${t('triage.secondary_child')}</div>` : ''}
         ${field('rr', 'triage.vital_rr', 80)}${field('sbp', 'triage.vital_sbp', 300)}${field('gcs', 'triage.vital_gcs', 15)}
         <div class="triage-secondary-err small text-danger fw-semibold"></div>
         <div class="mt-auto pt-3">
-            ${child ? '' : `<button type="button" class="btn btn-danger btn-lg w-100" style="height:72px;" data-act="calc"><i class="bi bi-calculator me-1"></i>${t('triage.secondary_calc')}</button>`}
-            <button type="button" class="btn ${child ? 'btn-danger btn-lg' : 'btn-outline-dark'} w-100 mt-2" data-act="pick">${t('triage.secondary_pick')}</button>
+            ${scoring ? `<button type="button" class="btn btn-danger btn-lg w-100" style="height:72px;" data-act="calc"><i class="bi bi-calculator me-1"></i>${t('triage.secondary_calc')}</button>` : ''}
+            <button type="button" class="btn ${scoring ? 'btn-outline-dark' : 'btn-danger btn-lg'} w-100 mt-2" data-act="pick">${t(scoring ? 'triage.secondary_pick' : 'triage.secondary_pick_record')}</button>
             <button type="button" class="btn btn-lg btn-outline-secondary w-100 mt-2" data-act="cancel">${t('triage.cancel')}</button>
         </div>
     </div>`);
