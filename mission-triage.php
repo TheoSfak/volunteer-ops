@@ -105,7 +105,7 @@ function triageVictimForResponse(int $missionId, int $victimId): ?array {
 }
 
 $fieldActions = ['assess', 'set_card', 'merge', 'bulk_green', 'details'];
-$commandActions = ['mci', 'point', 'status', 'transport_batch'];
+$commandActions = ['mci', 'point', 'status', 'transport_batch', 'sizeup'];
 
 if (in_array($action, $fieldActions, true)) {
     if (!$isApprovedParticipant && !$canManageWarRoom) {
@@ -250,6 +250,22 @@ if ($action === 'status') {
         triageFail($result['error']);
     }
     logAudit('triage_status', 'mission_triage_victims', (int) post('victim_id'), null, ['mission_id' => $missionId, 'status' => post('status')]);
+    triageJson(['ok' => true, 'triage' => loadTriageStateForMission($missionId, true, $userId)]);
+}
+
+// The size-up form. The whole form is posted each time as one JSON object, so
+// what is saved is exactly what is on the screen. A hazard that was not there
+// before is announced to the mission; nothing else is.
+if ($action === 'sizeup') {
+    $form = json_decode((string) post('sizeup'), true);
+    $result = saveMissionMciSizeup($missionId, is_array($form) ? $form : [], $userId);
+    if (!$result['ok']) {
+        triageFail($result['error']);
+    }
+    if ($result['hazards_added']) {
+        notifyMciHazards($missionId, $mission['title'], $responsibleId, $userId, $result['hazards_added']);
+    }
+    logAudit('triage_sizeup', 'missions', $missionId, null, ['hazards_added' => $result['hazards_added']]);
     triageJson(['ok' => true, 'triage' => loadTriageStateForMission($missionId, true, $userId)]);
 }
 

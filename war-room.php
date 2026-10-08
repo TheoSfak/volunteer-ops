@@ -3574,6 +3574,10 @@ include __DIR__ . '/includes/header.php';
        closed card still has to say. A white rim keeps red on red visible. */
     .triage-head-counts { display: inline-flex; gap: 3px; white-space: nowrap; }
     .triage-head-count { min-width: 1.7em; padding: 1px 5px; border-radius: 6px; border: 1px solid rgba(255,255,255,.9); font-size: .8rem; font-weight: 700; line-height: 1.35; text-align: center; font-variant-numeric: tabular-nums; }
+    /* Size-up: the box command fills in, and the hazard line on the triage screens. */
+    .triage-sizeup { border: 1px solid #dee2e6; border-radius: 8px; padding: 6px 8px; background: #fafbfc; }
+    .triage-sizeup > summary { cursor: pointer; }
+    .triage-flow-hazards { background: #fff3cd; color: #664d03; font-size: .85rem; font-weight: 600; padding: 5px 14px; border-bottom: 1px solid #ffe69c; }
     /* The evacuation queue: one tickable line per casualty, in the order they go. */
     .triage-queue { border: 1px solid #dee2e6; border-radius: 8px; padding: 6px 8px; background: #fafbfc; }
     .triage-queue > summary { cursor: pointer; }
@@ -4163,6 +4167,11 @@ include __DIR__ . '/includes/header.php';
             <div class="collapse" id="triageCardBody">
             <div class="card-body">
                 <div id="triageStatusLine" class="small mb-2"></div>
+                <!-- The hazards command wrote down, above the triage buttons: the
+                     people who are about to walk in read them first. Filled by
+                     renderTriage() for everybody except command, whose form is
+                     in the board. -->
+                <div id="triageHazards"></div>
                 <?php if ($isApprovedParticipant): ?>
                 <div id="triageFieldControls" class="d-none mb-3">
                     <div class="btn-group w-100 mb-2" role="group" aria-label="<?= t('triage.adult') ?> / <?= t('triage.child') ?>">
@@ -17102,6 +17111,8 @@ function renderTriage(state) {
             line.textContent = TRIAGE_CAN_MANAGE ? t('triage.mci_inactive_help') : '';
         }
     }
+    const hazardsEl = document.getElementById('triageHazards');
+    if (hazardsEl) hazardsEl.innerHTML = TRIAGE_CAN_MANAGE ? '' : triageSizeupReadOnlyHtml(state && state.sizeup);
     renderTriageBoard(state);
     renderTriageLayer(state);
 }
@@ -17172,6 +17183,120 @@ function triageRowHtml(v) {
             ${actions}
         </div>
     </details>`;
+}
+
+// ── Size-up (Εκτίμηση κατάστασης) ──────────────────────────────────────────
+// Command fills it in AFTER the switch is on; it never stands between a tap
+// and the switch. Hazards are read by everybody on the mission, at the top of
+// the card and on every triage screen, because the people walking in should
+// see them. The draft keeps what command typed through the board's rebuilds
+// (every poll) until it is saved.
+const TRIAGE_SIZEUP_HAZARDS = <?= json_encode(TRIAGE_SIZEUP_HAZARDS) ?>;
+const TRIAGE_SIZEUP_RESOURCES = <?= json_encode(TRIAGE_SIZEUP_RESOURCES) ?>;
+const TRIAGE_SIZEUP_ACCESS = <?= json_encode(TRIAGE_SIZEUP_ACCESS) ?>;
+let triageSizeupDraft = null;
+let triageSizeupOpen = false;
+let triageSizeupSavedAt = 0;
+function triageSizeupHazardNames(s) {
+    return ((s && s.hazards) || []).map(k => t('triage.sizeup.hazard.' + k));
+}
+function triageSizeupBlankForm() {
+    return {hazards: [], hazards_note: '', access: null, access_note: '', casualties_estimate: null, resources: [], resources_note: '', ekab_notified: false};
+}
+function triageSizeupReadOnlyHtml(s) {
+    if (!s) return '';
+    const hazards = triageSizeupHazardNames(s);
+    const lines = [];
+    if (hazards.length || s.hazards_note) {
+        lines.push(`<div class="fw-semibold"><i class="bi bi-exclamation-triangle-fill me-1"></i>${escapeHtml(t('triage.sizeup_hazards'))}: ${escapeHtml(hazards.join(', '))}${s.hazards_note ? ' — ' + escapeHtml(s.hazards_note) : ''}</div>`);
+    }
+    if (s.access || s.access_note) {
+        lines.push(`<div>${escapeHtml(t('triage.sizeup_access'))}: ${s.access ? escapeHtml(t('triage.sizeup.access.' + s.access)) : ''}${s.access_note ? (s.access ? ' — ' : '') + escapeHtml(s.access_note) : ''}</div>`);
+    }
+    if (s.casualties_estimate !== null && s.casualties_estimate !== undefined) {
+        lines.push(`<div>${escapeHtml(t('triage.sizeup_estimate'))}: ${s.casualties_estimate}</div>`);
+    }
+    return lines.length ? `<div class="alert alert-warning py-2 px-2 small mb-2 triage-sizeup-ro">${lines.join('')}</div>` : '';
+}
+function triageSizeupFormHtml(state) {
+    const s = triageSizeupDraft || state.sizeup || triageSizeupBlankForm();
+    const chk = (group, keys, picked) => keys.map(k => `<div class="form-check form-check-inline me-2 mb-0">
+            <input class="form-check-input" type="checkbox" data-group="${group}" value="${k}" id="tsz_${group}_${k}" ${picked.includes(k) ? 'checked' : ''}>
+            <label class="form-check-label small" for="tsz_${group}_${k}">${escapeHtml(t('triage.sizeup.' + (group === 'hazards' ? 'hazard' : 'resource') + '.' + k))}</label>
+        </div>`).join('');
+    const hazards = triageSizeupHazardNames(state.sizeup);
+    const badge = hazards.length ? ` <span class="badge bg-warning text-dark ms-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>${hazards.length}</span>` : '';
+    const saved = state.sizeup_by ? t('triage.sizeup_by', {name: state.sizeup_by, time: state.sizeup_at || ''}) : t('triage.sizeup_unset');
+    return `<details class="triage-sizeup mb-2" id="triageSizeup" ${triageSizeupOpen ? 'open' : ''}>
+        <summary class="fw-semibold"><i class="bi bi-binoculars me-1"></i>${t('triage.sizeup_title')}${badge}</summary>
+        <div class="small text-muted mb-2">${t('triage.sizeup_help')}</div>
+        <div class="fw-semibold small">${t('triage.sizeup_hazards')}</div>
+        <div class="mb-1">${chk('hazards', TRIAGE_SIZEUP_HAZARDS, s.hazards || [])}</div>
+        <input type="text" class="form-control form-control-sm mb-2" data-f="hazards_note" maxlength="500" placeholder="${escapeHtml(t('triage.sizeup_hazards_note'))}" value="${escapeHtml(s.hazards_note || '')}">
+        <div class="row g-1 mb-2">
+            <div class="col-5">
+                <label class="form-label small fw-semibold mb-0" for="tsz_access">${t('triage.sizeup_access')}</label>
+                <select class="form-select form-select-sm" id="tsz_access" data-f="access">
+                    <option value="">—</option>
+                    ${TRIAGE_SIZEUP_ACCESS.map(a => `<option value="${a}" ${s.access === a ? 'selected' : ''}>${escapeHtml(t('triage.sizeup.access.' + a))}</option>`).join('')}
+                </select>
+            </div>
+            <div class="col-7">
+                <label class="form-label small fw-semibold mb-0" for="tsz_access_note">&nbsp;</label>
+                <input type="text" class="form-control form-control-sm" id="tsz_access_note" data-f="access_note" maxlength="500" placeholder="${escapeHtml(t('triage.sizeup_access_note'))}" value="${escapeHtml(s.access_note || '')}">
+            </div>
+        </div>
+        <label class="form-label small fw-semibold mb-0" for="tsz_estimate">${t('triage.sizeup_estimate')}</label>
+        <input type="number" min="0" max="999" step="1" inputmode="numeric" class="form-control form-control-sm mb-2" style="max-width:8rem;" id="tsz_estimate" data-f="casualties_estimate" value="${s.casualties_estimate === null || s.casualties_estimate === undefined ? '' : s.casualties_estimate}">
+        <div class="fw-semibold small">${t('triage.sizeup_resources')}</div>
+        <div class="mb-1">${chk('resources', TRIAGE_SIZEUP_RESOURCES, s.resources || [])}</div>
+        <input type="text" class="form-control form-control-sm mb-2" data-f="resources_note" maxlength="500" placeholder="${escapeHtml(t('triage.sizeup_resources_note'))}" value="${escapeHtml(s.resources_note || '')}">
+        <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" data-f="ekab_notified" id="tsz_ekab" ${s.ekab_notified ? 'checked' : ''}>
+            <label class="form-check-label small" for="tsz_ekab">${t('triage.sizeup_ekab')}</label>
+        </div>
+        <button type="button" class="btn btn-sm btn-primary w-100 triage-sizeup-save"><i class="bi bi-check-lg me-1"></i>${t('triage.sizeup_save')}</button>
+        <div class="small text-muted mt-1 triage-sizeup-state">${escapeHtml(saved)}</div>
+    </details>`;
+}
+function triageReadSizeupForm(box) {
+    const form = triageSizeupBlankForm();
+    box.querySelectorAll('input[data-group]').forEach(i => { if (i.checked) form[i.dataset.group].push(i.value); });
+    box.querySelectorAll('[data-f]').forEach(el => {
+        const f = el.dataset.f;
+        if (f === 'ekab_notified') form.ekab_notified = el.checked;
+        else if (f === 'casualties_estimate') form.casualties_estimate = el.value.trim() === '' ? null : parseInt(el.value, 10);
+        else if (f === 'access') form.access = el.value || null;
+        else form[f] = el.value;
+    });
+    return form;
+}
+function triageWireSizeup(board) {
+    const box = board.querySelector('#triageSizeup');
+    if (!box) return;
+    box.addEventListener('toggle', e => { if (e.target === box) triageSizeupOpen = box.open; });
+    const remember = () => { triageSizeupDraft = triageReadSizeupForm(box); };
+    box.addEventListener('input', remember);
+    box.addEventListener('change', remember);
+    const saveBtn = box.querySelector('.triage-sizeup-save');
+    const stateEl = box.querySelector('.triage-sizeup-state');
+    saveBtn.addEventListener('click', () => {
+        const form = triageReadSizeupForm(box);
+        saveBtn.disabled = true;
+        stateEl.textContent = '…';
+        postTriage({action: 'sizeup', sizeup: JSON.stringify(form)}).then(r => {
+            saveBtn.disabled = false;
+            if (r && r.ok) {
+                triageSizeupDraft = null;
+                document.activeElement?.blur();
+                renderTriage(r.triage);
+                const again = document.querySelector('#triageSizeup .triage-sizeup-state');
+                if (again) again.innerHTML = `<span class="text-success fw-semibold"><i class="bi bi-check-circle-fill me-1"></i>${escapeHtml(t('triage.sizeup_saved'))}</span> · ${escapeHtml(again.textContent)}`;
+            } else {
+                stateEl.innerHTML = `<span class="text-danger">${escapeHtml((r && r.error) || t('common.failed'))}</span>`;
+            }
+        });
+    });
 }
 
 // ── Evacuation queue (command only) ────────────────────────────────────────
@@ -17302,7 +17427,10 @@ function renderTriageBoard(state) {
     const listBlock = TRIAGE_CAN_MANAGE
         ? `<div class="small fw-semibold text-muted mb-1">${heading}</div>${list}`
         : `<details id="triageListDetails" ${triageListOpen ? 'open' : ''}><summary class="small fw-semibold text-muted mb-1">${heading}</summary>${list}</details>`;
-    board.innerHTML = counts + walking + waitingLine + points + (TRIAGE_CAN_MANAGE ? triageQueueHtml(state) : '') + listBlock;
+    // Everybody who is not command reads the hazards at the top of the card
+    // (#triageHazards, filled by renderTriage); command gets the form here.
+    const sizeupForm = TRIAGE_CAN_MANAGE && (state.active || state.sizeup) ? triageSizeupFormHtml(state) : '';
+    board.innerHTML = counts + walking + waitingLine + points + sizeupForm + (TRIAGE_CAN_MANAGE ? triageQueueHtml(state) : '') + listBlock;
 
     board.querySelectorAll('details.triage-row').forEach(d => d.addEventListener('toggle', () => {
         const id = parseInt(d.dataset.victimId, 10);
@@ -17321,6 +17449,7 @@ function renderTriageBoard(state) {
         if (v) triageOpenFlow({existing: v, secondary: true});
     }));
     if (!TRIAGE_CAN_MANAGE) return;
+    triageWireSizeup(board);
     triageWireQueue(board);
     board.querySelectorAll('details.triage-row').forEach(row => {
         const victimId = row.dataset.victimId;
@@ -17363,6 +17492,9 @@ function triageSetMci(turnOn, btn) {
     postTriage({action: 'mci', active: turnOn ? '1' : '0'}).then(r => {
         btn.disabled = false;
         if (r && r.ok) {
+            // The size-up opens by itself the first time the switch is on, and
+            // only offers itself: nothing waits for it.
+            if (turnOn && !(r.triage && r.triage.sizeup)) triageSizeupOpen = true;
             renderTriage(r.triage);
             if (turnOn) triageGoToCard();
         } else {
@@ -17583,7 +17715,13 @@ function triageGpsText(flow) {
     return `<i class="bi bi-geo-alt-fill me-1"></i>${flow.fix.acc !== null ? t('triage.gps_ok', {m: Math.round(flow.fix.acc)}) : t('triage.gps_ok', {m: '?'})}`;
 }
 function triageHeadHtml(flow) {
-    return `<div class="triage-flow-head"><span><i class="bi bi-exclamation-triangle-fill me-1"></i>${t('triage.mci_badge')}</span><span class="triage-gps">${flow ? triageGpsText(flow) : ''}</span></div>`;
+    // The hazards command wrote down stay on every triage screen: this is the
+    // moment somebody is standing in them.
+    const hazards = triageSizeupHazardNames(triageState && triageState.sizeup);
+    const hazardLine = hazards.length
+        ? `<div class="triage-flow-hazards"><i class="bi bi-exclamation-triangle-fill me-1"></i>${escapeHtml(t('triage.sizeup_hazard_line', {list: hazards.join(', ')}))}</div>`
+        : '';
+    return `<div class="triage-flow-head"><span><i class="bi bi-exclamation-triangle-fill me-1"></i>${t('triage.mci_badge')}</span><span class="triage-gps">${flow ? triageGpsText(flow) : ''}</span></div>${hazardLine}`;
 }
 // A fast double tap on ΝΑΙ must not answer the NEXT question too — the next
 // screen puts a button in the very same place. Taps in the first moment

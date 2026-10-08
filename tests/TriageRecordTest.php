@@ -178,6 +178,47 @@ final class TriageRecordTest extends TestCase
         $this->assertSame('secondary_manual', $r['reason']);
     }
 
+    public function testTheSizeupIsSavedSeenByEveryoneAndOnlyNewHazardsAreNews(): void
+    {
+        $this->assertNull(loadTriageStateForMission($this->missionId, false, $this->anna)['sizeup'], 'Nothing yet.');
+
+        $r = saveMissionMciSizeup($this->missionId, ['hazards' => ['fire'], 'casualties_estimate' => '8', 'resources' => ['helicopter']], $this->adminId);
+        $this->assertTrue($r['ok']);
+        $this->assertSame(['fire'], $r['hazards_added']);
+
+        // A volunteer (masked view) reads the same size-up.
+        $state = loadTriageStateForMission($this->missionId, false, $this->anna);
+        $this->assertSame(['fire'], $state['sizeup']['hazards']);
+        $this->assertSame(8, $state['sizeup']['casualties_estimate']);
+        $this->assertNotNull($state['sizeup_at']);
+        $this->assertSame('Triage Admin', $state['sizeup_by']);
+
+        // Same hazards again plus one new one: only the new one is news.
+        $again = saveMissionMciSizeup($this->missionId, ['hazards' => ['fire', 'rockfall'], 'casualties_estimate' => 8, 'resources' => ['helicopter']], $this->adminId);
+        $this->assertSame(['rockfall'], $again['hazards_added']);
+        // Saving the identical form again is not an event and not news.
+        $same = saveMissionMciSizeup($this->missionId, ['hazards' => ['fire', 'rockfall'], 'casualties_estimate' => 8, 'resources' => ['helicopter']], $this->adminId);
+        $this->assertSame([], $same['hazards_added']);
+        $this->assertSame(2, (int) dbFetchValue("SELECT COUNT(*) FROM mission_mci_log WHERE mission_id = ? AND action = 'sizeup'", [$this->missionId]), 'Two real edits, three saves.');
+
+        $kinds = array_column(loadTriageActivityEvents($this->missionId), 'kind');
+        $this->assertContains('mci_sizeup', $kinds);
+        foreach (loadTriageActivityEvents($this->missionId) as $event) {
+            $this->assertStringNotContainsString('triage.', triageActivityText($event, 'en'), $event['kind']);
+        }
+
+        // Emptying the form clears it.
+        $this->assertTrue(saveMissionMciSizeup($this->missionId, [], $this->adminId)['ok']);
+        $this->assertNull(loadTriageStateForMission($this->missionId, false, $this->anna)['sizeup']);
+    }
+
+    public function testASizeupNeedsAMissionThatHadAMassCasualtyIncident(): void
+    {
+        $r = saveMissionMciSizeup(999999999, ['hazards' => ['fire']], $this->adminId);
+        $this->assertFalse($r['ok']);
+        $this->assertSame('triage.err_inactive', $r['error']);
+    }
+
     public function testOneVehicleCanTakeSeveralCasualtiesAtOnce(): void
     {
         $a = $this->assess($this->anna);

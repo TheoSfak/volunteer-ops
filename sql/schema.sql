@@ -2957,16 +2957,20 @@ CREATE TABLE IF NOT EXISTS `mission_mci` (
     `ccp_lng` DECIMAL(10,7) NULL,
     `green_lat` DECIMAL(10,7) NULL COMMENT 'Where the walking wounded are sent',
     `green_lng` DECIMAL(10,7) NULL,
+    `sizeup` TEXT NULL COMMENT 'JSON: hazards, access, casualties_estimate, resources, ekab_notified (+ notes)',
+    `sizeup_at` DATETIME NULL,
+    `sizeup_by` INT UNSIGNED NULL,
     `updated_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`activated_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
-    FOREIGN KEY (`deactivated_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+    FOREIGN KEY (`deactivated_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`sizeup_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `mission_mci_log` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `mission_id` INT UNSIGNED NOT NULL,
-    `action` ENUM('activated','deactivated','ccp_set','green_set') NOT NULL,
+    `action` ENUM('activated','deactivated','ccp_set','green_set','sizeup') NOT NULL,
     `user_id` INT UNSIGNED NULL,
     `lat` DECIMAL(10,7) NULL,
     `lng` DECIMAL(10,7) NULL,

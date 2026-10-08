@@ -791,6 +791,15 @@ include __DIR__ . '/includes/header.php';
         · Πρώτο θύμα <?= $triageReport['first_victim_at'] ? date('d/m H:i', strtotime($triageReport['first_victim_at'])) : '—' ?>
         · Τελευταίο κόκκινο διακομίστηκε <?= $triageReport['last_red_out_at'] ? date('d/m H:i', strtotime($triageReport['last_red_out_at'])) : '—' ?>
     </div>
+    <?php $triageSizeupLines = triageSizeupLines($triageReport['sizeup'], (int) $triageReport['recorded']); ?>
+    <?php if ($triageSizeupLines): ?>
+    <div class="border rounded-3 p-2 mt-2">
+        <div class="fw-semibold small">Εκτίμηση κατάστασης (size-up)<?php if ($triageReport['sizeup_by']): ?> <span class="fw-normal text-muted">· <?= h($triageReport['sizeup_by']) ?><?= $triageReport['sizeup_at'] ? ' στις ' . h($triageReport['sizeup_at']) : '' ?></span><?php endif; ?></div>
+        <?php foreach ($triageSizeupLines as $line): ?>
+        <div class="small text-muted"><?= h($line) ?></div>
+        <?php endforeach; ?>
+    </div>
+    <?php endif; ?>
     <?php $triageQualityLines = triageQualityLines($triageReport['quality']); ?>
     <?php if ($triageQualityLines): ?>
     <div class="border rounded-3 p-2 mt-2">

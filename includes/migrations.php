@@ -7698,6 +7698,21 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 187,
+            'description' => 'Size-up of a Μαζικό Συμβάν (v3.375.0): mission_mci.sizeup holds command\'s first read of the scene as JSON (hazards, access, estimated casualties, resources needed, whether the ambulance service knows), with who wrote it and when; mission_mci_log can record the edit.',
+            'up' => function () {
+                if (!dbColumnExists('mission_mci', 'sizeup')) {
+                    dbExecute("ALTER TABLE mission_mci
+                        ADD COLUMN sizeup TEXT NULL COMMENT 'JSON: hazards, access, casualties_estimate, resources, ekab_notified (+ notes)' AFTER green_lng,
+                        ADD COLUMN sizeup_at DATETIME NULL AFTER sizeup,
+                        ADD COLUMN sizeup_by INT UNSIGNED NULL AFTER sizeup_at,
+                        ADD CONSTRAINT fk_mci_sizeup_by FOREIGN KEY (sizeup_by) REFERENCES users(id) ON DELETE SET NULL");
+                }
+                dbExecute("ALTER TABLE mission_mci_log MODIFY COLUMN action ENUM('activated','deactivated','ccp_set','green_set','sizeup') NOT NULL");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

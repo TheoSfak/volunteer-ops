@@ -1045,6 +1045,16 @@ $triageDt = fn($v) => $v ? date('d/m/Y H:i', strtotime($v)) : '—';
         · Πρώτο θύμα: <?= $triageDt($triageReport['first_victim_at']) ?>
         · Τελευταίο κόκκινο διακομίστηκε: <?= $triageDt($triageReport['last_red_out_at']) ?>
     </div>
+    <?php $triageSizeupLines = triageSizeupLines($triageReport['sizeup'], (int) $triageReport['recorded']); ?>
+    <?php if ($triageSizeupLines): ?>
+    <div style="border:1px solid #ddd;border-radius:6px;padding:6px 10px;margin-bottom:8px;">
+        <strong>Εκτίμηση κατάστασης (size-up)</strong>
+        <?php if ($triageReport['sizeup_by']): ?><span style="font-size:8pt;color:#666;"> · <?= h($triageReport['sizeup_by']) ?><?= $triageReport['sizeup_at'] ? ' στις ' . h($triageReport['sizeup_at']) : '' ?></span><?php endif; ?>
+        <?php foreach ($triageSizeupLines as $line): ?>
+        <div style="font-size:8.5pt;color:#333;white-space:normal;margin-top:2px;"><?= h($line) ?></div>
+        <?php endforeach; ?>
+    </div>
+    <?php endif; ?>
     <?php $triageQualityLines = triageQualityLines($triageReport['quality']); ?>
     <?php if ($triageQualityLines): ?>
     <div style="border:1px solid #ddd;border-radius:6px;padding:6px 10px;margin-bottom:8px;">

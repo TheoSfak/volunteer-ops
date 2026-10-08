@@ -286,9 +286,85 @@ function triageReasonLabel(?string $reason, ?string $lang = null): string {
 }
 
 /** The mission's Μαζικό Συμβάν row, or null when it was never switched on. */
+/**
+ * The size-up: command's first read of the scene, filled in AFTER the switch
+ * is on and never in the way of it (activation is one tap; this is what
+ * follows). Modelled on the UK major-incident METHANE report, cut to what a
+ * rescue team here can fill in: hazards, access, an estimate of how many
+ * casualties, what is needed, and whether the ambulance service knows.
+ * Hazards are shown to everybody on the mission, because the people walking
+ * in should read them before they go.
+ */
+const TRIAGE_SIZEUP_HAZARDS = ['fire', 'collapse', 'rockfall', 'hazmat', 'electrical', 'water', 'weather', 'traffic'];
+const TRIAGE_SIZEUP_RESOURCES = ['ambulances', 'helicopter', 'fire_service', 'police', 'doctor', 'rescuers', 'equipment'];
+const TRIAGE_SIZEUP_ACCESS = ['open', 'partial', 'none'];
+
+/**
+ * A size-up as posted, reduced to what is allowed: unknown keys dropped, lists
+ * limited to the known options (in their canonical order, no duplicates),
+ * notes trimmed and cut, the estimate a whole number 0-999 or null. Always
+ * returns the full shape, so readers never test for a missing key.
+ */
+function normalizeTriageSizeup(array $in): array {
+    $pick = function ($list, array $allowed): array {
+        $list = is_array($list) ? $list : [];
+        return array_values(array_intersect($allowed, array_map('strval', $list)));
+    };
+    $note = fn($v): string => mb_substr(trim((string) ($v ?? '')), 0, 500);
+    $estimate = $in['casualties_estimate'] ?? null;
+    if (is_string($estimate) && preg_match('/^\d{1,3}$/', trim($estimate))) {
+        $estimate = (int) $estimate;
+    }
+    $estimate = is_int($estimate) && $estimate >= 0 && $estimate <= 999 ? $estimate : null;
+    $access = (string) ($in['access'] ?? '');
+    return [
+        'hazards'             => $pick($in['hazards'] ?? [], TRIAGE_SIZEUP_HAZARDS),
+        'hazards_note'        => $note($in['hazards_note'] ?? ''),
+        'access'              => in_array($access, TRIAGE_SIZEUP_ACCESS, true) ? $access : null,
+        'access_note'         => $note($in['access_note'] ?? ''),
+        'casualties_estimate' => $estimate,
+        'resources'           => $pick($in['resources'] ?? [], TRIAGE_SIZEUP_RESOURCES),
+        'resources_note'      => $note($in['resources_note'] ?? ''),
+        'ekab_notified'       => !empty($in['ekab_notified']) && $in['ekab_notified'] !== '0' && $in['ekab_notified'] !== 'false',
+    ];
+}
+
+/** True when a normalised size-up has nothing in it. */
+function triageSizeupIsEmpty(array $s): bool {
+    return !$s['hazards'] && $s['hazards_note'] === '' && $s['access'] === null && $s['access_note'] === ''
+        && $s['casualties_estimate'] === null && !$s['resources'] && $s['resources_note'] === '' && !$s['ekab_notified'];
+}
+
+/**
+ * Saves the size-up of a mission that has had a Μαζικό Συμβάν. Works while
+ * the incident is on or after it (a debrief corrects what was written).
+ * Returns ['ok' => true, 'hazards_added' => keys that were not there before]
+ * or ['ok' => false, 'error' => lang key].
+ */
+function saveMissionMciSizeup(int $missionId, array $in, int $userId): array {
+    $mci = loadMissionMci($missionId);
+    if (!$mci) {
+        return ['ok' => false, 'error' => 'triage.err_inactive'];
+    }
+    $new = normalizeTriageSizeup($in);
+    $old = !empty($mci['sizeup']) ? normalizeTriageSizeup((array) json_decode((string) $mci['sizeup'], true)) : normalizeTriageSizeup([]);
+    if (triageSizeupIsEmpty($new)) {
+        dbExecute("UPDATE mission_mci SET sizeup = NULL, sizeup_at = NULL, sizeup_by = NULL WHERE mission_id = ?", [$missionId]);
+    } else {
+        dbExecute(
+            "UPDATE mission_mci SET sizeup = ?, sizeup_at = NOW(), sizeup_by = ? WHERE mission_id = ?",
+            [json_encode($new, JSON_UNESCAPED_UNICODE), $userId, $missionId]
+        );
+    }
+    if ($new !== $old) {
+        dbInsert("INSERT INTO mission_mci_log (mission_id, action, user_id) VALUES (?, 'sizeup', ?)", [$missionId, $userId]);
+    }
+    return ['ok' => true, 'hazards_added' => array_values(array_diff($new['hazards'], $old['hazards']))];
+}
+
 function loadMissionMci(int $missionId): ?array {
     $row = dbFetchOne(
-        "SELECT mc.*, u.name AS activated_by_name
+        "SELECT mc.*, u.name AS activated_by_name, (SELECT name FROM users WHERE id = mc.sizeup_by) AS sizeup_by_name
          FROM mission_mci mc
          LEFT JOIN users u ON u.id = mc.activated_by
          WHERE mc.mission_id = ?",
@@ -871,6 +947,38 @@ function notifyTriageCommand(int $missionId, string $missionTitle, ?int $respons
 }
 
 /**
+ * A hazard that was not on the size-up before: tell the people on the mission
+ * once, naming it, because somebody may already be on the way in. Not sent for
+ * every edit of the form, only for a newly ticked hazard.
+ *
+ * @param string[] $hazardKeys keys from TRIAGE_SIZEUP_HAZARDS
+ */
+function notifyMciHazards(int $missionId, string $missionTitle, ?int $responsibleUserId, int $actorId, array $hazardKeys): void {
+    if (!$hazardKeys) {
+        return;
+    }
+    $ids = array_values(array_unique(array_merge(
+        actionRoomNotifyRecipientIds($missionId, null, $actorId),
+        getMissionCommandStaffIds($missionId, $responsibleUserId, $actorId)
+    )));
+    if (!$ids) {
+        return;
+    }
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $langs = getUserLanguages($ids);
+    foreach ($ids as $id) {
+        $lang = $langs[$id] ?? DEFAULT_LANGUAGE;
+        $names = implode(', ', array_map(fn($k) => t('triage.sizeup.hazard.' . $k, [], $lang), $hazardKeys));
+        sendNotification($id, t('triage.hazards_title', ['mission' => $missionTitle], $lang), t('triage.hazards_message', ['hazards' => $names], $lang), 'danger', '', [
+            'url' => $warRoomUrl,
+            'tag' => 'triage-hazards-' . $missionId,
+            'bannerMission' => $missionId,
+            'vibrate' => [200, 100, 200],
+        ]);
+    }
+}
+
+/**
  * Tell the field that Μαζικό Συμβάν is on: every Action Room participant and
  * every other coordinator, loud, because this is the moment the triage button
  * appears on their phone and they need to know why.
@@ -1025,6 +1133,11 @@ function loadTriageStateForMission(int $missionId, bool $unmasked, int $viewerId
         'active'        => $mci ? (bool) $mci['is_active'] : false,
         'activated_at'  => $mci && $mci['activated_at'] ? date('H:i', strtotime($mci['activated_at'])) : null,
         'activated_by'  => $mci['activated_by_name'] ?? null,
+        // Hazards are for everybody on the mission; the rest of the size-up is
+        // command's working note, but there is nothing in it worth hiding.
+        'sizeup'        => !empty($mci['sizeup']) ? normalizeTriageSizeup((array) json_decode((string) $mci['sizeup'], true)) : null,
+        'sizeup_at'     => !empty($mci['sizeup']) && $mci['sizeup_at'] ? date('H:i', strtotime($mci['sizeup_at'])) : null,
+        'sizeup_by'     => !empty($mci['sizeup']) ? ($mci['sizeup_by_name'] ?? null) : null,
         'ccp'           => $mci && $mci['ccp_lat'] !== null ? ['lat' => (float) $mci['ccp_lat'], 'lng' => (float) $mci['ccp_lng']] : null,
         'green'         => $mci && $mci['green_lat'] !== null ? ['lat' => (float) $mci['green_lat'], 'lng' => (float) $mci['green_lng']] : null,
         'counts'        => $counts,
@@ -1120,6 +1233,7 @@ function triageActivityText(array $e, ?string $lang = null): string {
     switch ($e['kind']) {
         case 'mci_activated':   return t('triage.act_mci_on', ['name' => $e['actor'] ?? '—'], $lang);
         case 'mci_deactivated': return t('triage.act_mci_off', ['name' => $e['actor'] ?? '—'], $lang);
+        case 'mci_sizeup':      return t('triage.act_sizeup', ['name' => $e['actor'] ?? '—'], $lang);
         case 'mci_ccp_set':     return t($e['lat'] !== null ? 'triage.act_ccp_set' : 'triage.act_ccp_clear', ['name' => $e['actor'] ?? '—'], $lang);
         case 'mci_green_set':   return t($e['lat'] !== null ? 'triage.act_green_set' : 'triage.act_green_clear', ['name' => $e['actor'] ?? '—'], $lang);
         case 'triaged':
@@ -1294,6 +1408,37 @@ function triageQualityLines(array $q): array {
     return $lines;
 }
 
+/**
+ * The size-up in words for the mission report and the stats page (Greek, plain
+ * text, the caller escapes). $recorded is how many casualties were actually
+ * recorded, set beside the estimate so a debrief sees how far off it was.
+ * Empty when no size-up was written.
+ */
+function triageSizeupLines(?array $s, int $recorded): array {
+    if (!$s) {
+        return [];
+    }
+    $names = fn(array $keys, string $group): string => implode(', ', array_map(fn($k) => t('triage.sizeup.' . $group . '.' . $k, [], 'el'), $keys));
+    $withNote = fn(string $head, string $note): string => $note !== '' ? $head . ($head !== '' ? ' — ' : '') . $note : $head;
+    $lines = [];
+    if ($s['hazards'] || $s['hazards_note'] !== '') {
+        $lines[] = 'Κίνδυνοι: ' . $withNote($names($s['hazards'], 'hazard'), $s['hazards_note']);
+    }
+    if ($s['access'] !== null || $s['access_note'] !== '') {
+        $lines[] = 'Πρόσβαση οχημάτων: ' . $withNote($s['access'] !== null ? t('triage.sizeup.access.' . $s['access'], [], 'el') : '', $s['access_note']);
+    }
+    if ($s['casualties_estimate'] !== null) {
+        $lines[] = sprintf('Εκτίμηση θυμάτων: %d · Καταγράφηκαν τελικά: %d.', $s['casualties_estimate'], $recorded);
+    }
+    if ($s['resources'] || $s['resources_note'] !== '') {
+        $lines[] = 'Τι ζητήθηκε: ' . $withNote($names($s['resources'], 'resource'), $s['resources_note']);
+    }
+    if ($s['ekab_notified']) {
+        $lines[] = 'Το ΕΚΑΒ ενημερώθηκε.';
+    }
+    return $lines;
+}
+
 /** What the figures from triageQualityStats() do and do not say. */
 const TRIAGE_QUALITY_NOTE = 'Η σύγκριση γίνεται με την πρώτη επανεκτίμηση και όχι με την πραγματική έκβαση των θυμάτων, άρα δεν δείχνει λάθος. Μια μείωση της κατηγορίας μπορεί να είναι πραγματική βελτίωση μετά από θεραπεία, και μόνο όσοι επανεκτιμήθηκαν μπορούν να εμφανιστούν.';
 
@@ -1355,6 +1500,10 @@ function loadTriageReportForMission(int $missionId): ?array {
 
     return [
         'quality'        => triageQualityStats($qualityRows, $leftAt),
+        'sizeup'         => $state['sizeup'],
+        'sizeup_at'      => $state['sizeup_at'],
+        'sizeup_by'      => $state['sizeup_by'],
+        'recorded'       => count($state['victims']) + (int) $state['walking'],
         'counts'         => $state['counts'],
         'initial_counts' => $initialCounts,
         'walking'        => $state['walking'],
