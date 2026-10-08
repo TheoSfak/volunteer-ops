@@ -177,6 +177,54 @@ function triageEvaluate(string $protocol, array $answers, bool $tolerateLegacy =
 }
 
 /**
+ * Secondary triage at the collection point: the Triage Revised Trauma Score
+ * (T-RTS, Champion 1989), the score the UK's "Triage Sort" uses. Three
+ * measurements, each coded 0-4, summed; 12 is physiologically normal.
+ *
+ *   respiratory rate  10-29 = 4   >=30 = 3   6-9 = 2   1-5 = 1   0 = 0
+ *   systolic pressure >=90  = 4   76-89 = 3   50-75 = 2  1-49 = 1  0 = 0
+ *   GCS               13-15 = 4   9-12 = 3    6-8 = 2   4-5 = 1    3 = 0
+ *
+ *   total 12 -> green, 11 -> yellow, 1-10 -> red, 0 -> black.
+ *
+ * It is a SUGGESTION. The rescuer accepts or changes the colour, and the
+ * phone warns when the score would lower the casualty's category, because
+ * vital signs miss fractures and internal injuries. The score is validated
+ * for adults only, so a child gets no suggestion and the colour is chosen.
+ *
+ * Returns ['rts', 'category', 'vitals' => [rr, sbp, gcs]] or null when a
+ * value is missing or is not a whole number in range. Mirrored by
+ * triageSecondaryScore() in assets/js/triage.js, pinned by the same fixture.
+ */
+function triageSecondaryScore(array $v): ?array {
+    $ranges = ['rr' => [0, 80], 'sbp' => [0, 300], 'gcs' => [3, 15]];
+    $clean = [];
+    foreach ($ranges as $key => [$min, $max]) {
+        $raw = $v[$key] ?? null;
+        if (is_int($raw) || (is_string($raw) && preg_match('/^\d{1,3}$/', $raw))) {
+            $n = (int) $raw;
+        } elseif (is_float($raw) && floor($raw) === $raw) {
+            $n = (int) $raw;
+        } else {
+            return null;
+        }
+        if ($n < $min || $n > $max) {
+            return null;
+        }
+        $clean[$key] = $n;
+    }
+    $rr = $clean['rr'];
+    $sbp = $clean['sbp'];
+    $gcs = $clean['gcs'];
+    $rrCode = $rr === 0 ? 0 : ($rr <= 5 ? 1 : ($rr <= 9 ? 2 : ($rr <= 29 ? 4 : 3)));
+    $sbpCode = $sbp === 0 ? 0 : ($sbp <= 49 ? 1 : ($sbp <= 75 ? 2 : ($sbp <= 89 ? 3 : 4)));
+    $gcsCode = $gcs <= 3 ? 0 : ($gcs <= 5 ? 1 : ($gcs <= 8 ? 2 : ($gcs <= 12 ? 3 : 4)));
+    $rts = $rrCode + $sbpCode + $gcsCode;
+    $category = $rts === 0 ? 'black' : ($rts <= 10 ? 'red' : ($rts === 11 ? 'yellow' : 'green'));
+    return ['rts' => $rts, 'category' => $category, 'vitals' => $clean];
+}
+
+/**
  * A card number as typed or scanned, made comparable. Cards are compared as
  * strings, so "0457", " 0457 " and "0457" typed on a Greek keyboard must all
  * land on the same person: whitespace goes, letters are upper-cased, and the
@@ -363,7 +411,8 @@ function refreshTriageVictimCategory(int $victimId): void {
  * its offline-queue replay are the same request.
  *
  * $in keys: victim_uuid, assessment_uuid, card_no, fallback_code, protocol
- * ('start'|'jumpstart'|'direct'), answers (array), category (direct only),
+ * ('start'|'jumpstart'|'direct'|'secondary'), answers (array; for
+ * 'secondary' the vitals rr/sbp/gcs), category (direct and secondary),
  * age_group, lat, lng, accuracy, assessed_at (field time, already resolved by
  * resolveEventTimestamp()), reported_at.
  *
@@ -404,6 +453,12 @@ function recordTriageAssessment(int $missionId, int $userId, array $in): array {
         }
         $reason = 'direct';
         $path = null;
+    } elseif ($protocol === 'secondary') {
+        // Decided below, once the casualty is found: whether a score applies
+        // depends on whether it is a child.
+        $category = '';
+        $reason = '';
+        $path = null;
     } else {
         $result = triageEvaluate($protocol, is_array($in['answers'] ?? null) ? $in['answers'] : [], true);
         if (!$result) {
@@ -428,14 +483,45 @@ function recordTriageAssessment(int $missionId, int $userId, array $in): array {
     $teamId = getUserTeamIdForMission($missionId, $userId);
 
     $victim = dbFetchOne(
-        "SELECT id, category, card_no FROM mission_triage_victims WHERE mission_id = ? AND victim_uuid = ?",
+        "SELECT id, category, card_no, age_group FROM mission_triage_victims WHERE mission_id = ? AND victim_uuid = ?",
         [$missionId, $victimUuid]
     );
     if (!$victim && $cardNo !== null) {
         $victim = dbFetchOne(
-            "SELECT id, category, card_no FROM mission_triage_victims WHERE mission_id = ? AND card_no = ?",
+            "SELECT id, category, card_no, age_group FROM mission_triage_victims WHERE mission_id = ? AND card_no = ?",
             [$missionId, $cardNo]
         );
+    }
+
+    if ($protocol === 'secondary') {
+        // A second look at somebody already triaged: it never creates a casualty.
+        if (!$victim) {
+            return ['ok' => false, 'error' => 'triage.err_secondary_unknown'];
+        }
+        $chosen = (string) ($in['category'] ?? '');
+        $chosenOk = in_array($chosen, TRIAGE_CATEGORIES, true);
+        $vitals = is_array($in['answers'] ?? null) ? $in['answers'] : [];
+        // The T-RTS is validated for adults; a child gets the vitals recorded
+        // and the colour from the rescuer.
+        $score = $victim['age_group'] === 'child' ? null : triageSecondaryScore($vitals);
+        if ($score) {
+            $category = $chosenOk ? $chosen : $score['category'];
+            $reason = $category === $score['category'] ? 'trts' : 'secondary_override';
+            $path = $score['vitals'] + ['rts' => $score['rts']];
+        } else {
+            if (!$chosenOk) {
+                return ['ok' => false, 'error' => 'triage.err_answers'];
+            }
+            $category = $chosen;
+            $reason = 'secondary_manual';
+            $path = [];
+            foreach (['rr', 'sbp', 'gcs'] as $key) {
+                if (isset($vitals[$key]) && is_numeric($vitals[$key]) && (int) $vitals[$key] >= 0 && (int) $vitals[$key] <= 999) {
+                    $path[$key] = (int) $vitals[$key];
+                }
+            }
+            $path = $path ?: null;
+        }
     }
 
     $created = false;
@@ -817,7 +903,7 @@ function loadTriageStateForMission(int $missionId, bool $unmasked, int $viewerId
     $historyByVictim = [];
     if ($victimRows) {
         $rows = dbFetchAll(
-            "SELECT a.victim_id, a.category, a.reason, a.protocol, a.assessed_at, u.name AS by_name
+            "SELECT a.victim_id, a.category, a.reason, a.protocol, a.answers, a.assessed_at, u.name AS by_name
              FROM mission_triage_assessments a
              LEFT JOIN users u ON u.id = a.assessed_by
              WHERE a.mission_id = ?
@@ -825,10 +911,18 @@ function loadTriageStateForMission(int $missionId, bool $unmasked, int $viewerId
             [$missionId]
         );
         foreach ($rows as $row) {
+            // The measurements of a secondary triage (rr, sbp, gcs, rts), for
+            // the history line; the yes/no answers of START are not shown.
+            $vitals = null;
+            if ($row['protocol'] === 'secondary' && $row['answers'] !== null) {
+                $decoded = json_decode((string) $row['answers'], true);
+                $vitals = is_array($decoded) && $decoded ? $decoded : null;
+            }
             $historyByVictim[(int) $row['victim_id']][] = [
                 'category' => $row['category'],
                 'reason' => triageReasonLabel($row['reason']),
                 'protocol' => $row['protocol'],
+                'vitals' => $vitals,
                 'at' => date('H:i', strtotime($row['assessed_at'])),
                 'by' => $row['by_name'],
             ];

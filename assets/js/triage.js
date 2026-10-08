@@ -87,6 +87,33 @@ function triageEvaluate(protocol, answers) {
     return step && step.category ? step : null;
 }
 
+/**
+ * Secondary triage: the Triage Revised Trauma Score. The twin of
+ * triageSecondaryScore() in includes/functions-triage.php (see the table
+ * there), pinned by the same fixture. Returns {rts, category, vitals:{rr,sbp,
+ * gcs}} or null when a value is missing or not a whole number in range.
+ */
+function triageSecondaryScore(v) {
+    const ranges = {rr: [0, 80], sbp: [0, 300], gcs: [3, 15]};
+    const clean = {};
+    for (const key of Object.keys(ranges)) {
+        const raw = v ? v[key] : undefined;
+        let n;
+        if (typeof raw === 'number' && Number.isInteger(raw)) n = raw;
+        else if (typeof raw === 'string' && /^\d{1,3}$/.test(raw)) n = parseInt(raw, 10);
+        else return null;
+        if (n < ranges[key][0] || n > ranges[key][1]) return null;
+        clean[key] = n;
+    }
+    const {rr, sbp, gcs} = clean;
+    const rrCode = rr === 0 ? 0 : (rr <= 5 ? 1 : (rr <= 9 ? 2 : (rr <= 29 ? 4 : 3)));
+    const sbpCode = sbp === 0 ? 0 : (sbp <= 49 ? 1 : (sbp <= 75 ? 2 : (sbp <= 89 ? 3 : 4)));
+    const gcsCode = gcs <= 3 ? 0 : (gcs <= 5 ? 1 : (gcs <= 8 ? 2 : (gcs <= 12 ? 3 : 4)));
+    const rts = rrCode + sbpCode + gcsCode;
+    const category = rts === 0 ? 'black' : (rts <= 10 ? 'red' : (rts === 11 ? 'yellow' : 'green'));
+    return {rts, category, vitals: clean};
+}
+
 // Greek capitals that are indistinguishable from Latin ones, folded so a
 // card typed on either keyboard layout is the same card. Mirrors the strtr()
 // map in normalizeTriageCardNo() (includes/functions-triage.php).
@@ -322,6 +349,7 @@ if (typeof module !== 'undefined' && module.exports) {
         TRIAGE_RETRIAGE_MINUTES,
         triageStep,
         triageEvaluate,
+        triageSecondaryScore,
         normalizeTriageCardNo,
         triageFallbackCode,
         triageUuid,

@@ -15,12 +15,27 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const {
-    TRIAGE_PROTOCOLS, triageStep, triageEvaluate, normalizeTriageCardNo, triageFallbackCode, triageUuid,
+    TRIAGE_PROTOCOLS, triageStep, triageEvaluate, triageSecondaryScore, normalizeTriageCardNo, triageFallbackCode, triageUuid,
 } = require('../../assets/js/triage.js');
 
 const fixture = JSON.parse(
     fs.readFileSync(path.join(__dirname, '../fixtures/triage-cases.json'), 'utf8')
 );
+
+test('triageSecondaryScore matches the shared fixture', async (t) => {
+    for (const c of fixture.secondary_cases) {
+        await t.test(c.name, () => {
+            const result = triageSecondaryScore(c.vitals);
+            if (c.expect === null) {
+                assert.equal(result, null);
+                return;
+            }
+            assert.ok(result);
+            assert.equal(result.rts, c.expect.rts);
+            assert.equal(result.category, c.expect.category);
+        });
+    }
+});
 
 test('triageEvaluate matches the shared fixture', async (t) => {
     for (const c of fixture.protocol_cases) {

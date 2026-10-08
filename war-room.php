@@ -17110,7 +17110,7 @@ function triageRowHtml(v) {
     const due = !gone && dueAfter && since >= dueAfter;
     const who = [v.patient_name, v.estimated_age, v.phone].filter(Boolean).join(' · ');
     const transport = [v.vehicle, v.destination].filter(Boolean).join(' · ');
-    const history = (v.history || []).map(h => `<div><span class="triage-dot triage-bg-${h.category}"></span> ${escapeHtml(h.at)} ${escapeHtml(triageCatLabel(h.category))} — ${escapeHtml(h.reason || '')} <span class="text-muted">(${escapeHtml(h.by || '—')})</span></div>`).join('');
+    const history = (v.history || []).map(h => `<div><span class="triage-dot triage-bg-${h.category}"></span> ${escapeHtml(h.at)} ${escapeHtml(triageCatLabel(h.category))} — ${escapeHtml(h.reason || '')}${h.vitals ? ' · ' + escapeHtml(triageVitalsText(h.vitals)) : ''} <span class="text-muted">(${escapeHtml(h.by || '—')})</span></div>`).join('');
     const statusBadge = gone ? 'bg-secondary' : (v.status === 'at_ccp' ? 'bg-primary' : 'bg-light text-dark border');
     const actions = TRIAGE_CAN_MANAGE ? `
         <div class="d-flex gap-1 flex-wrap mt-2">
@@ -17155,6 +17155,7 @@ function triageRowHtml(v) {
             <div class="text-muted">${escapeHtml(v.created_by || '')}${v.team_label ? ' (' + escapeHtml(v.team_label) + ')' : ''}</div>
             <div class="mt-1"><div class="fw-semibold">${t('triage.history')}</div>${history}</div>
             ${navigationBtnHtml(v.lat, v.lng, {block: true})}
+            ${!gone && (TRIAGE_CAN_FIELD || TRIAGE_CAN_MANAGE) ? `<button type="button" class="btn btn-sm btn-outline-dark w-100 mt-1 triage-secondary-btn"><i class="bi bi-activity me-1"></i>${t('triage.secondary_row_btn')}</button>` : ''}
             ${actions}
         </div>
     </details>`;
@@ -17206,6 +17207,10 @@ function renderTriageBoard(state) {
         postTriage({action: 'point', kind: b.dataset.kind}).then(r => {
             if (r && r.ok) renderTriage(r.triage); else { b.disabled = false; alert((r && r.error) || t('common.failed')); }
         });
+    }));
+    board.querySelectorAll('.triage-secondary-btn').forEach(b => b.addEventListener('click', () => {
+        const v = (triageState.victims || []).find(x => String(x.id) === b.closest('details.triage-row').dataset.victimId);
+        if (v) triageOpenFlow({existing: v, secondary: true});
     }));
     if (!TRIAGE_CAN_MANAGE) return;
     board.querySelectorAll('details.triage-row').forEach(row => {
@@ -17517,7 +17522,110 @@ function triageOpenFlow(opts) {
         else triageFinish(flow, o.direct, 'direct');
         return;
     }
+    if (o.secondary && existing) {
+        flow.secondary = true;
+        flow.protocol = 'secondary';
+        flow.vitals = {};
+        flow.score = null;
+        triageRenderSecondary(flow);
+        return;
+    }
     triageRenderQuestion(flow);
+}
+
+// ── Secondary assessment at the collection point ───────────────────────────
+// A second, measured look at somebody already triaged: breaths, systolic
+// pressure and GCS, scored with the T-RTS (triageSecondaryScore in
+// triage.js). The score is a SUGGESTION — the rescuer accepts it or picks
+// another colour — and a suggestion that would lower the casualty's category
+// says so, because vital signs miss fractures and internal injuries. For a
+// child there is no score. Black, as everywhere, takes a second tap.
+function triageReadVitals(root) {
+    const vitals = {};
+    let bad = false;
+    root.querySelectorAll('[data-vital]').forEach(input => {
+        const s = input.value.trim();
+        if (s === '') return;
+        if (!/^\d{1,3}$/.test(s)) { bad = true; return; }
+        vitals[input.dataset.vital] = parseInt(s, 10);
+    });
+    return {vitals, bad};
+}
+function triageVitalsText(vit) {
+    if (!vit) return '';
+    const dash = '–';
+    return t('triage.vitals_line', {rr: vit.rr ?? dash, sbp: vit.sbp ?? dash, gcs: vit.gcs ?? dash})
+        + (vit.rts !== undefined ? t('triage.vitals_rts', {rts: vit.rts}) : '');
+}
+function triageRenderSecondary(flow) {
+    const v = flow.vitals || {};
+    const child = flow.ageGroup === 'child';
+    const field = (key, labelKey, max) => `<div class="mb-2">
+        <label class="form-label fw-semibold mb-1" for="triageVital_${key}">${escapeHtml(t(labelKey))}</label>
+        <input type="number" inputmode="numeric" min="0" max="${max}" step="1" id="triageVital_${key}" data-vital="${key}" class="form-control form-control-lg" value="${v[key] !== undefined ? v[key] : ''}">
+    </div>`;
+    const el = triageShowFlow(triageHeadHtml(flow) + `<div class="triage-flow-body">
+        <div class="small text-muted">${t('triage.secondary_protocol')} · <span class="triage-code">${escapeHtml(flow.existing.code)}</span></div>
+        <div class="triage-question">${t('triage.secondary_title')}</div>
+        <div class="triage-hint mb-3">${t('triage.secondary_help')}</div>
+        ${child ? `<div class="alert alert-warning py-2 small">${t('triage.secondary_child')}</div>` : ''}
+        ${field('rr', 'triage.vital_rr', 80)}${field('sbp', 'triage.vital_sbp', 300)}${field('gcs', 'triage.vital_gcs', 15)}
+        <div class="triage-secondary-err small text-danger fw-semibold"></div>
+        <div class="mt-auto pt-3">
+            ${child ? '' : `<button type="button" class="btn btn-danger btn-lg w-100" style="height:72px;" data-act="calc"><i class="bi bi-calculator me-1"></i>${t('triage.secondary_calc')}</button>`}
+            <button type="button" class="btn ${child ? 'btn-danger btn-lg' : 'btn-outline-dark'} w-100 mt-2" data-act="pick">${t('triage.secondary_pick')}</button>
+            <button type="button" class="btn btn-lg btn-outline-secondary w-100 mt-2" data-act="cancel">${t('triage.cancel')}</button>
+        </div>
+    </div>`);
+    flow.renderedAt = performance.now();
+    const err = msg => { el.querySelector('.triage-secondary-err').textContent = msg || ''; };
+    el.querySelector('[data-act="calc"]')?.addEventListener('click', () => {
+        const {vitals, bad} = triageReadVitals(el);
+        flow.vitals = vitals;
+        const score = bad ? null : triageSecondaryScore(vitals);
+        if (!score) { err(t(Object.keys(vitals).length === 3 || bad ? 'triage.secondary_invalid' : 'triage.secondary_incomplete')); return; }
+        triageRenderSecondaryChoice(flow, score);
+    });
+    el.querySelector('[data-act="pick"]').addEventListener('click', () => {
+        const {vitals, bad} = triageReadVitals(el);
+        if (bad) { err(t('triage.secondary_invalid')); return; }
+        flow.vitals = vitals;
+        triageRenderSecondaryChoice(flow, null);
+    });
+    el.querySelector('[data-act="cancel"]').addEventListener('click', triageCloseFlow);
+}
+function triageRenderSecondaryChoice(flow, score) {
+    flow.score = score;
+    const urgency = {black: 0, green: 1, yellow: 2, red: 3};
+    const current = flow.existing ? flow.existing.category : null;
+    const reasonFor = cat => !score ? 'secondary_manual' : (cat === score.category ? 'trts' : 'secondary_override');
+    const choose = cat => {
+        if (triageGuarded(flow)) return;
+        flow.reason = reasonFor(cat);
+        if (cat === 'black') triageRenderBlackConfirm(flow, {reason: flow.reason});
+        else triageFinish(flow, cat, flow.reason);
+    };
+    const downgrade = score && current && current !== 'black' && score.category !== 'black' && urgency[score.category] < urgency[current];
+    const others = TRIAGE_CATEGORY_ORDER.filter(c => !score || c !== score.category);
+    const catBtn = (cat, big) => `<button type="button" class="btn triage-bg-${cat} ${big ? 'w-100 mb-2' : 'flex-fill'}" style="${big ? 'height:64px;font-size:1.3rem;font-weight:700;' : 'height:52px;font-weight:700;'}" data-cat="${cat}">${escapeHtml(triageCatLabel(cat))}</button>`;
+    const head = score
+        ? `<div class="triage-result triage-bg-${score.category}" style="flex:none;padding:18px 16px;">
+               <div class="small">${t('triage.secondary_suggested')}</div>
+               <div class="cat" style="font-size:2.2rem;">${escapeHtml(triageCatLabel(score.category).toLocaleUpperCase(jsLocale))}</div>
+               <div class="small">${escapeHtml(t('triage.secondary_score', {rts: score.rts, rr: score.vitals.rr, sbp: score.vitals.sbp, gcs: score.vitals.gcs}))}</div>
+           </div>`
+        : '';
+    const el = triageShowFlow(triageHeadHtml(flow) + head + `<div class="triage-flow-body" style="padding-top:12px;">
+        ${downgrade ? `<div class="alert alert-warning py-2 small">${escapeHtml(t('triage.secondary_downgrade', {cat: triageCatLabel(current)}))}</div>` : ''}
+        ${score ? `<button type="button" class="btn triage-bg-${score.category} w-100" style="height:80px;font-size:1.4rem;font-weight:800;" data-cat="${score.category}">${escapeHtml(t('triage.secondary_accept', {cat: triageCatLabel(score.category)}))}</button>
+                   <div class="small text-muted mt-3 mb-1">${t('triage.secondary_other')}</div>
+                   <div class="d-flex gap-2">${others.map(c => catBtn(c, false)).join('')}</div>`
+               : `<div class="triage-question" style="margin-top:0;">${t('triage.secondary_pick_title')}</div>${others.map(c => catBtn(c, true)).join('')}`}
+        <div class="mt-auto pt-3"><button type="button" class="btn btn-lg btn-outline-secondary w-100" data-act="back"><i class="bi bi-arrow-left me-1"></i>${t('triage.back')}</button></div>
+    </div>`);
+    flow.renderedAt = performance.now();
+    el.querySelectorAll('[data-cat]').forEach(b => b.addEventListener('click', () => choose(b.dataset.cat)));
+    el.querySelector('[data-act="back"]').addEventListener('click', () => triageRenderSecondary(flow));
 }
 
 function triageRenderQuestion(flow) {
@@ -17577,6 +17685,7 @@ function triageRenderBlackConfirm(flow, step) {
         triageFinish(flow, 'black', step ? step.reason : 'direct');
     });
     el.querySelector('[data-act="back"]').addEventListener('click', () => {
+        if (flow.secondary) { triageRenderSecondaryChoice(flow, flow.score); return; }
         if (flow.direct) { triageCloseFlow(); return; }
         const last = flow.asked.pop();
         if (last) delete flow.answers[last];
@@ -17590,11 +17699,11 @@ function triageAssessParams(flow) {
         victim_uuid: flow.victimUuid,
         assessment_uuid: flow.assessmentUuid,
         protocol: flow.direct ? 'direct' : flow.protocol,
-        answers: JSON.stringify(flow.direct ? {} : flow.answers),
+        answers: JSON.stringify(flow.direct ? {} : (flow.secondary ? flow.vitals : flow.answers)),
         age_group: flow.ageGroup,
         reported_at: flow.decidedAt,
     };
-    if (flow.direct) p.category = flow.category;
+    if (flow.direct || flow.secondary) p.category = flow.category;
     if (flow.fallbackCode) p.fallback_code = flow.fallbackCode;
     if (flow.cardNo) p.card_no = flow.cardNo;
     if (flow.fix) {
@@ -17797,16 +17906,20 @@ function triageOpenRetriage() {
         <div class="triage-retriage-found small mt-2"></div>
         <div class="mt-auto pt-3">
             <button type="button" class="btn btn-danger btn-lg w-100" style="height:72px;" data-act="start" disabled><i class="bi bi-clipboard2-pulse me-1"></i>${t('triage.retriage_start')}</button>
+            <button type="button" class="btn btn-outline-dark w-100 mt-2" data-act="secondary" disabled><i class="bi bi-activity me-1"></i>${t('triage.secondary_btn')}</button>
             <button type="button" class="btn btn-lg btn-outline-secondary w-100 mt-2" data-act="close">${t('triage.close_btn')}</button>
         </div>
     </div>`);
     const input = el.querySelector('#triageRetriageInput');
     const foundEl = el.querySelector('.triage-retriage-found');
     const startBtn = el.querySelector('[data-act="start"]');
+    const secondaryBtn = el.querySelector('[data-act="secondary"]');
     const lookup = () => {
         const card = normalizeTriageCardNo(input.value);
         const v = triageFindVictimByCard(input.value);
         startBtn.disabled = !card;
+        // A second look needs somebody already triaged.
+        secondaryBtn.disabled = !v;
         if (!card) { foundEl.innerHTML = ''; return; }
         foundEl.innerHTML = v
             ? `<span class="triage-dot triage-bg-${v.category}"></span> ${escapeHtml(t('triage.retriage_found', {code: v.code, category: triageCatLabel(v.category), time: v.last_at, reason: v.reason || ''}))}`
@@ -17820,6 +17933,10 @@ function triageOpenRetriage() {
         if (!card) return;
         const v = triageFindVictimByCard(card);
         triageOpenFlow(v ? {existing: v} : {cardNo: card});
+    });
+    secondaryBtn.addEventListener('click', () => {
+        const v = triageFindVictimByCard(input.value);
+        if (v) triageOpenFlow({existing: v, secondary: true});
     });
     setTimeout(() => input.focus(), 50);
 }

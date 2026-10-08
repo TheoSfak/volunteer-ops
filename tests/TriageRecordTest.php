@@ -118,6 +118,66 @@ final class TriageRecordTest extends TestCase
         $this->assertArrayNotHasKey('bleeding', $path);
     }
 
+    public function testSecondaryTriageScoresTheVitalsAndTheRescuerCanOverrideIt(): void
+    {
+        $first = $this->assess($this->anna, ['victim_uuid' => 'v-sec-0001', 'answers' => ['walk' => false, 'breathing' => true, 'rr_over_30' => true]]);
+        $this->assertSame('red', $first['category']);
+
+        // Normal vitals: the score says green, the rescuer accepts (no category chosen).
+        $r = $this->assess($this->anna, ['victim_uuid' => 'v-sec-0001', 'protocol' => 'secondary', 'answers' => ['rr' => 18, 'sbp' => 125, 'gcs' => 15]]);
+        $this->assertTrue($r['ok']);
+        $this->assertFalse($r['created']);
+        $this->assertSame('green', $r['category']);
+        $this->assertSame('trts', $r['reason']);
+        $this->assertSame('red', $r['previous_category']);
+        $row = dbFetchOne("SELECT protocol, answers FROM mission_triage_assessments WHERE victim_id = ? ORDER BY id DESC LIMIT 1", [$first['victim_id']]);
+        $this->assertSame('secondary', $row['protocol']);
+        $this->assertSame(['rr' => 18, 'sbp' => 125, 'gcs' => 15, 'rts' => 12], json_decode($row['answers'], true));
+
+        // The rescuer keeps it red against the score: stored as an override.
+        $o = $this->assess($this->anna, ['victim_uuid' => 'v-sec-0001', 'protocol' => 'secondary', 'category' => 'red', 'answers' => ['rr' => 18, 'sbp' => 125, 'gcs' => 15]]);
+        $this->assertSame('red', $o['category']);
+        $this->assertSame('secondary_override', $o['reason']);
+
+        // Accepting the score's own colour explicitly is not an override.
+        $same = $this->assess($this->anna, ['victim_uuid' => 'v-sec-0001', 'protocol' => 'secondary', 'category' => 'yellow', 'answers' => ['rr' => 18, 'sbp' => 125, 'gcs' => 12]]);
+        $this->assertSame('trts', $same['reason']);
+    }
+
+    public function testSecondaryTriageWithoutAScoreNeedsAColourAndNeverCreatesACasualty(): void
+    {
+        $first = $this->assess($this->anna, ['victim_uuid' => 'v-sec-0002']);
+
+        // Pressure not measured: no score, so the colour has to come from the rescuer.
+        $noColour = $this->assess($this->anna, ['victim_uuid' => 'v-sec-0002', 'protocol' => 'secondary', 'answers' => ['rr' => 18, 'gcs' => 15]]);
+        $this->assertSame('triage.err_answers', $noColour['error']);
+
+        $manual = $this->assess($this->anna, ['victim_uuid' => 'v-sec-0002', 'protocol' => 'secondary', 'category' => 'yellow', 'answers' => ['rr' => 18, 'gcs' => 15]]);
+        $this->assertTrue($manual['ok']);
+        $this->assertSame('yellow', $manual['category']);
+        $this->assertSame('secondary_manual', $manual['reason']);
+        $path = json_decode((string) dbFetchValue("SELECT answers FROM mission_triage_assessments WHERE victim_id = ? ORDER BY id DESC LIMIT 1", [$first['victim_id']]), true);
+        $this->assertSame(['rr' => 18, 'gcs' => 15], $path);
+
+        // A casualty nobody has triaged is not created by a second look.
+        $before = $this->victimCount();
+        $unknown = $this->assess($this->anna, ['protocol' => 'secondary', 'category' => 'red', 'answers' => ['rr' => 18, 'sbp' => 90, 'gcs' => 15]]);
+        $this->assertSame('triage.err_secondary_unknown', $unknown['error']);
+        $this->assertSame($before, $this->victimCount());
+    }
+
+    public function testSecondaryTriageGivesAChildNoScore(): void
+    {
+        $this->assess($this->anna, ['victim_uuid' => 'v-sec-0003', 'protocol' => 'jumpstart', 'age_group' => 'child',
+            'answers' => ['walk' => false, 'breathing' => true, 'rr_child' => true]]);
+        $vitals = ['rr' => 18, 'sbp' => 110, 'gcs' => 15];
+        // Normal adult vitals would say green; for a child the score is not used.
+        $this->assertSame('triage.err_answers', $this->assess($this->anna, ['victim_uuid' => 'v-sec-0003', 'protocol' => 'secondary', 'age_group' => 'child', 'answers' => $vitals])['error']);
+        $r = $this->assess($this->anna, ['victim_uuid' => 'v-sec-0003', 'protocol' => 'secondary', 'age_group' => 'child', 'category' => 'yellow', 'answers' => $vitals]);
+        $this->assertSame('yellow', $r['category']);
+        $this->assertSame('secondary_manual', $r['reason']);
+    }
+
     public function testIncompleteAnswersAndBadDirectChoicesAreRefused(): void
     {
         $this->assertSame('triage.err_answers', $this->assess($this->anna, ['answers' => ['walk' => false]])['error']);

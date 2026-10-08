@@ -7690,6 +7690,14 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 186,
+            'description' => 'Secondary triage at the collection point (v3.372.0): mission_triage_assessments.protocol also accepts \'secondary\' (vitals scored with the T-RTS, stored in the answers column).',
+            'up' => function () {
+                dbExecute("ALTER TABLE mission_triage_assessments MODIFY COLUMN protocol ENUM('start','jumpstart','direct','secondary') NOT NULL");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

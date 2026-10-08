@@ -63,6 +63,32 @@ final class TriageProtocolTest extends TestCase
         $this->assertSame($case['expect']['path'], $result['path']);
     }
 
+    /** @return array<string, array{0: array<mixed>}> */
+    public static function secondaryProvider(): array
+    {
+        $cases = [];
+        foreach (self::fixture()['secondary_cases'] as $case) {
+            $cases[$case['name']] = [$case];
+        }
+        return $cases;
+    }
+
+    /**
+     * @param array<mixed> $case
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('secondaryProvider')]
+    public function testSecondaryScoreMatchesTheSharedFixture(array $case): void
+    {
+        $result = triageSecondaryScore($case['vitals']);
+        if ($case['expect'] === null) {
+            $this->assertNull($result);
+            return;
+        }
+        $this->assertNotNull($result);
+        $this->assertSame($case['expect']['rts'], $result['rts']);
+        $this->assertSame($case['expect']['category'], $result['category']);
+    }
+
     /**
      * @param array<mixed> $case
      */
@@ -114,6 +140,18 @@ final class TriageProtocolTest extends TestCase
 
         $oldChild = ['walk' => false, 'breathing' => true, 'rr_child' => false, 'pulse' => true, 'avpu' => true];
         $this->assertSame('yellow', triageEvaluate('jumpstart', $oldChild, true)['category']);
+    }
+
+    /** The words the secondary-triage screens and history lines use. */
+    public function testSecondaryTriageReasonsAreTranslated(): void
+    {
+        $strings = require __DIR__ . '/../includes/lang/war-room.php';
+        foreach (['el', 'en'] as $lang) {
+            foreach (['trts', 'secondary_override', 'secondary_manual'] as $reason) {
+                $this->assertArrayHasKey('triage.reason.' . $reason, $strings[$lang], "reason $reason ($lang)");
+            }
+            $this->assertArrayHasKey('triage.err_secondary_unknown', $strings[$lang], "error ($lang)");
+        }
     }
 
     /** The tolerance is for the missing question only, never for other gaps. */

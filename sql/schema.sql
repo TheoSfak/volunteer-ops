@@ -3020,7 +3020,7 @@ CREATE TABLE IF NOT EXISTS `mission_triage_assessments` (
     `assessment_uuid` VARCHAR(64) NOT NULL COMMENT 'Made by the phone; an offline replay of the same assessment is recognised and ignored',
     `category` ENUM('red','yellow','green','black') NOT NULL,
     `reason` VARCHAR(40) NULL,
-    `protocol` ENUM('start','jumpstart','direct') NOT NULL,
+    `protocol` ENUM('start','jumpstart','direct','secondary') NOT NULL,
     `answers` VARCHAR(255) NULL COMMENT 'JSON of the yes/no answers on the route taken; NULL for a direct choice',
     `previous_category` ENUM('red','yellow','green','black') NULL COMMENT 'NULL = first triage of this casualty',
     `assessed_by` INT UNSIGNED NULL,
