@@ -65,6 +65,9 @@ const TRIAGE_CARD_MAX = 30;
 /** Largest "walking wounded sent to the green area" count one tap may add. */
 const TRIAGE_BULK_MAX = 200;
 
+/** Most casualties one «loaded a vehicle» tap may mark transported. */
+const TRIAGE_BATCH_MAX = 50;
+
 /**
  * The two protocols as decision trees. Each node is a yes/no question; a
  * branch is either the next node's key or a leaf [category, reason].
@@ -403,6 +406,48 @@ function refreshTriageVictimCategory(int $victimId): void {
          WHERE id = ?",
         [$latest['category'], $latest['reason'], $latest['assessed_at'], $first, $victimId]
     );
+}
+
+/**
+ * A vehicle (or a helicopter) leaves with several casualties: marks them all
+ * transported with the same vehicle and destination, in one transaction so the
+ * board never shows half a load gone. Casualties already transported or not
+ * on this mission are left alone (their vehicle and time are not rewritten).
+ * Returns ['ok' => true, 'count' => how many were marked] or ['ok' => false,
+ * 'error' => lang key].
+ */
+function setTriageVictimsTransported(int $missionId, array $victimIds, ?string $vehicle, ?string $destination, int $userId): array {
+    $ids = array_values(array_unique(array_filter(array_map('intval', $victimIds), fn($id) => $id > 0)));
+    if (!$ids || count($ids) > TRIAGE_BATCH_MAX) {
+        return ['ok' => false, 'error' => 'triage.err_invalid'];
+    }
+    $marks = implode(',', array_fill(0, count($ids), '?'));
+    $rows = dbFetchAll(
+        "SELECT id FROM mission_triage_victims WHERE mission_id = ? AND status <> 'transported' AND id IN ($marks)",
+        array_merge([$missionId], $ids)
+    );
+    if (!$rows) {
+        return ['ok' => false, 'error' => 'triage.err_not_found'];
+    }
+    $pdo = db();
+    $ownTransaction = !$pdo->inTransaction();
+    if ($ownTransaction) {
+        $pdo->beginTransaction();
+    }
+    try {
+        foreach ($rows as $row) {
+            setTriageVictimStatus($missionId, (int) $row['id'], 'transported', $vehicle, $destination, $userId);
+        }
+        if ($ownTransaction) {
+            $pdo->commit();
+        }
+    } catch (Throwable $e) {
+        if ($ownTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+    return ['ok' => true, 'count' => count($rows)];
 }
 
 /**

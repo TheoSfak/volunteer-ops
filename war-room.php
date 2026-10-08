@@ -3574,6 +3574,19 @@ include __DIR__ . '/includes/header.php';
        closed card still has to say. A white rim keeps red on red visible. */
     .triage-head-counts { display: inline-flex; gap: 3px; white-space: nowrap; }
     .triage-head-count { min-width: 1.7em; padding: 1px 5px; border-radius: 6px; border: 1px solid rgba(255,255,255,.9); font-size: .8rem; font-weight: 700; line-height: 1.35; text-align: center; font-variant-numeric: tabular-nums; }
+    /* The evacuation queue: one tickable line per casualty, in the order they go. */
+    .triage-queue { border: 1px solid #dee2e6; border-radius: 8px; padding: 6px 8px; background: #fafbfc; }
+    .triage-queue > summary { cursor: pointer; }
+    .triage-queue-row { display: flex; align-items: center; gap: 6px; padding: 5px 2px; border-bottom: 1px solid #e9ecef; cursor: pointer; margin: 0; }
+    .triage-queue-row.is-picked { background: #e7f1ff; }
+    .triage-queue-n { min-width: 1.5em; text-align: right; color: #6c757d; font-variant-numeric: tabular-nums; }
+    .triage-queue-wait { margin-left: auto; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .triage-queue-row { flex-wrap: wrap; }
+    .triage-queue-reason { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; }
+    /* On a phone the reason takes its own line under the code. */
+    @media (max-width: 575.98px) {
+        .triage-queue-reason { order: 9; flex-basis: 100%; padding-left: 2.1rem; color: #555; white-space: normal; line-height: 1.2; }
+    }
     .triage-row { border-bottom: 1px solid #e9ecef; padding: 6px 0; }
     .triage-row.is-gone { opacity: .55; }
     .triage-row summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
@@ -17161,6 +17174,101 @@ function triageRowHtml(v) {
     </details>`;
 }
 
+// ── Evacuation queue (command only) ────────────────────────────────────────
+// Who goes next: everybody still waiting, red then yellow then green, the one
+// waiting longest first (triageEvacuationQueue in triage.js). Command says how
+// many places the next vehicle has, the first N are ticked, and one tap marks
+// them all transported with that vehicle and destination. The ticks, the
+// capacity and the vehicle text live here, not in the DOM, because the board
+// is rebuilt on every poll.
+const triageQueueSel = new Set();
+let triageQueueCap = '';
+let triageQueueVehicle = '';
+let triageQueueDest = '';
+let triageQueueOpen = true;
+function triageQueueHtml(state) {
+    const queue = triageEvacuationQueue(state.victims || []);
+    if (!queue.length) { triageQueueSel.clear(); return ''; }
+    const present = new Set(queue.map(v => v.id));
+    [...triageQueueSel].forEach(id => { if (!present.has(id)) triageQueueSel.delete(id); });
+    const rows = queue.map((v, i) => {
+        const waited = triageMinutesSince(v.first_ts);
+        const dueAfter = TRIAGE_RETRIAGE_MINUTES[v.category];
+        const due = dueAfter && triageMinutesSince(v.last_ts) >= dueAfter;
+        return `<label class="triage-queue-row${triageQueueSel.has(v.id) ? ' is-picked' : ''}" title="${escapeHtml(t('triage.queue_waited', {m: waited}))}">
+            <input type="checkbox" class="form-check-input triage-queue-chk" data-id="${v.id}" ${triageQueueSel.has(v.id) ? 'checked' : ''}>
+            <span class="triage-queue-n">${i + 1}</span>
+            <span class="triage-dot triage-bg-${v.category}"></span>
+            <span class="triage-code">${escapeHtml(v.code)}</span>
+            ${v.age_group === 'child' ? `<span class="badge bg-info text-dark">${t('triage.child_badge')}</span>` : ''}
+            ${due ? `<i class="bi bi-alarm triage-due" title="${escapeHtml(t('triage.retriage_due', {minutes: triageMinutesSince(v.last_ts)}))}"></i>` : ''}
+            <span class="triage-queue-reason">${escapeHtml(v.reason || '')}</span>
+            <span class="badge ${v.status === 'at_ccp' ? 'bg-primary' : 'bg-light text-dark border'}">${escapeHtml(t('triage.status.' + v.status))}</span>
+            <span class="small fw-semibold triage-queue-wait">${waited}′</span>
+        </label>`;
+    }).join('');
+    return `<details class="triage-queue mb-2" id="triageQueue" ${triageQueueOpen ? 'open' : ''}>
+        <summary class="fw-semibold"><i class="bi bi-truck me-1"></i>${t('triage.queue_title')} · ${queue.length}</summary>
+        <div class="small text-muted mb-1">${t('triage.queue_help')}</div>
+        <div class="input-group input-group-sm mb-1">
+            <input type="number" min="1" max="50" step="1" inputmode="numeric" class="form-control triage-queue-cap" style="max-width:7.5rem;" placeholder="${escapeHtml(t('triage.queue_capacity'))}" value="${escapeHtml(String(triageQueueCap))}">
+            <button type="button" class="btn btn-outline-dark triage-queue-pick">${t('triage.queue_pick_btn')}</button>
+        </div>
+        <div class="triage-queue-list">${rows}</div>
+        <div class="input-group input-group-sm mt-1">
+            <input type="text" class="form-control triage-queue-vehicle" maxlength="100" placeholder="${escapeHtml(t('triage.vehicle_placeholder'))}" value="${escapeHtml(triageQueueVehicle)}">
+            <input type="text" class="form-control triage-queue-dest" maxlength="255" placeholder="${escapeHtml(t('triage.destination_placeholder'))}" value="${escapeHtml(triageQueueDest)}">
+        </div>
+        <button type="button" class="btn btn-danger w-100 mt-1 triage-queue-send" ${triageQueueSel.size ? '' : 'disabled'}><i class="bi bi-truck me-1"></i>${t('triage.queue_send_btn', {n: triageQueueSel.size})}</button>
+    </details>`;
+}
+function triageWireQueue(board) {
+    const box = board.querySelector('#triageQueue');
+    if (!box) return;
+    const sendBtn = box.querySelector('.triage-queue-send');
+    const refreshSend = () => {
+        sendBtn.disabled = triageQueueSel.size === 0;
+        sendBtn.innerHTML = `<i class="bi bi-truck me-1"></i>${escapeHtml(t('triage.queue_send_btn', {n: triageQueueSel.size}))}`;
+    };
+    box.addEventListener('toggle', e => { if (e.target === box) triageQueueOpen = box.open; });
+    box.querySelectorAll('.triage-queue-chk').forEach(chk => chk.addEventListener('change', () => {
+        const id = parseInt(chk.dataset.id, 10);
+        if (chk.checked) triageQueueSel.add(id); else triageQueueSel.delete(id);
+        chk.closest('.triage-queue-row').classList.toggle('is-picked', chk.checked);
+        refreshSend();
+    }));
+    box.querySelector('.triage-queue-cap').addEventListener('input', e => { triageQueueCap = e.target.value; });
+    box.querySelector('.triage-queue-vehicle').addEventListener('input', e => { triageQueueVehicle = e.target.value; });
+    box.querySelector('.triage-queue-dest').addEventListener('input', e => { triageQueueDest = e.target.value; });
+    box.querySelector('.triage-queue-pick').addEventListener('click', () => {
+        const n = parseInt(triageQueueCap, 10);
+        if (!(n >= 1)) { box.querySelector('.triage-queue-cap').focus(); return; }
+        triageQueueSel.clear();
+        triageEvacuationQueue(triageState.victims || []).slice(0, Math.min(n, 50)).forEach(v => triageQueueSel.add(v.id));
+        document.activeElement?.blur();
+        renderTriageBoard(triageState);
+    });
+    sendBtn.addEventListener('click', () => {
+        const ids = [...triageQueueSel];
+        if (!ids.length) return;
+        if (!confirm(t('triage.queue_confirm', {n: ids.length, vehicle: triageQueueVehicle.trim() || '—'}))) return;
+        sendBtn.disabled = true;
+        postTriage({action: 'transport_batch', victim_ids: ids.join(','), vehicle: triageQueueVehicle, destination: triageQueueDest}).then(r => {
+            if (r && r.ok) {
+                triageQueueSel.clear();
+                triageQueueCap = '';
+                triageQueueVehicle = '';
+                triageQueueDest = '';
+                document.activeElement?.blur();
+                renderTriage(r.triage);
+            } else {
+                refreshSend();
+                alert((r && r.error) || t('common.failed'));
+            }
+        });
+    });
+}
+
 function renderTriageBoard(state) {
     const board = document.getElementById('triageBoard');
     if (!board) return;
@@ -17194,7 +17302,7 @@ function renderTriageBoard(state) {
     const listBlock = TRIAGE_CAN_MANAGE
         ? `<div class="small fw-semibold text-muted mb-1">${heading}</div>${list}`
         : `<details id="triageListDetails" ${triageListOpen ? 'open' : ''}><summary class="small fw-semibold text-muted mb-1">${heading}</summary>${list}</details>`;
-    board.innerHTML = counts + walking + waitingLine + points + listBlock;
+    board.innerHTML = counts + walking + waitingLine + points + (TRIAGE_CAN_MANAGE ? triageQueueHtml(state) : '') + listBlock;
 
     board.querySelectorAll('details.triage-row').forEach(d => d.addEventListener('toggle', () => {
         const id = parseInt(d.dataset.victimId, 10);
@@ -17213,6 +17321,7 @@ function renderTriageBoard(state) {
         if (v) triageOpenFlow({existing: v, secondary: true});
     }));
     if (!TRIAGE_CAN_MANAGE) return;
+    triageWireQueue(board);
     board.querySelectorAll('details.triage-row').forEach(row => {
         const victimId = row.dataset.victimId;
         const setStatus = (status, extra, btn) => {

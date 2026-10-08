@@ -105,7 +105,7 @@ function triageVictimForResponse(int $missionId, int $victimId): ?array {
 }
 
 $fieldActions = ['assess', 'set_card', 'merge', 'bulk_green', 'details'];
-$commandActions = ['mci', 'point', 'status'];
+$commandActions = ['mci', 'point', 'status', 'transport_batch'];
 
 if (in_array($action, $fieldActions, true)) {
     if (!$isApprovedParticipant && !$canManageWarRoom) {
@@ -251,4 +251,15 @@ if ($action === 'status') {
     }
     logAudit('triage_status', 'mission_triage_victims', (int) post('victim_id'), null, ['mission_id' => $missionId, 'status' => post('status')]);
     triageJson(['ok' => true, 'triage' => loadTriageStateForMission($missionId, true, $userId)]);
+}
+
+// One vehicle, several casualties: the evacuation queue's «loaded» button.
+if ($action === 'transport_batch') {
+    $ids = array_map('intval', explode(',', (string) post('victim_ids')));
+    $result = setTriageVictimsTransported($missionId, $ids, post('vehicle'), post('destination'), $userId);
+    if (!$result['ok']) {
+        triageFail($result['error']);
+    }
+    logAudit('triage_transport_batch', 'missions', $missionId, null, ['count' => $result['count'], 'vehicle' => post('vehicle')]);
+    triageJson(['ok' => true, 'count' => $result['count'], 'triage' => loadTriageStateForMission($missionId, true, $userId)]);
 }

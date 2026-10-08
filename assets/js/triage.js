@@ -114,6 +114,20 @@ function triageSecondaryScore(v) {
     return {rts, category, vitals: clean};
 }
 
+/**
+ * The evacuation queue: who goes next. Everybody not yet transported and not
+ * dead, red before yellow before green, and inside a colour the one who has
+ * waited longest (first_ts, when they were first triaged) first. The dead
+ * are not evacuated to a schedule, and the transported are gone. Returns a
+ * new array of the same victim objects; the input is not touched.
+ */
+function triageEvacuationQueue(victims) {
+    const rank = {red: 0, yellow: 1, green: 2};
+    return (victims || [])
+        .filter(v => v.status !== 'transported' && Object.prototype.hasOwnProperty.call(rank, v.category))
+        .sort((a, b) => (rank[a.category] - rank[b.category]) || ((a.first_ts || 0) - (b.first_ts || 0)) || (a.id - b.id));
+}
+
 // Greek capitals that are indistinguishable from Latin ones, folded so a
 // card typed on either keyboard layout is the same card. Mirrors the strtr()
 // map in normalizeTriageCardNo() (includes/functions-triage.php).
@@ -350,6 +364,7 @@ if (typeof module !== 'undefined' && module.exports) {
         triageStep,
         triageEvaluate,
         triageSecondaryScore,
+        triageEvacuationQueue,
         normalizeTriageCardNo,
         triageFallbackCode,
         triageUuid,

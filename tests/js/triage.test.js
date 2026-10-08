@@ -15,7 +15,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const {
-    TRIAGE_PROTOCOLS, triageStep, triageEvaluate, triageSecondaryScore, normalizeTriageCardNo, triageFallbackCode, triageUuid,
+    TRIAGE_PROTOCOLS, triageStep, triageEvaluate, triageSecondaryScore, triageEvacuationQueue, normalizeTriageCardNo, triageFallbackCode, triageUuid,
 } = require('../../assets/js/triage.js');
 
 const fixture = JSON.parse(
@@ -35,6 +35,29 @@ test('triageSecondaryScore matches the shared fixture', async (t) => {
             assert.equal(result.category, c.expect.category);
         });
     }
+});
+
+test('evacuation queue: red, then yellow, then green; longest waiting first; no dead, no transported', () => {
+    const v = (id, category, first_ts, status = 'on_scene') => ({id, category, first_ts, status});
+    const input = [
+        v(1, 'green', 100), v(2, 'yellow', 300), v(3, 'red', 500), v(4, 'red', 200),
+        v(5, 'black', 50), v(6, 'red', 100, 'transported'), v(7, 'yellow', 100, 'at_ccp'), v(8, 'red', 200),
+    ];
+    const copy = JSON.parse(JSON.stringify(input));
+    const ids = triageEvacuationQueue(input).map(x => x.id);
+    // reds by wait (4 and 8 tie on time -> lower id first, then 3), yellows (7, 2), green (1)
+    assert.deepEqual(ids, [4, 8, 3, 7, 2, 1]);
+    assert.deepEqual(input, copy, 'the input must not be reordered or changed');
+    assert.deepEqual(triageEvacuationQueue([]), []);
+    assert.deepEqual(triageEvacuationQueue(null), []);
+});
+
+test('evacuation queue: a casualty who is at the CCP is still ranked by priority, not by place', () => {
+    const q = triageEvacuationQueue([
+        {id: 1, category: 'yellow', first_ts: 10, status: 'at_ccp'},
+        {id: 2, category: 'red', first_ts: 900, status: 'on_scene'},
+    ]);
+    assert.deepEqual(q.map(x => x.id), [2, 1]);
 });
 
 test('triageEvaluate matches the shared fixture', async (t) => {

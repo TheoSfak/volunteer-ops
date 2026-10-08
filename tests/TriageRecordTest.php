@@ -178,6 +178,36 @@ final class TriageRecordTest extends TestCase
         $this->assertSame('secondary_manual', $r['reason']);
     }
 
+    public function testOneVehicleCanTakeSeveralCasualtiesAtOnce(): void
+    {
+        $a = $this->assess($this->anna);
+        $b = $this->assess($this->anna);
+        $c = $this->assess($this->anna);
+        // c already left earlier, in another vehicle: it must keep that.
+        setTriageVictimStatus($this->missionId, $c['victim_id'], 'transported', 'ΕΚΑΒ 1', 'ΠΑΓΝΗ', $this->adminId);
+
+        $r = setTriageVictimsTransported($this->missionId, [$a['victim_id'], $b['victim_id'], $c['victim_id'], 999999], 'Ελικόπτερο', 'Βενιζέλειο', $this->adminId);
+        $this->assertTrue($r['ok']);
+        $this->assertSame(2, $r['count'], 'Only the two still waiting are marked.');
+
+        foreach ([$a, $b] as $x) {
+            $row = dbFetchOne("SELECT status, transport_vehicle, transport_destination FROM mission_triage_victims WHERE id = ?", [$x['victim_id']]);
+            $this->assertSame('transported', $row['status']);
+            $this->assertSame('Ελικόπτερο', $row['transport_vehicle']);
+            $this->assertSame('Βενιζέλειο', $row['transport_destination']);
+        }
+        $kept = dbFetchOne("SELECT transport_vehicle FROM mission_triage_victims WHERE id = ?", [$c['victim_id']]);
+        $this->assertSame('ΕΚΑΒ 1', $kept['transport_vehicle']);
+        $this->assertSame(2, (int) dbFetchValue("SELECT COUNT(*) FROM mission_triage_status_log WHERE vehicle = 'Ελικόπτερο'"));
+    }
+
+    public function testABatchTransportNeedsRealCasualtiesAndStaysWithinTheLimit(): void
+    {
+        $this->assertSame('triage.err_invalid', setTriageVictimsTransported($this->missionId, [], 'x', 'y', $this->adminId)['error']);
+        $this->assertSame('triage.err_invalid', setTriageVictimsTransported($this->missionId, range(1, TRIAGE_BATCH_MAX + 1), 'x', 'y', $this->adminId)['error']);
+        $this->assertSame('triage.err_not_found', setTriageVictimsTransported($this->missionId, [999999], 'x', 'y', $this->adminId)['error']);
+    }
+
     public function testIncompleteAnswersAndBadDirectChoicesAreRefused(): void
     {
         $this->assertSame('triage.err_answers', $this->assess($this->anna, ['answers' => ['walk' => false]])['error']);
