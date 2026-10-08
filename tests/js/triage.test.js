@@ -89,7 +89,9 @@ test('triageStep asks the next question until a leaf is reached', () => {
     assert.deepEqual(triageStep('start', {walk: false}), {question: 'breathing', path: {walk: false}});
     assert.deepEqual(triageStep('jumpstart', {walk: false, breathing: false, airway: false}),
         {question: 'pulse_apneic', path: {walk: false, breathing: false, airway: false}});
-    assert.equal(triageStep('start', {walk: true}).category, 'green');
+    assert.deepEqual(triageStep('start', {walk: true}), {question: 'walk_bleeding', path: {walk: true}}, 'A walker is asked about bleeding before being called green.');
+    assert.equal(triageStep('start', {walk: true, walk_bleeding: false}).category, 'green');
+    assert.equal(triageStep('start', {walk: true, walk_bleeding: true}).category, 'red');
     assert.equal(triageStep('nope', {}), null);
 });
 

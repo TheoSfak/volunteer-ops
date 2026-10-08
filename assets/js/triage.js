@@ -20,7 +20,10 @@ const TRIAGE_PROTOCOLS = {
     start: {
         root: 'walk',
         nodes: {
-            walk:       {yes: ['green', 'walks'], no: 'breathing'},
+            // Walking is green only when nothing is bleeding badly (v3.376.0).
+            // The server takes an old offline {walk: true} as «no» (legacy_no).
+            walk:       {yes: 'walk_bleeding', no: 'breathing'},
+            walk_bleeding: {yes: ['red', 'major_bleeding'], no: ['green', 'walks']},
             breathing:  {yes: 'rr_over_30', no: 'airway'},
             airway:     {yes: ['red', 'breathes_after_airway'], no: ['black', 'apneic']},
             rr_over_30: {yes: ['red', 'rr_over_30'], no: 'bleeding'},
@@ -36,7 +39,8 @@ const TRIAGE_PROTOCOLS = {
     jumpstart: {
         root: 'walk',
         nodes: {
-            walk:           {yes: ['green', 'walks'], no: 'breathing'},
+            walk:           {yes: 'walk_bleeding', no: 'breathing'},
+            walk_bleeding:  {yes: ['red', 'major_bleeding'], no: ['green', 'walks']},
             breathing:      {yes: 'rr_child', no: 'airway'},
             airway:         {yes: ['red', 'breathes_after_airway'], no: 'pulse_apneic'},
             pulse_apneic:   {yes: 'rescue_breaths', no: ['black', 'apneic_no_pulse']},

@@ -91,7 +91,10 @@ function triageProtocols(): array {
         'start' => [
             'root'  => 'walk',
             'nodes' => [
-                'walk'       => ['yes' => ['green', 'walks'], 'no' => 'breathing'],
+                // Walking is green only when nothing is bleeding badly: a
+                // person can walk and still be bleeding out (v3.376.0).
+                'walk'       => ['yes' => 'walk_bleeding', 'no' => 'breathing'],
+                'walk_bleeding' => ['yes' => ['red', 'major_bleeding'], 'no' => ['green', 'walks'], 'legacy_no' => true],
                 'breathing'  => ['yes' => 'rr_over_30', 'no' => 'airway'],
                 'airway'     => ['yes' => ['red', 'breathes_after_airway'], 'no' => ['black', 'apneic']],
                 'rr_over_30' => ['yes' => ['red', 'rr_over_30'], 'no' => 'bleeding'],
@@ -113,7 +116,8 @@ function triageProtocols(): array {
         'jumpstart' => [
             'root'  => 'walk',
             'nodes' => [
-                'walk'           => ['yes' => ['green', 'walks'], 'no' => 'breathing'],
+                'walk'           => ['yes' => 'walk_bleeding', 'no' => 'breathing'],
+                'walk_bleeding'  => ['yes' => ['red', 'major_bleeding'], 'no' => ['green', 'walks'], 'legacy_no' => true],
                 'breathing'      => ['yes' => 'rr_child', 'no' => 'airway'],
                 'airway'         => ['yes' => ['red', 'breathes_after_airway'], 'no' => 'pulse_apneic'],
                 'pulse_apneic'   => ['yes' => 'rescue_breaths', 'no' => ['black', 'apneic_no_pulse']],
@@ -156,7 +160,13 @@ function triageEvaluate(string $protocol, array $answers, bool $tolerateLegacy =
     for ($step = 0; $step < 12; $step++) {
         if (!array_key_exists($node, $answers)) {
             if ($tolerateLegacy && !empty($tree['nodes'][$node]['legacy_no'])) {
-                $node = $tree['nodes'][$node]['no'];
+                // The «no» of that question is either the next question or,
+                // for the walking wounded, the end of the route.
+                $no = $tree['nodes'][$node]['no'];
+                if (is_array($no)) {
+                    return ['category' => $no[0], 'reason' => $no[1], 'path' => $path];
+                }
+                $node = $no;
                 continue;
             }
             return null;

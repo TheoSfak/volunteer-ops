@@ -140,6 +140,15 @@ final class TriageProtocolTest extends TestCase
 
         $oldChild = ['walk' => false, 'breathing' => true, 'rr_child' => false, 'pulse' => true, 'avpu' => true];
         $this->assertSame('yellow', triageEvaluate('jumpstart', $oldChild, true)['category']);
+
+        // The walking wounded: an old phone sent only {walk: true}.
+        foreach (['start', 'jumpstart'] as $protocol) {
+            $this->assertNull(triageEvaluate($protocol, ['walk' => true]), "$protocol: not complete any more");
+            $walker = triageEvaluate($protocol, ['walk' => true], true);
+            $this->assertSame('green', $walker['category'], $protocol);
+            $this->assertSame('walks', $walker['reason'], $protocol);
+            $this->assertSame(['walk' => true], $walker['path'], 'The record shows the question was not asked.');
+        }
     }
 
     /** The words the secondary-triage screens and history lines use. */

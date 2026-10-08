@@ -118,6 +118,23 @@ final class TriageRecordTest extends TestCase
         $this->assertArrayNotHasKey('bleeding', $path);
     }
 
+    public function testAWalkerWhoIsBleedingBadlyIsRedAndAnOldOfflineWalkerIsStillGreen(): void
+    {
+        $bleeding = $this->assess($this->anna, ['answers' => ['walk' => true, 'walk_bleeding' => true]]);
+        $this->assertSame('red', $bleeding['category']);
+        $this->assertSame('major_bleeding', $bleeding['reason']);
+
+        $fine = $this->assess($this->anna, ['answers' => ['walk' => true, 'walk_bleeding' => false]]);
+        $this->assertSame('green', $fine['category']);
+
+        // Queued on a phone from before the question existed: just {walk: true}.
+        $old = $this->assess($this->anna, ['answers' => ['walk' => true]]);
+        $this->assertTrue($old['ok']);
+        $this->assertSame('green', $old['category']);
+        $path = json_decode((string) dbFetchValue("SELECT answers FROM mission_triage_assessments WHERE victim_id = ?", [$old['victim_id']]), true);
+        $this->assertSame(['walk' => true], $path);
+    }
+
     public function testSecondaryTriageScoresTheVitalsAndTheRescuerCanOverrideIt(): void
     {
         $first = $this->assess($this->anna, ['victim_uuid' => 'v-sec-0001', 'answers' => ['walk' => false, 'breathing' => true, 'rr_over_30' => true]]);
@@ -331,7 +348,7 @@ final class TriageRecordTest extends TestCase
         // Another phone, which never saw this casualty, scans the same card.
         $second = $this->assess($this->vasilis, [
             'card_no' => 'kt007',
-            'answers' => ['walk' => true],
+            'answers' => ['walk' => true, 'walk_bleeding' => false],
         ]);
         $this->assertFalse($second['created']);
         $this->assertSame($first['victim_id'], $second['victim_id']);
