@@ -101,6 +101,23 @@ final class TriageRecordTest extends TestCase
         $this->assertSame(['walk' => false, 'breathing' => true, 'rr_over_30' => true], $path);
     }
 
+    public function testHeavyBleedingIsRedAndAnOldOfflineAnswerSetIsStillAccepted(): void
+    {
+        // Breathes normally, obeys, but bleeds heavily: START alone said yellow.
+        $r = $this->assess($this->anna, ['answers' => ['walk' => false, 'breathing' => true, 'rr_over_30' => false, 'bleeding' => true]]);
+        $this->assertTrue($r['ok']);
+        $this->assertSame('red', $r['category']);
+        $this->assertSame('major_bleeding', $r['reason']);
+
+        // Queued on a phone before the bleeding question existed: no answer for
+        // it. Accepted as «no», and the stored path shows it was not asked.
+        $old = $this->assess($this->anna, ['answers' => ['walk' => false, 'breathing' => true, 'rr_over_30' => false, 'perfusion' => false, 'obeys' => true]]);
+        $this->assertTrue($old['ok']);
+        $this->assertSame('yellow', $old['category']);
+        $path = json_decode((string) dbFetchValue("SELECT answers FROM mission_triage_assessments WHERE victim_id = ?", [$old['victim_id']]), true);
+        $this->assertArrayNotHasKey('bleeding', $path);
+    }
+
     public function testIncompleteAnswersAndBadDirectChoicesAreRefused(): void
     {
         $this->assertSame('triage.err_answers', $this->assess($this->anna, ['answers' => ['walk' => false]])['error']);

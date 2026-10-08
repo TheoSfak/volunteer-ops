@@ -97,6 +97,33 @@ final class TriageProtocolTest extends TestCase
     }
 
     /**
+     * An assessment queued offline on a phone from before the bleeding step
+     * existed has no answer for it. The server takes that as «no» (what the old
+     * tree did) instead of refusing the casualty, and the stored path shows the
+     * question was not asked. The plain evaluator, which the phone's logic
+     * mirrors, still treats the route as incomplete.
+     */
+    public function testOldOfflineAssessmentWithoutTheBleedingAnswerIsTakenAsNo(): void
+    {
+        $old = ['walk' => false, 'breathing' => true, 'rr_over_30' => false, 'perfusion' => false, 'obeys' => true];
+        $this->assertNull(triageEvaluate('start', $old));
+        $result = triageEvaluate('start', $old, true);
+        $this->assertSame('yellow', $result['category']);
+        $this->assertSame('obeys', $result['reason']);
+        $this->assertArrayNotHasKey('bleeding', $result['path']);
+
+        $oldChild = ['walk' => false, 'breathing' => true, 'rr_child' => false, 'pulse' => true, 'avpu' => true];
+        $this->assertSame('yellow', triageEvaluate('jumpstart', $oldChild, true)['category']);
+    }
+
+    /** The tolerance is for the missing question only, never for other gaps. */
+    public function testLegacyToleranceDoesNotExcuseOtherMissingAnswers(): void
+    {
+        $this->assertNull(triageEvaluate('start', ['walk' => false, 'breathing' => true, 'rr_over_30' => false], true));
+        $this->assertNull(triageEvaluate('start', ['walk' => false, 'breathing' => true, 'rr_over_30' => false, 'bleeding' => 'maybe'], true));
+    }
+
+    /**
      * Every reason a tree can produce needs words on both languages' screens.
      */
     public function testEveryReasonAndQuestionIsTranslated(): void

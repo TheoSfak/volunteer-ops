@@ -23,7 +23,11 @@ const TRIAGE_PROTOCOLS = {
             walk:       {yes: ['green', 'walks'], no: 'breathing'},
             breathing:  {yes: 'rr_over_30', no: 'airway'},
             airway:     {yes: ['red', 'breathes_after_airway'], no: ['black', 'apneic']},
-            rr_over_30: {yes: ['red', 'rr_over_30'], no: 'perfusion'},
+            rr_over_30: {yes: ['red', 'rr_over_30'], no: 'bleeding'},
+            // Added v3.371.0. The server accepts an old offline assessment
+            // without this answer as «no» (legacy_no in functions-triage.php);
+            // the phone always asks.
+            bleeding:   {yes: ['red', 'major_bleeding'], no: 'perfusion'},
             perfusion:  {yes: ['red', 'poor_perfusion'], no: 'obeys'},
             obeys:      {yes: ['yellow', 'obeys'], no: ['red', 'no_obey']},
         },
@@ -37,7 +41,8 @@ const TRIAGE_PROTOCOLS = {
             airway:         {yes: ['red', 'breathes_after_airway'], no: 'pulse_apneic'},
             pulse_apneic:   {yes: 'rescue_breaths', no: ['black', 'apneic_no_pulse']},
             rescue_breaths: {yes: ['red', 'breathes_after_rescue'], no: ['black', 'apneic']},
-            rr_child:       {yes: ['red', 'rr_child'], no: 'pulse'},
+            rr_child:       {yes: ['red', 'rr_child'], no: 'bleeding'},
+            bleeding:       {yes: ['red', 'major_bleeding'], no: 'pulse'},
             pulse:          {yes: 'avpu', no: ['red', 'no_pulse']},
             avpu:           {yes: ['yellow', 'avpu_ok'], no: ['red', 'avpu']},
         },

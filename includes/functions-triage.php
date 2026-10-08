@@ -91,7 +91,13 @@ function triageProtocols(): array {
                 'walk'       => ['yes' => ['green', 'walks'], 'no' => 'breathing'],
                 'breathing'  => ['yes' => 'rr_over_30', 'no' => 'airway'],
                 'airway'     => ['yes' => ['red', 'breathes_after_airway'], 'no' => ['black', 'apneic']],
-                'rr_over_30' => ['yes' => ['red', 'rr_over_30'], 'no' => 'perfusion'],
+                'rr_over_30' => ['yes' => ['red', 'rr_over_30'], 'no' => 'bleeding'],
+                // Added v3.371.0. START has no step for bleeding, and a
+                // casualty who breathes normally, obeys and bleeds out would
+                // come out yellow. «Yes» is red; the question tells the
+                // rescuer to stop the bleeding NOW, before moving on.
+                // `legacy_no`: see triageEvaluate().
+                'bleeding'   => ['yes' => ['red', 'major_bleeding'], 'no' => 'perfusion', 'legacy_no' => true],
                 // Radial pulse absent, OR capillary refill over 2 seconds.
                 'perfusion'  => ['yes' => ['red', 'poor_perfusion'], 'no' => 'obeys'],
                 'obeys'      => ['yes' => ['yellow', 'obeys'], 'no' => ['red', 'no_obey']],
@@ -110,7 +116,9 @@ function triageProtocols(): array {
                 'pulse_apneic'   => ['yes' => 'rescue_breaths', 'no' => ['black', 'apneic_no_pulse']],
                 'rescue_breaths' => ['yes' => ['red', 'breathes_after_rescue'], 'no' => ['black', 'apneic']],
                 // Breathing under 15 or over 45 a minute.
-                'rr_child'       => ['yes' => ['red', 'rr_child'], 'no' => 'pulse'],
+                'rr_child'       => ['yes' => ['red', 'rr_child'], 'no' => 'bleeding'],
+                // Added v3.371.0, same step as in START.
+                'bleeding'       => ['yes' => ['red', 'major_bleeding'], 'no' => 'pulse', 'legacy_no' => true],
                 'pulse'          => ['yes' => 'avpu', 'no' => ['red', 'no_pulse']],
                 // AVPU: Alert, responds to Voice, or localises Pain appropriately.
                 'avpu'           => ['yes' => ['yellow', 'avpu_ok'], 'no' => ['red', 'avpu']],
@@ -125,8 +133,16 @@ function triageProtocols(): array {
  * the route taken (anything extra the client sent is dropped, so what gets
  * stored is exactly what decided the colour), or null when an answer the
  * route needs is missing or is not a plain yes/no.
+ *
+ * $tolerateLegacy is for the SERVER only (recordTriageAssessment): a phone can
+ * hold an assessment queued offline from before a question was added to the
+ * tree, and refusing it would lose a casualty over a question its rescuer was
+ * never shown. A node marked `legacy_no` is then taken as «no» when its answer
+ * is absent, which is exactly what the old tree did, and the stored path
+ * leaves it out (so the record shows it was not asked). The phone's own
+ * walk through the tree never sets this: it always asks.
  */
-function triageEvaluate(string $protocol, array $answers): ?array {
+function triageEvaluate(string $protocol, array $answers, bool $tolerateLegacy = false): ?array {
     $tree = triageProtocols()[$protocol] ?? null;
     if (!$tree) {
         return null;
@@ -136,6 +152,10 @@ function triageEvaluate(string $protocol, array $answers): ?array {
     // Bounded by the deepest tree, so a malformed tree can never loop.
     for ($step = 0; $step < 12; $step++) {
         if (!array_key_exists($node, $answers)) {
+            if ($tolerateLegacy && !empty($tree['nodes'][$node]['legacy_no'])) {
+                $node = $tree['nodes'][$node]['no'];
+                continue;
+            }
             return null;
         }
         $raw = $answers[$node];
@@ -385,7 +405,7 @@ function recordTriageAssessment(int $missionId, int $userId, array $in): array {
         $reason = 'direct';
         $path = null;
     } else {
-        $result = triageEvaluate($protocol, is_array($in['answers'] ?? null) ? $in['answers'] : []);
+        $result = triageEvaluate($protocol, is_array($in['answers'] ?? null) ? $in['answers'] : [], true);
         if (!$result) {
             return ['ok' => false, 'error' => 'triage.err_answers'];
         }
