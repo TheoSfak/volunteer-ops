@@ -3612,6 +3612,12 @@ include __DIR__ . '/includes/header.php';
     .triage-scanner-close { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); }
     .triage-marker { color: #fff; font: 700 11px/1 SFMono-Regular, Consolas, monospace; padding: 3px 5px; border-radius: 6px; border: 2px solid #fff; box-shadow: 0 1px 4px #0008; white-space: nowrap; }
     .triage-marker.is-gone { opacity: .45; }
+    /* The four numbers on the live map (instead of a marker per casualty). */
+    .wr-triage-counts { background: rgba(255,255,255,.96); border: 1px solid #adb5bd; border-radius: 8px; padding: 5px 6px; box-shadow: 0 1px 4px rgba(0,0,0,.25); cursor: pointer; max-width: 210px; }
+    .wr-triage-counts-row { display: flex; gap: 4px; }
+    .triage-count-pill { min-width: 2.1em; padding: 2px 6px; border-radius: 6px; text-align: center; font-size: 1rem; font-weight: 700; line-height: 1.3; font-variant-numeric: tabular-nums; }
+    .wr-triage-counts-note { margin-top: 3px; font-size: .74rem; line-height: 1.2; color: #495057; }
+    .wr-triage-counts-note.is-urgent { color: #b71c1c; font-weight: 600; }
     /* Συντονιστικό: a dark label with an amber rim and a point under it. The
        tip is the spot (the icon is 0x0 at the coordinate), so a drag moves the
        spot, not the label. Dark on amber reads on street, topo and satellite. */
@@ -17299,59 +17305,66 @@ document.getElementById('mciHeroBtn')?.addEventListener('click', e => {
 })();
 
 // ── Map ─────────────────────────────────────────────────────────────────────
-// Its own layer, deliberately NOT the shared marker cluster the incidents and
-// pins use: in a pile-up the casualties are a metre apart, and a cluster
-// bubble that hides three reds behind a "5" is the one thing this map must
-// never do. Reds sit on top of everything else in the pane.
+// The map shows the collection point, the green area and four numbers. NOT
+// one marker per casualty: 30 of them bury the map, and the list in the
+// triage card already has each one with its position. (v3.370.0 removed the
+// per-casualty chips.) The numbers are those still on scene or at the CCP;
+// the ones already transported are counted apart.
 let triageLayer = null;
 let triageLayerSig = null;
+let triageCountsControl = null;
+function renderTriageCounts(state) {
+    const victims = (state && state.victims) || [];
+    const walking = (state && state.walking) || 0;
+    if (!victims.length && !walking) {
+        if (triageCountsControl) { triageCountsControl.remove(); triageCountsControl = null; }
+        return;
+    }
+    if (!triageCountsControl) {
+        const Counts = L.Control.extend({
+            options: {position: 'topright'},
+            onAdd: function () {
+                const div = L.DomUtil.create('div', 'leaflet-control wr-triage-counts');
+                L.DomEvent.disableClickPropagation(div);
+                div.setAttribute('role', 'button');
+                div.addEventListener('click', triageGoToCard);
+                return div;
+            },
+        });
+        triageCountsControl = new Counts().addTo(map);
+    }
+    const open = {red: 0, yellow: 0, green: 0, black: 0};
+    let gone = 0;
+    let waitingRed = 0;
+    victims.forEach(v => {
+        // The dead stay in the count wherever they have been moved to: the
+        // number commanders report is the total, not "dead still lying here".
+        if (v.category === 'black') { open.black++; return; }
+        if (v.status === 'transported') { gone++; return; }
+        open[v.category]++;
+        if (v.category === 'red') waitingRed++;
+    });
+    open.green += walking;
+    const pills = TRIAGE_CATEGORY_ORDER.map(cat =>
+        `<span class="triage-count-pill triage-bg-${cat}" title="${escapeHtml(t('triage.cat_tile.' + cat))}">${open[cat]}</span>`).join('');
+    const note = waitingRed > 0 ? t(waitingRed === 1 ? 'triage.waiting_red_one' : 'triage.waiting_red', {n: waitingRed}) : t('triage.waiting_red_none');
+    triageCountsControl.getContainer().innerHTML = `<div class="wr-triage-counts-row">${pills}</div>`
+        + `<div class="wr-triage-counts-note${waitingRed > 0 ? ' is-urgent' : ''}">${escapeHtml(note)}</div>`
+        + (gone > 0 ? `<div class="wr-triage-counts-note">${escapeHtml(t('triage.map_transported', {n: gone}))}</div>` : '');
+}
 function renderTriageLayer(state) {
     if (!map) return;
+    renderTriageCounts(state);
     if (!triageLayer) {
         map.createPane('triagePane');
         map.getPane('triagePane').style.zIndex = 640;
         triageLayer = L.layerGroup().addTo(map);
     }
-    const victims = (state && state.victims) || [];
-    const sig = JSON.stringify([victims.map(v => [v.id, v.code, v.category, v.status, v.lat, v.lng, v.reason]), state && state.ccp, state && state.green]);
+    const sig = JSON.stringify([state && state.ccp, state && state.green]);
     if (sig === triageLayerSig) return;
     triageLayerSig = sig;
     triageLayer.clearLayers();
     if (!state) return;
-    // Casualties within about a metre of each other share ONE marker, a
-    // stack of their codes, reds first. That is the normal case, not an edge
-    // one: a rescuer kneeling between three people records all three from
-    // the same spot, and three separate markers at one coordinate would
-    // cover each other so that only the top one could ever be seen or
-    // tapped. Positions are never nudged apart — the stack sits exactly
-    // where they were recorded. Gone (transported) casualties stack at the
-    // bottom and fade.
-    const rank = v => (v.status === 'transported' ? 10 : 0) + TRIAGE_CATEGORY_ORDER.indexOf(v.category);
-    const groups = new Map();
-    victims.filter(v => v.lat !== null && v.lng !== null).forEach(v => {
-        const key = v.lat.toFixed(5) + ',' + v.lng.toFixed(5);
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(v);
-    });
-    groups.forEach(group => {
-        group.sort((a, b) => rank(a) - rank(b));
-        const lead = group[0];
-        const chips = group.map(v => `<div class="triage-marker${v.status === 'transported' ? ' is-gone' : ''}" style="background:${TRIAGE_CAT_HEX[v.category]};color:${TRIAGE_CAT_TEXT[v.category]};">${escapeHtml(v.code)}</div>`).join('');
-        const icon = L.divIcon({
-            className: '',
-            html: `<div style="transform:translate(-50%,-50%);display:inline-flex;flex-direction:column;gap:2px;">${chips}</div>`,
-            iconSize: [0, 0], iconAnchor: [0, 0],
-        });
-        const popup = group.map(v => `<strong>${escapeHtml(v.code)} — ${escapeHtml(triageCatLabel(v.category))}</strong>`
-            + (v.age_group === 'child' ? ` <span class="badge bg-info text-dark">${t('triage.child_badge')}</span>` : '')
-            + `<br>${escapeHtml(v.reason || '')}`
-            + `<br><span class="small">${escapeHtml(t('triage.status.' + v.status))}${v.destination ? ' · ' + escapeHtml(v.destination) : ''}</span>`
-            + `<br><span class="small text-muted">${escapeHtml(v.first_at)} · ${escapeHtml(v.created_by || '')}</span>`).join('<hr class="my-1">')
-            + accuracyLineHtml(lead.accuracy_m)
-            + '<br>' + navigationBtnHtml(lead.lat, lead.lng);
-        L.marker([lead.lat, lead.lng], {icon, pane: 'triagePane', zIndexOffset: (4 - Math.min(rank(lead), 4)) * 100 - (lead.status === 'transported' ? 1000 : 0)})
-            .bindPopup(popup).addTo(triageLayer);
-    });
     const pointIcon = (bg, iconClass, label) => L.divIcon({
         className: '',
         html: `<div class="triage-marker" style="background:${bg};transform:translate(-50%,-50%);display:inline-block;font-family:inherit;"><i class="bi ${iconClass} me-1"></i>${escapeHtml(label)}</div>`,
