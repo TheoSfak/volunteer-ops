@@ -105,7 +105,7 @@ function triageVictimForResponse(int $missionId, int $victimId): ?array {
 }
 
 $fieldActions = ['assess', 'set_card', 'merge', 'bulk_green', 'details'];
-$commandActions = ['mci', 'point', 'status', 'transport_batch', 'sizeup'];
+$commandActions = ['mci', 'point', 'status', 'transport_batch', 'sizeup', 'expectant'];
 
 if (in_array($action, $fieldActions, true)) {
     if (!$isApprovedParticipant && !$canManageWarRoom) {
@@ -250,6 +250,21 @@ if ($action === 'status') {
         triageFail($result['error']);
     }
     logAudit('triage_status', 'mission_triage_victims', (int) post('victim_id'), null, ['mission_id' => $missionId, 'status' => post('status')]);
+    triageJson(['ok' => true, 'triage' => loadTriageStateForMission($missionId, true, $userId)]);
+}
+
+// «Αναμενόμενος» (expectant, grey): command only, a reason is required, and it
+// comes off again with on=0. Off unless the organisation switched it on in
+// the settings; see setTriageVictimExpectant().
+if ($action === 'expectant') {
+    $on = post('on') === '1';
+    $result = setTriageVictimExpectant($missionId, (int) post('victim_id'), $on, post('reason'), $userId);
+    if (!$result['ok']) {
+        triageFail($result['error']);
+    }
+    if ($result['changed']) {
+        logAudit($on ? 'triage_expectant_set' : 'triage_expectant_cleared', 'mission_triage_victims', (int) post('victim_id'), null, ['mission_id' => $missionId]);
+    }
     triageJson(['ok' => true, 'triage' => loadTriageStateForMission($missionId, true, $userId)]);
 }
 

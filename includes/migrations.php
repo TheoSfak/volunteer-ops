@@ -7713,6 +7713,33 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 188,
+            'description' => 'The command-only «expectant» (grey) flag on a casualty (v3.377.0): mission_triage_victims.expectant_at / expectant_by / expectant_reason say that command declared this casualty not expected to survive with the resources available, and why. It is a flag, not a fifth colour, so the START/JumpSTART results and their fixtures are untouched. mission_triage_expectant_log keeps every declaration and every undoing, with who and why.',
+            'up' => function () {
+                if (!dbColumnExists('mission_triage_victims', 'expectant_at')) {
+                    dbExecute("ALTER TABLE mission_triage_victims
+                        ADD COLUMN expectant_at DATETIME NULL AFTER status_by,
+                        ADD COLUMN expectant_by INT UNSIGNED NULL AFTER expectant_at,
+                        ADD COLUMN expectant_reason VARCHAR(255) NULL AFTER expectant_by,
+                        ADD CONSTRAINT fk_triage_victim_expectant_by FOREIGN KEY (expectant_by) REFERENCES users(id) ON DELETE SET NULL");
+                }
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_triage_expectant_log (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    victim_id INT UNSIGNED NOT NULL,
+                    mission_id INT UNSIGNED NOT NULL,
+                    action ENUM('set','cleared') NOT NULL,
+                    reason VARCHAR(255) NULL,
+                    user_id INT UNSIGNED NULL,
+                    created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_triage_expectant_mission (mission_id, created_at),
+                    FOREIGN KEY (victim_id) REFERENCES mission_triage_victims(id) ON DELETE CASCADE,
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

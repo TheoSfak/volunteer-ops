@@ -52,6 +52,20 @@ test('evacuation queue: red, then yellow, then green; longest waiting first; no 
     assert.deepEqual(triageEvacuationQueue(null), []);
 });
 
+test('evacuation queue: an expectant casualty goes after everybody else, whatever the colour', () => {
+    const v = (id, category, first_ts, expectant = false) => ({id, category, first_ts, status: 'on_scene', expectant});
+    const q = triageEvacuationQueue([
+        v(1, 'red', 10, true),     // red, but declared expectant
+        v(2, 'green', 500),
+        v(3, 'yellow', 100),
+        v(4, 'red', 900),
+        v(5, 'yellow', 20, true),  // yellow, expectant, waited longest
+    ]);
+    assert.deepEqual(q.map(x => x.id), [4, 3, 2, 1, 5]);
+    // Without the flag nothing changes.
+    assert.deepEqual(triageEvacuationQueue([v(1, 'red', 10), v(2, 'green', 500)]).map(x => x.id), [1, 2]);
+});
+
 test('evacuation queue: a casualty who is at the CCP is still ranked by priority, not by place', () => {
     const q = triageEvacuationQueue([
         {id: 1, category: 'yellow', first_ts: 10, status: 'at_ccp'},

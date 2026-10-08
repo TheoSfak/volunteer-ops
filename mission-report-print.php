@@ -1033,6 +1033,12 @@ $triageDt = fn($v) => $v ? date('d/m/Y H:i', strtotime($v)) : '—';
             <div style="font-size:8pt;"><?= h(triageCategoryLabel($cat, 'el')) ?> · <?= h(t('triage.cat_desc.' . $cat, [], 'el')) ?></div>
         </div>
         <?php endforeach; ?>
+        <?php if (!empty($triageReport['expectant'])): ?>
+        <div style="min-width:110px;padding:6px 10px;border-radius:8px;text-align:center;background:#6c757d;color:#fff;">
+            <div style="font-size:18pt;font-weight:800;line-height:1;"><?= (int) $triageReport['expectant'] ?></div>
+            <div style="font-size:8pt;"><?= h(t('triage.expectant_tile', [], 'el')) ?> · γκρι</div>
+        </div>
+        <?php endif; ?>
     </div>
     <div class="event-time" style="margin-bottom:8px;">
         Αρχική διαλογή: Κόκκινα <?= (int) $triageReport['initial_counts']['red'] ?> · Κίτρινα <?= (int) $triageReport['initial_counts']['yellow'] ?> · Πράσινα <?= (int) $triageReport['initial_counts']['green'] ?> · Μαύρα <?= (int) $triageReport['initial_counts']['black'] ?>
@@ -1072,6 +1078,7 @@ $triageDt = fn($v) => $v ? date('d/m/Y H:i', strtotime($v)) : '—';
             <strong><?= h($v['code']) ?></strong><?= $v['age_group'] === 'child' ? ' (παιδί)' : '' ?>
             — <?= h(triageReasonLabel($v['reason_key'], 'el')) ?>
             <?= $v['first_category'] !== $v['category'] ? ' · αρχικά ' . h(triageCategoryLabel($v['first_category'], 'el')) : '' ?>
+            <?= !empty($v['expectant']) ? ' · <b>δηλώθηκε αναμενόμενος (γκρι)</b>' : '' ?>
             <?= $v['patient_name'] ? ' · ' . h($v['patient_name']) : '' ?><?= $v['estimated_age'] ? ', ' . h($v['estimated_age']) : '' ?>
         </div>
         <div class="event-time">Διαλογή <?= h($v['first_at']) ?> από <?= h($v['created_by'] ?? '—') ?>

@@ -737,7 +737,7 @@ foreach ($incidentRows as $row) {
 // different things; neither ever carries a casualty's name or phone.
 foreach (loadTriageActivityEvents($missionId) as $e) {
     $icon = ['mci_activated' => '🚨', 'mci_deactivated' => '🏁', 'mci_ccp_set' => '🏥', 'mci_green_set' => '🟩',
-             'bulk_green' => '🚶', 'status' => '🚑'][$e['kind']]
+             'bulk_green' => '🚶', 'status' => '🚑', 'expectant_set' => '🩶', 'expectant_cleared' => '↩️'][$e['kind']]
         ?? ['red' => '🔴', 'yellow' => '🟡', 'green' => '🟢', 'black' => '⚫'][$e['category'] ?? ''] ?? '🏷️';
     $events[] = [
         'icon' => $icon,

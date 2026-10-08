@@ -11084,7 +11084,7 @@ function loadMissionActivityEventsForReport(int $missionId, bool $includeStaffOn
     // Never a name or a phone.
     foreach (loadTriageActivityEvents($missionId) as $e) {
         $icon = ['mci_activated' => '🚨', 'mci_deactivated' => '🏁', 'mci_ccp_set' => '🏥', 'mci_green_set' => '🟩',
-                 'bulk_green' => '🚶', 'status' => '🚑'][$e['kind']]
+                 'bulk_green' => '🚶', 'status' => '🚑', 'expectant_set' => '🩶', 'expectant_cleared' => '↩️'][$e['kind']]
             ?? ['red' => '🔴', 'yellow' => '🟡', 'green' => '🟢', 'black' => '⚫'][$e['category'] ?? ''] ?? '🏷️';
         $events[] = ['icon' => $icon, 'text' => h(triageActivityText($e, 'el')), 'ts' => $e['ts']];
     }

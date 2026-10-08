@@ -524,6 +524,7 @@ $actionRoomFields = [
     'google_maps_api_key',
     'search_rings_enabled',
     'osm_layer_enabled',
+    'triage_expectant_enabled',
 ];
 
 if (isPost()) {
@@ -545,7 +546,7 @@ if (isPost()) {
         foreach ($fieldsToUpdate as $field) {
                     $value = isset($_POST[$field]) ? $_POST[$field] : '';
 
-                    if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'osm_layer_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy', 'war_room_gps_smoothing', 'war_room_native_sampling', 'war_room_native_full_tracking'])) {
+                    if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'osm_layer_enabled', 'triage_expectant_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy', 'war_room_gps_smoothing', 'war_room_native_sampling', 'war_room_native_full_tracking'])) {
                         $value = isset($_POST[$field]) ? '1' : '0';
                     }
 
@@ -2555,6 +2556,29 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         <i class="bi bi-shield-lock me-1"></i>
                         Στον δρομολογητή στέλνονται <strong>μόνο δύο ζεύγη συντεταγμένων</strong> —
                         κανένα όνομα, καμία ομάδα, κανένα αναγνωριστικό.
+                    </div>
+                </div>
+            </div>
+
+            <!-- Triage: the command-only «expectant» (grey) flag. Off until a doctor has signed off. -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-clipboard2-pulse me-1"></i>Διαλογή: κατηγορία «Αναμενόμενος» (γκρι)</h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="triage_expectant_enabled" id="triageExpectantEnabled"
+                               <?= ($settings['triage_expectant_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="triageExpectantEnabled">
+                            <strong>Να επιτρέπεται στη διοίκηση να δηλώνει ένα θύμα «αναμενόμενο» (expectant)</strong>
+                        </label>
+                        <div class="form-text">
+                            Σημαίνει ότι το θύμα δεν αναμένεται να επιβιώσει με τους διαθέσιμους πόρους και μπαίνει <strong>τελευταίο</strong> στη σειρά
+                            εκκένωσης. Είναι <strong>ηθική και νομική απόφαση</strong>: το σύστημα δεν την παίρνει ποτέ μόνο του, τη δηλώνει μόνο η
+                            διοίκηση με υποχρεωτική αιτιολογία, καταγράφεται με το όνομά της και αναιρείται με ένα πάτημα. Κλειστό από προεπιλογή·
+                            ανοίξτε το μόνο αφού το έχει εγκρίνει γιατρός ή το ΕΚΑΒ και έχει συμφωνηθεί ποιος αποφασίζει και με ποια κριτήρια.
+                            Όσο είναι κλειστό, δεν εμφανίζεται κανένα κουμπί· όσα έχουν ήδη δηλωθεί παραμένουν ορατά και μπορούν να αναιρεθούν.
+                        </div>
                     </div>
                 </div>
             </div>

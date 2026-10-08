@@ -133,8 +133,9 @@ $identity = function (array $v): string {
     <?php foreach ($rows as $v): ?>
     <tr>
         <td class="code"><?= h($v['code']) ?><?= $v['age_group'] === 'child' ? ' (' . h(t('triage.child_badge')) . ')' : '' ?></td>
-        <td><span class="chip" style="background:<?= $catColors[$v['category']][0] ?>;color:<?= $catColors[$v['category']][1] ?>;"><?= h(triageCategoryLabel($v['category'])) ?></span></td>
-        <td><?= h($v['reason']) ?></td>
+        <td><span class="chip" style="background:<?= $catColors[$v['category']][0] ?>;color:<?= $catColors[$v['category']][1] ?>;"><?= h(triageCategoryLabel($v['category'])) ?></span>
+            <?php if (!empty($v['expectant'])): ?><br><span class="chip" style="background:#6c757d;color:#fff;"><?= h(t('triage.expectant_label')) ?></span><?php endif; ?></td>
+        <td><?= h($v['reason']) ?><?php if (!empty($v['expectant']) && !empty($v['expectant_reason'])): ?><br><i><?= h(t('triage.expectant_why', ['reason' => $v['expectant_reason']])) ?></i><?php endif; ?></td>
         <td><?= h($v['first_at']) ?><?= $v['last_at'] !== $v['first_at'] ? ' / ' . h($v['last_at']) : '' ?></td>
         <?php if ($isGone): ?>
         <td><?= h(implode(' · ', array_filter([$v['vehicle'], $v['destination'], $v['status_at']]))) ?: '—' ?></td>

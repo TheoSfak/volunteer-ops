@@ -368,7 +368,8 @@ function collectMissionAssistantRaw(int $missionId, int $userId, array $missionS
     // Category and times only — the same "no casualty identity in a summary
     // strip" rule as incidents above.
     $raw['triage'] = dbFetchAll(
-        "SELECT id, category, UNIX_TIMESTAMP(first_assessed_at) AS first_ts, UNIX_TIMESTAMP(last_assessed_at) AS last_ts
+        "SELECT id, category, UNIX_TIMESTAMP(first_assessed_at) AS first_ts, UNIX_TIMESTAMP(last_assessed_at) AS last_ts,
+                (expectant_at IS NOT NULL AND category IN ('red', 'yellow')) AS expectant
          FROM mission_triage_victims
          WHERE mission_id = ? AND status <> 'transported'",
         [$missionId]
@@ -812,7 +813,9 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
     // TRIAGE_RETRIAGE_MINUTES — START is a snapshot, a yellow can be red ten
     // minutes later).
     $triageRows = $raw['triage'] ?? [];
-    $waitingReds = array_values(array_filter($triageRows, fn($r) => $r['category'] === 'red'));
+    // A red command has declared expectant is no longer one it is racing for;
+    // it stays in the re-triage list below, because that is how a change gets seen.
+    $waitingReds = array_values(array_filter($triageRows, fn($r) => $r['category'] === 'red' && empty($r['expectant'])));
     if ($waitingReds) {
         $oldestTs = min(array_map(fn($r) => (int) $r['first_ts'], $waitingReds));
         $pending[] = [

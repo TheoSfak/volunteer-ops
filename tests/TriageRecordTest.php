@@ -229,6 +229,113 @@ final class TriageRecordTest extends TestCase
         $this->assertNull(loadTriageStateForMission($this->missionId, false, $this->anna)['sizeup']);
     }
 
+    private function setExpectantSwitch(?string $value): void
+    {
+        dbExecute("DELETE FROM settings WHERE setting_key = 'triage_expectant_enabled'");
+        if ($value !== null) {
+            dbExecute("INSERT INTO settings (setting_key, setting_value) VALUES ('triage_expectant_enabled', ?)", [$value]);
+        }
+    }
+
+    public function testExpectantIsOffUntilTheOrganisationSwitchesItOn(): void
+    {
+        $r = $this->assess($this->anna);
+        $this->setExpectantSwitch(null);
+        $this->assertFalse(triageExpectantEnabled());
+        $this->assertSame('triage.err_expectant_off', setTriageVictimExpectant($this->missionId, $r['victim_id'], true, 'σοβαρή κάκωση', $this->adminId)['error']);
+        $this->assertFalse(loadTriageStateForMission($this->missionId, true, $this->adminId)['expectant_enabled']);
+
+        $this->setExpectantSwitch('0');
+        $this->assertSame('triage.err_expectant_off', setTriageVictimExpectant($this->missionId, $r['victim_id'], true, 'σοβαρή κάκωση', $this->adminId)['error']);
+
+        $this->setExpectantSwitch('1');
+        $this->assertTrue(loadTriageStateForMission($this->missionId, true, $this->adminId)['expectant_enabled']);
+        $this->assertTrue(setTriageVictimExpectant($this->missionId, $r['victim_id'], true, 'σοβαρή κάκωση', $this->adminId)['ok']);
+    }
+
+    public function testDeclaringExpectantNeedsAReasonAndARedOrYellowCasualtyWhoHasNotLeft(): void
+    {
+        $this->setExpectantSwitch('1');
+        $red = $this->assess($this->anna);
+        $green = $this->assess($this->anna, ['answers' => ['walk' => true, 'walk_bleeding' => false]]);
+        $black = $this->assess($this->anna, ['protocol' => 'direct', 'category' => 'black']);
+        $gone = $this->assess($this->anna);
+        setTriageVictimStatus($this->missionId, $gone['victim_id'], 'transported', 'ΕΚΑΒ 1', 'ΠΑΓΝΗ', $this->adminId);
+
+        foreach (['', '  ', 'ab'] as $weak) {
+            $this->assertSame('triage.err_expectant_reason', setTriageVictimExpectant($this->missionId, $red['victim_id'], true, $weak, $this->adminId)['error'], "reason «{$weak}»");
+        }
+        $this->assertSame('triage.err_expectant_category', setTriageVictimExpectant($this->missionId, $green['victim_id'], true, 'λόγος', $this->adminId)['error']);
+        $this->assertSame('triage.err_expectant_category', setTriageVictimExpectant($this->missionId, $black['victim_id'], true, 'λόγος', $this->adminId)['error']);
+        $this->assertSame('triage.err_expectant_gone', setTriageVictimExpectant($this->missionId, $gone['victim_id'], true, 'λόγος', $this->adminId)['error']);
+        $this->assertSame('triage.err_not_found', setTriageVictimExpectant($this->missionId, 999999999, true, 'λόγος', $this->adminId)['error']);
+        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_triage_expectant_log WHERE mission_id = ?", [$this->missionId]), 'Nothing was logged for a refusal.');
+    }
+
+    public function testAnExpectantCasualtyLeavesTheCountsGoesLastAndIsLogged(): void
+    {
+        $this->setExpectantSwitch('1');
+        $a = $this->assess($this->anna);                       // red
+        $b = $this->assess($this->anna);                       // red
+        $y = $this->assess($this->anna, ['answers' => ['walk' => false, 'breathing' => true, 'rr_over_30' => false, 'bleeding' => false, 'perfusion' => false, 'obeys' => true]]); // yellow
+
+        $before = loadTriageStateForMission($this->missionId, false, $this->anna);
+        $this->assertSame(2, $before['counts']['red']);
+        $this->assertSame(2, $before['waiting_red']);
+
+        $r = setTriageVictimExpectant($this->missionId, $a['victim_id'], true, 'Ν.Χ. κρανιοεγκεφαλική', $this->adminId);
+        $this->assertTrue($r['ok']);
+        $this->assertTrue($r['changed']);
+        $this->assertFalse(setTriageVictimExpectant($this->missionId, $a['victim_id'], true, 'ξανά', $this->adminId)['changed'], 'Declaring twice changes nothing.');
+
+        // A volunteer's (masked) view: sees THAT, not WHY.
+        $v = loadTriageStateForMission($this->missionId, false, $this->anna);
+        $this->assertSame(1, $v['counts']['red'], 'The expectant casualty is not counted as red any more.');
+        $this->assertSame(1, $v['waiting_red']);
+        $this->assertSame(1, $v['expectant']);
+        $row = array_values(array_filter($v['victims'], fn($x) => $x['id'] === $a['victim_id']))[0];
+        $this->assertTrue($row['expectant']);
+        $this->assertNull($row['expectant_reason'], 'The reason is command\'s.');
+        $this->assertSame('Triage Admin', $row['expectant_by']);
+        // Command sees the reason.
+        $c = loadTriageStateForMission($this->missionId, true, $this->adminId);
+        $this->assertSame('Ν.Χ. κρανιοεγκεφαλική', array_values(array_filter($c['victims'], fn($x) => $x['id'] === $a['victim_id']))[0]['expectant_reason']);
+
+        // Last among those still here, behind even the yellow.
+        $ids = array_column($v['victims'], 'id');
+        $this->assertSame($a['victim_id'], end($ids));
+
+        // The timeline says who and when, and never the reason.
+        $events = array_values(array_filter(loadTriageActivityEvents($this->missionId), fn($e) => $e['kind'] === 'expectant_set'));
+        $this->assertCount(1, $events);
+        $text = triageActivityText($events[0], 'el');
+        $this->assertStringContainsString('Triage Admin', $text);
+        $this->assertStringNotContainsString('κρανιοεγκεφαλική', $text);
+        $this->assertStringNotContainsString('triage.', triageActivityText($events[0], 'en'));
+
+        // Undoing is one call, works with the switch off, and is logged too.
+        $this->setExpectantSwitch('0');
+        $this->assertTrue(setTriageVictimExpectant($this->missionId, $a['victim_id'], false, null, $this->adminId)['changed']);
+        $after = loadTriageStateForMission($this->missionId, false, $this->anna);
+        $this->assertSame(2, $after['counts']['red']);
+        $this->assertSame(0, $after['expectant']);
+        $this->assertSame(['set', 'cleared'], array_column(dbFetchAll("SELECT action FROM mission_triage_expectant_log WHERE mission_id = ? ORDER BY id", [$this->missionId]), 'action'));
+    }
+
+    public function testAStaleExpectantFlagDoesNotOutliveTheCategory(): void
+    {
+        $this->setExpectantSwitch('1');
+        $a = $this->assess($this->anna, ['victim_uuid' => 'v-expect-0001']);
+        setTriageVictimExpectant($this->missionId, $a['victim_id'], true, 'λόγος', $this->adminId);
+        $this->assertSame(1, loadTriageStateForMission($this->missionId, false, $this->anna)['expectant']);
+
+        // A later look finds them dead: black is black, the flag no longer counts.
+        $this->assess($this->vasilis, ['victim_uuid' => 'v-expect-0001', 'protocol' => 'direct', 'category' => 'black', 'assessed_at' => date('Y-m-d H:i:s', time() + 5)]);
+        $s = loadTriageStateForMission($this->missionId, false, $this->anna);
+        $this->assertSame(0, $s['expectant']);
+        $this->assertSame(1, $s['counts']['black']);
+    }
+
     public function testASizeupNeedsAMissionThatHadAMassCasualtyIncident(): void
     {
         $r = saveMissionMciSizeup(999999999, ['hazards' => ['fire']], $this->adminId);

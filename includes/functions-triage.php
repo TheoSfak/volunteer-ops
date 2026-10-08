@@ -1031,7 +1031,90 @@ function triageCategoryCounts(int $missionId): array {
  */
 function triageVictimSortKey(array $v): array {
     $priority = array_flip(TRIAGE_CATEGORIES);
-    return [$v['status'] === 'transported' ? 1 : 0, $priority[$v['category']] ?? 9, $v['first_ts']];
+    // Gone last; among those still here, the «expectant» after everybody else.
+    return [$v['status'] === 'transported' ? 1 : 0, !empty($v['expectant']) ? 1 : 0, $priority[$v['category']] ?? 9, $v['first_ts']];
+}
+
+/**
+ * The «expectant» (grey) flag: command's declaration that this casualty is
+ * not expected to survive with the resources available. A flag, not a fifth
+ * colour, on purpose: START/JumpSTART still say what they say, and nothing in
+ * the protocol trees or their fixtures depends on it. Only command sets it,
+ * never an algorithm, never a rescuer's phone; it needs a reason, it is
+ * logged with who did it, and it comes off with one tap.
+ *
+ * Off by default (settings: triage_expectant_enabled) until a doctor has
+ * agreed who decides and by what criteria. Switching it off only stops NEW
+ * declarations; whatever was declared stays visible and can be undone.
+ */
+function triageExpectantEnabled(): bool {
+    // Straight from the table, not getSetting(): that one caches for the whole
+    // request, and a safety switch must read the value that is there now.
+    return (string) dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'triage_expectant_enabled'") === '1';
+}
+
+/**
+ * A casualty is «expectant» only while the flag is on AND the last
+ * assessment is still red or yellow: if a later look made them green or
+ * black, a stale flag must not keep them out of the counts.
+ */
+function triageIsExpectantRow(array $v): bool {
+    return !empty($v['expectant_at']) && in_array($v['category'], ['red', 'yellow'], true);
+}
+
+/**
+ * Declares (or un-declares) a casualty expectant. Returns ['ok' => true,
+ * 'changed' => bool] or ['ok' => false, 'error' => lang key]. Declaring
+ * needs the setting on, a red or yellow casualty who has not left, and a
+ * reason of at least three characters; undoing is always allowed.
+ */
+function setTriageVictimExpectant(int $missionId, int $victimId, bool $on, ?string $reason, int $userId): array {
+    $v = dbFetchOne(
+        "SELECT id, category, status, expectant_at FROM mission_triage_victims WHERE id = ? AND mission_id = ?",
+        [$victimId, $missionId]
+    );
+    if (!$v) {
+        return ['ok' => false, 'error' => 'triage.err_not_found'];
+    }
+    if ($on) {
+        if (!triageExpectantEnabled()) {
+            return ['ok' => false, 'error' => 'triage.err_expectant_off'];
+        }
+        if (!in_array($v['category'], ['red', 'yellow'], true)) {
+            return ['ok' => false, 'error' => 'triage.err_expectant_category'];
+        }
+        if ($v['status'] === 'transported') {
+            return ['ok' => false, 'error' => 'triage.err_expectant_gone'];
+        }
+        $reason = mb_substr(trim((string) $reason), 0, 255);
+        if (mb_strlen($reason) < 3) {
+            return ['ok' => false, 'error' => 'triage.err_expectant_reason'];
+        }
+        if ($v['expectant_at'] !== null) {
+            return ['ok' => true, 'changed' => false];
+        }
+        dbExecute(
+            "UPDATE mission_triage_victims SET expectant_at = NOW(), expectant_by = ?, expectant_reason = ? WHERE id = ?",
+            [$userId, $reason, $victimId]
+        );
+        dbInsert(
+            "INSERT INTO mission_triage_expectant_log (victim_id, mission_id, action, reason, user_id) VALUES (?, ?, 'set', ?, ?)",
+            [$victimId, $missionId, $reason, $userId]
+        );
+        return ['ok' => true, 'changed' => true];
+    }
+    if ($v['expectant_at'] === null) {
+        return ['ok' => true, 'changed' => false];
+    }
+    dbExecute(
+        "UPDATE mission_triage_victims SET expectant_at = NULL, expectant_by = NULL, expectant_reason = NULL WHERE id = ?",
+        [$victimId]
+    );
+    dbInsert(
+        "INSERT INTO mission_triage_expectant_log (victim_id, mission_id, action, reason, user_id) VALUES (?, ?, 'cleared', NULL, ?)",
+        [$victimId, $missionId, $userId]
+    );
+    return ['ok' => true, 'changed' => true];
 }
 
 /**
@@ -1052,7 +1135,8 @@ function triageVictimSortKey(array $v): array {
 function loadTriageStateForMission(int $missionId, bool $unmasked, int $viewerId): ?array {
     $mci = loadMissionMci($missionId);
     $victimRows = dbFetchAll(
-        "SELECT v.*, u.name AS created_by_name, mt.codename, mt.team_number
+        "SELECT v.*, u.name AS created_by_name, mt.codename, mt.team_number,
+                (SELECT name FROM users WHERE id = v.expectant_by) AS expectant_by_name
          FROM mission_triage_victims v
          LEFT JOIN users u ON u.id = v.created_by
          LEFT JOIN mission_teams mt ON mt.id = v.team_id
@@ -1125,13 +1209,27 @@ function loadTriageStateForMission(int $missionId, bool $unmasked, int $viewerId
             'phone'         => $phone,
             'notes'         => $unmasked ? $v['notes'] : null,
             'history'       => $history,
+            // Everybody on the mission sees THAT a casualty was declared
+            // expectant (the counts would otherwise lose a red with no
+            // explanation); the reason is command's, like the notes.
+            'expectant'        => triageIsExpectantRow($v),
+            'expectant_by'     => triageIsExpectantRow($v) ? $v['expectant_by_name'] : null,
+            'expectant_at'     => triageIsExpectantRow($v) ? date('H:i', strtotime($v['expectant_at'])) : null,
+            'expectant_reason' => $unmasked && triageIsExpectantRow($v) ? $v['expectant_reason'] : null,
         ];
     }, $victimRows);
     usort($victims, fn($a, $b) => triageVictimSortKey($a) <=> triageVictimSortKey($b));
 
+    // The four colour counts leave the expectant out (they are counted on
+    // their own), so red and yellow still mean "people we are racing for".
     $counts = ['red' => 0, 'yellow' => 0, 'green' => 0, 'black' => 0];
     $waitingRed = 0;
+    $expectant = 0;
     foreach ($victims as $v) {
+        if ($v['expectant']) {
+            $expectant++;
+            continue;
+        }
         $counts[$v['category']]++;
         if ($v['category'] === 'red' && $v['status'] !== 'transported') {
             $waitingRed++;
@@ -1151,6 +1249,8 @@ function loadTriageStateForMission(int $missionId, bool $unmasked, int $viewerId
         'ccp'           => $mci && $mci['ccp_lat'] !== null ? ['lat' => (float) $mci['ccp_lat'], 'lng' => (float) $mci['ccp_lng']] : null,
         'green'         => $mci && $mci['green_lat'] !== null ? ['lat' => (float) $mci['green_lat'], 'lng' => (float) $mci['green_lng']] : null,
         'counts'        => $counts,
+        'expectant'     => $expectant,
+        'expectant_enabled' => triageExpectantEnabled(),
         'walking'       => $walking,
         'waiting_red'   => $waitingRed,
         'victims'       => $victims,
@@ -1230,6 +1330,21 @@ function loadTriageActivityEvents(int $missionId): array {
             'vehicle' => $row['vehicle'], 'destination' => $row['destination'], 'lat' => null, 'lng' => null,
         ];
     }
+    // The «expectant» declarations and their undoing. WHO and WHEN, never the
+    // reason: this feed is read by everybody and the reason is free text.
+    foreach (dbFetchAll(
+        "SELECT l.action, l.created_at, COALESCE(v.card_no, v.fallback_code) AS code, u.name AS actor
+         FROM mission_triage_expectant_log l
+         JOIN mission_triage_victims v ON v.id = l.victim_id
+         LEFT JOIN users u ON u.id = l.user_id
+         WHERE l.mission_id = ?",
+        [$missionId]
+    ) as $row) {
+        $events[] = [
+            'kind' => 'expectant_' . $row['action'], 'ts' => strtotime($row['created_at']), 'actor' => $row['actor'], 'team_id' => null,
+            'code' => $row['code'], 'category' => null, 'lat' => null, 'lng' => null,
+        ];
+    }
     usort($events, fn($a, $b) => $a['ts'] <=> $b['ts']);
     return $events;
 }
@@ -1252,6 +1367,8 @@ function triageActivityText(array $e, ?string $lang = null): string {
         case 'retriaged':
             return t('triage.act_retriaged', ['name' => $e['actor'] ?? '—', 'code' => $e['code'], 'from' => $cat($e['previous']), 'to' => $cat($e['category'])], $lang);
         case 'bulk_green':      return t('triage.act_bulk', ['name' => $e['actor'] ?? '—', 'count' => $e['count']], $lang);
+        case 'expectant_set':     return t('triage.act_expectant_set', ['name' => $e['actor'] ?? '—', 'code' => $e['code']], $lang);
+        case 'expectant_cleared': return t('triage.act_expectant_cleared', ['name' => $e['actor'] ?? '—', 'code' => $e['code']], $lang);
         case 'status':
             if ($e['status'] === 'transported') {
                 $where = trim(implode(' · ', array_filter([$e['vehicle'], $e['destination']])));
@@ -1510,6 +1627,7 @@ function loadTriageReportForMission(int $missionId): ?array {
 
     return [
         'quality'        => triageQualityStats($qualityRows, $leftAt),
+        'expectant'      => $state['expectant'],
         'sizeup'         => $state['sizeup'],
         'sizeup_at'      => $state['sizeup_at'],
         'sizeup_by'      => $state['sizeup_by'],

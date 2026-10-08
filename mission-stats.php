@@ -780,6 +780,14 @@ include __DIR__ . '/includes/header.php';
             </div>
         </div>
         <?php endforeach; ?>
+        <?php if (!empty($triageReport['expectant'])): ?>
+        <div class="col-6 col-lg-3">
+            <div class="text-center rounded-3 py-2" style="background:#6c757d;color:#fff;">
+                <div style="font-size:1.8rem;font-weight:800;line-height:1;"><?= (int) $triageReport['expectant'] ?></div>
+                <div class="small"><?= h(t('triage.expectant_tile', [], 'el')) ?> · γκρι</div>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
     <div class="small text-muted">
         Θύματα με κάρτα: <?= count($triageReport['victims']) ?><?= $triageReport['walking'] ? ' · Περιπατητικοί χωρίς κάρτα: ' . (int) $triageReport['walking'] : '' ?>

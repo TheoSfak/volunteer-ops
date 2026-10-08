@@ -3560,6 +3560,8 @@ include __DIR__ . '/includes/header.php';
     .triage-bg-yellow { background: #f9a825 !important; color: #1f1300 !important; }
     .triage-bg-green  { background: #2e7d32 !important; color: #fff !important; }
     .triage-bg-black  { background: #212121 !important; color: #fff !important; }
+    /* «Expectant»: a flag command sets, drawn as grey, not one of the four START colours. */
+    .triage-bg-gray   { background: #6c757d !important; color: #fff !important; }
     .triage-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; flex: none; }
     .triage-big-btn { min-height: 96px; font-size: 1.25rem; font-weight: 600; }
     /* Four equal columns that always fit a 360px phone: the default button
@@ -17087,10 +17089,11 @@ function renderTriage(state) {
     if (headCounts) {
         const c = state && state.counts;
         const walking = (state && state.walking) || 0;
-        const any = !!c && (c.red + c.yellow + c.green + c.black + walking) > 0;
+        const any = !!c && (c.red + c.yellow + c.green + c.black + walking + ((state && state.expectant) || 0)) > 0;
+        const expectantN = (state && state.expectant) || 0;
         headCounts.innerHTML = any ? TRIAGE_CATEGORY_ORDER.map(cat =>
             `<span class="triage-head-count triage-bg-${cat}" title="${escapeHtml(t('triage.cat_tile.' + cat))}">${c[cat] + (cat === 'green' ? walking : 0)}</span>`
-        ).join('') : '';
+        ).join('') + (expectantN ? `<span class="triage-head-count triage-bg-gray" title="${escapeHtml(t('triage.expectant_tile'))}">${expectantN}</span>` : '') : '';
     }
     document.getElementById('triageFieldControls')?.classList.toggle('d-none', !active);
     // The first scan in a dead zone must not depend on a download, so the
@@ -17136,6 +17139,19 @@ function triageRowHtml(v) {
     const transport = [v.vehicle, v.destination].filter(Boolean).join(' · ');
     const history = (v.history || []).map(h => `<div><span class="triage-dot triage-bg-${h.category}"></span> ${escapeHtml(h.at)} ${escapeHtml(triageCatLabel(h.category))} — ${escapeHtml(h.reason || '')}${h.vitals ? ' · ' + escapeHtml(triageVitalsText(h.vitals)) : ''} <span class="text-muted">(${escapeHtml(h.by || '—')})</span></div>`).join('');
     const statusBadge = gone ? 'bg-secondary' : (v.status === 'at_ccp' ? 'bg-primary' : 'bg-light text-dark border');
+    // «Expectant»: everybody sees that command declared it; the reason and the
+    // buttons are command's. Declaring is offered only while the organisation
+    // has the switch on, for a red or yellow casualty who has not left.
+    const expectantInfo = v.expectant ? `<div class="mt-1"><span class="badge triage-bg-gray">${escapeHtml(t('triage.expectant_label'))}</span>
+            ${v.expectant_by ? `<span class="text-muted"> ${escapeHtml(t('triage.expectant_by', {name: v.expectant_by, time: v.expectant_at || ''}))}</span>` : ''}
+            ${v.expectant_reason ? `<div class="fst-italic">${escapeHtml(t('triage.expectant_why', {reason: v.expectant_reason}))}</div>` : ''}</div>` : '';
+    const expectantActions = !TRIAGE_CAN_MANAGE ? '' : (v.expectant
+        ? `<button type="button" class="btn btn-sm btn-outline-secondary w-100 mt-1 triage-expectant-clear"><i class="bi bi-arrow-counterclockwise me-1"></i>${t('triage.expectant_clear_btn')}</button>`
+        : ((triageState && triageState.expectant_enabled && !gone && (v.category === 'red' || v.category === 'yellow'))
+            ? `<div class="input-group input-group-sm mt-1">
+                   <input type="text" class="form-control triage-expectant-reason" maxlength="255" placeholder="${escapeHtml(t('triage.expectant_reason_placeholder'))}">
+                   <button type="button" class="btn btn-secondary triage-expectant-btn"><i class="bi bi-circle-fill me-1"></i>${t('triage.expectant_btn')}</button>
+               </div>` : ''));
     const actions = TRIAGE_CAN_MANAGE ? `
         <div class="d-flex gap-1 flex-wrap mt-2">
             <button type="button" class="btn btn-sm btn-outline-primary triage-status-btn" data-status="at_ccp" ${v.status === 'at_ccp' ? 'disabled' : ''}><i class="bi bi-hospital me-1"></i>${t('triage.to_ccp_btn')}</button>
@@ -17162,9 +17178,10 @@ function triageRowHtml(v) {
         </details>` : '';
     return `<details class="triage-row${gone ? ' is-gone' : ''}" data-victim-id="${v.id}" ${triageOpenRows.has(v.id) ? 'open' : ''}>
         <summary>
-            <span class="triage-dot triage-bg-${v.category}"></span>
+            <span class="triage-dot triage-bg-${v.expectant ? 'gray' : v.category}"></span>
             <span class="triage-code">${escapeHtml(v.code)}</span>
             ${v.age_group === 'child' ? `<span class="badge bg-info text-dark">${t('triage.child_badge')}</span>` : ''}
+            ${v.expectant ? `<span class="badge triage-bg-gray">${escapeHtml(t('triage.expectant_label'))}</span>` : ''}
             ${due ? `<i class="bi bi-alarm triage-due" title="${escapeHtml(t('triage.retriage_due', {minutes: since}))}"></i>` : ''}
             <span class="small text-truncate triage-reason">${escapeHtml(v.reason || '')}</span>
             <span class="badge ${statusBadge} ms-auto">${escapeHtml(t('triage.status.' + v.status))}</span>
@@ -17179,7 +17196,9 @@ function triageRowHtml(v) {
             <div class="text-muted">${escapeHtml(v.created_by || '')}${v.team_label ? ' (' + escapeHtml(v.team_label) + ')' : ''}</div>
             <div class="mt-1"><div class="fw-semibold">${t('triage.history')}</div>${history}</div>
             ${navigationBtnHtml(v.lat, v.lng, {block: true})}
+            ${expectantInfo}
             ${!gone && (TRIAGE_CAN_FIELD || TRIAGE_CAN_MANAGE) ? `<button type="button" class="btn btn-sm btn-outline-dark w-100 mt-1 triage-secondary-btn"><i class="bi bi-activity me-1"></i>${t('triage.secondary_row_btn')}</button>` : ''}
+            ${expectantActions}
             ${actions}
         </div>
     </details>`;
@@ -17323,9 +17342,10 @@ function triageQueueHtml(state) {
         return `<label class="triage-queue-row${triageQueueSel.has(v.id) ? ' is-picked' : ''}" title="${escapeHtml(t('triage.queue_waited', {m: waited}))}">
             <input type="checkbox" class="form-check-input triage-queue-chk" data-id="${v.id}" ${triageQueueSel.has(v.id) ? 'checked' : ''}>
             <span class="triage-queue-n">${i + 1}</span>
-            <span class="triage-dot triage-bg-${v.category}"></span>
+            <span class="triage-dot triage-bg-${v.expectant ? 'gray' : v.category}"></span>
             <span class="triage-code">${escapeHtml(v.code)}</span>
             ${v.age_group === 'child' ? `<span class="badge bg-info text-dark">${t('triage.child_badge')}</span>` : ''}
+            ${v.expectant ? `<span class="badge triage-bg-gray">${escapeHtml(t('triage.expectant_label'))}</span>` : ''}
             ${due ? `<i class="bi bi-alarm triage-due" title="${escapeHtml(t('triage.retriage_due', {minutes: triageMinutesSince(v.last_ts)}))}"></i>` : ''}
             <span class="triage-queue-reason">${escapeHtml(v.reason || '')}</span>
             <span class="badge ${v.status === 'at_ccp' ? 'bg-primary' : 'bg-light text-dark border'}">${escapeHtml(t('triage.status.' + v.status))}</span>
@@ -17369,7 +17389,9 @@ function triageWireQueue(board) {
         const n = parseInt(triageQueueCap, 10);
         if (!(n >= 1)) { box.querySelector('.triage-queue-cap').focus(); return; }
         triageQueueSel.clear();
-        triageEvacuationQueue(triageState.victims || []).slice(0, Math.min(n, 50)).forEach(v => triageQueueSel.add(v.id));
+        // Never an expectant casualty: command may tick one by hand, but the
+        // «first N» button must not decide that for them.
+        triageEvacuationQueue(triageState.victims || []).filter(v => !v.expectant).slice(0, Math.min(n, 50)).forEach(v => triageQueueSel.add(v.id));
         document.activeElement?.blur();
         renderTriageBoard(triageState);
     });
@@ -17411,11 +17433,12 @@ function renderTriageBoard(state) {
         return;
     }
     const c = state.counts;
-    const total = c.red + c.yellow + c.green + c.black + state.walking;
+    const total = c.red + c.yellow + c.green + c.black + state.walking + (state.expectant || 0);
     const counts = `<div class="triage-counts mb-2">${TRIAGE_CATEGORY_ORDER.map(cat => `
         <div class="triage-count triage-bg-${cat}"><div class="n">${c[cat] + (cat === 'green' ? state.walking : 0)}</div><div class="l">${escapeHtml(t('triage.cat_tile.' + cat))}</div></div>`).join('')}</div>`;
-    const walking = state.walking ? `<div class="small text-muted mb-1"><i class="bi bi-person-walking me-1"></i>${t('triage.walking_count', {n: state.walking})}</div>` : '';
-    const waiting = state.victims.filter(v => v.category === 'red' && v.status !== 'transported');
+    const expectantLine = state.expectant ? `<div class="small mb-1"><span class="triage-dot triage-bg-gray me-1"></span><strong>${escapeHtml(t('triage.expectant_tile'))}: ${state.expectant}</strong></div>` : '';
+    const walking = (state.walking ? `<div class="small text-muted mb-1"><i class="bi bi-person-walking me-1"></i>${t('triage.walking_count', {n: state.walking})}</div>` : '') + expectantLine;
+    const waiting = state.victims.filter(v => v.category === 'red' && v.status !== 'transported' && !v.expectant);
     const oldest = waiting.length ? waiting.reduce((a, b) => (a.first_ts <= b.first_ts ? a : b)) : null;
     const waitingText = waiting.length === 0 ? t('triage.waiting_red_none')
         : (waiting.length === 1 ? t('triage.waiting_red_one') : t('triage.waiting_red', {n: waiting.length}));
@@ -17461,6 +17484,23 @@ function renderTriageBoard(state) {
             });
         };
         row.querySelectorAll('.triage-status-btn').forEach(b => b.addEventListener('click', () => setStatus(b.dataset.status, null, b)));
+        // «Expectant»: a reason is required and the declaration asks once.
+        // Undoing needs no reason and no question.
+        const setExpectant = (on, reason, btn) => {
+            btn.disabled = true;
+            postTriage({action: 'expectant', victim_id: victimId, on: on ? '1' : '0', reason: reason || ''}).then(r => {
+                if (r && r.ok) { document.activeElement?.blur(); renderTriage(r.triage); }
+                else { btn.disabled = false; alert((r && r.error) || t('common.failed')); }
+            });
+        };
+        row.querySelector('.triage-expectant-btn')?.addEventListener('click', e => {
+            const reason = row.querySelector('.triage-expectant-reason').value.trim();
+            if (reason.length < 3) { alert(t('triage.err_expectant_reason')); row.querySelector('.triage-expectant-reason').focus(); return; }
+            const code = row.querySelector('.triage-code').textContent.trim();
+            if (!confirm(t('triage.expectant_confirm', {code}))) return;
+            setExpectant(true, reason, e.currentTarget);
+        });
+        row.querySelector('.triage-expectant-clear')?.addEventListener('click', e => setExpectant(false, '', e.currentTarget));
         row.querySelector('.triage-transport-btn')?.addEventListener('click', e => setStatus('transported', {
             vehicle: row.querySelector('.triage-vehicle').value,
             destination: row.querySelector('.triage-dest').value,
@@ -17582,17 +17622,22 @@ function renderTriageCounts(state) {
     const open = {red: 0, yellow: 0, green: 0, black: 0};
     let gone = 0;
     let waitingRed = 0;
+    let expectantOpen = 0;
     victims.forEach(v => {
         // The dead stay in the count wherever they have been moved to: the
         // number commanders report is the total, not "dead still lying here".
         if (v.category === 'black') { open.black++; return; }
         if (v.status === 'transported') { gone++; return; }
+        // Declared expectant by command: counted on their own, not as the
+        // red or yellow they would otherwise add to.
+        if (v.expectant) { expectantOpen++; return; }
         open[v.category]++;
         if (v.category === 'red') waitingRed++;
     });
     open.green += walking;
     const pills = TRIAGE_CATEGORY_ORDER.map(cat =>
-        `<span class="triage-count-pill triage-bg-${cat}" title="${escapeHtml(t('triage.cat_tile.' + cat))}">${open[cat]}</span>`).join('');
+        `<span class="triage-count-pill triage-bg-${cat}" title="${escapeHtml(t('triage.cat_tile.' + cat))}">${open[cat]}</span>`).join('')
+        + (expectantOpen > 0 ? `<span class="triage-count-pill triage-bg-gray" title="${escapeHtml(t('triage.expectant_tile'))}">${expectantOpen}</span>` : '');
     const note = waitingRed > 0 ? t(waitingRed === 1 ? 'triage.waiting_red_one' : 'triage.waiting_red', {n: waitingRed}) : t('triage.waiting_red_none');
     triageCountsControl.getContainer().innerHTML = `<div class="wr-triage-counts-row">${pills}</div>`
         + `<div class="wr-triage-counts-note${waitingRed > 0 ? ' is-urgent' : ''}">${escapeHtml(note)}</div>`

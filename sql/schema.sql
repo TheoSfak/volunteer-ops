@@ -2995,6 +2995,9 @@ CREATE TABLE IF NOT EXISTS `mission_triage_victims` (
     `status` ENUM('on_scene','at_ccp','transported') NOT NULL DEFAULT 'on_scene',
     `status_at` DATETIME NULL,
     `status_by` INT UNSIGNED NULL,
+    `expectant_at` DATETIME NULL,
+    `expectant_by` INT UNSIGNED NULL,
+    `expectant_reason` VARCHAR(255) NULL,
     `transport_vehicle` VARCHAR(100) NULL,
     `transport_destination` VARCHAR(255) NULL,
     `patient_name` VARCHAR(255) NULL,
@@ -3013,8 +3016,24 @@ CREATE TABLE IF NOT EXISTS `mission_triage_victims` (
     INDEX `idx_triage_board` (`mission_id`, `status`, `category`),
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`status_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`expectant_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- The command-only «expectant» (grey) flag: every declaration and every undoing.
+CREATE TABLE IF NOT EXISTS `mission_triage_expectant_log` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `victim_id` INT UNSIGNED NOT NULL,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `action` ENUM('set','cleared') NOT NULL,
+    `reason` VARCHAR(255) NULL,
+    `user_id` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_triage_expectant_mission` (`mission_id`, `created_at`),
+    FOREIGN KEY (`victim_id`) REFERENCES `mission_triage_victims`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS `mission_triage_assessments` (
