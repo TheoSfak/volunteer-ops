@@ -4168,6 +4168,7 @@ include __DIR__ . '/includes/header.php';
             </div>
             <div class="collapse" id="triageCardBody">
             <div class="card-body">
+                <div class="text-end small mb-1"><a href="docs/manual-triage.html" target="_blank" rel="noopener" id="triageManualLink"><i class="bi bi-book me-1"></i><?= t('triage.manual_link') ?></a></div>
                 <div id="triageStatusLine" class="small mb-2"></div>
                 <!-- The hazards command wrote down, above the triage buttons: the
                      people who are about to walk in read them first. Filled by
