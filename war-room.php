@@ -4261,6 +4261,17 @@ include __DIR__ . '/includes/header.php';
                         </ul>
                     </div>
                     <?php endif; ?>
+                    <?php if ($searchRingsOn): ?>
+                    <!-- One tap to hide / bring back the search rings. Starts
+                         hidden (d-none): renderSearchRingsLayer() shows it only
+                         once the missing person has a last-seen point and a
+                         category, i.e. once there ARE rings to hide. The same
+                         switch lives in the layers menu; both go through
+                         setMapOverlayShown('rings'). -->
+                    <button type="button" id="mapRingsToggle" class="btn btn-sm btn-outline-secondary active d-none" aria-pressed="true" title="<?= t('map.rings_hide') ?>">
+                        <i class="bi bi-bullseye"></i>
+                    </button>
+                    <?php endif; ?>
                     <button type="button" id="mapSatelliteToggle" class="btn btn-sm btn-outline-secondary" title="<?= t('map.base_layer_menu') ?>">
                         <i class="bi bi-layers"></i>
                     </button>
@@ -7776,6 +7787,13 @@ function refreshMapOverlayUi() {
     const hidden = MAP_OVERLAYS.filter(o => mapOverlaysHidden.has(o.key)).map(o => t(o.label));
     document.querySelectorAll('input[data-overlay]').forEach(input => { input.checked = !mapOverlaysHidden.has(input.dataset.overlay); });
     document.getElementById('mapSatelliteToggle')?.classList.toggle('wr-overlays-hidden', hidden.length > 0);
+    const ringsBtn = document.getElementById('mapRingsToggle');
+    if (ringsBtn) {
+        const ringsShown = !mapOverlaysHidden.has('rings');
+        ringsBtn.classList.toggle('active', ringsShown);
+        ringsBtn.setAttribute('aria-pressed', ringsShown ? 'true' : 'false');
+        ringsBtn.title = t(ringsShown ? 'map.rings_hide' : 'map.rings_show');
+    }
     if (!hidden.length) {
         if (mapHiddenChip) { mapHiddenChip.remove(); mapHiddenChip = null; }
         return;
@@ -7828,6 +7846,13 @@ function refreshMapOverlayUi() {
 try {
     JSON.parse(sessionStorage.getItem(MAP_OVERLAYS_KEY) || '[]').forEach(key => setMapOverlayShown(key, false));
 } catch (e) {}
+// The search-rings button: flips the same «Ζώνες αναζήτησης» switch the layers
+// menu has. Hidden stays hidden across the 5s poll (the rings are redrawn into
+// their own group, which is simply not on the map) and across a reload of this
+// tab (sessionStorage above), until it is tapped again.
+document.getElementById('mapRingsToggle')?.addEventListener('click', () => {
+    setMapOverlayShown('rings', mapOverlaysHidden.has('rings'));
+});
 
 // ── Όνομα ομάδας πάνω από τα στίγματα ───────────────────────────────────────
 // A viewer's own preference (localStorage, one for every mission), ON unless
@@ -18475,6 +18500,8 @@ function renderSearchRingsLayer(item) {
     });
     const stillValid = searchRingsEnabled && item && item.last_seen_lat !== null && item.last_seen_lat !== undefined
         && item.last_seen_lng !== null && item.last_seen_lng !== undefined && LPB_RING_TABLE[item.subject_category];
+    // The hide/show button only has a job while there are rings to hide.
+    document.getElementById('mapRingsToggle')?.classList.toggle('d-none', !stillValid);
     const sameSubject = openRingLayer && stillValid
         && openRingLayer.ringSubjectCategory === item.subject_category
         && openRingLayer.ringLat === item.last_seen_lat
