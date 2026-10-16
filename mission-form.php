@@ -467,8 +467,11 @@ include __DIR__ . '/includes/header.php';
                             <button type="button" class="btn btn-outline-secondary" id="parseMapsBtn" title="Εξαγωγή συντεταγμένων">
                                 <i class="bi bi-crosshair"></i>
                             </button>
+                            <button type="button" class="btn btn-outline-primary" id="pickMapBtn" title="Επιλογή σημείου από χάρτη">
+                                <i class="bi bi-map me-1"></i>Χάρτης
+                            </button>
                         </div>
-                        <div class="form-text">Επικολλήστε έναν σύνδεσμο από Google Maps για ακριβή πρόβλεψη καιρού. Τα συντεταγμένα εξάγονται αυτόματα.</div>
+                        <div class="form-text">Επικολλήστε έναν σύνδεσμο από Google Maps ή πατήστε «Χάρτης» για να διαλέξετε το σημείο πάνω στον χάρτη. Οι συντεταγμένες συμπληρώνονται αυτόματα και χρησιμοποιούνται για ακριβή πρόβλεψη καιρού.</div>
                         <div id="mapsParseStatus" class="mt-1"></div>
                     </div>
 
@@ -788,6 +791,22 @@ include __DIR__ . '/includes/header.php';
             'Συντεταγμένα: ' + parseFloat(coords.lat).toFixed(5) + ', ' + parseFloat(coords.lng).toFixed(5) + '</small>';
     }
 
+    // Short link (maps.app.goo.gl, goo.gl, etc.) — resolved server-side.
+    // Resolves to {lat, lng}; rejects with an Error whose message is shown to the user.
+    function resolveShortLink(url) {
+        return fetch('api-resolve-maps.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
+            body: 'url=' + encodeURIComponent(url) + '&csrf_token=' + encodeURIComponent(csrfToken)
+        })
+        .then(function(r) { return r.json(); })
+        .catch(function() { throw new Error('Αποτυχία επεξεργασίας συνδέσμου.'); })
+        .then(function(data) {
+            if (data.lat && data.lng) return { lat: data.lat, lng: data.lng };
+            throw new Error(data.error || 'Δεν βρέθηκαν συντεταγμένα στον σύνδεσμο.');
+        });
+    }
+
     function handleMapsInput(url) {
         url = url.trim();
         if (!url) return;
@@ -798,26 +817,16 @@ include __DIR__ . '/includes/header.php';
             return;
         }
 
-        // Short link (maps.app.goo.gl, goo.gl, etc.) — resolve server-side
         if (/goo\.gl|maps\.app\.goo\.gl/.test(url)) {
             var status = document.getElementById('mapsParseStatus');
             status.innerHTML = '<small class="text-muted"><i class="bi bi-hourglass-split me-1"></i>Επεξεργασία συνδέσμου...</small>';
-            fetch('api-resolve-maps.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Requested-With': 'XMLHttpRequest' },
-                body: 'url=' + encodeURIComponent(url) + '&csrf_token=' + encodeURIComponent(csrfToken)
+            resolveShortLink(url)
+            .then(function(resolved) {
+                applyCoords(resolved, 'resolved');
             })
-            .then(function(r) { return r.json(); })
-            .then(function(data) {
-                if (data.lat && data.lng) {
-                    applyCoords({ lat: data.lat, lng: data.lng }, 'resolved');
-                } else {
-                    status.innerHTML = '<small class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>' +
-                        (data.error || 'Δεν βρέθηκαν συντεταγμένα στον σύνδεσμο.') + '</small>';
-                }
-            })
-            .catch(function() {
-                status.innerHTML = '<small class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Αποτυχία επεξεργασίας συνδέσμου.</small>';
+            .catch(function(err) {
+                status.innerHTML = '<small class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>' +
+                    err.message + '</small>';
             });
             return;
         }
@@ -826,6 +835,13 @@ include __DIR__ . '/includes/header.php';
             '<small class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>' +
             'Δεν βρέθηκαν συντεταγμένα. Χρησιμοποιήστε τον κανονικό σύνδεσμο από Google Maps (Κοινή χρήση &rarr; Αντιγραφή συνδέσμου).</small>';
     }
+
+    // Shared with the map point picker below.
+    window.VolunteerOpsMapsLink = {
+        extractLatLng: extractLatLng,
+        applyCoords: applyCoords,
+        resolveShortLink: resolveShortLink
+    };
 
     document.addEventListener('DOMContentLoaded', function() {
         var input = document.getElementById('maps_link');
@@ -848,6 +864,389 @@ include __DIR__ . '/includes/header.php';
             'Συντεταγμένα: <?= $mission['latitude'] ?>, <?= $mission['longitude'] ?></small>';
         <?php endif; ?>
     });
+}());
+</script>
+
+<!-- Map point picker (opened from the Google Maps link field) -->
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<style>
+    /* z-index:0 makes the map its own stacking context, so Leaflet's panes and
+       controls (z-index up to 1000) can never paint over the search results list. */
+    #mapPickerMap { position: relative; z-index: 0; height: clamp(280px, calc(100vh - 335px), 620px); border-radius: .375rem; cursor: crosshair; }
+    /* Below lg the modal is full-screen and the search row wraps to two lines, so it needs more room. */
+    @media (max-width: 991.98px) { #mapPickerMap { height: clamp(260px, calc(100vh - 390px), 620px); } }
+    #mapPickerResults { z-index: 5; max-height: 40vh; overflow-y: auto; }
+</style>
+<div class="modal fade" id="mapPickerModal" tabindex="-1" aria-labelledby="mapPickerModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered modal-fullscreen-lg-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="mapPickerModalLabel">
+                    <i class="bi bi-geo-alt-fill text-danger me-2"></i>Επιλογή σημείου από χάρτη
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Κλείσιμο"></button>
+            </div>
+            <div class="modal-body">
+                <div class="position-relative mb-2">
+                    <!-- On a phone the two map buttons wrap under the search box instead of squeezing it -->
+                    <div class="d-flex flex-wrap gap-2">
+                        <div class="input-group flex-grow-1" style="min-width: min(100%, 260px);">
+                            <input type="text" class="form-control" id="mapPickerSearch" autocomplete="off"
+                                   placeholder="Περιοχή, διεύθυνση, συντεταγμένες ή σύνδεσμος Google">
+                            <button type="button" class="btn btn-primary" id="mapPickerSearchBtn">
+                                <i class="bi bi-search me-1"></i>Αναζήτηση
+                            </button>
+                        </div>
+                        <div class="btn-group flex-shrink-0 ms-auto" role="group">
+                            <button type="button" class="btn btn-outline-secondary" id="mapPickerGpsBtn" title="Η τοποθεσία μου">
+                                <i class="bi bi-bullseye"></i><span class="d-sm-none ms-1">Η θέση μου</span>
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" id="mapPickerLayerBtn">
+                                <i class="bi bi-globe-americas"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="list-group position-absolute start-0 end-0 shadow d-none" id="mapPickerResults"></div>
+                </div>
+                <div class="small text-muted text-truncate mb-2" id="mapPickerStatus" role="status">
+                    Κλικ στον χάρτη για να βάλετε το σημείο· σύρετέ το για να το μετακινήσετε.
+                </div>
+                <div id="mapPickerMap"></div>
+            </div>
+            <div class="modal-footer justify-content-between">
+                <div class="small fw-semibold" id="mapPickerCoords">Δεν έχει επιλεγεί σημείο</div>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Ακύρωση</button>
+                    <button type="button" class="btn btn-success" id="mapPickerConfirm" disabled>
+                        <i class="bi bi-check-lg me-1"></i>Επιλογή σημείου
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+(function() {
+    var api      = window.VolunteerOpsMapsLink;
+    var modalEl  = document.getElementById('mapPickerModal');
+    var openBtn  = document.getElementById('pickMapBtn');
+    if (!api || !modalEl || !openBtn) return;
+
+    var searchEl  = document.getElementById('mapPickerSearch');
+    var resultsEl = document.getElementById('mapPickerResults');
+    var statusEl  = document.getElementById('mapPickerStatus');
+    var coordsEl  = document.getElementById('mapPickerCoords');
+    var confirmEl = document.getElementById('mapPickerConfirm');
+    var gpsBtn    = document.getElementById('mapPickerGpsBtn');
+    var layerBtn  = document.getElementById('mapPickerLayerBtn');
+
+    var DEFAULT_VIEW = { center: [38.6, 24.8], zoom: 6 };   // all of Greece
+    var map = null, marker = null, layers = null, layerKey = 'street';
+    var picked = null;        // {lat, lng} currently under the pin
+    var pickedName = '';      // place name from a search hit, while the pin is still on it
+    var searchSeq = 0;        // drops the answer of a search that has since been replaced
+
+    function el(id) { return document.getElementById(id); }
+
+    function setStatus(text, kind) {
+        statusEl.className = 'small mb-2 text-truncate text-' + (kind || 'muted');
+        statusEl.textContent = text;
+        statusEl.title = text;
+    }
+
+    function fmt(n) { return Number(n).toFixed(6); }
+
+    function validLatLng(lat, lng) {
+        return isFinite(lat) && isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+    }
+
+    function getJson(url) {
+        return fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+            .then(function(r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            });
+    }
+
+    // ---- base layers (street / satellite) ----------------------------------
+    function savedLayer() {
+        try { if (localStorage.getItem('mission_form_map_layer') === 'satellite') return 'satellite'; } catch (e) {}
+        return 'street';
+    }
+
+    function updateLayerBtn() {
+        // The button offers the layer you are NOT looking at.
+        var toSatellite = layerKey === 'street';
+        layerBtn.title = toSatellite ? 'Δορυφορικός χάρτης' : 'Απλός χάρτης';
+        layerBtn.innerHTML = toSatellite
+            ? '<i class="bi bi-globe-americas"></i><span class="d-sm-none ms-1">Δορυφόρος</span>'
+            : '<i class="bi bi-map"></i><span class="d-sm-none ms-1">Χάρτης</span>';
+    }
+
+    function toggleLayer() {
+        if (!map) return;
+        map.removeLayer(layers[layerKey]);
+        layerKey = layerKey === 'street' ? 'satellite' : 'street';
+        layers[layerKey].addTo(map);
+        try { localStorage.setItem('mission_form_map_layer', layerKey); } catch (e) {}
+        updateLayerBtn();
+    }
+
+    // ---- map + pin ----------------------------------------------------------
+    function initMap() {
+        map = L.map('mapPickerMap', { zoomControl: true, maxZoom: 21 });
+        layers = {
+            street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                maxNativeZoom: 19, maxZoom: 21
+            }),
+            satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri',
+                maxNativeZoom: 19, maxZoom: 21
+            })
+        };
+        layerKey = savedLayer();
+        layers[layerKey].addTo(map);
+        updateLayerBtn();
+        map.on('click', function(e) {
+            var ll = e.latlng.wrap();
+            pickedName = '';
+            setPoint(ll.lat, ll.lng);
+        });
+    }
+
+    function setPoint(lat, lng) {
+        picked = { lat: lat, lng: lng };
+        if (!marker) {
+            marker = L.marker([lat, lng], { draggable: true }).addTo(map);
+            marker.on('dragend', function() {
+                var ll = marker.getLatLng().wrap();
+                pickedName = '';
+                setPoint(ll.lat, ll.lng);
+            });
+        } else {
+            marker.setLatLng([lat, lng]);
+        }
+        coordsEl.textContent = 'Σημείο: ' + fmt(lat) + ', ' + fmt(lng);
+        confirmEl.disabled = false;
+    }
+
+    function clearPoint() {
+        picked = null;
+        pickedName = '';
+        if (marker) { map.removeLayer(marker); marker = null; }
+        coordsEl.textContent = 'Δεν έχει επιλεγεί σημείο';
+        confirmEl.disabled = true;
+    }
+
+    // The point the form already holds: lat/lng fields first, then the pasted link.
+    function currentFormPoint() {
+        var lat = parseFloat(el('latitude').value);
+        var lng = parseFloat(el('longitude').value);
+        if (validLatLng(lat, lng)) return { lat: lat, lng: lng };
+        var c = api.extractLatLng(el('maps_link').value.trim());
+        if (c) {
+            lat = parseFloat(c.lat); lng = parseFloat(c.lng);
+            if (validLatLng(lat, lng)) return { lat: lat, lng: lng };
+        }
+        return null;
+    }
+
+    // ---- search -------------------------------------------------------------
+    // "35.3387, 25.1442" or "35,3387 25,1442" (Greek decimal comma, space between).
+    function parseCoordsText(q) {
+        var m = q.match(/^(-?\d+(?:\.\d+)?)\s*[,;]?\s*(-?\d+(?:\.\d+)?)$/) ||
+                q.match(/^(-?\d+,\d+)\s*[;\s]\s*(-?\d+,\d+)$/);
+        if (!m) return null;
+        var lat = parseFloat(m[1].replace(',', '.'));
+        var lng = parseFloat(m[2].replace(',', '.'));
+        return validLatLng(lat, lng) ? { lat: lat, lng: lng } : null;
+    }
+
+    function hideResults() {
+        resultsEl.classList.add('d-none');
+        resultsEl.textContent = '';
+    }
+
+    function showResults(list) {
+        resultsEl.textContent = '';
+        list.forEach(function(item) {
+            var b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'list-group-item list-group-item-action small';
+            var icon = document.createElement('i');
+            icon.className = 'bi bi-geo-alt-fill text-danger me-2';
+            b.appendChild(icon);
+            b.appendChild(document.createTextNode(item.display_name));
+            b.addEventListener('click', function() { selectResult(item); });
+            resultsEl.appendChild(b);
+        });
+        resultsEl.classList.remove('d-none');
+        setStatus('Επιλέξτε ένα από τα αποτελέσματα.', 'muted');
+    }
+
+    function selectResult(item) {
+        hideResults();
+        if (item.bbox && item.bbox.length === 4) {
+            // Nominatim bbox order: south, north, west, east.
+            map.fitBounds([[item.bbox[0], item.bbox[2]], [item.bbox[1], item.bbox[3]]], { maxZoom: 17 });
+        } else {
+            map.setView([item.lat, item.lng], 16);
+        }
+        setPoint(item.lat, item.lng);
+        pickedName = String(item.display_name || '').split(',').slice(0, 2).join(',').trim();
+        setStatus(item.display_name + ' — κάντε κλικ στον χάρτη για να διορθώσετε το σημείο.', 'muted');
+    }
+
+    function goToPoint(lat, lng, text) {
+        hideResults();
+        pickedName = '';
+        map.setView([lat, lng], 17);
+        setPoint(lat, lng);
+        setStatus(text, 'success');
+    }
+
+    function runSearch() {
+        var q = searchEl.value.trim();
+        hideResults();
+        if (!q || !map) return;
+        var seq = ++searchSeq;
+
+        var xy = parseCoordsText(q);
+        if (xy) { goToPoint(xy.lat, xy.lng, 'Συντεταγμένες: ' + fmt(xy.lat) + ', ' + fmt(xy.lng)); return; }
+
+        if (/^https?:\/\//i.test(q)) {
+            var c = api.extractLatLng(q);
+            if (c) { goToPoint(parseFloat(c.lat), parseFloat(c.lng), 'Σημείο από τον σύνδεσμο Google.'); return; }
+            if (/goo\.gl/.test(q)) {
+                setStatus('Επεξεργασία συνδέσμου...', 'muted');
+                api.resolveShortLink(q).then(function(r) {
+                    if (seq !== searchSeq) return;
+                    goToPoint(parseFloat(r.lat), parseFloat(r.lng), 'Σημείο από τον σύνδεσμο Google.');
+                }).catch(function(err) {
+                    if (seq !== searchSeq) return;
+                    setStatus(err.message, 'warning');
+                });
+                return;
+            }
+            setStatus('Δεν βρέθηκαν συντεταγμένα στον σύνδεσμο.', 'warning');
+            return;
+        }
+
+        setStatus('Αναζήτηση...', 'muted');
+        getJson('geocode-address.php?limit=5&q=' + encodeURIComponent(q)).then(function(data) {
+            if (seq !== searchSeq) return;
+            if (!data.ok || !data.results || !data.results.length) {
+                setStatus(data.error || 'Δεν βρέθηκε η περιοχή.', 'warning');
+                return;
+            }
+            if (data.results.length === 1) { selectResult(data.results[0]); return; }
+            showResults(data.results);
+        }).catch(function() {
+            if (seq !== searchSeq) return;
+            setStatus('Αποτυχία αναζήτησης. Δοκιμάστε ξανά.', 'warning');
+        });
+    }
+
+    // ---- "my location" ------------------------------------------------------
+    function useMyLocation() {
+        if (!navigator.geolocation) {
+            setStatus('Ο περιηγητής δεν υποστηρίζει εντοπισμό θέσης.', 'warning');
+            return;
+        }
+        gpsBtn.disabled = true;
+        setStatus('Εντοπισμός θέσης...', 'muted');
+        navigator.geolocation.getCurrentPosition(function(pos) {
+            gpsBtn.disabled = false;
+            var acc = Math.round(pos.coords.accuracy || 0);
+            goToPoint(pos.coords.latitude, pos.coords.longitude,
+                'Η τοποθεσία σας' + (acc ? ' (ακρίβεια ~' + acc + ' μ.)' : '') + '.');
+        }, function(err) {
+            gpsBtn.disabled = false;
+            var msg = err && err.code === 1 ? 'Δεν δόθηκε άδεια πρόσβασης στην τοποθεσία.'
+                    : err && err.code === 3 ? 'Λήξη χρόνου εντοπισμού θέσης. Δοκιμάστε ξανά.'
+                    : 'Η τοποθεσία σας δεν είναι διαθέσιμη.';
+            setStatus(msg, 'warning');
+        }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 30000 });
+    }
+
+    // ---- confirm: fill link + coordinates (+ the address if «Τοποθεσία» is empty)
+    function applyPicked(name) {
+        var lat = fmt(picked.lat), lng = fmt(picked.lng);
+        el('maps_link').value = 'https://www.google.com/maps?q=' + lat + ',' + lng;
+        api.applyCoords({ lat: lat, lng: lng }, 'map');
+        var loc = el('location');
+        if (name && !loc.value.trim()) loc.value = name;
+        ['maps_link', 'latitude', 'longitude', 'location'].forEach(function(id) {
+            el(id).dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+    }
+
+    function confirmPoint() {
+        if (!picked) return;
+        if (el('location').value.trim()) { applyPicked(''); return; }
+
+        // «Τοποθεσία» is required and still empty: fetch the address of the pin.
+        var original = confirmEl.innerHTML;
+        confirmEl.disabled = true;
+        confirmEl.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Διεύθυνση...';
+        function done(name) {
+            confirmEl.innerHTML = original;
+            confirmEl.disabled = false;
+            applyPicked(name);
+        }
+        getJson('geocode-address.php?lat=' + encodeURIComponent(picked.lat) + '&lng=' + encodeURIComponent(picked.lng))
+            .then(function(data) { done(data.ok && data.short_name ? data.short_name : pickedName); })
+            .catch(function() { done(pickedName); });
+    }
+
+    // ---- wiring -------------------------------------------------------------
+    openBtn.addEventListener('click', function() {
+        if (typeof L === 'undefined') {
+            el('mapsParseStatus').innerHTML = '<small class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>' +
+                'Ο χάρτης δεν φορτώθηκε. Ελέγξτε τη σύνδεσή σας και ανανεώστε τη σελίδα.</small>';
+            return;
+        }
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    });
+
+    modalEl.addEventListener('shown.bs.modal', function() {
+        if (!map) initMap();
+        map.invalidateSize();
+        hideResults();
+        searchEl.value = '';
+        setStatus('Κλικ στον χάρτη για να βάλετε το σημείο· σύρετέ το για να το μετακινήσετε.', 'muted');
+
+        var existing = currentFormPoint();
+        if (existing) {
+            map.setView([existing.lat, existing.lng], 16);
+            setPoint(existing.lat, existing.lng);
+        } else {
+            clearPoint();
+            map.setView(DEFAULT_VIEW.center, DEFAULT_VIEW.zoom);
+        }
+        // A touch screen would pop the keyboard over the map.
+        if (window.matchMedia && window.matchMedia('(pointer: fine)').matches) searchEl.focus();
+    });
+
+    modalEl.addEventListener('hidden.bs.modal', function() {
+        searchSeq++;
+        hideResults();
+    });
+
+    el('mapPickerSearchBtn').addEventListener('click', runSearch);
+    searchEl.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); runSearch(); }
+    });
+    searchEl.addEventListener('input', hideResults);
+    modalEl.addEventListener('click', function(e) {
+        if (!resultsEl.contains(e.target) && e.target !== searchEl) hideResults();
+    });
+    gpsBtn.addEventListener('click', useMyLocation);
+    layerBtn.addEventListener('click', toggleLayer);
+    confirmEl.addEventListener('click', confirmPoint);
 }());
 </script>
 
