@@ -9085,8 +9085,39 @@ function sectorAdminSetTeam(id, teamId, selectEl) {
         else { alert(result.error || t('common.send_failed')); if (selectEl) selectEl.disabled = false; }
     }).catch(e => actionRequestFailed(selectEl, e));
 }
+// «Αυτόματη Ανάθεση» hands each team three separate things: an area, a sector
+// on it, and a ROUTE whose numbered points were already sent to the team's
+// phones. The route hangs off neither of the other two, so deleting the area
+// or its sectors used to leave the points on the map and the order on the
+// phones. Taking the route away is NOT done silently for that reason: the
+// delete handlers below work out which routes belong to what is being deleted
+// (this ring, this team, still active) BEFORE the local lists change, and once
+// the delete has gone through, offerCancelRingRoutes() asks.
+function ringRoutesTiedTo(area, sectorList) {
+    if (!area || area.ring_index === null || area.ring_index === undefined) return [];
+    const teamIds = new Set(sectorList.filter(s => s.team_id).map(s => Number(s.team_id)));
+    if (!teamIds.size) return [];
+    return routes.filter(r => r.status === 'active' && r.ring_index === area.ring_index && teamIds.has(Number(r.team_id)));
+}
+// One cancel per route, one after the other: every answer carries the whole
+// routes list and replaces the page's copy, so parallel ones could land out of
+// order and put a cancelled route back on the map.
+function offerCancelRingRoutes(ringIndex, ringRoutes) {
+    if (!ringRoutes.length) return Promise.resolve();
+    const pct = [25, 50, 75, 95][ringIndex];
+    if (!confirm(t('missing_person.ring_cancel_routes_confirm', {pct, list: ringRoutes.map(r => '• ' + r.title).join('\n')}))) return Promise.resolve();
+    const reason = t('missing_person.ring_area_deleted_cancel_reason');
+    let failed = false;
+    return ringRoutes.reduce(
+        (chain, r) => chain.then(() => postRouteAction('cancel', r.id, {reason}).then(res => { if (!res || !res.ok) failed = true; })),
+        Promise.resolve()
+    ).then(() => { if (failed) alert(t('missing_person.ring_cancel_routes_failed', {pct})); });
+}
 function sectorDelete(id) {
     if (!confirm(t('sector.delete_confirm'))) return;
+    const gone = sectors.find(s => String(s.id) === String(id));
+    const goneArea = gone ? areas.find(a => String(a.id) === String(gone.area_id)) : null;
+    const ringRoutes = ringRoutesTiedTo(goneArea, gone ? [gone] : []);
     const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'delete', id});
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) {
@@ -9094,6 +9125,7 @@ function sectorDelete(id) {
             sectors = sectors.filter(s => String(s.id) !== String(id));
             sectorRefreshAfter();
             if (typeof renderAckTracker === 'function') renderAckTracker([]);
+            if (goneArea) offerCancelRingRoutes(goneArea.ring_index, ringRoutes);
         }
     });
 }
@@ -9492,6 +9524,7 @@ var openAutoAssignForRing = async function(ringIndex, btnEl) {
 function areaDelete(id) {
     const area = areas.find(a => String(a.id) === String(id));
     if (!confirm(t('sector.area_delete_confirm', {label: area ? area.label : '', count: area ? area.sector_count : 0}))) return;
+    const ringRoutes = ringRoutesTiedTo(area, sectors.filter(s => String(s.area_id) === String(id)));
     const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'delete_area', id});
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) {
@@ -9499,12 +9532,14 @@ function areaDelete(id) {
             areas = areas.filter(a => String(a.id) !== String(id));
             sectors = sectors.filter(s => String(s.area_id) !== String(id));
             sectorRefreshAfter();
+            if (area) offerCancelRingRoutes(area.ring_index, ringRoutes);
         }
     });
 }
 function clearAreaSectors(id) {
     const area = areas.find(a => String(a.id) === String(id));
     if (!confirm(t('sector.clear_area_sectors_confirm', {count: area ? area.sector_count : 0}))) return;
+    const ringRoutes = ringRoutesTiedTo(area, sectors.filter(s => String(s.area_id) === String(id)));
     const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'clear_area_sectors', id});
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) {
@@ -9517,6 +9552,7 @@ function clearAreaSectors(id) {
             const areaObj = areas.find(a => String(a.id) === String(id));
             if (areaObj) { areaObj.sector_count = 0; areaObj.completed_count = 0; }
             sectorRefreshAfter();
+            if (area) offerCancelRingRoutes(area.ring_index, ringRoutes);
         }
     });
 }
