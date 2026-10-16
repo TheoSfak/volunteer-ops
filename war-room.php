@@ -2538,6 +2538,29 @@ include __DIR__ . '/includes/header.php';
        button while anything is hidden, and the chip on the map that says so. */
     .dropdown-item.wr-overlay-item { display: flex; align-items: center; gap: 8px; cursor: pointer; }
     .wr-overlay-item .form-check-input { margin: 0; flex-shrink: 0; }
+    /* Two lists side by side. With the OpenStreetMap section the map's layers
+       menu grew to 28 rows (1126px against a 520px map): what is drawn
+       (views, shapes, labels) on the left, the OpenStreetMap data on the
+       right. The column break is on the OSM heading, so a section is never
+       cut in half, and a label that does not fit its column wraps rather than
+       widening the menu past the screen. Without the OSM layer the menu keeps
+       its one column (addOsmLayer() adds the class). */
+    .dropdown-menu.wr-layers-2col.show { column-count: 2; column-gap: 0; column-rule: 1px solid var(--bs-border-color, #dee2e6); width: 42rem; max-width: calc(100vw - 1rem); z-index: 1100; }
+    .wr-layers-2col > li { break-inside: avoid; }
+    .card.wr-menu-open { overflow: visible; }
+    .wr-layers-2col .dropdown-header { white-space: normal; }
+    .wr-layers-2col .dropdown-item { overflow-wrap: anywhere; }
+    .wr-layers-2col .dropdown-item .bi-check-lg { margin-left: .5rem !important; }
+    .wr-layers-2col > li.wr-col-break { break-before: column; }
+    /* The app-wide .dropdown-item padding (0.6rem) is a 43px row, which is what
+       made the single column so tall; this one is 34px, still a full finger. */
+    .wr-layers-2col .dropdown-item { white-space: normal; padding: .4rem .75rem; font-size: .9rem; }
+    /* A phone's columns are ~160px: less padding and a slightly smaller face, so
+       fewer labels need a second line. */
+    @media (max-width: 575.98px) {
+        .wr-layers-2col .dropdown-item { padding: .35rem .5rem; font-size: .82rem; gap: 6px; }
+        .wr-layers-2col .dropdown-header { padding-left: .5rem; padding-right: .5rem; }
+    }
     .wr-overlays-hidden { position: relative; }
     .wr-overlays-hidden::after { content: ''; position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; border-radius: 50%; background: #dc3545; box-shadow: 0 0 0 2px #fff; }
     .wr-hidden-chip { background: #fff8e1; border: 1px solid #f59e0b; border-radius: 6px; padding: 4px 8px; font-size: .78rem; max-width: 240px; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
@@ -7823,6 +7846,12 @@ function refreshMapOverlayUi() {
     // Ticking a box must not close the menu. Picking a map view still does,
     // as it always has (the listener at the bottom).
     btn.setAttribute('data-bs-auto-close', 'outside');
+    // The map's card is overflow:hidden, so everything the menu had below the
+    // card's bottom edge was cut off and could not be reached at all. While the
+    // menu is open the card lets it hang out (CSS: .card.wr-menu-open).
+    const menuCard = btn.closest('.card');
+    btn.addEventListener('show.bs.dropdown', () => menuCard?.classList.add('wr-menu-open'));
+    btn.addEventListener('hidden.bs.dropdown', () => menuCard?.classList.remove('wr-menu-open'));
     const divider = document.createElement('li');
     divider.innerHTML = '<hr class="dropdown-divider">';
     const header = document.createElement('li');
@@ -8319,12 +8348,21 @@ function osmScheduleLoad() {
     const btn = document.getElementById('mapSatelliteToggle');
     const menu = btn?.parentNode.querySelector('.dropdown-menu');
     if (!menu) return;
-    const divider = document.createElement('li');
-    divider.innerHTML = '<hr class="dropdown-divider">';
+    // The OpenStreetMap section is the menu's second column (see .wr-layers-2col
+    // in the CSS): the heading starts it, so no divider line is needed here.
+    menu.classList.add('wr-layers-2col');
+    // The map's card is narrower than the menu on a laptop (the Action Room
+    // keeps cards side by side) and clips whatever sticks out of it, which cut
+    // the second column off. So the width follows the card, never past 42rem.
+    btn.addEventListener('show.bs.dropdown', () => {
+        const room = (btn.closest('.card') || btn.parentNode).clientWidth;
+        menu.style.width = Math.max(260, Math.min(672, room - 16)) + 'px';
+    });
     const header = document.createElement('li');
+    header.className = 'wr-col-break';
     header.innerHTML = '<h6 class="dropdown-header"></h6>';
     header.firstChild.textContent = t('osm.header');
-    menu.append(divider, header);
+    menu.append(header);
     const addRow = (attr, key, icon, color, label, extraClass) => {
         const li = document.createElement('li');
         li.innerHTML = '<label class="dropdown-item wr-overlay-item ' + extraClass + '"><input type="checkbox" class="form-check-input" ' + attr + '="' + key + '"><i class="bi ' + icon + '"' + (color ? ' style="color:' + color + '"' : '') + '></i><span></span></label>';
