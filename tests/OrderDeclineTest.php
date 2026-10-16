@@ -349,7 +349,10 @@ final class OrderDeclineTest extends TestCase
         $this->assertSame([true, true], array_column($card['people'], 'declined'), 'Every member of the route shows ✗.');
         $this->assertCount(1, $card['declines']);
 
-        // «Έφτασες;» is not asked of a group that said it is not going.
+        // «Έφτασες;» is not asked of a group that said it is not going. (The
+        // question, so with the automatic arrival off: on, an accurate fix
+        // starts the wait for a second one instead of asking.)
+        $this->setArrivalAuto(false);
         checkArrivalPrompts($this->missionId, $this->teammate, $this->teamId, self::LAT, self::LNG, 8.0, 3);
         $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_arrival_prompts WHERE user_id = ?", [$this->teammate]));
 
@@ -360,14 +363,37 @@ final class OrderDeclineTest extends TestCase
             'Once taken back, the route is theirs again, question and all.');
     }
 
+    private function setArrivalAuto(bool $on): void
+    {
+        dbExecute(
+            "INSERT INTO settings (setting_key, setting_value, updated_at) VALUES ('arrival_auto_enabled', ?, NOW())
+             ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()",
+            [$on ? '1' : '0']
+        );
+    }
+
     public function testTheArrivalQuestionSkipsADispatchTheTeamDeclined(): void
     {
+        $this->setArrivalAuto(false);
         $dispatchId = $this->sendPoint($this->teamId);
         $this->decline('dispatch', $dispatchId, $this->member);
 
         checkArrivalPrompts($this->missionId, $this->teammate, $this->teamId, self::LAT, self::LNG, 8.0, 3);
 
         $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_arrival_prompts WHERE target_id = ? AND target_kind = 'dispatch'", [$dispatchId]));
+    }
+
+    public function testTheGpsDoesNotRecordAnArrivalAtADispatchTheTeamDeclined(): void
+    {
+        $this->setArrivalAuto(true);
+        $dispatchId = $this->sendPoint($this->teamId);
+        $this->decline('dispatch', $dispatchId, $this->member);
+
+        // A phone that reports it is standing still would be recorded at once.
+        checkArrivalPrompts($this->missionId, $this->teammate, $this->teamId, self::LAT, self::LNG, 8.0, 3, 0.0);
+
+        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_dispatch_progress WHERE dispatch_id = ?", [$dispatchId]),
+            'a team that said «Δεν μπορώ» has not arrived');
     }
 
     public function testCommandIsNotAskedToChaseAnOrderTheFieldAnswered(): void

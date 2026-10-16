@@ -82,10 +82,10 @@ index 0000000..b0b19e5
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
 new file mode 100644
-index 0000000..050b295
+index 0000000..5f46d02
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
-@@ -0,0 +1,600 @@
+@@ -0,0 +1,627 @@
 +package com.capgo.capacitor_background_geolocation;
 +
 +import android.app.Notification;
@@ -177,7 +177,9 @@ index 0000000..050b295
 +    // Before, every notification rang like an order — heads-up, with the
 +    // triple buzz — and a phone that buzzes the same for "your shift was
 +    // approved" as for "go to point 3" teaches its owner to ignore both.
-+    private static final String CHANNEL_ID = "volunteerops_alerts_v2";
++    // Package-private since v3.383.0: AlertSpeaker keeps the same Do Not
++    // Disturb limit this channel carries.
++    static final String CHANNEL_ID = "volunteerops_alerts_v2";
 +    private static final String CHANNEL_NAME = "Εντολές";
 +    private static final String CHANNEL_UPDATES_ID = "volunteerops_updates";
 +    // Distinct from the plugin's own silent foreground-service notification
@@ -204,6 +206,9 @@ index 0000000..050b295
 +    static final String A_T_ACKED = "vopsAlertTextAcked";
 +    static final String A_T_RETRY = "vopsAlertTextRetry";
 +    static final String A_T_OPEN_APP = "vopsAlertTextOpenApp";
++    // v3.383.0: what to say aloud, and in which language (a BCP 47 tag).
++    static final String A_SPEAK_TEXT = "vopsAlertSpeakText";
++    static final String A_SPEAK_LANG = "vopsAlertSpeakLang";
 +
 +    // What a notification is showing: as it arrived, «Ελήφθη» being sent, and
 +    // the three outcomes. Only NEW makes a sound or lights the screen.
@@ -250,7 +255,9 @@ index 0000000..050b295
 +            // vops=2: this app labels an alert's button per alert (v3.333.0,
 +            // the «Έφτασα» of an arrival question). An older app sends nothing
 +            // and the server offers it only «Ελήφθη».
-+            String url = baseUrl + "/mobile-alerts.php?since_id=" + cursor + (shiftId > 0 ? "&shift_id=" + shiftId : "") + "&vops=2";
++            // vops=3 (v3.383.0): this app also says an alert aloud itself, with
++            // the screen off (AlertSpeaker); the server adds `speak` only then.
++            String url = baseUrl + "/mobile-alerts.php?since_id=" + cursor + (shiftId > 0 ? "&shift_id=" + shiftId : "") + "&vops=3";
 +
 +            connection = (HttpURLConnection) new URL(url).openConnection();
 +            connection.setRequestMethod("GET");
@@ -356,6 +363,13 @@ index 0000000..050b295
 +            a.putString(A_T_ACKED, ack.optString("acked", texts.optString("acked", "")));
 +            a.putString(A_T_RETRY, texts.optString("ack_retry", ""));
 +            a.putString(A_T_OPEN_APP, texts.optString("ack_open_app", ""));
++        }
++        // {text, lang}: only for the alerts the page itself reads aloud
++        // (mobile-alerts.php, mobileAlertSpeech()).
++        JSONObject speak = alert.optJSONObject("speak");
++        if (speak != null && !speak.optString("text", "").isEmpty()) {
++            a.putString(A_SPEAK_TEXT, speak.optString("text", ""));
++            a.putString(A_SPEAK_LANG, speak.optString("lang", "en-US"));
 +        }
 +        return a;
 +    }
@@ -465,6 +479,19 @@ index 0000000..050b295
 +        if (state == STATE_NEW && urgent) {
 +            wakeScreen(context);
 +            vibrateForOrder(context, manager);
++        }
++
++        // v3.383.0: said aloud as well, when the server asked for it. Only a
++        // NEW alert: redrawing the notification after «Ελήφθη» must not repeat
++        // it. AlertSpeaker keeps itself out of the foreground app (the page
++        // reads it there), Silent and Do Not Disturb, and never throws.
++        String speakText = a.getString(A_SPEAK_TEXT);
++        if (state == STATE_NEW && speakText != null && !speakText.isEmpty()) {
++            try {
++                AlertSpeaker.speak(context, speakText, a.getString(A_SPEAK_LANG, "en-US"));
++            } catch (Throwable e) {
++                Logger.debug("alert speak failed: " + e.getMessage());
++            }
 +        }
 +    }
 +
@@ -684,6 +711,241 @@ index 0000000..050b295
 +            updates.setDescription("Οι υπόλοιπες ειδοποιήσεις της εφαρμογής");
 +            manager.createNotificationChannel(updates);
 +        }
++    }
++}
+diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertSpeaker.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertSpeaker.java
+new file mode 100644
+index 0000000..5ea0375
+--- /dev/null
++++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertSpeaker.java
+@@ -0,0 +1,229 @@
++package com.capgo.capacitor_background_geolocation;
++
++import android.app.ActivityManager;
++import android.app.NotificationChannel;
++import android.app.NotificationManager;
++import android.content.Context;
++import android.media.AudioAttributes;
++import android.media.AudioFocusRequest;
++import android.media.AudioManager;
++import android.os.Build;
++import android.os.Handler;
++import android.os.Looper;
++import android.speech.tts.TextToSpeech;
++import android.speech.tts.UtteranceProgressListener;
++
++import com.getcapacitor.Logger;
++
++import java.util.List;
++import java.util.Locale;
++
++/**
++ * VolunteerOps addition (v3.383.0, not upstream).
++ *
++ * Says an alert aloud, from the background service, with the screen off. The
++ * Action Room page already reads announcements and «Έφτασες στο …» through the
++ * phone's TextToSpeech, but a page whose screen is off is frozen by the OS and
++ * says nothing; this service is awake. mobile-alerts.php tells it what to say
++ * (`speak`: text and language) only for the alerts the page would read, and
++ * only to an app that asks for it (vops=3).
++ *
++ * The same voice engine the page uses (the phone's default one), the same rate,
++ * and the language of the TEXT: a Greek sentence read by an English voice is
++ * unintelligible. Spoken as navigation guidance, the way a map app does it, so
++ * music ducks for the sentence instead of stopping.
++ *
++ * It stays quiet - and the notification's own sound and buzz are all there is -
++ * in exactly the cases where speaking would be wrong or doubled:
++ *  - the phone is switched to Silent, or Do Not Disturb holds (the same two
++ *    limits AlertPoller.vibrateForOrder() keeps);
++ *  - the app is in the foreground: the open page reads it itself;
++ *  - the phone has no voice for the language (a Greek sentence is not read
++ *    in English), or no speech engine at all.
++ *
++ * Nothing here may disturb the location tracking this service exists for, so
++ * every entry point catches everything, one alert is spoken at a time (a newer
++ * one replaces an older, like the page), and the engine is always released,
++ * after the sentence or after GIVE_UP_MS, whichever comes first.
++ */
++final class AlertSpeaker {
++
++    // Longer than the longest sentence the server sends (500 characters) at the
++    // page's 0.95 rate, so only a stuck engine ever reaches it.
++    private static final long GIVE_UP_MS = 45000L;
++    private static final String UTTERANCE_ID = "vopsAlertSpeak";
++
++    private static final Handler MAIN = new Handler(Looper.getMainLooper());
++
++    // Main thread only, from here down.
++    private static TextToSpeech engine;
++    private static AudioFocusRequest focusRequest;
++    private static int generation = 0;
++
++    private AlertSpeaker() {}
++
++    /** Safe from any thread. */
++    static void speak(final Context context, final String text, final String languageTag) {
++        try {
++            final Context app = context.getApplicationContext();
++            MAIN.post(() -> {
++                try {
++                    start(app, text, languageTag);
++                } catch (Throwable e) {
++                    Logger.debug("AlertSpeaker failed: " + e.getMessage());
++                    release(app);
++                }
++            });
++        } catch (Throwable e) {
++            Logger.debug("AlertSpeaker failed: " + e.getMessage());
++        }
++    }
++
++    private static void start(final Context app, final String text, final String languageTag) {
++        release(app);
++        if (text == null || text.trim().isEmpty()) return;
++
++        String why = reasonToStayQuiet(app);
++        if (why != null) {
++            DebugLog.log(app, "alert_speak", "quiet: " + why);
++            return;
++        }
++
++        final int mine = ++generation;
++        final Locale locale = Locale.forLanguageTag(languageTag == null || languageTag.isEmpty() ? "en-US" : languageTag);
++
++        engine = new TextToSpeech(app, status -> {
++            // The engine binds asynchronously; by now a newer alert may have
++            // replaced this one, or it was given up on.
++            if (mine != generation || engine == null) return;
++            if (status != TextToSpeech.SUCCESS) {
++                DebugLog.log(app, "alert_speak", "no engine (status " + status + ")");
++                release(app);
++                return;
++            }
++            try {
++                int languageResult = engine.setLanguage(locale);
++                if (languageResult == TextToSpeech.LANG_MISSING_DATA || languageResult == TextToSpeech.LANG_NOT_SUPPORTED) {
++                    DebugLog.log(app, "alert_speak", "no voice for " + locale.toLanguageTag());
++                    release(app);
++                    return;
++                }
++                engine.setAudioAttributes(new AudioAttributes.Builder()
++                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
++                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
++                    .build());
++                engine.setSpeechRate(0.95f);
++                engine.setOnUtteranceProgressListener(new UtteranceProgressListener() {
++                    @Override public void onStart(String utteranceId) {}
++                    @Override public void onDone(String utteranceId) {
++                        DebugLog.log(app, "alert_speak", "spoken");
++                        endIfCurrent(app, mine);
++                    }
++                    @Override public void onError(String utteranceId) {
++                        DebugLog.log(app, "alert_speak", "engine error");
++                        endIfCurrent(app, mine);
++                    }
++                });
++                requestFocus(app);
++                int queued = engine.speak(text, TextToSpeech.QUEUE_FLUSH, null, UTTERANCE_ID);
++                if (queued != TextToSpeech.SUCCESS) {
++                    DebugLog.log(app, "alert_speak", "speak refused");
++                    release(app);
++                }
++            } catch (Throwable e) {
++                Logger.debug("AlertSpeaker failed: " + e.getMessage());
++                release(app);
++            }
++        });
++        MAIN.postDelayed(() -> endIfCurrent(app, mine), GIVE_UP_MS);
++    }
++
++    /** UtteranceProgressListener calls back on a binder thread. */
++    private static void endIfCurrent(final Context app, final int mine) {
++        MAIN.post(() -> {
++            if (mine == generation) release(app);
++        });
++    }
++
++    /** Stops whatever is being said and gives the engine and the audio focus back. */
++    private static void release(Context app) {
++        generation++;
++        MAIN.removeCallbacksAndMessages(null);
++        TextToSpeech old = engine;
++        engine = null;
++        if (old != null) {
++            try {
++                old.stop();
++                old.shutdown();
++            } catch (Throwable ignore) {}
++        }
++        abandonFocus(app);
++    }
++
++    /** Null when speaking is right, else why it is not (for the debug log). */
++    private static String reasonToStayQuiet(Context app) {
++        AudioManager audio = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
++        if (audio != null && audio.getRingerMode() == AudioManager.RINGER_MODE_SILENT) {
++            return "silent mode";
++        }
++        NotificationManager manager = (NotificationManager) app.getSystemService(Context.NOTIFICATION_SERVICE);
++        if (manager != null && manager.getCurrentInterruptionFilter() > NotificationManager.INTERRUPTION_FILTER_ALL) {
++            NotificationChannel channel = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
++                ? manager.getNotificationChannel(AlertPoller.CHANNEL_ID) : null;
++            if (channel == null || !channel.canBypassDnd()) return "do not disturb";
++        }
++        if (appInForeground(app)) {
++            return "app in foreground";
++        }
++        return null;
++    }
++
++    /**
++     * Whether this app has an activity in front of the user. The foreground
++     * SERVICE keeps the process at a higher importance than "cached" but not at
++     * IMPORTANCE_FOREGROUND, which is reserved for the process showing the UI.
++     */
++    private static boolean appInForeground(Context app) {
++        ActivityManager am = (ActivityManager) app.getSystemService(Context.ACTIVITY_SERVICE);
++        if (am == null) return false;
++        List<ActivityManager.RunningAppProcessInfo> processes = am.getRunningAppProcesses();
++        if (processes == null) return false;
++        for (ActivityManager.RunningAppProcessInfo info : processes) {
++            if (app.getPackageName().equals(info.processName)) {
++                return info.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND;
++            }
++        }
++        return false;
++    }
++
++    @SuppressWarnings("deprecation")
++    private static void requestFocus(Context app) {
++        AudioManager audio = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
++        if (audio == null) return;
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
++            focusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
++                .setAudioAttributes(new AudioAttributes.Builder()
++                    .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
++                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
++                    .build())
++                .build();
++            audio.requestAudioFocus(focusRequest);
++        } else {
++            audio.requestAudioFocus(null, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK);
++        }
++    }
++
++    @SuppressWarnings("deprecation")
++    private static void abandonFocus(Context app) {
++        AudioManager audio = (AudioManager) app.getSystemService(Context.AUDIO_SERVICE);
++        if (audio == null) return;
++        try {
++            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
++                if (focusRequest != null) audio.abandonAudioFocusRequest(focusRequest);
++                focusRequest = null;
++            } else {
++                audio.abandonAudioFocus(null);
++            }
++        } catch (Throwable ignore) {}
 +    }
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java

@@ -3289,4 +3289,22 @@ CREATE TABLE IF NOT EXISTS `mission_map_point_routes` (
     FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- THE WAIT BEFORE AN ARRIVAL IS RECORDED BY THE GPS ALONE (v3.381.0). One row
+-- per person per target while they have been standing at it; see
+-- checkArrivalPrompts().
+CREATE TABLE IF NOT EXISTS `mission_arrival_dwell` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `target_kind` ENUM('dispatch','waypoint','sector') NOT NULL,
+    `target_id` INT UNSIGNED NOT NULL,
+    `first_hit_at` DATETIME NOT NULL,
+    `last_hit_at` DATETIME NOT NULL,
+    `hits` SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+    UNIQUE KEY `uk_arrival_dwell` (`target_kind`, `target_id`, `user_id`),
+    INDEX `idx_arrival_dwell_user` (`mission_id`, `user_id`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

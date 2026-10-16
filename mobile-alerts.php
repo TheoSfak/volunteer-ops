@@ -196,8 +196,9 @@ function mobileAlertOp(?array $ref): ?string {
 }
 
 // What the app understands beyond v3.332.0: 2 = a button labelled per alert
-// (the «Έφτασα» of an arrival question). Sent by the app itself; an older
-// app sends nothing and gets exactly what it got before.
+// (the «Έφτασα» of an arrival question); 3 = reads an alert aloud itself
+// (`speak`, v3.383.0). Sent by the app itself; an older app sends nothing and
+// gets exactly what it got before.
 $appLevel = (int) ($_GET['vops'] ?? 0);
 $lang = getUserLanguage($userId);
 
@@ -229,6 +230,9 @@ foreach ($rows as $row) {
         'urgent' => is_array($data) && isset($data['bannerMission']),
         'url' => $path,
         'ack' => mobileAlertAck($ref, $userId, $lang, $appLevel),
+        // {text, lang}: what to say aloud with the screen off (a voice
+        // announcement, an arrival the GPS recorded). Null for everything else.
+        'speak' => mobileAlertSpeech($data, (string) $row['message'], $appLevel),
     ], fn($v) => $v !== null);
 }
 

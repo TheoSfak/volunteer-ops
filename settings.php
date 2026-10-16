@@ -53,6 +53,9 @@ $defaults = [
     'war_room_max_ping_speed_kmh' => '25',
     'war_room_max_ping_speed_kmh_vehicle' => '140',
     'war_room_gps_smoothing' => '1',
+    // The GPS records «Έφτασα» itself (checkArrivalPrompts(), v3.381.0). On: the
+    // Action Room was asked for it; off puts back the «Έφτασες;» question.
+    'arrival_auto_enabled' => '1',
     'war_room_low_battery_pct' => '60',
     'war_room_max_shift_minutes' => '480',
     'war_room_grid_max_size_m' => '900',
@@ -517,6 +520,7 @@ $actionRoomFields = [
     'war_room_auto_ping_seconds', 'war_room_auto_ping_high_accuracy',
     'war_room_native_sampling', 'war_room_native_full_tracking',
     'war_room_max_ping_accuracy_m', 'war_room_max_ping_speed_kmh', 'war_room_max_ping_speed_kmh_vehicle', 'war_room_gps_smoothing',
+    'arrival_auto_enabled',
     'war_room_low_battery_pct', 'war_room_max_shift_minutes',
     'vitals_enabled', 'vitals_sample_seconds', 'vitals_elevated_pct', 'vitals_critical_pct',
     'vitals_low_bpm', 'vitals_reference_age', 'vitals_stale_seconds', 'vitals_retention_days',
@@ -547,7 +551,7 @@ if (isPost()) {
         foreach ($fieldsToUpdate as $field) {
                     $value = isset($_POST[$field]) ? $_POST[$field] : '';
 
-                    if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'osm_layer_enabled', 'triage_expectant_enabled', 'triage_trts_suggestion_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy', 'war_room_gps_smoothing', 'war_room_native_sampling', 'war_room_native_full_tracking'])) {
+                    if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'osm_layer_enabled', 'triage_expectant_enabled', 'triage_trts_suggestion_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy', 'war_room_gps_smoothing', 'arrival_auto_enabled', 'war_room_native_sampling', 'war_room_native_full_tracking'])) {
                         $value = isset($_POST[$field]) ? '1' : '0';
                     }
 
@@ -2300,6 +2304,14 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                             Εξομάλυνση θέσης (φίλτρο Kalman)
                         </label>
                         <div><small class="text-muted">Ένας εθελοντής που στέκεται ακίνητος στέλνει θέση που «χορεύει» 10–40 μ. από στίγμα σε στίγμα. Με την εξομάλυνση, όσο το κινητό δείχνει ότι στέκεται (από την ταχύτητά του και από το αν τα τελευταία στίγματα προχωρούν σταθερά προς μία κατεύθυνση), τα διαδοχικά στίγματα σταθμίζονται μεταξύ τους και η πινέζα, ο «πλησιέστερος», οι αποστάσεις και ο Βοηθός παίρνουν τη σταθερότερη θέση· μόλις κινηθεί, ακόμα και αργά, περνά σχεδόν αυτούσιο το νέο στίγμα, ώστε η πινέζα να μη μένει πίσω. Σε κάθε περίπτωση η θέση δεν απομακρύνεται ποτέ από το στίγμα του κινητού περισσότερο από το μισό της ακρίβειας που δηλώνει. Το ακατέργαστο στίγμα της συσκευής κρατιέται πάντα ξεχωριστά και η <strong>Ποιότητα GPS</strong> συγκρίνει τα δύο με σημείο αναφοράς. Κλείστε το μόνο αν θέλετε να βλέπετε ό,τι ακριβώς στέλνει το κινητό.</small></div>
+                    </div>
+                    <div class="form-check mb-3">
+                        <input class="form-check-input" type="checkbox" name="arrival_auto_enabled" id="arrivalAutoEnabled"
+                               <?= ($settings['arrival_auto_enabled'] ?? '1') === '1' ? 'checked' : '' ?>>
+                        <label class="form-check-label" for="arrivalAutoEnabled">
+                            Αυτόματη άφιξη: όταν το στίγμα φτάσει στο σημείο της εντολής, η άφιξη καταγράφεται μόνη της
+                        </label>
+                        <div><small class="text-muted">Όταν ένας εθελοντής βρεθεί σε ακτίνα 30 μ. από το σημείο ή μέσα στην περιοχή που στάλθηκε η ομάδα του, ή στο επόμενο σημείο της πορείας του, η άφιξη της ομάδας <strong>καταγράφεται χωρίς πάτημα</strong>, ο συντονιστής ειδοποιείται με την ένδειξη «αυτόματα, από το GPS» και ο εθελοντής ακούει δυνατά «Έφτασες στο …». Μετράει μόνο στίγμα με ακρίβεια ±30 μ. ή καλύτερη. Ένα όχημα που περνά γρήγορα δεν μετράει (αν το κινητό δίνει ταχύτητα πάνω από 2,5 μ./δλ.). Αν το κινητό δεν δίνει ταχύτητα, χρειάζονται δύο καλά στίγματα με διαφορά τουλάχιστον 10 δλ. και κανένα στίγμα εκτός σημείου ανάμεσά τους· με τον κύκλο των <?= (int) ($settings['war_room_auto_ping_seconds'] ?? 180) ?> δλ. που έχετε τώρα, αυτό σημαίνει ότι η άφιξη μπορεί να καταγραφεί μέχρι τόσο αργότερα. Σε στίγμα ±30–50 μ. ρωτά όπως πριν «Έφτασες;». Κλειστό: ρωτά πάντα και δεν καταγράφει τίποτα μόνο του. Σε τομέα αναζήτησης, όταν η ομάδα τον έχει παραλάβει και βρεθεί μέσα του, περνά αυτόματα σε «Σε εξέλιξη» (το «Έφτασα — Έναρξη Έρευνας»)· τομέας δεν ρωτά ποτέ «Έφτασες;». Δεν καταγράφονται αυτόματα το «Ξεκινάω» και το «Ολοκληρώθηκε».</small></div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Μέγιστη Αποδεκτή Αβεβαιότητα Στίγματος (μ.)</label>

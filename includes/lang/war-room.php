@@ -1119,6 +1119,7 @@ return [
         'nav.walk' => 'Με τα πόδια',
         // «Έφτασες;» in the popup, and the arrow screen («Πυξίδα»).
         'popup.type.arrive' => 'Έφτασες;',
+        'popup.type.arrived_auto' => 'Έφτασες',
         'popup.btn.arrived' => 'Έφτασα',
         'popup.btn.not_yet' => 'Όχι ακόμα',
         'popup.step.arrive_confirm' => 'Επιβεβαίωση άφιξης',
@@ -1324,6 +1325,7 @@ return [
         'route.order_summary_untitled' => 'Πορεία {count} σημείων',
         'route.notify_arrival_title' => '📍 Άφιξη σε σημείο πορείας',
         'route.notify_arrival_message' => 'Η ομάδα {team} έφτασε στο σημείο «{label}» της αποστολής «{mission}».',
+        'route.notify_arrival_auto_message' => 'Η ομάδα {team} έφτασε στο σημείο «{label}» της αποστολής «{mission}» (αυτόματα, από το GPS).',
         'route.notify_departure_title' => '🚶 Εκκίνηση για σημείο πορείας',
         'route.notify_departure_message' => 'Η ομάδα {team} ξεκίνησε για το σημείο «{label}» της αποστολής «{mission}».',
         'route.notify_waypoint_completed_title' => '✅ Ολοκληρώθηκε σημείο πορείας',
@@ -1532,6 +1534,20 @@ return [
         'arrival.prompt_area' => 'Είσαι μέσα στην περιοχή «{label}».',
         'arrival.prompt_area_nolabel' => 'Είσαι μέσα στην περιοχή που σου στάλθηκε.',
         'arrival.prompt_waypoint' => 'Είσαι {m} μ. από το σημείο {seq} της πορείας «{route}».',
+        // «Έφτασες στο …» — said when the GPS recorded the arrival itself
+        // (checkArrivalPrompts(), v3.381.0). The page reads the message aloud,
+        // so each one is a whole sentence. The suffix goes after the message
+        // command is sent, to say it was a measurement and not a report.
+        'arrival.auto_title' => '✓ Έφτασες',
+        'arrival.auto_point' => 'Έφτασες στο σημείο «{label}».',
+        'arrival.auto_point_nolabel' => 'Έφτασες στο σημείο που σου στάλθηκε.',
+        'arrival.auto_area' => 'Έφτασες στην περιοχή «{label}».',
+        'arrival.auto_area_nolabel' => 'Έφτασες στην περιοχή που σου στάλθηκε.',
+        'arrival.auto_waypoint' => 'Έφτασες στο σημείο {seq} της πορείας «{route}».',
+        'arrival.auto_sector' => 'Έφτασες στον τομέα «{label}». Η έρευνα ξεκίνησε.',
+        'arrival.auto_suffix' => ' (αυτόματα, από το GPS)',
+        // What the status log of a sector shows against a step the GPS made.
+        'sector.auto_note' => 'Αυτόματα, από το GPS',
 
         // mission-chat.php
         'chat.no_room_access' => 'Δεν έχετε πρόσβαση σε αυτό το chat.',
@@ -3816,6 +3832,7 @@ return [
         'nav.drive' => 'Drive',
         'nav.walk' => 'Walk',
         'popup.type.arrive' => 'Have you arrived?',
+        'popup.type.arrived_auto' => 'You have arrived',
         'popup.btn.arrived' => "I'm here",
         'popup.btn.not_yet' => 'Not yet',
         'popup.step.arrive_confirm' => 'Confirm arrival',
@@ -4021,6 +4038,7 @@ return [
         'route.order_summary_untitled' => 'Route with {count} stops',
         'route.notify_arrival_title' => '📍 Arrival at route stop',
         'route.notify_arrival_message' => 'Team {team} arrived at stop "{label}" of mission "{mission}".',
+        'route.notify_arrival_auto_message' => 'Team {team} arrived at stop "{label}" of mission "{mission}" (automatic, from GPS).',
         'route.notify_departure_title' => '🚶 Departed for route stop',
         'route.notify_departure_message' => 'Team {team} departed for stop "{label}" of mission "{mission}".',
         'route.notify_waypoint_completed_title' => '✅ Route stop completed',
@@ -4216,6 +4234,15 @@ return [
         'arrival.prompt_area' => 'You are inside the area «{label}».',
         'arrival.prompt_area_nolabel' => 'You are inside the area you were sent to.',
         'arrival.prompt_waypoint' => 'You are {m} m from point {seq} of the route «{route}».',
+        'arrival.auto_title' => '✓ You have arrived',
+        'arrival.auto_point' => 'You have arrived at the point «{label}».',
+        'arrival.auto_point_nolabel' => 'You have arrived at the point you were sent to.',
+        'arrival.auto_area' => 'You have arrived in the area «{label}».',
+        'arrival.auto_area_nolabel' => 'You have arrived in the area you were sent to.',
+        'arrival.auto_waypoint' => 'You have arrived at point {seq} of the route «{route}».',
+        'arrival.auto_sector' => 'You have arrived in sector «{label}». The search has started.',
+        'arrival.auto_suffix' => ' (automatic, from GPS)',
+        'sector.auto_note' => 'Automatic, from GPS',
 
         'chat.no_room_access' => 'You do not have access to this chat.',
         'chat.empty_message' => 'The message cannot be empty.',

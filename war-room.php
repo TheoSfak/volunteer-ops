@@ -14926,6 +14926,20 @@ function opModelFromNotice(key, b) {
             card: 'myTasksCard', cardLabel: t('popup.btn.show_order'),
         };
     }
+    // «Έφτασες στο …» (v3.381.0): the server recorded this person's arrival
+    // from the GPS (recordAutoArrival()). The notification carries
+    // alarmStyle 'speak', so opArrive() reads the message aloud; the replay
+    // button is for when the engine was drowned out by the car.
+    if (b.popup.info === 'mission_arrived_auto') {
+        return {
+            key: key, kind: 'info', id: 0, type: 'arrived_auto',
+            cat: 'move', icon: 'bi-geo-alt-fill',
+            title: t('popup.type.arrived_auto'),
+            text: b.message, meta: '',
+            acked: false, outstanding: true, steps: [t('popup.step.seen')], step: 0, stepTimes: {},
+            hint: '', speakText: b.message, target: null, card: 'myTasksCard', cardLabel: t('popup.btn.show_order'),
+        };
+    }
     if (b.popup.info === 'mission_order_withdrawn') {
         // The order itself has already left this page — deleted, or no longer
         // this team's — so there is nothing to show beyond the words.
@@ -15248,7 +15262,7 @@ function opArrivalCardHtml(m, i, n) {
             ${m.hint ? `<div class="wr-op-hint"><i class="bi bi-info-circle me-1"></i>${escapeHtml(m.hint)}</div>` : ''}
             <div class="wr-op-actions mt-2">
                 <button type="button" class="btn btn-primary w-100 fw-semibold" data-op="${op}"><i class="bi ${icon} me-1"></i>${escapeHtml(label)}</button>
-                ${m.type === 'speak' ? opReplayBtnHtml() : ''}
+                ${m.type === 'speak' || m.type === 'arrived_auto' ? opReplayBtnHtml() : ''}
                 ${opCompassBtnHtml(m)}
                 ${opNoticeCardBtnHtml(m)}
                 ${m.kind === 'arrive' ? '' : `<button type="button" class="btn btn-outline-secondary w-100 mt-2" data-op="min">${escapeHtml(t('popup.btn.later'))}</button>`}
@@ -15285,7 +15299,7 @@ function opReviewCardHtml(m, i, n) {
             <div class="wr-op-text">${escapeHtml(m.text)}</div>
             <div class="wr-op-meta">${escapeHtml(m.meta)}</div>
             ${dispatchIncidentHtml(m.casualty)}
-            ${m.type === 'speak' ? opReplayBtnHtml() : ''}
+            ${m.type === 'speak' || m.type === 'arrived_auto' ? opReplayBtnHtml() : ''}
             <div class="wr-op-steps">${steps}</div>
             ${m.kind === 'arrive' ? '' : opCompassBtnHtml(m)}
             ${m.hint ? `<div class="wr-op-hint mt-0"><i class="bi bi-info-circle me-1"></i>${escapeHtml(m.hint)}</div>` : ''}

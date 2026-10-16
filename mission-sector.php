@@ -44,50 +44,8 @@ function notifySectorAssigned(int $missionId, string $missionTitle, int $teamId,
     }
 }
 
-/**
- * Notify "the other side" of a sector status change — command staff when a
- * field team self-reported, or the assigned team when command staff made
- * the change — so whoever DIDN'T cause it finds out. $newStatus is passed
- * explicitly rather than read off a $sector row that may already be stale
- * by the time this runs.
- */
-function notifySectorStatusChanged(int $missionId, string $missionTitle, ?int $responsibleUserId, array $sector, string $newStatus, int $actorId, bool $actorIsAdmin, string $actorName = ''): void {
-    if ($actorIsAdmin) {
-        if (!$sector['team_id']) {
-            return;
-        }
-        $recipientIds = actionRoomNotifyRecipientIds($missionId, (int) $sector['team_id'], $actorId);
-    } else {
-        $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $actorId);
-    }
-    if (empty($recipientIds)) {
-        return;
-    }
-
-    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-    $langByUserId = getUserLanguages($recipientIds);
-    foreach ($recipientIds as $recipientId) {
-        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
-        $message = t('sector.status_changed_notify_message', [
-            'label'  => $sector['label'],
-            'status' => sectorStatusLabel($newStatus, $lang),
-            'name'   => $actorName,
-        ], $lang);
-        $pushData = [
-            'url' => $warRoomUrl,
-            'tag' => 'sector-status-mission-' . $missionId,
-            'bannerMission' => $missionId,
-        ];
-        // Command sending a finished sector back for a recheck is a new order
-        // to the team, not news about one — so it opens as the order popup,
-        // like the assignment did (see war-room.php's banners). Every other
-        // status change stays a ticker line.
-        if ($actorIsAdmin && $newStatus === 'needs_recheck') {
-            $pushData['sectorId'] = (int) $sector['id'];
-        }
-        sendNotification($recipientId, t('sector.status_changed_notify_title', ['mission' => $missionTitle], $lang), $message, 'info', 'mission_sector_status', $pushData);
-    }
-}
+// notifySectorStatusChanged() moved to includes/functions-warroom.php (v3.382.0),
+// next to recordSectorArrivalByGps(), which needs it too.
 
 /**
  * Every mutating action below ends by reloading and returning the current

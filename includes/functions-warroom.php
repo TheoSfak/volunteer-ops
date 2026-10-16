@@ -1348,6 +1348,123 @@ function sectorSelfReportNextStatus(string $currentStatus): ?string {
 }
 
 /**
+ * Notify "the other side" of a sector status change — command staff when a
+ * field team self-reported, or the assigned team when command staff made
+ * the change — so whoever DIDN'T cause it finds out. $newStatus is passed
+ * explicitly rather than read off a $sector row that may already be stale
+ * by the time this runs.
+ *
+ * Moved here from mission-sector.php (v3.382.0) so the GPS can report a sector
+ * the same way the team's button does. $via is ARRIVAL_AUTO_VIA when the GPS
+ * made the change: command is told so, because it is a measurement and not a
+ * report.
+ */
+function notifySectorStatusChanged(int $missionId, string $missionTitle, ?int $responsibleUserId, array $sector, string $newStatus, int $actorId, bool $actorIsAdmin, string $actorName = '', ?string $via = null): void {
+    if ($actorIsAdmin) {
+        if (!$sector['team_id']) {
+            return;
+        }
+        $recipientIds = actionRoomNotifyRecipientIds($missionId, (int) $sector['team_id'], $actorId);
+    } else {
+        $recipientIds = getMissionCommandStaffIds($missionId, $responsibleUserId, $actorId);
+    }
+    if (empty($recipientIds)) {
+        return;
+    }
+
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $langByUserId = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        $message = t('sector.status_changed_notify_message', [
+            'label'  => $sector['label'],
+            'status' => sectorStatusLabel($newStatus, $lang),
+            'name'   => $actorName,
+        ], $lang);
+        if ($via === ARRIVAL_AUTO_VIA) {
+            $message .= t('arrival.auto_suffix', [], $lang);
+        }
+        $pushData = [
+            'url' => $warRoomUrl,
+            'tag' => 'sector-status-mission-' . $missionId,
+            'bannerMission' => $missionId,
+        ];
+        // Command sending a finished sector back for a recheck is a new order
+        // to the team, not news about one — so it opens as the order popup,
+        // like the assignment did (see war-room.php's banners). Every other
+        // status change stays a ticker line.
+        if ($actorIsAdmin && $newStatus === 'needs_recheck') {
+            $pushData['sectorId'] = (int) $sector['id'];
+        }
+        sendNotification($recipientId, t('sector.status_changed_notify_title', ['mission' => $missionTitle], $lang), $message, 'info', 'mission_sector_status', $pushData);
+    }
+}
+
+/**
+ * A team standing in its sector: «Έφτασα — Έναρξη Έρευνας» recorded by the
+ * GPS (v3.382.0). The self-report path of mission-sector.php's `status`
+ * action — an optimistic UPDATE that pins the status moved FROM, a row in
+ * mission_sector_status_log, the audit row, «Δεν μπορώ» resolved, and command
+ * told — for a team member, with the one difference that a team which never
+ * pressed «Αναχώρηση» still has arrived: assigned -> en_route is written first,
+ * the way recordDispatchProgress() backfills a departure. Only the final step
+ * is announced to command; the backfilled one is not news.
+ *
+ * Only a sector the team has RECEIVED (the page refuses to advance one that is
+ * still waiting for «Ελήφθη») and that is assigned or on its way. A sector
+ * sent back for a recheck is resumed by the team, and one already being
+ * searched or finished has nothing left to arrive at.
+ *
+ * Returns whether THIS call moved it, so only the person whose fix did is told.
+ */
+function recordSectorArrivalByGps(array $mission, int $sectorId, int $userId, string $userName, string $via = ARRIVAL_AUTO_VIA): bool {
+    $missionId = (int) $mission['id'];
+    $sector = dbFetchOne(
+        "SELECT id, team_id, status, acknowledged_at, label FROM mission_search_sectors WHERE id = ? AND mission_id = ?",
+        [$sectorId, $missionId]
+    );
+    if (!$sector || !$sector['team_id'] || (int) $sector['team_id'] !== getUserTeamIdForMission($missionId, $userId)) {
+        return false;
+    }
+    $steps = [];
+    if ($sector['status'] === 'assigned' && $sector['acknowledged_at']) {
+        $steps = [['assigned', 'en_route'], ['en_route', 'in_progress']];
+    } elseif ($sector['status'] === 'en_route') {
+        $steps = [['en_route', 'in_progress']];
+    }
+    $moved = false;
+    foreach ($steps as [$from, $to]) {
+        // The same guard as the page: two people (or a person and a coordinator)
+        // moving it at once cannot both win.
+        $updated = dbExecute(
+            "UPDATE mission_search_sectors SET status = ?, status_updated_at = NOW(), status_updated_by = ? WHERE id = ? AND status = ?",
+            [$to, $userId, $sectorId, $from]
+        );
+        if ($updated === 0) {
+            return false;
+        }
+        dbInsert(
+            "INSERT INTO mission_sector_status_log (sector_id, from_status, to_status, team_id, user_id, note, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
+            [$sectorId, $from, $to, $sector['team_id'], $userId, t('sector.auto_note', [], DEFAULT_LANGUAGE)]
+        );
+        logAudit('update_mission_sector_status', 'mission_search_sectors', $sectorId, null, [
+            'mission_id' => $missionId, 'from' => $from, 'to' => $to,
+        ] + receiptAuditExtra($userId, $via));
+        $moved = true;
+    }
+    if (!$moved) {
+        return false;
+    }
+    // «Δεν μπορώ» on this sector: the team moving it on itself means they could after all.
+    resolveOrderDeclineOnProgress('sector', $sectorId, 't' . (int) $sector['team_id'], $userId);
+    notifySectorStatusChanged(
+        $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null,
+        $sector, 'in_progress', $userId, false, $userName, $via
+    );
+    return true;
+}
+
+/**
  * War Room "Εντολή Πορείας": load routes visible to $userId — every route of
  * the mission for command staff (the live admin panel needs the full
  * picture, including closed ones), or just their own team's route(s) for an
@@ -3645,6 +3762,46 @@ function notificationPopupRef($data): ?array {
     return null;
 }
 
+/** The longest text a 'speak' order may carry (war-room.php truncates to this too). */
+const MOBILE_ALERT_SPEAK_MAX_CHARS = 500;
+/** The first app level (the `vops` it sends) that reads an alert aloud itself. */
+const MOBILE_ALERT_SPEAK_APP_LEVEL = 3;
+
+/**
+ * What the Android app's background service should say aloud for a
+ * notification (v3.383.0), or null for nothing. The page speaks inside the app
+ * through the phone's TextToSpeech (speakAnnouncement()), but a page whose
+ * screen is off is frozen and says nothing; the service that polls
+ * mobile-alerts.php is awake, so it speaks instead.
+ *
+ * Exactly the notifications the page would read out: alarmStyle 'speak' (a
+ * voice announcement, «Έφτασες στο …» recorded by the GPS) AND addressed to
+ * this person — notificationPopupRef() is null for a bystander admin's FYI
+ * copy of an announcement, which the page does not speak either. Only for an
+ * app that says it can ($appLevel), so an older one is sent exactly what it
+ * was before.
+ *
+ * `lang` is the language of the TEXT, chosen by its letters like the page's
+ * announcementLang(), never the account's setting: a Greek sentence read by an
+ * English voice is not accented, it is unintelligible.
+ */
+function mobileAlertSpeech($data, string $message, int $appLevel): ?array {
+    if ($appLevel < MOBILE_ALERT_SPEAK_APP_LEVEL || !is_array($data) || ($data['alarmStyle'] ?? null) !== 'speak') {
+        return null;
+    }
+    if (notificationPopupRef($data) === null) {
+        return null;
+    }
+    $text = trim(mb_substr($message, 0, MOBILE_ALERT_SPEAK_MAX_CHARS));
+    if ($text === '') {
+        return null;
+    }
+    return [
+        'text' => $text,
+        'lang' => preg_match('/[\x{0370}-\x{03FF}\x{1F00}-\x{1FFF}]/u', $text) ? 'el-GR' : 'en-US',
+    ];
+}
+
 function receiptAuditExtra(int $userId, ?string $via): array {
     return $via === null ? [] : ['user_id' => $userId, 'via' => $via];
 }
@@ -3862,7 +4019,7 @@ function receiveMissionDispatch(array $mission, int $dispatchId, int $userId, st
  * Mirrors the admin/shift-leader recipient resolution in mission-chat.php's
  * notifyMissionTeamChat() for the non-admin-sender branch.
  */
-function notifyDispatchArrival(int $missionId, string $missionTitle, ?int $responsibleUserId, array $dispatch, ?string $teamLabel, string $ackerName, int $ackerId): void {
+function notifyDispatchArrival(int $missionId, string $missionTitle, ?int $responsibleUserId, array $dispatch, ?string $teamLabel, string $ackerName, int $ackerId, ?string $via = null): void {
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
     $labelPart = $dispatch['label'] ? ' «' . $dispatch['label'] . '»' : '';
 
@@ -3874,6 +4031,11 @@ function notifyDispatchArrival(int $missionId, string $missionTitle, ?int $respo
         $kind = t($dispatch['type'] === 'point' ? 'dispatch.kind_at_point' : 'dispatch.kind_at_area', [], $lang);
         $who = $teamLabel ? t('dispatch.team_label_prefix', ['team' => $teamLabel], $lang) : $ackerName;
         $message = t('dispatch.arrival_message', ['who' => $who, 'kind' => $kind, 'label_part' => $labelPart, 'mission' => $missionTitle], $lang);
+        // Recorded by the GPS, not stated by anyone (v3.381.0): command is told
+        // which, because the first is a measurement and the second a report.
+        if ($via === ARRIVAL_AUTO_VIA) {
+            $message .= t('arrival.auto_suffix', [], $lang);
+        }
         sendNotification($recipientId, t('dispatch.arrival_notify_title', [], $lang), $message, 'success', 'mission_dispatch_ack', [
             'url' => $warRoomUrl,
             'tag' => 'dispatch-ack-mission-' . $missionId,
@@ -4004,7 +4166,7 @@ function advanceMissionDispatch(array $mission, int $dispatchId, int $userId, st
         // "done", not "arrived" and then "done".
         if (in_array($step, $recorded, true) && !($step === 'arrive' && $legacyArrived)) {
             if ($step === 'arrive') {
-                notifyDispatchArrival($missionId, $mission['title'], $responsibleUserId, $dispatch, $teamLabel, $userName, $userId);
+                notifyDispatchArrival($missionId, $mission['title'], $responsibleUserId, $dispatch, $teamLabel, $userName, $userId, $via);
             } else {
                 notifyDispatchStep($step, $missionId, $mission['title'], $responsibleUserId, $dispatch, $teamLabel, $userName, $userId, $note);
             }
@@ -4413,7 +4575,9 @@ function recordRouteWaypointArrival(array $mission, array $wp, int $userId, ?flo
     notifyCommandStaffBanner(
         $missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId,
         'mission_route_arrival', 'route.notify_arrival_title', [],
-        'route.notify_arrival_message', ['team' => $teamLbl, 'label' => $label, 'mission' => $mission['title']]
+        // Recorded by the GPS (v3.381.0): its own wording says so.
+        $via === ARRIVAL_AUTO_VIA ? 'route.notify_arrival_auto_message' : 'route.notify_arrival_message',
+        ['team' => $teamLbl, 'label' => $label, 'mission' => $mission['title']]
     );
     return true;
 }
@@ -5328,14 +5492,17 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
     }
 
     // «Έφτασες;» — a fix at the place this person's team was sent to asks them
-    // to confirm it (checkArrivalPrompts()). From the smoothed estimate, the
-    // position the command post sees, and with the same best-effort treatment
-    // as the geofence above.
+    // to confirm it, or, when it is accurate enough, records the arrival itself
+    // (checkArrivalPrompts()). From the smoothed estimate, the position the
+    // command post sees, and with the same best-effort treatment as the
+    // geofence above. The speed is the device's own: it is what tells a person
+    // arriving from a car going past.
     try {
         checkArrivalPrompts(
             (int) $pr['mission_id'], $userId, $pingTeamId,
             (float) $estimate['lat'], (float) $estimate['lng'],
-            $estimate['acc'] !== null ? (float) $estimate['acc'] : null, $fixAgeSeconds
+            $estimate['acc'] !== null ? (float) $estimate['acc'] : null, $fixAgeSeconds,
+            $speedMps
         );
     } catch (Throwable $e) {
         // Non-critical — the ping itself already succeeded.
@@ -5466,27 +5633,83 @@ const ARRIVAL_PROMPT_MAX_ACCURACY_M = 50;
 /** Older than this (the app's outage buffer replaying) is history, not a position. */
 const ARRIVAL_PROMPT_MAX_FIX_AGE_S = 120;
 
+// ── Arrival recorded by the GPS alone (v3.381.0) ────────────────────────────
+//
+// Between 30 and 50 m of accuracy a fix still cannot say which side of the
+// 30 m line someone is on, so it only asks («Έφτασες;», above). At 30 m or
+// better it can, and then it records the arrival itself — through the same
+// functions «Έφτασα» calls, tagged ARRIVAL_AUTO_VIA so the record, the audit
+// row and the message to command all say it was a measurement.
+//
+// The one thing the GPS cannot tell apart from arriving is going past: a car
+// at 30 m of a point on the road is as "there" as a person standing at it.
+// What separates them is speed, when the device reports one, and otherwise
+// time — a second good fix a few seconds after the first, with no fix away
+// from the place in between.
+/** Good enough to place someone on one side of the 30 m line. */
+const ARRIVAL_AUTO_MAX_ACCURACY_M = 30;
+/** Faster than a jog is a vehicle going by, not someone arriving. */
+const ARRIVAL_AUTO_MAX_SPEED_MPS = 2.5;
+/** With no speed to go on: how long the first good fix must be held by a second. */
+const ARRIVAL_AUTO_MIN_DWELL_S = 10;
+/** What `via` says on the audit row of an arrival the GPS recorded. */
+const ARRIVAL_AUTO_VIA = 'auto_gps';
+
 /**
- * «Έφτασες;» (v3.333.0). Called from recordVolunteerPing() on every fix, like
- * checkRestrictedAreaBreach() above: when the fix puts this person at the place
- * their team was sent — within ARRIVAL_PROMPT_RADIUS_M of a dispatch point,
- * inside a dispatch area, or within the radius of the next point of a route
- * they are on — they are asked, once, whether they have arrived. On the
- * Android app that is a notification with an «Έφτασα» button
- * (mobile-alerts.php / mobile-order-ack.php), on an open page a popup.
- *
- * Nothing is ever recorded on anyone's behalf: arrival is a team step the
- * command post reads as a statement, and a GPS fix is not one. This only asks.
- *
- * Asked once per person per target — mission_arrival_prompts' unique key, and
- * INSERT IGNORE decides who asks, so two fixes landing together cannot both
- * notify. Not asked when the team has already arrived, or on a fix too vague
- * or too old to place someone within 30 m.
+ * Whether the GPS may record an arrival by itself (settings:
+ * arrival_auto_enabled). On unless somebody has switched it off, so a site that
+ * never opened the settings page gets the behaviour the Action Room was asked
+ * for. Off, checkArrivalPrompts() only asks «Έφτασες;», exactly as it did in
+ * v3.333.0. Read from the table each time: it is one indexed row, and a
+ * coordinator who flips the switch mid-operation means from the next fix.
  */
-function checkArrivalPrompts(int $missionId, int $userId, ?int $teamId, float $lat, float $lng, ?float $accuracy, int $fixAgeSeconds): void {
+function arrivalAutoEnabled(): bool {
+    return (string) dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = 'arrival_auto_enabled'") !== '0';
+}
+
+/**
+ * How long a first good fix stays the start of a stay. The phones report every
+ * war_room_auto_ping_seconds (180 by default), so the second fix of a real
+ * stay can be that far behind the first; two cadences and a margin is what
+ * keeps a slow-reporting site from never confirming anything.
+ */
+function arrivalAutoWindowSeconds(): int {
+    return max(120, 2 * (int) getSetting('war_room_auto_ping_seconds', '180') + 30);
+}
+
+/**
+ * «Έφτασες;» (v3.333.0), and since v3.381.0 the arrival itself. Called from
+ * recordVolunteerPing() on every fix, like checkRestrictedAreaBreach() above:
+ * when the fix puts this person at the place their team was sent — within
+ * ARRIVAL_PROMPT_RADIUS_M of a dispatch point, inside a dispatch area, or
+ * within the radius of the next point of a route they are on — then:
+ *
+ *   · arrival_auto_enabled off, or a fix too vague for the 30 m line
+ *     (ARRIVAL_AUTO_MAX_ACCURACY_M): they are asked, once, whether they have
+ *     arrived. On the Android app that is a notification with an «Έφτασα»
+ *     button (mobile-alerts.php / mobile-order-ack.php), on an open page a popup.
+ *     Nothing is recorded on anyone's behalf: a fix that vague is not a statement.
+ *   · on, and the fix is accurate: going faster than ARRIVAL_AUTO_MAX_SPEED_MPS
+ *     is a vehicle going past — neither asked nor recorded. A device that
+ *     reports a speed at or under it is recorded at once. A device that
+ *     reports none is recorded on a second accurate fix at least
+ *     ARRIVAL_AUTO_MIN_DWELL_S after the first (mission_arrival_dwell), and a
+ *     fix away from the place in between starts the wait again.
+ *
+ * A search SECTOR (v3.382.0) is the one place with no question: only on, only
+ * on a fix sure enough for the 30 m line, and the "arrival" is the step the
+ * page calls «Έφτασα — Έναρξη Έρευνας» — recordSectorArrivalByGps().
+ *
+ * The question is asked once per person per target — mission_arrival_prompts'
+ * unique key, and INSERT IGNORE decides who asks, so two fixes landing together
+ * cannot both notify. Neither happens when the team has already arrived, said
+ * «Δεν μπορώ», or on a fix too vague or too old to place someone within 50 m.
+ */
+function checkArrivalPrompts(int $missionId, int $userId, ?int $teamId, float $lat, float $lng, ?float $accuracy, int $fixAgeSeconds, ?float $speedMps = null): void {
     if ($accuracy === null || $accuracy > ARRIVAL_PROMPT_MAX_ACCURACY_M || $fixAgeSeconds > ARRIVAL_PROMPT_MAX_FIX_AGE_S) {
         return;
     }
+    $auto = arrivalAutoEnabled();
     $hits = [];
 
     // Dispatches for this person's team (or for everyone) the team has not
@@ -5499,14 +5722,12 @@ function checkArrivalPrompts(int $missionId, int $userId, ?int $teamId, float $l
           WHERE d.mission_id = ?
             AND (d.team_id IS NULL OR d.team_id = ?)
             AND p.arrived_at IS NULL AND p.completed_at IS NULL
-            AND NOT EXISTS (SELECT 1 FROM mission_arrival_prompts ap
-                             WHERE ap.target_kind = 'dispatch' AND ap.target_id = d.id AND ap.user_id = ?)
             AND NOT EXISTS (SELECT 1 FROM mission_dispatch_acks a
                              WHERE a.dispatch_id = d.id AND " . ($teamId ? "a.team_id = ?" : "a.user_id = ? AND a.team_id IS NULL") . ")
             -- A team that said «Δεν μπορώ» is not asked whether it got there.
             AND NOT EXISTS (SELECT 1 FROM mission_order_declines od
                              WHERE od.target_kind = 'dispatch' AND od.target_id = d.id AND od.scope_key = ? AND od.active = 1)",
-        [dispatchProgressScopeKey($teamId, $userId), $missionId, $teamId ?: 0, $userId, $teamId ?: $userId, dispatchProgressScopeKey($teamId, $userId)]
+        [dispatchProgressScopeKey($teamId, $userId), $missionId, $teamId ?: 0, $teamId ?: $userId, dispatchProgressScopeKey($teamId, $userId)]
     );
     foreach ($dispatches as $d) {
         $geo = json_decode((string) $d['geo'], true);
@@ -5550,16 +5771,196 @@ function checkArrivalPrompts(int $missionId, int $userId, ?int $teamId, float $l
         ];
     }
 
+    // The search sector this person's team has received and is on its way to
+    // (v3.382.0). Only when the GPS may record an arrival: a sector has no
+    // «Έφτασες;» question, so with the switch off there is nothing to do for
+    // one. team_id is the person's own team, never NULL — a sector nobody has
+    // been given is not anyone's to arrive at.
+    if ($auto && $teamId) {
+        $sectors = dbFetchAll(
+            "SELECT s.id, s.label, s.geo
+               FROM mission_search_sectors s
+              WHERE s.mission_id = ? AND s.team_id = ?
+                AND (s.status = 'en_route' OR (s.status = 'assigned' AND s.acknowledged_at IS NOT NULL))
+                AND NOT EXISTS (SELECT 1 FROM mission_order_declines od
+                                 WHERE od.target_kind = 'sector' AND od.target_id = s.id AND od.scope_key = ? AND od.active = 1)",
+            [$missionId, $teamId, dispatchProgressScopeKey($teamId, $userId)]
+        );
+        foreach ($sectors as $s) {
+            $geo = json_decode((string) $s['geo'], true);
+            if (is_array($geo) && count($geo) >= 3 && pointInPolygon($lat, $lng, $geo)) {
+                $hits[] = ['kind' => 'sector', 'id' => (int) $s['id'], 'distance' => null, 'area' => true, 'label' => $s['label']];
+            }
+        }
+    }
+
+    $asked = [];
+    if ($auto) {
+        // A fix that is sure of itself and is NOT at a place ends the wait
+        // there: "no fix away in between" is what makes two fixes a stay.
+        arrivalDwellForget($missionId, $userId, array_map(fn($h) => [$h['kind'], $h['id']], $hits));
+    }
+    if ($hits) {
+        foreach (dbFetchAll("SELECT target_kind, target_id FROM mission_arrival_prompts WHERE mission_id = ? AND user_id = ?", [$missionId, $userId]) as $row) {
+            $asked[$row['target_kind'] . ':' . $row['target_id']] = true;
+        }
+    }
+
     foreach ($hits as $hit) {
-        $asked = dbExecute(
+        if ($auto) {
+            // Going past: not there yet, and not worth a question. When they
+            // stop, a later fix will be.
+            if ($speedMps !== null && $speedMps > ARRIVAL_AUTO_MAX_SPEED_MPS) continue;
+            if ($accuracy <= ARRIVAL_AUTO_MAX_ACCURACY_M) {
+                if ($speedMps !== null || arrivalDwellConfirms($missionId, $userId, $hit)) {
+                    recordAutoArrival($missionId, $userId, $teamId, $hit, $lat, $lng, $accuracy);
+                }
+                continue;
+            }
+            // Between 30 and 50 m: near, but not sure — ask, below.
+        }
+        // A sector is never asked about: it has no question, only the step.
+        if ($hit['kind'] === 'sector') continue;
+        if (isset($asked[$hit['kind'] . ':' . $hit['id']])) continue;
+        $inserted = dbExecute(
             "INSERT IGNORE INTO mission_arrival_prompts (mission_id, user_id, target_kind, target_id, lat, lng, accuracy_m, distance_m)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             [$missionId, $userId, $hit['kind'], $hit['id'], $lat, $lng, $accuracy, $hit['distance']]
         );
-        if ($asked > 0) {
+        if ($inserted > 0) {
             notifyArrivalPrompt($missionId, $userId, $hit);
         }
     }
+}
+
+/**
+ * Ends the wait at every place this person is no longer at. $stillAt is a list
+ * of [kind, id] — the places this fix IS at. Reads first and deletes only what
+ * it found: this runs on every fix, finds nothing for almost everybody, and a
+ * DELETE that matches nothing still takes gap locks other pings can queue behind.
+ */
+function arrivalDwellForget(int $missionId, int $userId, array $stillAt): void {
+    $rows = dbFetchAll("SELECT id, target_kind, target_id FROM mission_arrival_dwell WHERE mission_id = ? AND user_id = ?", [$missionId, $userId]);
+    if (!$rows) {
+        return;
+    }
+    $here = [];
+    foreach ($stillAt as [$kind, $id]) {
+        $here[$kind . ':' . (int) $id] = true;
+    }
+    $gone = [];
+    foreach ($rows as $row) {
+        if (!isset($here[$row['target_kind'] . ':' . $row['target_id']])) {
+            $gone[] = (int) $row['id'];
+        }
+    }
+    if ($gone) {
+        dbExecute("DELETE FROM mission_arrival_dwell WHERE id IN (" . implode(',', $gone) . ")");
+    }
+}
+
+/**
+ * One more accurate fix at a place. True when it is the second of a stay: the
+ * first was at least ARRIVAL_AUTO_MIN_DWELL_S ago and not so long ago that it
+ * belongs to an earlier visit (arrivalAutoWindowSeconds()). The first fix, and
+ * a fix too close behind it, only start or extend the wait.
+ */
+function arrivalDwellConfirms(int $missionId, int $userId, array $hit): bool {
+    $row = dbFetchOne(
+        "SELECT TIMESTAMPDIFF(SECOND, first_hit_at, NOW()) AS held, TIMESTAMPDIFF(SECOND, last_hit_at, NOW()) AS idle
+           FROM mission_arrival_dwell WHERE target_kind = ? AND target_id = ? AND user_id = ?",
+        [$hit['kind'], $hit['id'], $userId]
+    );
+    if (!$row || (int) $row['idle'] > arrivalAutoWindowSeconds()) {
+        dbExecute(
+            "INSERT INTO mission_arrival_dwell (mission_id, user_id, target_kind, target_id, first_hit_at, last_hit_at, hits)
+             VALUES (?, ?, ?, ?, NOW(), NOW(), 1)
+             ON DUPLICATE KEY UPDATE first_hit_at = NOW(), last_hit_at = NOW(), hits = 1",
+            [$missionId, $userId, $hit['kind'], $hit['id']]
+        );
+        return false;
+    }
+    dbExecute(
+        "UPDATE mission_arrival_dwell SET last_hit_at = NOW(), hits = hits + 1 WHERE target_kind = ? AND target_id = ? AND user_id = ?",
+        [$hit['kind'], $hit['id'], $userId]
+    );
+    return (int) $row['held'] >= ARRIVAL_AUTO_MIN_DWELL_S;
+}
+
+/**
+ * Records the arrival the GPS has decided on, as the team's, and tells the
+ * person. Goes through advanceMissionDispatch() / recordRouteWaypointArrival()
+ * — the functions the button calls — so the progress row, the audit row, the
+ * message to command and "first member moves the whole team on" are not copied
+ * here. The person is told only when THIS fix was the one that recorded it: a
+ * teammate who got there a moment earlier has already moved the team on, and
+ * their colleague at the same spot has not "arrived" a second time.
+ */
+function recordAutoArrival(int $missionId, int $userId, ?int $teamId, array $hit, float $lat, float $lng, float $accuracy): void {
+    // The wait is over whichever way it ends.
+    dbExecute("DELETE FROM mission_arrival_dwell WHERE target_kind = ? AND target_id = ? AND user_id = ?", [$hit['kind'], $hit['id'], $userId]);
+
+    $mission = dbFetchOne("SELECT id, title, responsible_user_id FROM missions WHERE id = ?", [$missionId]);
+    if (!$mission) {
+        return;
+    }
+    $recorded = false;
+    if ($hit['kind'] === 'sector') {
+        $name = (string) dbFetchValue("SELECT name FROM users WHERE id = ?", [$userId]);
+        $recorded = recordSectorArrivalByGps($mission, $hit['id'], $userId, $name);
+    } elseif ($hit['kind'] === 'dispatch') {
+        $name = (string) dbFetchValue("SELECT name FROM users WHERE id = ?", [$userId]);
+        $error = advanceMissionDispatch($mission, $hit['id'], $userId, $name, 'arrive', ARRIVAL_AUTO_VIA);
+        $recorded = $error === null && (int) dbFetchValue(
+            "SELECT arrived_by FROM mission_dispatch_progress WHERE dispatch_id = ? AND scope_key = ?",
+            [$hit['id'], dispatchProgressScopeKey($teamId, $userId)]
+        ) === $userId;
+    } else {
+        $wp = loadWaypointForAction($hit['id'], $missionId, $userId);
+        // The same gates the phone's «Έφτασα» applies (arriveFromPrompt()).
+        if (!$wp || $wp['route_cancelled_at'] || $wp['route_completed_at'] || !$wp['is_route_member']
+            || $wp['completed_at'] || $wp['skipped_at'] || $wp['arrived_at']) {
+            return;
+        }
+        $now = date('Y-m-d H:i:s');
+        $recorded = recordRouteWaypointArrival($mission, $wp, $userId, $lat, $lng, $accuracy, $now, $now, 0, ARRIVAL_AUTO_VIA);
+    }
+    if ($recorded) {
+        notifyAutoArrival($missionId, $userId, $hit);
+    }
+}
+
+/**
+ * «Έφτασες στο …» — to the one person whose fix recorded the arrival. A notice
+ * in the order popup (popupInfo), and alarmStyle 'speak': the page reads the
+ * message aloud, the way it reads a voice announcement, because someone who
+ * has just stopped the car is not looking at the phone. bannerMission makes it
+ * an order-class alert on the Android app too.
+ */
+function notifyAutoArrival(int $missionId, int $userId, array $hit): void {
+    $lang = getUserLanguage($userId);
+    $label = trim((string) ($hit['label'] ?? ''));
+    if ($hit['kind'] === 'sector') {
+        // Labels are stored as «Τομέας Ε» already; the sentence says "sector".
+        $short = trim((string) preg_replace('/^(τομέας|sector)\s+/iu', '', $label));
+        $message = t('arrival.auto_sector', ['label' => $short !== '' ? $short : $label], $lang);
+    } elseif ($hit['kind'] === 'waypoint') {
+        $message = t('arrival.auto_waypoint', [
+            'seq' => $hit['seq'],
+            'route' => trim((string) ($hit['routeTitle'] ?? '')) ?: t('route.default_title', [], $lang),
+        ], $lang);
+    } elseif ($hit['area']) {
+        $message = $label !== '' ? t('arrival.auto_area', ['label' => $label], $lang) : t('arrival.auto_area_nolabel', [], $lang);
+    } else {
+        $message = $label !== '' ? t('arrival.auto_point', ['label' => $label], $lang) : t('arrival.auto_point_nolabel', [], $lang);
+    }
+    sendNotification($userId, t('arrival.auto_title', [], $lang), $message, 'success', '', [
+        'url' => rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId,
+        'tag' => 'arrived-' . $hit['kind'] . '-' . $hit['id'],
+        'bannerMission' => $missionId,
+        'popupInfo' => 'mission_arrived_auto',
+        'alarmStyle' => 'speak',
+    ]);
 }
 
 /**

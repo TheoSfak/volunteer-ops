@@ -7740,6 +7740,35 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 189,
+            'description' => "Add mission_arrival_dwell (v3.381.0): the wait before an arrival is recorded by the GPS alone. One row per person per target (a dispatch point/area, or a route point) while they have been standing at it: when the first good fix there was, when the latest was, and how many. checkArrivalPrompts() records the arrival only on a second good fix a few seconds after the first with no fix away from the place in between, so a car going past at 30 m is never an arrival. Rows are deleted when the person leaves, when the arrival is recorded, and with the mission.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_arrival_dwell (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    user_id INT UNSIGNED NOT NULL,
+                    target_kind ENUM('dispatch','waypoint') NOT NULL,
+                    target_id INT UNSIGNED NOT NULL,
+                    first_hit_at DATETIME NOT NULL,
+                    last_hit_at DATETIME NOT NULL,
+                    hits SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+                    UNIQUE KEY uk_arrival_dwell (target_kind, target_id, user_id),
+                    INDEX idx_arrival_dwell_user (mission_id, user_id),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
+        [
+            'version'     => 190,
+            'description' => "Widen mission_arrival_dwell.target_kind with 'sector' (v3.382.0): a team inside its search sector is moved from en_route to in_progress («Έφτασα — Έναρξη Έρευνας») by the GPS, and the wait for the second good fix is kept per sector like it is per dispatch point and route point. Appended last so no stored value is renumbered.",
+            'up' => function () {
+                dbExecute("ALTER TABLE mission_arrival_dwell MODIFY COLUMN target_kind ENUM('dispatch','waypoint','sector') NOT NULL");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
