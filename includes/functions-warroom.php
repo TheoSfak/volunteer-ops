@@ -760,6 +760,176 @@ function getExternalGuestMissionIds(int $userId): array {
     return array_map('intval', array_column($rows, 'mission_id'));
 }
 
+/**
+ * The missions getExternalGuestMissionIds() returns that are LIVE right now:
+ * open and on the Action Room board. That function deliberately lists every
+ * mission the guest was ever approved on, because missions.php shows the
+ * history — but it is also what bootstrap.php counted to decide whether a guest
+ * can be sent straight into the operation, so a partner team that had been on
+ * one earlier exercise was never taken to the live one again: it landed on the
+ * list and had to find the mission itself, on a phone, in the field.
+ */
+function getExternalGuestLiveMissionIds(int $userId): array {
+    $rows = dbFetchAll(
+        "SELECT DISTINCT s.mission_id, MAX(s.start_time) as last_start
+         FROM participation_requests pr
+         JOIN shifts s ON pr.shift_id = s.id
+         JOIN missions m ON m.id = s.mission_id AND m.deleted_at IS NULL
+         WHERE pr.volunteer_id = ? AND pr.status = ? AND m.status = ? AND m.show_in_ops = 1
+         GROUP BY s.mission_id
+         ORDER BY last_start DESC",
+        [$userId, PARTICIPATION_APPROVED, STATUS_OPEN]
+    );
+    return array_map('intval', array_column($rows, 'mission_id'));
+}
+
+/**
+ * Where bootstrap.php sends a partner-org guest who asked for a page that is
+ * not theirs. Exactly one live mission: straight into it. Several live: the
+ * list, because choosing for them would be a guess. None live: the one mission
+ * they have, if they have only one (war-room.php then explains it has ended),
+ * and the list otherwise. Pure, so the rule can be tested without a request.
+ */
+function externalGuestLandingUrl(array $allMissionIds, array $liveMissionIds): string {
+    if (count($liveMissionIds) === 1) {
+        return 'war-room.php?id=' . (int) $liveMissionIds[0];
+    }
+    if (count($liveMissionIds) === 0 && count($allMissionIds) === 1) {
+        return 'war-room.php?id=' . (int) $allMissionIds[0];
+    }
+    return 'missions.php';
+}
+
+/**
+ * Whether a mission visitor's one mission still lets them in: open, and not
+ * deleted. bootstrap.php signs a visitor out and deletes the account when this
+ * is false. It used to read missions.status alone, so a deleted mission whose
+ * status was still OPEN kept the visitor signed in, with nothing to show them.
+ */
+function missionVisitorMissionIsOpen(int $missionId): bool {
+    if ($missionId <= 0) {
+        return false;
+    }
+    return dbFetchValue("SELECT status FROM missions WHERE id = ? AND deleted_at IS NULL", [$missionId]) === STATUS_OPEN;
+}
+
+/**
+ * The shift a QR visitor is approved on when they register: the one running
+ * now, else the next to start, else the one that started last. visitor-join.php
+ * used to take the latest-starting shift unconditionally, which on a mission
+ * with a second shift later in the day put the visitor on a shift that had not
+ * begun — and "everybody on duty" (activeMissionRecipientIds()) is defined by
+ * the shift window, so every broadcast and request skipped them until then.
+ * $now is a parameter so a test does not depend on the clock.
+ */
+function missionVisitorShiftId(int $missionId, ?string $now = null): ?int {
+    $now = $now ?? date('Y-m-d H:i:s');
+    $id = dbFetchValue(
+        "SELECT id FROM shifts WHERE mission_id = ?
+         ORDER BY (start_time <= ? AND end_time > ?) DESC,
+                  (start_time > ?) DESC,
+                  CASE WHEN start_time > ? THEN start_time END ASC,
+                  start_time DESC,
+                  id DESC
+         LIMIT 1",
+        [$missionId, $now, $now, $now, $now]
+    );
+    return $id ? (int) $id : null;
+}
+
+/**
+ * Takes a mission visitor off the operation. Signing the account out is not
+ * the same as removing the person: the participation, the GPS tick and the team
+ * place all stayed, so a removed visitor kept filling the roster and every
+ * recipient list, and every order sent afterwards waited on somebody who could
+ * no longer answer. Orders they had already answered stay as history; the ones
+ * they had not are taken off, so the acknowledgement panel and the assistant
+ * stop waiting for them. A team they led is left without a leader — a state the
+ * schema allows (leader_id is SET NULL when the user goes) — rather than handing
+ * the lead to whoever is next on the list, which is command's decision.
+ * Returns false when $visitorId is not a visitor of this mission.
+ */
+function removeMissionVisitor(int $missionId, int $visitorId, int $byUserId): bool {
+    $affected = dbExecute(
+        "UPDATE users SET deleted_at = NOW(), deleted_by = ?, is_active = 0, updated_at = NOW()
+         WHERE id = ? AND is_mission_visitor = 1 AND mission_visitor_mission_id = ?",
+        [$byUserId, $visitorId, $missionId]
+    );
+    if (!$affected) {
+        return false;
+    }
+    dbExecute(
+        "UPDATE participation_requests pr
+           JOIN shifts s ON s.id = pr.shift_id
+            SET pr.status = ?, pr.updated_at = NOW()
+          WHERE s.mission_id = ? AND pr.volunteer_id = ? AND pr.status IN (?, ?)",
+        [PARTICIPATION_CANCELED_BY_ADMIN, $missionId, $visitorId, PARTICIPATION_PENDING, PARTICIPATION_APPROVED]
+    );
+    dbExecute("UPDATE mission_teams SET leader_id = NULL, updated_at = NOW() WHERE mission_id = ? AND leader_id = ?", [$missionId, $visitorId]);
+    dbExecute("DELETE FROM mission_team_members WHERE mission_id = ? AND user_id = ?", [$missionId, $visitorId]);
+    setActionRoomParticipation($missionId, $visitorId, false, $byUserId);
+    dbExecute(
+        "DELETE r FROM mission_order_recipients r
+           JOIN mission_orders o ON o.id = r.order_id
+          WHERE o.mission_id = ? AND r.user_id = ? AND r.acknowledged_at IS NULL",
+        [$missionId, $visitorId]
+    );
+    return true;
+}
+
+/**
+ * Where war-room.php sends somebody it will not open the Action Room for, and
+ * whether that person must be signed out on the way. $default is where anyone
+ * else goes; a mission visitor cannot be sent there. bootstrap.php allows a
+ * visitor exactly the Action Room's own scripts and answers anything else with
+ * a redirect back to war-room.php, so "to the dashboard" or "to the mission
+ * page" from war-room.php was a loop the browser gave up on with
+ * ERR_TOO_MANY_REDIRECTS — after a mission was taken off the board, or the
+ * visitor was taken off its roster, the visitor had nowhere to go at all.
+ * They are signed out and shown the page that says why instead. $reason is
+ * 'ended' (the mission is gone or closed), 'paused' (open but off the board) or
+ * 'removed' (no longer on the roster). Pure; returns [url, signOut].
+ */
+function actionRoomRefusalExit(string $reason, string $default, bool $isMissionVisitor): array {
+    if (!$isMissionVisitor) {
+        return [$default, false];
+    }
+    $code = in_array($reason, ['paused', 'removed'], true) ? $reason : '1';
+    return ['visitor-join.php?ended=' . $code, true];
+}
+
+/**
+ * War Room: every approved participant of $missionId who is on shift RIGHT NOW
+ * and takes part in the Action Room — what "a volunteer this order can actually
+ * reach" means everywhere, and deliberately the ONE definition of it (moved here
+ * from war-room.php so it can be tested). The two broadcasts (global_message /
+ * end_mission_broadcast) used to run their own query without the shift-time
+ * clause, so they went to every approved participant of the whole mission —
+ * including tomorrow's shift and yesterday's. Those people cannot acknowledge
+ * an order they were never on duty for, which left their
+ * mission_order_recipients rows NULL forever and kept the coordinator's «Τι μου
+ * ξέφυγε» panel permanently showing an obligation that nobody could ever clear.
+ *
+ * The same argument is why the GPS tick is joined in here and not bolted onto
+ * each caller: a volunteer without it has no Action Room on their phone to
+ * receive the order in. And it is why an account that has been switched off or
+ * deleted is left out: it can never answer either.
+ */
+function activeMissionRecipientIds(int $missionId): array {
+    $activeRecipients = dbFetchAll(
+        "SELECT DISTINCT pr.volunteer_id
+         FROM participation_requests pr
+         JOIN shifts s ON s.id = pr.shift_id
+         JOIN users u ON u.id = pr.volunteer_id AND u.is_active = 1 AND u.deleted_at IS NULL
+         JOIN mission_action_room_participants arp
+              ON arp.mission_id = s.mission_id AND arp.user_id = pr.volunteer_id
+         WHERE s.mission_id = ? AND pr.status = ?
+           AND s.start_time <= NOW() AND s.end_time > NOW()",
+        [$missionId, PARTICIPATION_APPROVED]
+    );
+    return array_map('intval', array_column($activeRecipients, 'volunteer_id'));
+}
+
 // Team color palette, same index basis as war-room.php's own MISSION_TEAM_CODENAMES
 // (team N gets codename[N % 26] and color[N % 8] — colors cycle every 8 teams
 // since a colorblind-safe categorical palette only stays distinguishable up to

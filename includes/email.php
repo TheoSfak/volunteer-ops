@@ -184,10 +184,31 @@ function logEmail(string $to, string $subject, array $result, ?string $notificat
 }
 
 /**
+ * An address that can never receive mail: the reserved .invalid top level
+ * (RFC 2606). visitor-join.php invents one for every walk-up mission visitor —
+ * the account needs an email and has none — and a send to it is refused by the
+ * server at best and sits out an SMTP timeout at worst.
+ */
+function isUndeliverableEmail(string $email): bool {
+    return (bool) preg_match('/\.invalid$/i', trim($email));
+}
+
+/**
  * Send email using SMTP
  * @param string|null $notificationCode  Optional code for log tracking
  */
 function sendEmail(string $to, string $subject, string $htmlBody, ?string $fromName = null, ?string $notificationCode = null): array {
+    // The one funnel every mail goes through, so the one place that has to know
+    // about addresses that cannot be delivered to. Most callers already leave
+    // mission visitors out (mobilization, the "new mission" blast, Telegram),
+    // but the shift-reminder cron and the mission cancel/delete notices mail
+    // every participant, and each visitor in it cost one failed send — in a web
+    // request, for the cancel. A skip, not a failure: nothing was wrong, nobody
+    // was meant to be reached, and it is not worth a row in the email log.
+    if (isUndeliverableEmail($to)) {
+        return ['success' => false, 'skipped' => true, 'message' => 'Η διεύθυνση δεν μπορεί να παραλάβει email'];
+    }
+
     $smtp = getSmtpSettings();
     
     if (empty($smtp['host']) || empty($smtp['from_email'])) {

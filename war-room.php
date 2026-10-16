@@ -9,10 +9,23 @@ require_once __DIR__ . '/includes/weather.php';
 require_once __DIR__ . '/includes/lpb-rings.php';
 requireLogin();
 
+// Where this page sends somebody it will not open for. A mission visitor is
+// allowed exactly the Action Room's own scripts (bootstrap.php), so sending one
+// to dashboard.php or mission-view.php just bounces them back here: a redirect
+// loop. They are signed out and shown the page that says why instead — see
+// actionRoomRefusalExit(). Everyone else goes where this page always sent them.
+function leaveActionRoom(string $reason, string $default): void {
+    [$url, $signOut] = actionRoomRefusalExit($reason, $default, isMissionVisitor());
+    if ($signOut) {
+        logout();
+    }
+    redirect($url);
+}
+
 $missionId = (int)get('id');
 if (!$missionId) {
     setFlash('error', t('common.mission_not_found'));
-    redirect('dashboard.php');
+    leaveActionRoom('ended', 'dashboard.php');
 }
 
 $user = getCurrentUser();
@@ -28,7 +41,7 @@ $mission = dbFetchOne(
 );
 if (!$mission) {
     setFlash('error', t('common.mission_not_found'));
-    redirect('dashboard.php');
+    leaveActionRoom('ended', 'dashboard.php');
 }
 
 if (!defined('MISSION_TEAM_CODENAMES')) {
@@ -70,38 +83,8 @@ function notifyMissionTeamMembers(int $missionId, string $missionTitle, string $
     }
 }
 
-/**
- * War Room: every approved participant of $missionId who is on shift RIGHT NOW.
- *
- * This is what "a volunteer this order can actually reach" means everywhere in
- * the Action Room, and it is deliberately the ONE definition of it. The two
- * broadcasts (global_message / end_mission_broadcast) used to run their own
- * query without the shift-time clause, so they went to every approved
- * participant of the whole mission — including tomorrow's shift and yesterday's.
- * Those people cannot acknowledge an order they were never on duty for, which
- * left their mission_order_recipients rows NULL forever and kept the
- * coordinator's «Τι μου ξέφυγε» panel permanently showing an obligation that
- * nobody could ever clear.
- *
- * The same argument is why the GPS tick is joined in here and not bolted onto
- * each caller: a volunteer without it has no Action Room on their phone to
- * receive the order in, so an order addressed to them is another obligation
- * that can never be cleared.
- */
-function activeMissionRecipientIds(int $missionId): array {
-    $activeRecipients = dbFetchAll(
-        "SELECT DISTINCT pr.volunteer_id
-         FROM participation_requests pr
-         JOIN shifts s ON s.id = pr.shift_id
-         JOIN users u ON u.id = pr.volunteer_id
-         JOIN mission_action_room_participants arp
-              ON arp.mission_id = s.mission_id AND arp.user_id = pr.volunteer_id
-         WHERE s.mission_id = ? AND pr.status = ?
-           AND s.start_time <= NOW() AND s.end_time > NOW()",
-        [$missionId, PARTICIPATION_APPROVED]
-    );
-    return array_map('intval', array_column($activeRecipients, 'volunteer_id'));
-}
+// activeMissionRecipientIds() — who "everybody on duty" means — lives in
+// includes/functions-warroom.php, where tests/ can reach it.
 
 /**
  * War Room: resolve which active-shift volunteers a location/photo/video/task
@@ -126,7 +109,7 @@ $isApprovedParticipant = (bool)dbFetchValue(
 $isMissingPersonMission = ((int)($mission['mission_type_id'] ?? 0) === missingPersonMissionTypeId());
 if (!$canManageWarRoom && !$isApprovedParticipant) {
     setFlash('error', t('wr.access_denied'));
-    redirect('dashboard.php');
+    leaveActionRoom('removed', 'dashboard.php');
 }
 // A finished mission's Action Room is its read-only archive, for command staff
 // (mission-archive.php). Everyone else keeps the warning below.
@@ -144,7 +127,13 @@ if ($mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
     // guest finds their finished missions and their feedback form for each.
     // Not for a mission visitor, whose list has no profile.php either;
     // bootstrap.php signs them out as soon as their mission is no longer open.
-    redirect(isExternalGuest() && !isMissionVisitor() ? 'profile.php' : 'mission-view.php?id=' . $missionId);
+    // A visitor's mission that is no longer open is signed out by bootstrap.php
+    // before this point; what reaches here is a mission that is open but off
+    // the board (show_in_ops unticked), which is 'paused' rather than 'ended'.
+    leaveActionRoom(
+        $mission['status'] === STATUS_OPEN ? 'paused' : 'ended',
+        isExternalGuest() ? 'profile.php' : 'mission-view.php?id=' . $missionId
+    );
 }
 
 // Which LAYOUT this person gets — deliberately NOT the same question as
@@ -180,6 +169,12 @@ $volunteerTabs = ($viewModeCookie === 'tabs' || $viewModeCookie === 'full')
 // unknown-card fallback. Never rendered for anyone without command powers, so
 // a plain volunteer's four-tab view is byte-identical to what it was.
 $commandTab = $volunteerTabs && $canManageWarRoom;
+// The activity and chat exports are pages a mission visitor is not allowed
+// (bootstrap.php keeps a walk-up, unvetted account to the Action Room's own
+// scripts), so for one the buttons only ever bounced back to this page with no
+// file and no word why. They are simply not offered — a control that cannot
+// work is worse than none. Every other account keeps them.
+$canExportMissionData = !isMissionVisitor();
 
 
 if (isPost()) {
@@ -252,11 +247,12 @@ if (isPost()) {
             // regular staff account, so widening it here keeps removal fast
             // (no waiting on a system admin) without widening the blast
             // radius of what a mission manager can delete.
-            $affected = dbExecute(
-                "UPDATE users SET deleted_at = NOW(), deleted_by = ?, is_active = 0, updated_at = NOW()
-                 WHERE id = ? AND is_mission_visitor = 1 AND mission_visitor_mission_id = ?",
-                [$user['id'], $visitorId, $missionId]
-            );
+            //
+            // removeMissionVisitor() also takes them off the operation — the
+            // participation, the GPS tick, the team place and the orders they
+            // had not answered. Switching the account off alone left a person
+            // nobody could reach on every roster and in every recipient list.
+            $affected = removeMissionVisitor($missionId, $visitorId, (int) $user['id']);
             if ($affected) {
                 logAudit('soft_delete_user', 'users', $visitorId);
                 setFlash('success', t('visitor.remove_success'));
@@ -5009,9 +5005,11 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h5 class="mb-0 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#activityCollapse" role="button" aria-expanded="false" aria-controls="activityCollapse"><i class="bi bi-activity me-1"></i><?= t('activity.panel_title') ?><i class="bi bi-chevron-down wr-collapsible-chevron ms-1"></i></h5>
                 <div class="d-flex align-items-center gap-2">
+                    <?php if ($canExportMissionData): ?>
                     <a href="exports/export-mission-activity.php?mission_id=<?= $missionId ?>" class="btn btn-sm btn-outline-secondary" title="<?= t('activity.export_btn') ?>">
                         <i class="bi bi-file-earmark-excel me-1"></i><?= t('activity.export_btn') ?>
                     </a>
+                    <?php endif; ?>
                     <small class="text-muted"><?= t('common.updated_label') ?> <span id="activityRefresh"></span></small>
                 </div>
             </div>
@@ -5883,6 +5881,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <div class="card shadow-sm mb-4" data-card-id="chatCard">
     <div class="card-header d-flex justify-content-between align-items-center">
         <h5 class="mb-0"><i class="bi bi-chat-dots me-1"></i><?= t('chat.panel_title') ?></h5>
+        <?php if ($canExportMissionData): ?>
         <div class="dropdown">
             <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown">
                 <i class="bi bi-file-earmark-excel me-1"></i><?= t('chat.export_btn') ?>
@@ -5894,6 +5893,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                 <?php endforeach; ?>
             </ul>
         </div>
+        <?php endif; ?>
     </div>
     <div class="card-body">
         <ul class="nav nav-pills mb-3 flex-wrap" id="chatRoomTabs">

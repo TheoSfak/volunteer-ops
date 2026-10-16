@@ -158,8 +158,7 @@ if (isLoggedIn() && isExternalGuest()) {
     // can't drift out of sync with a future close/cancel code path.
     if ($__isMissionVisitor) {
         $__vMissionId = (int) ($__extUser['mission_visitor_mission_id'] ?? 0);
-        $__vStatus = $__vMissionId ? dbFetchValue("SELECT status FROM missions WHERE id = ?", [$__vMissionId]) : null;
-        if ($__vStatus !== STATUS_OPEN) {
+        if (!missionVisitorMissionIsOpen($__vMissionId)) {
             dbExecute("UPDATE users SET deleted_at = NOW(), is_active = 0, updated_at = NOW() WHERE id = ?", [$__extUser['id']]);
             logAudit('soft_delete_user', 'users', $__extUser['id']);
             // logout() destroys the session (session_destroy()) before this
@@ -195,11 +194,13 @@ if (isLoggedIn() && isExternalGuest()) {
                 ? ('war-room.php?id=' . (int) $__extUser['mission_visitor_mission_id'])
                 : 'visitor-join.php');
         }
-        $__extMissionIds = getExternalGuestMissionIds(getCurrentUserId());
-        if (count($__extMissionIds) === 1) {
-            redirect('war-room.php?id=' . $__extMissionIds[0]);
-        }
-        redirect('missions.php');
+        // The live mission wins over the history: a partner team that was on
+        // an earlier exercise has two missions on its account, and counting
+        // all of them sent it to the list instead of into the operation.
+        redirect(externalGuestLandingUrl(
+            getExternalGuestMissionIds(getCurrentUserId()),
+            getExternalGuestLiveMissionIds(getCurrentUserId())
+        ));
     }
     unset($__extScript, $__extAllowed, $__extUser, $__isMissionVisitor);
 }

@@ -136,10 +136,13 @@ if ($mission && isPost()) {
                 // decided_by stays NULL, no admin decided this one. Every
                 // OPEN mission always has at least one shift (auto-created,
                 // mission-form.php), so this is never null in practice.
-                $shiftId = dbFetchValue(
-                    "SELECT id FROM shifts WHERE mission_id = ? ORDER BY start_time DESC LIMIT 1",
-                    [$mission['id']]
-                );
+                //
+                // The shift running now, else the next one — not the latest
+                // one: on a mission with a second shift later in the day that
+                // put the visitor on a shift that had not begun, and "everybody
+                // on duty" is defined by the shift window, so every broadcast
+                // and request skipped them until it did.
+                $shiftId = missionVisitorShiftId((int) $mission['id']);
                 if ($shiftId) {
                     dbInsert(
                         "INSERT INTO participation_requests
@@ -231,6 +234,11 @@ $hasLogo = !empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLog
         <?php if (get('ended', '') === '1'): ?>
         <i class="bi bi-flag-fill text-success" style="font-size:2.5rem;"></i>
         <h2 class="mt-3 mb-2" style="font-size:1.25rem;"><?= h(t('visitor.session_ended_mission_closed', [], 'el')) ?></h2>
+        <?php elseif (in_array(get('ended', ''), ['paused', 'removed'], true)): ?>
+        <?php /* Where war-room.php signs a visitor out to when it will not open — see actionRoomRefusalExit(). */ ?>
+        <i class="bi bi-pause-circle text-warning" style="font-size:2.5rem;"></i>
+        <h2 class="mt-3 mb-2" style="font-size:1.25rem;"><?= h(t('visitor.session_ended_' . get('ended', ''), [], 'el')) ?></h2>
+        <p class="text-muted small mb-0"><?= h(t('visitor.session_ended_' . get('ended', '') . '_detail', [], 'el')) ?></p>
         <?php else: ?>
         <i class="bi bi-x-circle text-danger" style="font-size:2.5rem;"></i>
         <h2 class="mt-3 mb-2" style="font-size:1.25rem;"><?= h(t('visitor.join_invalid_link', [], 'el')) ?></h2>

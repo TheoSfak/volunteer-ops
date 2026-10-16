@@ -1897,6 +1897,10 @@ return [
         // by an admin after self-registering (war-room.php's visitor card).
         'visitor.nav_my_mission' => 'Η Αποστολή μου',
         'visitor.session_ended_mission_closed' => 'Η αποστολή ολοκληρώθηκε. Ευχαριστούμε για τη βοήθειά σας.',
+        'visitor.session_ended_paused' => 'Η αποστολή δεν είναι ενεργή αυτή τη στιγμή.',
+        'visitor.session_ended_paused_detail' => 'Δεν εμφανίζεται πλέον στο Action Room. Αν ξαναγίνει ενεργή, ανοίξτε ξανά τον σύνδεσμο της αποστολής για να συνεχίσετε.',
+        'visitor.session_ended_removed' => 'Δεν είστε πλέον στη λίστα συμμετεχόντων αυτής της αποστολής.',
+        'visitor.session_ended_removed_detail' => 'Αν νομίζετε ότι είναι λάθος, επικοινωνήστε με τον συντονιστή επιτόπου.',
         'visitor.join_title' => 'Εγγραφή Επισκέπτη Αποστολής',
         'visitor.join_intro' => 'Συμπληρώστε τα στοιχεία σας για πρόσβαση στο Action Room αυτής της αποστολής.',
         'visitor.join_mission_label' => 'Αποστολή',
@@ -4586,6 +4590,10 @@ return [
         // Mission Visitor
         'visitor.nav_my_mission' => 'My Mission',
         'visitor.session_ended_mission_closed' => 'The mission has ended. Thank you for your help.',
+        'visitor.session_ended_paused' => 'The mission is not active at the moment.',
+        'visitor.session_ended_paused_detail' => 'It is no longer shown in the Action Room. If it becomes active again, open the mission link again to continue.',
+        'visitor.session_ended_removed' => 'You are no longer on this mission\'s list of participants.',
+        'visitor.session_ended_removed_detail' => 'If you think this is a mistake, contact the on-scene coordinator.',
         'visitor.join_title' => 'Mission Visitor Registration',
         'visitor.join_intro' => 'Fill in your details to get access to this mission\'s Action Room.',
         'visitor.join_mission_label' => 'Mission',
