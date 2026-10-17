@@ -35,6 +35,7 @@ final class OrderDeclineTest extends TestCase
         forgetActiveOrderDeclines();
 
         $this->adminId = $this->makeUser('Decline Admin');
+        dbExecute("UPDATE users SET role = ? WHERE id = ?", [ROLE_DEPARTMENT_ADMIN, $this->adminId]);
         $missionTypeId = (int) dbFetchValue("SELECT id FROM mission_types ORDER BY id LIMIT 1");
         $this->missionId = (int) dbInsert(
             "INSERT INTO missions (title, location, start_datetime, end_datetime, mission_type_id, status, show_in_ops, responsible_user_id) VALUES (?, ?, ?, ?, ?, ?, 1, ?)",

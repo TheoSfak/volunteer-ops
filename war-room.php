@@ -149,8 +149,12 @@ if ($mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
 // holding missions_manage, guest, mission visitor) keeps the tabs.
 // isPreviewMode() is excluded for the same reason isAdmin()/isSystemAdmin()
 // exclude it — previewing a role has to render as that role's holder sees it.
-$isAdminAccount = !isPreviewMode()
-    && in_array($user['role'], [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN], true);
+// Since v3.389.1 the same account-type rule also decides who is command staff
+// AT ALL: canManageActionRoom() is false for anyone who is not an admin
+// account, so a mission's Υπεύθυνος or a ΤΕΠ role holder never reaches the
+// command view, the Διοίκηση tab or the «Όψη Διοίκησης» toggle — they are a
+// plain user here, and must be an approved participant to open the room.
+$isAdminAccount = isActionRoomAdminAccount();
 // ...and a default is only a default. The hero toggle (command staff only —
 // see toggle_view_mode below) overrides it in either direction and is
 // remembered from then on, so the same squad lead gets tabs on their phone

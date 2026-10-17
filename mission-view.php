@@ -603,7 +603,10 @@ include __DIR__ . '/includes/header.php';
         </nav>
     </div>
     <div>
-        <?php if (!empty($mission['show_in_ops']) && $mission['status'] === STATUS_OPEN && ($canManageMissions || $isResponsible || $isApprovedParticipant)): ?>
+        <?php // Same gate as war-room.php itself (v3.389.1): command staff are admin accounts only, so a
+              // responsible volunteer or a ΤΕΠ role holder gets the button only as an approved participant.
+        if (!empty($mission['show_in_ops']) && $mission['status'] === STATUS_OPEN
+            && (canManageActionRoom($mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, (int) getCurrentUserId()) || $isApprovedParticipant)): ?>
             <a href="war-room.php?id=<?= $mission['id'] ?>" class="btn btn-danger">
                 <i class="bi bi-broadcast-pin me-1"></i>Action Room
             </a>

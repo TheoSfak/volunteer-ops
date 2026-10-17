@@ -3206,7 +3206,37 @@ function streamMediaFileWithRanges(string $filePath, string $mime, string $downl
  */
 function canManageActionRoom(?int $responsibleUserId, int $userId): bool {
     if (isExternalGuest()) return false;
+    // Only an admin account is ever command staff in the Action Room (v3.389.1).
+    // A mission's Υπεύθυνος, a shift leader, or a volunteer whose custom role
+    // carries «Διαχείριση Αποστολών» (an Υπεύθυνος ΤΕΠ, say) holds more access
+    // elsewhere in the app, but in the Action Room they are a plain user: no
+    // command menu, no Διοίκηση tab, no command endpoints.
+    if (!isActionRoomAdminAccount()) return false;
     return hasPagePermission('missions_manage') || ($responsibleUserId !== null && $responsibleUserId === $userId);
+}
+
+/**
+ * The account types that count as administrators for the Action Room. Pure on
+ * purpose (a role string in, a bool out), so the rule has one definition that
+ * canManageActionRoom(), canManageAnyActionRoom(), filterActionRoomManagers()
+ * and war-room.php's layout default all share, and a test can pin it without
+ * a session.
+ */
+function isActionRoomAdminRole(?string $role): bool {
+    return in_array($role, [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN], true);
+}
+
+/**
+ * Is the signed-in account an administrator, for Action Room purposes? False
+ * while a system admin previews a role, so the preview renders as that role's
+ * holder sees it (the same exclusion isAdmin()/isSystemAdmin() make). Note
+ * isAdmin() is the WRONG test here: it is true for any account with a
+ * custom_role_id, which is exactly the population this rule is about.
+ */
+function isActionRoomAdminAccount(): bool {
+    if (isPreviewMode()) return false;
+    $user = getCurrentUser();
+    return $user && isActionRoomAdminRole($user['role'] ?? null);
 }
 
 /**
@@ -3219,6 +3249,7 @@ function canManageActionRoom(?int $responsibleUserId, int $userId): bool {
  */
 function canManageAnyActionRoom(int $userId): bool {
     if (isExternalGuest()) return false;
+    if (!isActionRoomAdminAccount()) return false;
     if (hasPagePermission('missions_manage')) return true;
     return (bool) dbFetchOne(
         "SELECT 1 FROM missions WHERE responsible_user_id = ? AND deleted_at IS NULL LIMIT 1",
@@ -3594,9 +3625,11 @@ function getMissionCommandStaffIds(int $missionId, ?int $responsibleUserId, int 
  * from a team channel I cannot find".
  *
  * Nobody gains access here; people simply stop being sent alerts that were
- * dead on arrival. If a deployment WANTS its shift leaders to be command
- * staff, the supported way is to grant their role missions_manage — which
- * gives them the screens to act on the alert as well as the alert.
+ * dead on arrival. Since v3.389.1 command staff means an ADMIN ACCOUNT
+ * (SYSTEM_ADMIN / DEPARTMENT_ADMIN) holding missions_manage or named as the
+ * mission's responsible: a shift leader, a volunteer-account Υπεύθυνος or a
+ * custom-role ΤΕΠ holder is a plain user in the Action Room, so is no longer
+ * sent command alerts either (isActionRoomAdminRole()).
  */
 function filterActionRoomManagers(array $userIds, ?int $responsibleUserId): array {
     $userIds = array_values(array_unique(array_map('intval', $userIds)));
@@ -3604,14 +3637,21 @@ function filterActionRoomManagers(array $userIds, ?int $responsibleUserId): arra
 
     $placeholders = implode(',', array_fill(0, count($userIds), '?'));
     try {
+        // Admin accounts only (see canManageActionRoom()): a shift leader, a
+        // volunteer-account Υπεύθυνος or a ΤΕΠ role holder can no longer open
+        // the command view, so an alert sent to them would be dead on arrival.
+        // The responsible user counts only when they are themselves an admin
+        // account, which is the second half of canManageActionRoom().
         $rows = dbFetchAll(
             "SELECT u.id FROM users u
              WHERE u.id IN ($placeholders)
                AND (u.is_external IS NULL OR u.is_external = 0)
+               AND u.role IN (?, ?)
                AND (u.role = ?
+                    OR u.id = ?
                     OR EXISTS (SELECT 1 FROM custom_role_permissions p
                                WHERE p.role_id = u.custom_role_id AND p.page_slug = 'missions_manage'))",
-            array_merge($userIds, [ROLE_SYSTEM_ADMIN])
+            array_merge($userIds, [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN, ROLE_SYSTEM_ADMIN, (int) $responsibleUserId])
         );
     } catch (Throwable $e) {
         // Same defensive stance hasPagePermission() takes around this table.
@@ -3622,13 +3662,7 @@ function filterActionRoomManagers(array $userIds, ?int $responsibleUserId): arra
         return $userIds;
     }
 
-    $allowed = array_map('intval', array_column($rows, 'id'));
-    // Second half of canManageActionRoom(): the mission's responsible user
-    // manages its Action Room whatever their sitewide permissions say.
-    if ($responsibleUserId && in_array((int) $responsibleUserId, $userIds, true)) {
-        $allowed[] = (int) $responsibleUserId;
-    }
-    return array_values(array_unique($allowed));
+    return array_values(array_unique(array_map('intval', array_column($rows, 'id'))));
 }
 
 /**

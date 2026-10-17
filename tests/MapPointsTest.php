@@ -28,7 +28,7 @@ final class MapPointsTest extends TestCase
     {
         db()->beginTransaction();
         $this->userId = (int) dbInsert(
-            "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
+            "INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, 'DEPARTMENT_ADMIN')",
             ['Συντονιστής Τεστ', 'mp-' . uniqid('', true) . '@example.invalid', 'x']
         );
         $missionTypeId = (int) dbFetchValue("SELECT id FROM mission_types ORDER BY id LIMIT 1");

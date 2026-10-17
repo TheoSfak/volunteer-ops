@@ -38,6 +38,7 @@ final class ArrivalPromptTest extends TestCase
         db()->beginTransaction();
 
         $this->adminId = $this->makeUser('Arrival Admin');
+        dbExecute("UPDATE users SET role = ? WHERE id = ?", [ROLE_DEPARTMENT_ADMIN, $this->adminId]);
         $missionTypeId = (int) dbFetchValue("SELECT id FROM mission_types ORDER BY id LIMIT 1");
         $this->missionId = (int) dbInsert(
             "INSERT INTO missions (title, location, start_datetime, end_datetime, mission_type_id, status, show_in_ops) VALUES (?, ?, ?, ?, ?, ?, 1)",
