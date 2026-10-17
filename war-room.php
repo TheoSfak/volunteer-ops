@@ -3686,6 +3686,12 @@ include __DIR__ . '/includes/header.php';
     .leaflet-bar.wr-mp-control a, .leaflet-touch .leaflet-bar.wr-mp-control a { display: flex; align-items: center; justify-content: center; gap: 5px; width: auto; min-width: 30px; padding: 0 7px; color: #0f172a; font: 600 12px/1 system-ui, -apple-system, "Segoe UI", sans-serif; white-space: nowrap; }
     .wr-mp-control a .bi { color: #0d9488; font-size: 15px; }
     .wr-mp-control .wr-mp-count { background: #0d9488; color: #fff; border-radius: 9px; padding: 1px 6px; font-size: 11px; }
+    /* Map-toolbar buttons that are command tools: a phone in a volunteer's
+       hand has no use for them (rings hide/show, the Σημεία list). Only put
+       on for accounts that cannot manage the Action Room. */
+    @media (max-width: 767.98px) {
+        .wr-hide-phone { display: none !important; }
+    }
     .wr-mp-pin-wrap { background: none; border: 0; }
     .wr-mp-pin { color: #0d9488; font-size: 30px; line-height: 1; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 1px 4px rgba(0,0,0,.55); }
     .wr-mp-flag { color: #0d9488; }
@@ -4287,7 +4293,7 @@ include __DIR__ . '/includes/header.php';
                          category, i.e. once there ARE rings to hide. The same
                          switch lives in the layers menu; both go through
                          setMapOverlayShown('rings'). -->
-                    <button type="button" id="mapRingsToggle" class="btn btn-sm btn-outline-secondary active d-none" aria-pressed="true" title="<?= t('map.rings_hide') ?>">
+                    <button type="button" id="mapRingsToggle" class="btn btn-sm btn-outline-secondary active d-none<?= $canManageWarRoom ? '' : ' wr-hide-phone' ?>" aria-pressed="true" title="<?= t('map.rings_hide') ?>">
                         <i class="bi bi-bullseye"></i>
                     </button>
                     <?php endif; ?>
@@ -12074,7 +12080,7 @@ function mpRefresh() {
 const MapPointsControl = L.Control.extend({
     options: {position: 'topleft'},
     onAdd: function () {
-        const bar = L.DomUtil.create('div', 'leaflet-bar leaflet-control wr-mp-control');
+        const bar = L.DomUtil.create('div', 'leaflet-bar leaflet-control wr-mp-control' + (MP_CAN_MANAGE ? '' : ' wr-hide-phone'));
         const a = L.DomUtil.create('a', '', bar);
         a.id = 'mapPointsBtn';
         a.href = '#';
