@@ -12186,12 +12186,71 @@ function renderMissionClosePanel(array $incidents, array $shortageReports, array
 }
 
 /**
- * The poll's `liveFragments` key for command staff (a volunteer's page has none
- * of these cards, so for them the key is null). The visitors fragment exists
- * only while the mission has a visitor link: with none, the card shows the
- * «Ενεργοποίηση» button instead and there is no list to keep fresh.
+ * Gives every team of a special mission its briefing link token.
+ *
+ * A team created before its mission was flagged special (or before the feature
+ * existed) has a NULL briefing_token, and so does every team made from the
+ * Action Room itself, which never sets one. The token used to be filled in only
+ * when the whole page loaded, so a team created while an admin already had the
+ * page open would have shown a link ending in an empty `?token=` until they
+ * reloaded - not tolerable now that the briefing card redraws on the poll.
+ * Mirrors shift-view.php's own lazy QR-token generation idiom.
+ *
+ * The UPDATE only fills a gap: two admins' polls can notice the same missing
+ * token in the same second, and the one that loses must adopt the winner's
+ * token rather than overwrite it (the winner may already have copied the link).
+ * Keys of $teams are kept, so it takes the page's id-keyed list and the poll's
+ * plain list alike.
  */
-function buildCommandLiveFragments(int $missionId, bool $visitorsEnabled, array $incidents, array $shortageReports, array $sosAlerts): array {
+function ensureTeamBriefingTokens(array $teams): array {
+    foreach ($teams as $key => $team) {
+        if (!empty($team['briefing_token'])) {
+            continue;
+        }
+        $teamId = (int) $team['id'];
+        $token = bin2hex(random_bytes(32));
+        $filled = dbExecute(
+            "UPDATE mission_teams SET briefing_token = ? WHERE id = ? AND (briefing_token IS NULL OR briefing_token = '')",
+            [$token, $teamId]
+        );
+        $teams[$key]['briefing_token'] = $filled
+            ? $token
+            : (string) dbFetchValue("SELECT briefing_token FROM mission_teams WHERE id = ?", [$teamId]);
+    }
+    return $teams;
+}
+
+/**
+ * The per-team link list of the briefing card: a badge, the read-only link and
+ * a copy button. The copy button is wired by one delegated listener in
+ * war-room.php, because this markup is replaced on the poll.
+ */
+function renderBriefingTeamLinks(array $teams): string {
+    ob_start();
+    ?>
+                <?php if (empty($teams)): ?>
+                <p class="small text-muted mb-0"><?= t('briefing.no_teams_yet') ?></p>
+                <?php else: ?>
+                <?php foreach ($teams as $team): [$briefBg, $briefFg] = teamBadgeColors($team['color']); $briefUrl = rtrim(BASE_URL, '/') . '/briefing-view.php?token=' . urlencode($team['briefing_token'] ?? ''); ?>
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <span class="badge" style="background:<?= h($briefBg) ?>;color:<?= h($briefFg) ?>;white-space:nowrap;"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></span>
+                    <input type="text" class="form-control form-control-sm wr-briefing-link" readonly value="<?= h($briefUrl) ?>" onclick="this.select()">
+                    <button type="button" class="btn btn-sm btn-outline-secondary wr-briefing-copy-btn" data-copy-text="<?= h($briefUrl) ?>" title="<?= t('briefing.copy_btn') ?>"><i class="bi bi-clipboard"></i></button>
+                </div>
+                <?php endforeach; ?>
+                <?php endif; ?>
+    <?php
+    return (string) ob_get_clean();
+}
+
+/**
+ * The poll's `liveFragments` key for command staff (a volunteer's page has none
+ * of these cards, so for them the key is null). Two fragments exist only while
+ * their card shows a list: the visitors one needs a visitor link (with none the
+ * card shows the «Ενεργοποίηση» button instead), and the briefing one needs a
+ * special mission, passed as its teams (null = no briefing card on the page).
+ */
+function buildCommandLiveFragments(int $missionId, bool $visitorsEnabled, array $incidents, array $shortageReports, array $sosAlerts, ?array $briefingTeams = null): array {
     $fragments = [
         'missionClose' => warRoomLiveFragmentPayload(renderMissionClosePanel($incidents, $shortageReports, $sosAlerts)),
         'missionShifts' => warRoomLiveFragmentPayload(renderMissionShiftRows(loadMissionShiftsWithCounts($missionId))),
@@ -12201,6 +12260,9 @@ function buildCommandLiveFragments(int $missionId, bool $visitorsEnabled, array 
         $fragments['missionVisitors'] = warRoomLiveFragmentPayload(
             renderMissionVisitorLists($visitors['pending'], $visitors['active'], $visitors['tags'])
         );
+    }
+    if ($briefingTeams !== null) {
+        $fragments['missionBriefing'] = warRoomLiveFragmentPayload(renderBriefingTeamLinks($briefingTeams));
     }
     return $fragments;
 }

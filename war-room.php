@@ -1644,6 +1644,12 @@ if (get('ajax') === '1') {
     // array_values() so this comes through as a JSON array, not an object
     // keyed by team id like the full-page render's own $teams stays as.
     $teams = array_values(loadMissionTeamsForMission($missionId));
+    // The briefing card's link list rides the poll too, so a team made after the
+    // page loaded needs its token here, not only on the next full page load.
+    $briefingCardOn = $canManageWarRoom && !empty($mission['is_special_mission']);
+    if ($briefingCardOn) {
+        $teams = ensureTeamBriefingTokens($teams);
+    }
     // Hazard zones are mission-wide, not team/area-scoped (no team_id on
     // mission_restricted_areas at all) — unlike shortage reports/SOS above,
     // there's no reason to hide a danger zone's boundary from the very
@@ -1686,7 +1692,10 @@ if (get('ajax') === '1') {
         'annotations' => $annotations,
         'areas' => $areas,
         'sectors' => $sectors,
-        'teams' => $teams,
+        // Without briefing_token: it is a bearer link to a public page, nothing
+        // in the browser reads it from here (command staff get the links in the
+        // briefing fragment below), and this key goes to every participant.
+        'teams' => array_map(fn($team) => array_diff_key($team, ['briefing_token' => true]), $teams),
         'restrictedAreas' => $restrictedAreas,
         'restrictedAreaBreaches' => $restrictedAreaBreaches,
         'restrictedAreaBreachHistory' => $restrictedAreaBreachHistory,
@@ -1713,13 +1722,14 @@ if (get('ajax') === '1') {
         // where nobody has pressed anything hashes identically tick after
         // tick and costs no bandwidth at all.
         'ackTracker' => $canManageWarRoom ? loadAckTrackerCardsForMission($missionId) : null,
-        // Shift list, visitors lists and the open-items warning on «Κλείσιμο
-        // αποστολής» - command cards that used to be drawn once at page load.
+        // Shift list, visitors lists, briefing links and the open-items warning
+        // on «Κλείσιμο αποστολής» - command cards that used to be drawn once at
+        // page load.
         // Ready-made markup (see warRoomLiveFragment) so there is one template
         // per card; built from the incident/shortage/SOS lists already loaded
         // above, so the warning cannot disagree with the cards that list them.
         'liveFragments' => $canManageWarRoom
-            ? buildCommandLiveFragments($missionId, !empty($mission['visitor_join_token']), $incidents, $shortageReports, $sosAlerts)
+            ? buildCommandLiveFragments($missionId, !empty($mission['visitor_join_token']), $incidents, $shortageReports, $sosAlerts, $briefingCardOn ? $teams : null)
             : null,
         // See $gpsParticipationSig.
         'gpsSig' => $gpsParticipationSig,
@@ -1910,18 +1920,10 @@ $teams = loadMissionTeamsForMission($missionId);
 
 // Lazy briefing-link generation: a team created before its mission was
 // flagged special (or before this feature existed) simply has a NULL
-// briefing_token — backfilled here on the admin's next War Room view rather
-// than needing a separate "generate" action. Mirrors shift-view.php's own
-// lazy QR-token generation idiom.
+// briefing_token — backfilled on the admin's next War Room view (and, since
+// v3.394.0, on every poll) rather than needing a separate "generate" action.
 if ($canManageWarRoom && !empty($mission['is_special_mission'])) {
-    foreach ($teams as $tid => &$teamRef) {
-        if (empty($teamRef['briefing_token'])) {
-            $newBriefingToken = bin2hex(random_bytes(32));
-            dbExecute("UPDATE mission_teams SET briefing_token = ? WHERE id = ?", [$newBriefingToken, $tid]);
-            $teamRef['briefing_token'] = $newBriefingToken;
-        }
-    }
-    unset($teamRef);
+    $teams = ensureTeamBriefingTokens($teams);
 }
 
 $teamLabelByUserId = [];
@@ -5590,17 +5592,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                     <button type="submit" class="btn btn-sm btn-primary w-100"><?= t('common.save') ?></button>
                 </form>
                 <div class="fw-semibold small mb-2"><?= t('briefing.links_title') ?></div>
-                <?php if (empty($teams)): ?>
-                <p class="small text-muted mb-0"><?= t('briefing.no_teams_yet') ?></p>
-                <?php else: ?>
-                <?php foreach ($teams as $team): [$briefBg, $briefFg] = teamBadgeColors($team['color']); $briefUrl = rtrim(BASE_URL, '/') . '/briefing-view.php?token=' . urlencode($team['briefing_token'] ?? ''); ?>
-                <div class="d-flex align-items-center gap-2 mb-2">
-                    <span class="badge" style="background:<?= h($briefBg) ?>;color:<?= h($briefFg) ?>;white-space:nowrap;"><?= h(teamLabel($team['codename'], $team['team_number'])) ?></span>
-                    <input type="text" class="form-control form-control-sm wr-briefing-link" readonly value="<?= h($briefUrl) ?>" onclick="this.select()">
-                    <button type="button" class="btn btn-sm btn-outline-secondary wr-briefing-copy-btn" data-copy-text="<?= h($briefUrl) ?>" title="<?= t('briefing.copy_btn') ?>"><i class="bi bi-clipboard"></i></button>
-                </div>
-                <?php endforeach; ?>
-                <?php endif; ?>
+                <?= warRoomLiveFragment('missionBriefing', renderBriefingTeamLinks($teams)) ?>
             </div>
         </div>
         <?php endif; ?>
@@ -28121,20 +28113,22 @@ function renderWaypointPanel() {
     });
 })();
 
-document.querySelectorAll('.wr-briefing-copy-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-        navigator.clipboard.writeText(btn.dataset.copyText || '').then(() => {
-            const icon = btn.querySelector('i');
-            const prevClass = icon.className;
-            icon.className = 'bi bi-check-lg';
-            btn.classList.add('btn-success');
-            btn.classList.remove('btn-outline-secondary');
-            setTimeout(() => {
-                icon.className = prevClass;
-                btn.classList.remove('btn-success');
-                btn.classList.add('btn-outline-secondary');
-            }, 1500);
-        });
+// Delegated rather than bound per button: the link list is a live fragment
+// that the 5s poll replaces, and per-element listeners would die with it.
+document.addEventListener('click', e => {
+    const btn = e.target.closest('.wr-briefing-copy-btn');
+    if (!btn) return;
+    navigator.clipboard.writeText(btn.dataset.copyText || '').then(() => {
+        const icon = btn.querySelector('i');
+        const prevClass = icon.className;
+        icon.className = 'bi bi-check-lg';
+        btn.classList.add('btn-success');
+        btn.classList.remove('btn-outline-secondary');
+        setTimeout(() => {
+            icon.className = prevClass;
+            btn.classList.remove('btn-success');
+            btn.classList.add('btn-outline-secondary');
+        }, 1500);
     });
 });
 

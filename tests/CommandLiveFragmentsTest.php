@@ -278,7 +278,126 @@ final class CommandLiveFragmentsTest extends TestCase
         }
     }
 
+    // --- briefing links -----------------------------------------------------
+
+    private function team(int $id, string $codename, int $number, ?string $token, ?string $color = '#2563eb'): array
+    {
+        return ['id' => $id, 'codename' => $codename, 'team_number' => $number, 'color' => $color, 'briefing_token' => $token];
+    }
+
+    public function testBriefingLinksSayWhenThereAreNoTeamsYet(): void
+    {
+        $html = renderBriefingTeamLinks([]);
+
+        $this->assertStringContainsString(t('briefing.no_teams_yet'), $html);
+        $this->assertStringNotContainsString('wr-briefing-copy-btn', $html);
+    }
+
+    public function testBriefingLinksCarryOneLinkAndCopyButtonPerTeam(): void
+    {
+        $html = renderBriefingTeamLinks([
+            $this->team(1, 'ΑΛΦΑ', 1, str_repeat('a', 64)),
+            $this->team(2, 'ΒΗΤΑ', 2, str_repeat('b', 64)),
+        ]);
+
+        $this->assertSame(2, substr_count($html, 'wr-briefing-copy-btn'));
+        $this->assertStringContainsString('/briefing-view.php?token=' . str_repeat('a', 64) . '"', $html);
+        $this->assertStringContainsString('data-copy-text="' . h(rtrim(BASE_URL, '/') . '/briefing-view.php?token=' . str_repeat('b', 64)) . '"', $html);
+        $this->assertStringContainsString(h(teamLabel('ΑΛΦΑ', 1)), $html);
+        $this->assertStringNotContainsString(t('briefing.no_teams_yet'), $html);
+    }
+
+    public function testBriefingLinksEscapeTheTeamName(): void
+    {
+        $html = renderBriefingTeamLinks([$this->team(1, '<b>X</b>', 1, str_repeat('c', 64))]);
+
+        $this->assertStringNotContainsString('<b>X</b>', $html);
+        $this->assertStringContainsString('&lt;b&gt;X&lt;/b&gt;', $html);
+    }
+
+    public function testANewTeamChangesTheBriefingFragment(): void
+    {
+        $one = [$this->team(1, 'ΑΛΦΑ', 1, str_repeat('a', 64))];
+        $two = array_merge($one, [$this->team(2, 'ΒΗΤΑ', 2, str_repeat('b', 64))]);
+
+        $this->assertNotSame(
+            warRoomLiveFragmentPayload(renderBriefingTeamLinks($one))['sig'],
+            warRoomLiveFragmentPayload(renderBriefingTeamLinks($two))['sig']
+        );
+    }
+
+    private function makeTeam(int $missionId, int $userId, int $number, ?string $token): int
+    {
+        return (int) dbInsert(
+            "INSERT INTO mission_teams (mission_id, codename, team_number, created_by, briefing_token) VALUES (?, ?, ?, ?, ?)",
+            [$missionId, 'ΤΕΣΤ', $number, $userId, $token]
+        );
+    }
+
+    public function testATeamWithoutATokenGetsOneAndKeepsIt(): void
+    {
+        $missionId = $this->makeMission();
+        $userId = $this->makeUser('Briefing Admin');
+        $teamId = $this->makeTeam($missionId, $userId, 1, null);
+
+        $filled = ensureTeamBriefingTokens(loadMissionTeamsForMission($missionId));
+
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $filled[$teamId]['briefing_token'], 'the page\'s id-keyed list keeps its keys');
+        $this->assertSame($filled[$teamId]['briefing_token'], dbFetchValue("SELECT briefing_token FROM mission_teams WHERE id = ?", [$teamId]));
+
+        $again = ensureTeamBriefingTokens(array_values(loadMissionTeamsForMission($missionId)));
+        $this->assertSame($filled[$teamId]['briefing_token'], $again[0]['briefing_token'], 'a team that already has a token is left alone');
+    }
+
+    public function testALosingPollAdoptsTheWinnersToken(): void
+    {
+        $missionId = $this->makeMission();
+        $userId = $this->makeUser('Briefing Admin 2');
+        $teamId = $this->makeTeam($missionId, $userId, 1, null);
+        $stale = array_values(loadMissionTeamsForMission($missionId));
+        $this->assertEmpty($stale[0]['briefing_token']);
+
+        // Another admin's poll fills the gap between this one's read and write.
+        $winner = str_repeat('f', 64);
+        dbExecute("UPDATE mission_teams SET briefing_token = ? WHERE id = ?", [$winner, $teamId]);
+
+        $result = ensureTeamBriefingTokens($stale);
+
+        $this->assertSame($winner, $result[0]['briefing_token']);
+        $this->assertSame($winner, dbFetchValue("SELECT briefing_token FROM mission_teams WHERE id = ?", [$teamId]));
+    }
+
+    public function testThePollCarriesTheBriefingFragmentOnlyOnASpecialMission(): void
+    {
+        $missionId = $this->makeMission();
+
+        $normal = buildCommandLiveFragments($missionId, false, [], [], [], null);
+        $special = buildCommandLiveFragments($missionId, false, [], [], [], []);
+
+        $this->assertArrayNotHasKey('missionBriefing', $normal);
+        $this->assertArrayHasKey('missionBriefing', $special);
+        $this->assertSame(md5($special['missionBriefing']['html']), $special['missionBriefing']['sig']);
+    }
+
     // --- wiring (source pins; the gate needs a signed-in session) ----------
+
+    public function testThePolledTeamsNoLongerCarryTheBriefingToken(): void
+    {
+        $page = file_get_contents(__DIR__ . '/../war-room.php');
+
+        $this->assertStringContainsString("'teams' => array_map(fn(\$team) => array_diff_key(\$team, ['briefing_token' => true]), \$teams),", $page);
+        // And nothing in the browser was reading it from there.
+        $this->assertStringNotContainsString('.briefing_token', $page);
+    }
+
+    public function testTheCopyButtonSurvivesTheFragmentBeingReplaced(): void
+    {
+        $page = file_get_contents(__DIR__ . '/../war-room.php');
+
+        $this->assertStringNotContainsString("querySelectorAll('.wr-briefing-copy-btn')", $page, 'per-button listeners die when the poll replaces the list');
+        $this->assertStringContainsString("e.target.closest('.wr-briefing-copy-btn')", $page);
+    }
+
 
     public function testThePageAndThePollAgreeOnTheFragmentKeys(): void
     {
@@ -294,7 +413,7 @@ final class CommandLiveFragmentsTest extends TestCase
         sort($pageKeys);
         sort($pollKeys);
 
-        $this->assertSame(['missionClose', 'missionShifts', 'missionVisitors'], $pageKeys);
+        $this->assertSame(['missionBriefing', 'missionClose', 'missionShifts', 'missionVisitors'], $pageKeys);
         $this->assertSame($pageKeys, $pollKeys, 'a key on only one side is a card that is never redrawn, or a payload nobody reads');
     }
 
