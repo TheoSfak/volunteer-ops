@@ -358,15 +358,114 @@ final class SectorExitWarningTest extends TestCase
         $this->assertMatchesRegularExpression("~m\\.type === 'sector_exit' && m\\.advanceStatus\\) return \\['advance'~", $go);
         $this->assertLessThan(strpos($go, "m.kind === 'info'"), strpos($go, "m.type === 'sector_exit'"), 'before the generic «Κατάλαβα» of a notice');
         // …and tapping the small map must never be it.
-        $this->assertMatchesRegularExpression("~m\\.type === 'sector_exit' \\? \\['wpmap'~", $fn('function opMiniHtml('));
+        $this->assertMatchesRegularExpression("~\\(m\\.type === 'sector_exit' \\|\\| m\\.type === 'sector_exit_staff'\\) \\? \\['wpmap'~", $fn('function opMiniHtml('));
         // «Γυρνάω πίσω» is the notice's own dismiss.
-        $this->assertStringContainsString("opBtn('dismiss', 'bi-arrow-return-left', t('popup.btn.sector_exit_back')", $fn('function opNoticeCardBtnHtml('));
+        $notice = $fn('function opNoticeCardBtnHtml(');
+        $this->assertStringContainsString("opBtn('dismiss', 'bi-arrow-return-left', t('popup.btn.sector_exit_back')", $notice);
         // Kept current by the sync, dropped once the sector is done; ignored on arrival if it already is.
         $sync = $fn('function orderPopupSync(');
-        $this->assertStringContainsString("m.type === 'sector_exit'", $sync);
+        $this->assertStringContainsString("m.type === 'sector_exit' || m.type === 'sector_exit_staff'", $sync);
         $this->assertStringContainsString('opSectorExitOpen(m.id)', $sync);
-        $this->assertStringContainsString("b.popup.info === 'mission_sector_exit' && !opSectorExitOpen(b.popup.sectorId)", $fn('function orderPopupTakeBanner('));
+        $this->assertStringContainsString("(b.popup.info === 'mission_sector_exit' || b.popup.info === 'mission_sector_exit_staff') && !opSectorExitOpen(b.popup.sectorId)", $fn('function orderPopupTakeBanner('));
         $this->assertStringContainsString("sector.status === 'in_progress'", $fn('function opSectorExitOpen('));
+
+        // Command's popup (v3.392.0): «Κατάλαβα» and the sector on the map — and
+        // never «Ολοκλήρωση Τομέα», which only the person's own popup may offer.
+        $this->assertStringContainsString("b.popup.info === 'mission_sector_exit_staff'", $fn('function opModelFromNotice('));
+        $this->assertStringContainsString("m.type === 'sector_exit' && sector", $fn('function opRefreshSectorExit('), 'advanceStatus is set for the person\'s popup only');
+        $this->assertStringContainsString("opBtn('secmap'", $notice);
+        $this->assertStringContainsString("if (op === 'secmap')", $fn('function opAct('));
+    }
+
+    // ── Command staff (v3.392.0) ────────────────────────────────────────────
+
+    private function makeCommand(): int
+    {
+        $id = $this->makeUser('Exit Command');
+        dbExecute("UPDATE users SET role = ? WHERE id = ?", [ROLE_DEPARTMENT_ADMIN, $id]);
+        dbExecute("UPDATE missions SET responsible_user_id = ? WHERE id = ?", [$id, $this->missionId]);
+        return $id;
+    }
+
+    private function staffNotices(int $userId): array
+    {
+        return dbFetchAll(
+            "SELECT title, message, data FROM notifications WHERE user_id = ? AND data LIKE '%mission_sector_exit_staff%'",
+            [$userId]
+        );
+    }
+
+    public function testCommandIsToldOnceWhenSomeoneWalksOutAndNobodyElseIs(): void
+    {
+        $command = $this->makeCommand();
+
+        $this->fix($this->member, $this->inside());
+        $this->assertSame([], $this->staffNotices($command), 'nothing to say while they are in the sector');
+
+        $this->fix($this->member, $this->northOfSector(150.0));
+        $this->fix($this->member, $this->northOfSector(400.0));
+
+        $notices = $this->staffNotices($command);
+        $this->assertCount(1, $notices, 'one per walk out, like the person\'s own');
+        $data = json_decode($notices[0]['data'], true);
+        $this->assertSame('mission_sector_exit_staff', $data['popupInfo']);
+        $this->assertSame($this->sectorId, $data['exitSectorId']);
+        $this->assertSame($this->missionId, $data['bannerMission'], 'a popup on the page, the loud channel on the phone');
+        $this->assertSame(
+            ['kind' => 'info', 'info' => 'mission_sector_exit_staff', 'id' => 0, 'sectorId' => $this->sectorId],
+            notificationPopupRef($data)
+        );
+        $this->assertStringContainsString('Άννα Α.', $notices[0]['message'], 'who');
+        $this->assertStringContainsString('ΑΛΦΑ', $notices[0]['message'], 'which team');
+        $this->assertStringContainsString('«Α3»', $notices[0]['message'], 'which sector');
+        $this->assertStringContainsString('100', $notices[0]['message']);
+
+        // The walker still gets their own, not command's; a teammate and another team get nothing.
+        $this->assertCount(1, $this->notices($this->member));
+        $this->assertSame([], $this->staffNotices($this->member));
+        $this->assertSame([], $this->staffNotices($this->teammate));
+        $this->assertSame([], $this->notices($this->teammate));
+        $this->assertSame([], $this->staffNotices($this->stranger));
+    }
+
+    public function testCommandIsToldAgainOnlyForANewWalkOut(): void
+    {
+        $command = $this->makeCommand();
+        $this->fix($this->member, $this->inside());
+        $this->fix($this->member, $this->northOfSector(200.0));
+        $this->fix($this->member, $this->northOfSector(60.0));
+        $this->fix($this->member, $this->northOfSector(200.0));
+        $this->assertCount(1, $this->staffNotices($command));
+
+        $this->fix($this->member, $this->inside());
+        $this->fix($this->member, $this->northOfSector(200.0));
+        $this->assertCount(2, $this->staffNotices($command));
+    }
+
+    public function testAnAdminOnTheTeamIsNotToldAboutTheirOwnWalkOut(): void
+    {
+        // An admin account that is also a team member: they get the person's
+        // warning, and command's copy is for the others.
+        $command = $this->makeCommand();
+        dbExecute("UPDATE users SET role = ? WHERE id = ?", [ROLE_DEPARTMENT_ADMIN, $this->member]);
+        dbExecute("UPDATE missions SET responsible_user_id = ? WHERE id = ?", [$this->member, $this->missionId]);
+
+        $this->fix($this->member, $this->inside());
+        $this->fix($this->member, $this->northOfSector(200.0));
+
+        $this->assertCount(1, $this->notices($this->member));
+        $this->assertSame([], $this->staffNotices($this->member), 'their own walk out is not news to them twice');
+    }
+
+    public function testNobodyOnCommandIsToldWhenNobodyWasWarned(): void
+    {
+        $command = $this->makeCommand();
+        // Never at the sector, then a sector that is not being searched.
+        $this->fix($this->teammate, $this->northOfSector(500.0));
+        dbExecute("UPDATE mission_search_sectors SET status = 'completed' WHERE id = ?", [$this->sectorId]);
+        $this->fix($this->member, $this->inside());
+        $this->fix($this->member, $this->northOfSector(500.0));
+        $this->assertSame([], $this->staffNotices($command));
     }
 
     public function testThePingHooksItAndTheEnglishWordingExists(): void
@@ -379,11 +478,15 @@ final class SectorExitWarningTest extends TestCase
 
         $lang = loadLangStrings('war-room');
         foreach (['el', 'en'] as $code) {
-            foreach (['sector_exit.title', 'sector_exit.message', 'popup.type.sector_exit', 'popup.btn.sector_exit_back'] as $key) {
+            foreach (['sector_exit.title', 'sector_exit.message', 'popup.type.sector_exit', 'popup.btn.sector_exit_back',
+                      'sector_exit.staff_title', 'sector_exit.staff_message', 'popup.type.sector_exit_staff'] as $key) {
                 $this->assertArrayHasKey($key, $lang[$code], "$code $key");
             }
         }
-        $this->assertStringContainsString('{m}', $lang['en']['sector_exit.message']);
-        $this->assertStringContainsString('{label}', $lang['en']['sector_exit.message']);
+        foreach (['sector_exit.message', 'sector_exit.staff_message'] as $key) {
+            $this->assertStringContainsString('{m}', $lang['en'][$key]);
+            $this->assertStringContainsString('{label}', $lang['en'][$key]);
+        }
+        $this->assertStringContainsString('{who}', $lang['en']['sector_exit.staff_message']);
     }
 }

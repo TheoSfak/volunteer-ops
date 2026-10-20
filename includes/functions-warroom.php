@@ -6142,29 +6142,66 @@ function checkSectorExitWarnings(int $missionId, int $userId, ?int $teamId, floa
 }
 
 /**
- * The warning itself, to the one person who walked out. An order-class alert
- * (bannerMission): a popup on the open page whose first button is
- * «Ολοκλήρωση Τομέα», and the loud channel on the Android app. `exitSectorId`
- * is what notificationPopupRef() reads to tell the popup which sector.
+ * The warning itself, to the one person who walked out, and (v3.392.0) the same
+ * news to command staff. Both are order-class alerts (bannerMission) that open
+ * as a popup on the page and take the loud channel on the Android app.
+ * `exitSectorId` is what notificationPopupRef() reads to tell the popup which
+ * sector. The person's popup carries «Ολοκλήρωση Τομέα»; command's only says who
+ * left what, with the sector on a small map — completing a sector on behalf of
+ * the team is not something a notice should offer.
  */
 function notifySectorExit(int $missionId, int $userId, array $sector): void {
     $lang = getUserLanguage($userId);
     $label = trim((string) $sector['label']);
     // Labels are stored as «Τομέας Ε» already; the sentence says "sector".
     $short = trim((string) preg_replace('/^(τομέας|sector)\s+/iu', '', $label));
+    $shown = $short !== '' ? $short : $label;
+    $url = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
     sendNotification(
         $userId,
         t('sector_exit.title', [], $lang),
-        t('sector_exit.message', ['label' => $short !== '' ? $short : $label, 'm' => SECTOR_EXIT_WARN_M], $lang),
+        t('sector_exit.message', ['label' => $shown, 'm' => SECTOR_EXIT_WARN_M], $lang),
         'warning', '',
         [
-            'url' => rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId,
+            'url' => $url,
             'tag' => 'sector-exit-' . (int) $sector['id'],
             'bannerMission' => $missionId,
             'popupInfo' => 'mission_sector_exit',
             'exitSectorId' => (int) $sector['id'],
         ]
     );
+
+    $mission = dbFetchOne("SELECT responsible_user_id FROM missions WHERE id = ?", [$missionId]);
+    $staffIds = getMissionCommandStaffIds($missionId, !empty($mission['responsible_user_id']) ? (int) $mission['responsible_user_id'] : null, $userId);
+    if (!$staffIds) {
+        return;
+    }
+    $person = dbFetchOne("SELECT name FROM users WHERE id = ?", [$userId]);
+    $teamRow = dbFetchOne(
+        "SELECT mt.codename, mt.team_number FROM mission_team_members m JOIN mission_teams mt ON mt.id = m.team_id WHERE m.mission_id = ? AND m.user_id = ? LIMIT 1",
+        [$missionId, $userId]
+    );
+    $name = (string) ($person['name'] ?? '');
+    $langs = getUserLanguages($staffIds);
+    foreach ($staffIds as $staffId) {
+        $staffLang = $langs[$staffId] ?? DEFAULT_LANGUAGE;
+        $who = $teamRow
+            ? t('decline.who_team', ['team' => teamLabel($teamRow['codename'], $teamRow['team_number']), 'name' => $name], $staffLang)
+            : $name;
+        sendNotification(
+            $staffId,
+            t('sector_exit.staff_title', [], $staffLang),
+            t('sector_exit.staff_message', ['who' => $who, 'label' => $shown, 'm' => SECTOR_EXIT_WARN_M], $staffLang),
+            'warning', '',
+            [
+                'url' => $url,
+                'tag' => 'sector-exit-staff-' . (int) $sector['id'] . '-' . $userId,
+                'bannerMission' => $missionId,
+                'popupInfo' => 'mission_sector_exit_staff',
+                'exitSectorId' => (int) $sector['id'],
+            ]
+        );
+    }
 }
 
 /**

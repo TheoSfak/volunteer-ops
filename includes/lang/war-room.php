@@ -1558,6 +1558,10 @@ return [
         // it without pressing «Ολοκλήρωση Τομέα» (sector.action.complete).
         'sector_exit.title' => '⚠ Βγήκες από τον τομέα',
         'sector_exit.message' => 'Βγήκες πάνω από {m} μ. έξω από τον τομέα «{label}» και δεν τον έχεις ολοκληρώσει. Αν τον ολοκλήρωσες, πάτα «Ολοκλήρωση Τομέα». Αλλιώς, γύρνα πίσω στον τομέα σου.',
+        // The same news for command staff (v3.392.0). {who} is «Ομάδα (όνομα)».
+        'sector_exit.staff_title' => '⚠ Έξοδος από τομέα',
+        'sector_exit.staff_message' => '{who} βγήκε πάνω από {m} μ. έξω από τον τομέα «{label}» χωρίς να τον ολοκληρώσει.',
+        'popup.type.sector_exit_staff' => 'Έξοδος από τομέα',
         'popup.type.sector_exit' => 'Βγήκες από τον τομέα',
         'popup.btn.sector_exit_back' => 'Γυρνάω πίσω στον τομέα',
 
@@ -4266,6 +4270,9 @@ return [
         'sector.auto_note' => 'Automatic, from GPS',
         'sector_exit.title' => '⚠ You left the sector',
         'sector_exit.message' => 'You are more than {m} m outside sector «{label}» and have not completed it. If you have, press «Complete Sector». Otherwise, go back to your sector.',
+        'sector_exit.staff_title' => '⚠ Left a sector',
+        'sector_exit.staff_message' => '{who} is more than {m} m outside sector «{label}» and has not completed it.',
+        'popup.type.sector_exit_staff' => 'Left a sector',
         'popup.type.sector_exit' => 'You left the sector',
         'popup.btn.sector_exit_back' => "I'm going back to the sector",
 
