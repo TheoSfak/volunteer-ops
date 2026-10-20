@@ -4301,9 +4301,16 @@ include __DIR__ . '/includes/header.php';
                         <i class="bi bi-bullseye"></i>
                     </button>
                     <?php endif; ?>
+                    <?php if ($canManageWarRoom): ?>
+                    <!-- The layers menu (map view, which shapes to show, pin
+                         labels, OpenStreetMap data) is a command tool: only
+                         admin accounts get the button. Everything that reads
+                         it looks the button up with a guard, so a page served
+                         without it simply never builds the menu. -->
                     <button type="button" id="mapSatelliteToggle" class="btn btn-sm btn-outline-secondary" title="<?= t('map.base_layer_menu') ?>">
                         <i class="bi bi-layers"></i>
                     </button>
+                    <?php endif; ?>
                     <button type="button" id="mapFullscreenToggle" class="btn btn-sm btn-outline-secondary" title="<?= t('map.btn_fullscreen') ?>">
                         <i class="bi bi-arrows-fullscreen"></i>
                     </button>
@@ -9673,38 +9680,18 @@ document.getElementById('sectorsCardClearAllBtn')?.addEventListener('click', () 
         }
     });
 });
-// Search areas get their permanent label OUTSIDE the polygon (just past its
-// own northernmost corner) instead of centered like every other polygon
-// label on this map — once an area is divided, a sector's own centered
-// label can land right on the area's centroid too, and the two used to
-// overlap into unreadable text. Sectors keep direction:'center' — a sector
-// never has another label competing for its own centroid, only the area
-// does. Anchored to the polygon's own northernmost vertex (a real corner of
-// the shape) with a small FIXED nudge, not scaled by the polygon's size —
-// a first version scaled the offset with the area's own height and drifted
-// far enough from a realistically-sized area to start overlapping a
-// different, unrelated area drawn further north on the same map.
-function areaLabelAnchor(geo) {
-    let north = geo[0];
-    for (const pt of geo) {
-        if (pt[0] > north[0]) north = pt;
-    }
-    return [north[0] + 0.00025, north[1]];
-}
-
-// Zoom-tiered polygon names. Every area, sector and restricted area carries a
+// Zoom-tiered polygon names. Every sector and restricted area carries a
 // permanent on-map label, and one divided area can hold up to
 // war_room_grid_max_cells of them (120 by default, MAX_GRID_CELLS 400 ceiling)
 // -- zoomed out to the whole mission that is a wall of "Sector A1" laid over
-// the ground the map exists to show.
+// the ground the map exists to show. A search AREA carries none (v3.389.2): its
+// red name sat on top of the sectors' own, and the sectors are what is read off
+// this map. The area is still named in its popup and in the areas list.
 //
 // The tier is decided per polygon by how big THAT shape is on screen right
 // now, never by a zoom level. A fixed zoom threshold is wrong in half the
 // missions: a 20 km2 area still reads fine at z=13 while a 300m grid is
-// already soup there. Going by on-screen size also buys the right priority
-// for free -- an area is a much larger shape than the sectors inside it, so
-// it keeps its name far deeper into a zoom-out than they do, which is exactly
-// what an overview should answer first.
+// already soup there.
 //
 // Nothing is lost by dropping a name: a sector's fill already encodes its
 // status (SECTOR_STATUS_HEX), and that colour pattern is what actually gets
@@ -9766,9 +9753,9 @@ function polygonPixelSize(bounds) {
 
 // Binds the permanent label AND records what the tier pass needs to re-decide
 // it later. bounds come from the polygon's own geo even when the tooltip hangs
-// off a separate invisible marker (an area labels itself just outside its
-// northernmost corner -- see areaLabelAnchor above): it is the SHAPE's size on
-// screen that decides whether naming it is worth the ink, never the anchor's.
+// off a separate layer (a restricted area's label sits on its visual copy): it
+// is the SHAPE's size on screen that decides whether naming it is worth the
+// ink.
 function bindTieredPolygonLabel(layer, text, geo, className, opts = {}) {
     layer._wrLabel = {
         full: text,
@@ -9831,11 +9818,6 @@ function renderAreaLayer(items) {
     // save and a reload. Returning early also leaves an open popup genuinely
     // open rather than destroying and reopening it, which is strictly better
     // than what the reopen dance below can manage.
-    //
-    // Skipping applyPolygonLabelTiers() on this path is safe and deliberate:
-    // a label's tier depends on its text, its shape's bounds and the zoom.
-    // The first two cannot have moved if the signature matched, and the zoom
-    // has its own zoomend handler that re-tiers every group.
     const sig = JSON.stringify(items);
     if (sig === areasRenderedSig) return;
     areasRenderedSig = sig;
@@ -9849,8 +9831,8 @@ function renderAreaLayer(items) {
     items.forEach(item => {
         const rollup = `<div class="small mt-1">${t('sector.area_rollup', {completed: item.completed_count, total: item.sector_count})}</div>`;
         // Size is popup-only, here and on sectors below, and never a second
-        // permanent on-map label. Every area and every sector already carries
-        // one (.wr-polygon-label); hanging a number off each of them turns a
+        // permanent on-map label. Every sector already carries one
+        // (.wr-polygon-label); hanging a number off each of them turns a
         // divided callout map into a wall of digits laid over the ground the
         // map exists to show. A number consulted while planning can afford a
         // click; a label scanned at a glance cannot afford a neighbour.
@@ -9874,14 +9856,13 @@ function renderAreaLayer(items) {
 
         const layer = L.polygon(item.geo, {pane: 'areaPane', color: '#dc3545', weight: 4, dashArray: '10,6', fillColor: '#dc3545', fillOpacity: 0.06}).addTo(areaLayer).bindPopup(popupHtml);
         markMapPickable(layer, {kind: 'area', id: item.id, color: '#dc3545', title: item.label, sub: t('map_pick.kind_area')});
-        const areaLabelMarker = L.marker(areaLabelAnchor(item.geo), {icon: L.divIcon({className: '', iconSize: [0, 0]}), interactive: false});
-        bindTieredPolygonLabel(areaLabelMarker, item.label, item.geo, 'wr-polygon-label');
-        areaLabelMarker.addTo(areaLayer);
+        // No permanent on-map name for an area (v3.389.2): only the sectors
+        // inside it are named. The name is in the popup above, the areas list
+        // and «Τι υπάρχει εδώ;».
         layer.areaId = item.id;
         if (String(item.id) === String(openAreaId)) reopenAreaLayer = layer;
     });
 
-    applyPolygonLabelTiers(areaLayer);
     if (reopenAreaLayer) reopenAreaLayer.openPopup();
 }
 areaLayer?.on('popupopen', event => {
