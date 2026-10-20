@@ -1124,6 +1124,13 @@ $gpsParticipationSig = (function () use ($canManageWarRoom, $iTakePartInActionRo
     sort($ids);
     return substr(md5(implode(',', $ids)), 0, 12);
 })();
+// Who is on the roster at all (approved participations), command staff only.
+// Same idea as the GPS tick above and the same soft reload when it moves, for
+// the same reason: the roster feeds every recipient list and team form on the
+// page, not just its own card. A volunteer's phone is deliberately left alone -
+// a reload there could land in the middle of a photo, a video or a report, and
+// they have no recipient lists to keep right.
+$rosterSig = $canManageWarRoom ? missionRosterSignature($missionId) : null;
 
 $continuousFieldMinutesByVolunteerId = computeContinuousFieldMinutesByVolunteerId($missionId);
 $warRoomMaxShiftMinutes = (int) getSetting('war_room_max_shift_minutes', '480');
@@ -1733,6 +1740,8 @@ if (get('ajax') === '1') {
             : null,
         // See $gpsParticipationSig.
         'gpsSig' => $gpsParticipationSig,
+        // See $rosterSig. Null for everybody but command staff.
+        'rosterSig' => $rosterSig,
     ];
 
     // Don't re-send 51KB that the client already has.
@@ -21370,6 +21379,9 @@ function applyGpsParticipationToRow(uid, takesPart) {
 // handover (one off, one on) is one reload, and none at all while a window
 // is open or something is being typed.
 const GPS_PARTICIPATION_SIG = <?= json_encode($gpsParticipationSig) ?>;
+// The roster counterpart (command staff only, null for everybody else): who is
+// approved on this mission, as this page was built. See $rosterSig.
+const ROSTER_SIG = <?= json_encode($rosterSig) ?>;
 const GPS_RELOAD_VIEW_KEY = 'wr-gps-reload-view-<?= $missionId ?>';
 const GPS_RELOAD_GRACE_MS = 3000;
 let gpsReloadDeadline = 0;
@@ -21388,9 +21400,12 @@ function gpsReloadBlocked() {
 
 // extend: a switch flipped here restarts the grace period, so the next one
 // can follow; the poll only starts it, or a busy poll would postpone forever.
-function reloadForGpsChange(extend) {
+// reason: 'roster' when the people on the mission changed rather than who has
+// GPS - only the wording of the notice differs, the reload is the same one.
+function reloadForGpsChange(extend, reason) {
     if (extend || !gpsReloadTimer) gpsReloadDeadline = Date.now() + GPS_RELOAD_GRACE_MS;
     if (gpsReloadTimer) return;
+    const noticeKey = reason === 'roster' ? 'roster_reload' : 'gps_reload';
     let toast = document.getElementById('gpsReloadToast');
     if (!toast) {
         toast = document.createElement('div');
@@ -21409,7 +21424,7 @@ function reloadForGpsChange(extend) {
         const text = document.getElementById('gpsReloadText');
         if (gpsReloadBlocked()) {
             gpsReloadDeadline = Date.now() + GPS_RELOAD_GRACE_MS;
-            text.textContent = t('gps_reload.waiting');
+            text.textContent = t(noticeKey + '.waiting');
             return;
         }
         const left = Math.ceil((gpsReloadDeadline - Date.now()) / 1000);
@@ -21417,7 +21432,7 @@ function reloadForGpsChange(extend) {
             saveViewAndReload();
             return;
         }
-        text.textContent = t('gps_reload.countdown', {s: left});
+        text.textContent = t(noticeKey + '.countdown', {s: left});
     };
     tick();
     gpsReloadTimer = setInterval(tick, 250);
@@ -25267,6 +25282,9 @@ function pollWarRoomData() {
         if (data.teamCaptains) teamCaptains = data.teamCaptains;
         // Somebody's GPS tick changed since this page was built.
         if (data.gpsSig && data.gpsSig !== GPS_PARTICIPATION_SIG) reloadForGpsChange(false);
+        // Somebody was approved, withdrawn or moved to another shift since this
+        // page was built (command staff only: the key is null otherwise).
+        else if (data.rosterSig && ROSTER_SIG && data.rosterSig !== ROSTER_SIG) reloadForGpsChange(false, 'roster');
         renderPins(pins = data.pins || []);
         if (data.dispatches) renderDispatches(dispatches = data.dispatches);
         if (data.annotations) renderAnnotations(annotations = data.annotations);

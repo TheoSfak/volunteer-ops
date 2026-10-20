@@ -12266,3 +12266,34 @@ function buildCommandLiveFragments(int $missionId, bool $visitorsEnabled, array 
     }
     return $fragments;
 }
+
+/**
+ * Who is on the roster, as one short fingerprint (v3.395.0).
+ *
+ * The roster card is not a card on its own: the same approved participations
+ * feed the eight recipient lists, the route composer's picker and the team
+ * forms, all rendered by PHP at page load. Redrawing only the roster card when
+ * somebody is approved would leave the person visible but impossible to send an
+ * order to, so a change in this fingerprint reloads the page instead, through
+ * the same soft reload a GPS switch already uses (reloadForGpsChange()).
+ *
+ * It covers exactly what the roster card lists: one entry per approved
+ * participation, with its shift, so an approval, a withdrawal and a move to
+ * another shift all change it. It deliberately does NOT contain anything that
+ * moves on its own (pings, presence, status), which the poll already redraws in
+ * place - a fingerprint that moved with those would reload the page every few
+ * seconds. The page and the poll both call this one function, so on an
+ * unchanged roster they cannot disagree.
+ */
+function missionRosterSignature(int $missionId): string {
+    $rows = dbFetchAll(
+        "SELECT pr.id AS pr_id, pr.shift_id
+         FROM participation_requests pr
+         JOIN users u ON u.id = pr.volunteer_id
+         JOIN shifts s ON s.id = pr.shift_id
+         WHERE s.mission_id = ? AND pr.status = ?
+         ORDER BY pr.id",
+        [$missionId, PARTICIPATION_APPROVED]
+    );
+    return substr(md5(implode(',', array_map(fn($r) => $r['pr_id'] . ':' . $r['shift_id'], $rows))), 0, 12);
+}
