@@ -14777,6 +14777,13 @@ function orderPopupSync(entries) {
             m.hint = open ? '' : t('popup.unlock_resolved');
             return;
         }
+        // «Βγήκες από τον τομέα» (v3.391.0): answered the moment the sector is
+        // completed — by this person, a teammate or command — or gone.
+        if (m.type === 'sector_exit') {
+            if (!opSectorExitOpen(m.id)) opInfo.delete(key);
+            else opRefreshSectorExit(m);
+            return;
+        }
         if (m.kind !== 'arrive') return;
         const where = opArriveTarget(m.target_kind, m.id);
         if (!where.open) opInfo.delete(key);
@@ -14906,6 +14913,9 @@ function orderPopupTakeBanner(b) {
     if (!b.popup || !document.getElementById('orderPopupRoot')) return false;
     if (b.popup.kind === 'info') {
         const key = 'info:' + b.id;
+        // Already completed (or gone) by the time the warning reaches this page:
+        // nothing to ask, and no ticker line either.
+        if (b.popup.info === 'mission_sector_exit' && !opSectorExitOpen(b.popup.sectorId)) return true;
         // Only where the command post is NOW matters: an older «moved»
         // notice still waiting for «Κατάλαβα» would point at a spot it has
         // already left.
@@ -14984,6 +14994,27 @@ function opArrive(key, b) {
 // A route cancelled or a route point skipped by someone else, or a dispatch or
 // sector command has taken back. The text is the notification's own, already
 // in this person's language.
+// The sector a «Βγήκες από τον τομέα» notice is about, as this page knows it
+// now — and whether it is still being searched. A volunteer's list holds only
+// their own team's sectors, so one that is missing has been deleted or taken
+// off the team: nothing left to complete either.
+function opSectorExitSector(sectorId) {
+    return (sectors || []).find(s => String(s.id) === String(sectorId)) || null;
+}
+function opSectorExitOpen(sectorId) {
+    const sector = opSectorExitSector(sectorId);
+    return !!sector && sector.status === 'in_progress';
+}
+// Brings the notice up to date with the sector: «Ολοκλήρωση Τομέα» while this
+// person may still press it, and the sector on the small map for the way back.
+function opRefreshSectorExit(m) {
+    const sector = opSectorExitSector(m.id);
+    m.advanceStatus = sector && sector.status === 'in_progress' && sector.can_self_report ? sector.next_status : null;
+    m.advanceLabel = m.advanceStatus ? sectorActionLabel(sector.status) : '';
+    const nav = sector ? opPolygonNav(sector.geo) : null;
+    m.target = sector && nav ? {kind: 'polygon', pts: sector.geo, nav: nav} : null;
+}
+
 function opModelFromNotice(key, b) {
     // The Συντονιστικό was set up or has moved (v3.346.0). The spot comes with
     // the notice rather than from the page's commandPost, which the same poll
@@ -15029,6 +15060,25 @@ function opModelFromNotice(key, b) {
             acked: false, outstanding: true, steps: [t('popup.step.seen')], step: 0, stepTimes: {},
             hint: '', speakText: b.message, target: null, card: 'myTasksCard', cardLabel: t('popup.btn.show_order'),
         };
+    }
+    // «Βγήκες από τον τομέα» (v3.391.0): this person's team is searching a
+    // sector and they have walked more than 100 m out of it without pressing
+    // «Ολοκλήρωση Τομέα» (checkSectorExitWarnings()). The first button IS that
+    // button, offered for as long as the sector is being searched
+    // (opRefreshSectorExit, kept current by orderPopupSync); the other says they
+    // are going back, and the small map, compass and directions show the way.
+    if (b.popup.info === 'mission_sector_exit') {
+        const m = {
+            key: key, kind: 'info', id: Number(b.popup.sectorId) || 0, type: 'sector_exit',
+            cat: 'move', icon: 'bi-box-arrow-right',
+            title: t('popup.type.sector_exit'),
+            text: b.message, meta: '',
+            acked: false, outstanding: true, steps: [t('popup.step.seen')], step: 0, stepTimes: {},
+            hint: '', speakText: '', target: null, card: 'mySectorsCard', cardLabel: t('popup.btn.show_order'),
+            advanceStatus: null, advanceLabel: '',
+        };
+        opRefreshSectorExit(m);
+        return m;
     }
     if (b.popup.info === 'mission_order_withdrawn') {
         // The order itself has already left this page — deleted, or no longer
@@ -15325,6 +15375,8 @@ function opCompassBtnHtml(m) {
 function opGoAction(m) {
     const mapLess = !map || !m.target;
     if (m.type === 'unlock_request' && m.unlockOpen) return ['unlock', 'bi-unlock-fill', t('route.unlock.btn')];
+    // «Ολοκλήρωση Τομέα» itself, for someone who walked out of their sector.
+    if (m.type === 'sector_exit' && m.advanceStatus) return ['advance', 'bi-check2-circle', m.advanceLabel];
     if (m.kind === 'info' || m.kind === 'team') return ['dismiss', 'bi-check2', t('popup.btn.got_it')];
     if (m.kind === 'arrive') return ['arrived', 'bi-geo-alt-fill', t('popup.btn.arrived')];
     switch (m.type) {
@@ -15404,6 +15456,9 @@ function opNoticeCardBtnHtml(m) {
     // An arrival question's other answer: not yet — it is not asked again.
     if (m.kind === 'arrive') return opBtn('dismiss', 'bi-x-lg', t('popup.btn.not_yet'), 'btn-outline-secondary');
     if (m.type === 'command_post') return map && m.target ? opBtn('cpmap', 'bi-map', t('popup.btn.show_command_post'), 'btn-outline-primary') : '';
+    // Their other answer: not done, going back. (Without «Ολοκλήρωση Τομέα» —
+    // nothing to press — the primary button above is already «Κατάλαβα».)
+    if (m.type === 'sector_exit') return m.advanceStatus ? opBtn('dismiss', 'bi-arrow-return-left', t('popup.btn.sector_exit_back'), 'btn-outline-secondary') : '';
     return (m.kind === 'info' || m.kind === 'team') && m.card
         ? opBtn('card', 'bi-box-arrow-up-right', m.cardLabel, 'btn-outline-primary')
         : '';
@@ -15483,6 +15538,9 @@ function opMiniHtml(m) {
     // is pressed on its button, never on a map someone was only looking at.
     const [op, , label] = m.type === 'command_post' ? ['cpmap', '', t('popup.btn.show_command_post')]
         : m.type === 'unlock_request' ? ['wpmap', '', t('popup.btn.show_point')]
+        // Tapping the map must never be «Ολοκλήρωση Τομέα», which is what the
+        // first button of this notice is.
+        : m.type === 'sector_exit' ? ['wpmap', '', t('popup.btn.show_sector')]
         : opGoAction(m);
     return `<div class="wr-op-mini" data-op="${op}" role="button" aria-label="${escapeHtml(label)}">
         <div id="wrOpMiniMap" style="position:absolute;inset:0;"></div>

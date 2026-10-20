@@ -1553,6 +1553,13 @@ return [
         'arrival.auto_suffix' => ' (αυτόματα, από το GPS)',
         // What the status log of a sector shows against a step the GPS made.
         'sector.auto_note' => 'Αυτόματα, από το GPS',
+        // «Βγήκες από τον τομέα» (checkSectorExitWarnings(), v3.390.0/v3.391.0):
+        // someone whose team is searching a sector walked more than {m} m out of
+        // it without pressing «Ολοκλήρωση Τομέα» (sector.action.complete).
+        'sector_exit.title' => '⚠ Βγήκες από τον τομέα',
+        'sector_exit.message' => 'Βγήκες πάνω από {m} μ. έξω από τον τομέα «{label}» και δεν τον έχεις ολοκληρώσει. Αν τον ολοκλήρωσες, πάτα «Ολοκλήρωση Τομέα». Αλλιώς, γύρνα πίσω στον τομέα σου.',
+        'popup.type.sector_exit' => 'Βγήκες από τον τομέα',
+        'popup.btn.sector_exit_back' => 'Γυρνάω πίσω στον τομέα',
 
         // mission-chat.php
         'chat.no_room_access' => 'Δεν έχετε πρόσβαση σε αυτό το chat.',
@@ -4257,6 +4264,10 @@ return [
         'arrival.auto_sector' => 'You have arrived in sector «{label}». The search has started.',
         'arrival.auto_suffix' => ' (automatic, from GPS)',
         'sector.auto_note' => 'Automatic, from GPS',
+        'sector_exit.title' => '⚠ You left the sector',
+        'sector_exit.message' => 'You are more than {m} m outside sector «{label}» and have not completed it. If you have, press «Complete Sector». Otherwise, go back to your sector.',
+        'popup.type.sector_exit' => 'You left the sector',
+        'popup.btn.sector_exit_back' => "I'm going back to the sector",
 
         'chat.no_room_access' => 'You do not have access to this chat.',
         'chat.empty_message' => 'The message cannot be empty.',

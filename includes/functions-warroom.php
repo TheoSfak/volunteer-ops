@@ -3955,6 +3955,12 @@ function notificationPopupRef($data): ?array {
         if (!empty($data['waypointId'])) {
             $ref['waypointId'] = (int) $data['waypointId'];
         }
+        // Someone walked out of the sector their team is searching (v3.390.0):
+        // which sector, for the popup's «Ολοκλήρωση Τομέα» and its map. Not
+        // `sectorId` — that key makes the notification an order about the sector.
+        if (!empty($data['exitSectorId'])) {
+            $ref['sectorId'] = (int) $data['exitSectorId'];
+        }
         // A notice about a place (the Συντονιστικό moved, v3.346.0) carries
         // the spot, for the popup's map and directions.
         if (isset($data['popupLat'], $data['popupLng']) && is_numeric($data['popupLat']) && is_numeric($data['popupLng'])) {
@@ -5712,6 +5718,19 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
         // Non-critical — the ping itself already succeeded.
     }
 
+    // «Βγήκες από τον τομέα» (v3.390.0): a member of a team that is searching a
+    // sector and has not completed it, now more than SECTOR_EXIT_WARN_M outside
+    // it. From the same smoothed estimate, and just as best-effort.
+    try {
+        checkSectorExitWarnings(
+            (int) $pr['mission_id'], $userId, $pingTeamId,
+            (float) $estimate['lat'], (float) $estimate['lng'],
+            $estimate['acc'] !== null ? (float) $estimate['acc'] : null, $fixAgeSeconds
+        );
+    } catch (Throwable $e) {
+        // Non-critical — the ping itself already succeeded.
+    }
+
     // The Συντονιστικό, when it follows this device (v3.347.0): the pin moves
     // with the fix, and a stop somewhere new is announced once. From the
     // smoothed estimate, like «Έφτασες;» above, and just as best-effort.
@@ -6035,6 +6054,117 @@ function checkArrivalPrompts(int $missionId, int $userId, ?int $teamId, float $l
             notifyArrivalPrompt($missionId, $userId, $hit);
         }
     }
+}
+
+/** How far outside the sector a member of the team searching it may go before they are asked. */
+const SECTOR_EXIT_WARN_M = 100;
+
+/**
+ * «Βγήκες από τον τομέα» (v3.390.0). Called from recordVolunteerPing() on every
+ * fix, after checkArrivalPrompts(). A sector whose team has arrived and not yet
+ * pressed «Ολοκλήρωση Τομέα» (status in_progress) is being searched; a member of
+ * that team who ends up more than SECTOR_EXIT_WARN_M outside it is told, once,
+ * to either complete it or go back.
+ *
+ * Per person, not per team: the status is the team's, but the walking is each
+ * member's. And only a person who WAS at the sector — a teammate still on the
+ * way there is far outside it too, and has nothing to be told. So each person
+ * has a small state per sector (mission_sector_exit_watch):
+ *
+ *   · none     → armed ('near') by the first fix within SECTOR_EXIT_WARN_M of the
+ *                sector, inside it or just outside. A «Έφτασα» pressed 80 m from
+ *                the edge counts as being there.
+ *   · 'near'   → the first fix beyond SECTOR_EXIT_WARN_M asks, and moves it to
+ *                'warned'. The UPDATE decides who asks, so two fixes landing
+ *                together cannot both notify.
+ *   · 'warned' → not asked again for this walk. Back INSIDE the sector — not
+ *                merely within the 100 m — re-arms it, so a person pacing the
+ *                boundary is asked once, not on every crossing.
+ *
+ * A row belongs to one stint of the sector: stint_at is the sector's
+ * status_updated_at when it was written, so a sector sent back for a recheck and
+ * resumed starts clean instead of inheriting last pass's state.
+ *
+ * Same trust as «Έφτασες;»: a fix too vague (ARRIVAL_PROMPT_MAX_ACCURACY_M) or
+ * too old (ARRIVAL_PROMPT_MAX_FIX_AGE_S) to place someone says nothing either way.
+ */
+function checkSectorExitWarnings(int $missionId, int $userId, ?int $teamId, float $lat, float $lng, ?float $accuracy, int $fixAgeSeconds): void {
+    if (!$teamId || $accuracy === null || $accuracy > ARRIVAL_PROMPT_MAX_ACCURACY_M || $fixAgeSeconds > ARRIVAL_PROMPT_MAX_FIX_AGE_S) {
+        return;
+    }
+    $sectors = dbFetchAll(
+        "SELECT id, label, geo, status_updated_at
+           FROM mission_search_sectors
+          WHERE mission_id = ? AND team_id = ? AND status = 'in_progress' AND status_updated_at IS NOT NULL",
+        [$missionId, $teamId]
+    );
+    foreach ($sectors as $s) {
+        $geo = json_decode((string) $s['geo'], true);
+        if (!is_array($geo) || count($geo) < 3) {
+            continue;
+        }
+        $distance = pointToPolygonDistanceMeters($lat, $lng, $geo);
+        $stint = (string) $s['status_updated_at'];
+        $row = dbFetchOne(
+            "SELECT state, stint_at FROM mission_sector_exit_watch WHERE sector_id = ? AND user_id = ?",
+            [$s['id'], $userId]
+        );
+        $state = ($row && (string) $row['stint_at'] === $stint) ? $row['state'] : null;
+
+        if ($state === null) {
+            if ($distance <= SECTOR_EXIT_WARN_M) {
+                dbExecute(
+                    "INSERT INTO mission_sector_exit_watch (sector_id, user_id, stint_at, state, updated_at)
+                     VALUES (?, ?, ?, 'near', NOW())
+                     ON DUPLICATE KEY UPDATE stint_at = VALUES(stint_at), state = 'near', updated_at = NOW()",
+                    [$s['id'], $userId, $stint]
+                );
+            }
+        } elseif ($state === 'near') {
+            if ($distance > SECTOR_EXIT_WARN_M) {
+                $won = dbExecute(
+                    "UPDATE mission_sector_exit_watch SET state = 'warned', updated_at = NOW()
+                      WHERE sector_id = ? AND user_id = ? AND stint_at = ? AND state = 'near'",
+                    [$s['id'], $userId, $stint]
+                );
+                if ($won > 0) {
+                    notifySectorExit($missionId, $userId, $s);
+                }
+            }
+        } elseif ($distance <= 0.0) {
+            dbExecute(
+                "UPDATE mission_sector_exit_watch SET state = 'near', updated_at = NOW()
+                  WHERE sector_id = ? AND user_id = ? AND stint_at = ? AND state = 'warned'",
+                [$s['id'], $userId, $stint]
+            );
+        }
+    }
+}
+
+/**
+ * The warning itself, to the one person who walked out. An order-class alert
+ * (bannerMission): a popup on the open page whose first button is
+ * «Ολοκλήρωση Τομέα», and the loud channel on the Android app. `exitSectorId`
+ * is what notificationPopupRef() reads to tell the popup which sector.
+ */
+function notifySectorExit(int $missionId, int $userId, array $sector): void {
+    $lang = getUserLanguage($userId);
+    $label = trim((string) $sector['label']);
+    // Labels are stored as «Τομέας Ε» already; the sentence says "sector".
+    $short = trim((string) preg_replace('/^(τομέας|sector)\s+/iu', '', $label));
+    sendNotification(
+        $userId,
+        t('sector_exit.title', [], $lang),
+        t('sector_exit.message', ['label' => $short !== '' ? $short : $label, 'm' => SECTOR_EXIT_WARN_M], $lang),
+        'warning', '',
+        [
+            'url' => rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId,
+            'tag' => 'sector-exit-' . (int) $sector['id'],
+            'bannerMission' => $missionId,
+            'popupInfo' => 'mission_sector_exit',
+            'exitSectorId' => (int) $sector['id'],
+        ]
+    );
 }
 
 /**

@@ -7769,6 +7769,24 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 191,
+            'description' => "Add mission_sector_exit_watch (v3.391.0): one row per person per sector their team is searching, holding whether they are 'near' it (armed: within 100 m of it, inside or just outside) or have already been 'warned' for walking more than 100 m out of it without pressing «Ολοκλήρωση Τομέα». stint_at is the sector's status_updated_at when the row was written, so a sector resumed after a recheck starts with a clean slate. The UPDATE near -> warned is what decides who is told, so two fixes landing together cannot both notify.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_sector_exit_watch (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    sector_id INT UNSIGNED NOT NULL,
+                    user_id INT UNSIGNED NOT NULL,
+                    stint_at DATETIME NOT NULL,
+                    state ENUM('near','warned') NOT NULL,
+                    updated_at DATETIME NOT NULL,
+                    UNIQUE KEY uk_sector_exit_watch (sector_id, user_id),
+                    FOREIGN KEY (sector_id) REFERENCES mission_search_sectors(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
