@@ -634,6 +634,13 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
 <?php endif; ?>
 
 <?php if (!empty($pendingAnnouncements)): ?>
+<?php
+// Written out here means dealt with: the popup is shown once, whether or not
+// «Κατάλαβα» is pressed or its request ever arrives (a poor signal, a refresh
+// with the popup still open, the Action Room reloading under it). See
+// markAnnouncementsDismissed().
+markAnnouncementsDismissed((int) getCurrentUserId(), array_column($pendingAnnouncements, 'id'));
+?>
 <!-- ══════════════════════════════════════════════════════════════════════════
      "WHAT'S NEW" ANNOUNCEMENT POPUP — see announcements.php + header.php's
      capped-digest query. data-bs-backdrop="static" + no close [x]: the only
@@ -679,21 +686,51 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
     var ids = <?= json_encode(array_map('intval', array_column($pendingAnnouncements, 'id'))) ?>;
     var modalEl = document.getElementById('vo-announcement-modal');
     var modal = new bootstrap.Modal(modalEl);
-    modal.show();
+
+    // The server has already recorded these as shown (footer.php), so a new page
+    // load anywhere never brings them back. What is left is the page that was
+    // loaded BEFORE somebody closed the popup: a second tab opened at the same
+    // time (a browser restoring its tabs), or one that was already open. Closing
+    // it in one tab closes it in the others of this browser, and a tab that
+    // finds it already closed does not show it at all.
+    var STORE_KEY = 'vo-announcements-dismissed';
+    function readDismissed() {
+        try {
+            var stored = JSON.parse(localStorage.getItem(STORE_KEY) || '[]');
+            return Array.isArray(stored) ? stored : [];
+        } catch (e) { return []; }
+    }
+    function closedAlready() {
+        var done = readDismissed();
+        return ids.every(function(id) { return done.indexOf(id) !== -1; });
+    }
+    function rememberClosed() {
+        try {
+            var merged = readDismissed().concat(ids).filter(function(id, i, all) { return all.indexOf(id) === i; });
+            localStorage.setItem(STORE_KEY, JSON.stringify(merged.slice(-100)));
+        } catch (e) {}
+    }
+
+    if (!closedAlready()) modal.show();
+    window.addEventListener('storage', function(e) {
+        if (e.key === STORE_KEY && closedAlready()) modal.hide();
+    });
 
     document.getElementById('vo-announcement-dismiss-btn').addEventListener('click', function(e) {
-        var btn = e.currentTarget;
-        btn.disabled = true;
+        e.currentTarget.disabled = true;
+        // Closing never waits for the network: the popup is already recorded
+        // server-side, and this request only repeats it.
+        rememberClosed();
+        modal.hide();
         var meta = document.querySelector('meta[name="csrf-token"]');
         var csrfToken = meta ? meta.getAttribute('content') : '';
         fetch('<?= rtrim(BASE_URL, '/') ?>/announcement-dismiss.php', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
             body: JSON.stringify({ ids: ids, csrf_token: csrfToken }),
-            credentials: 'same-origin'
-        }).finally(function() {
-            modal.hide();
-        });
+            credentials: 'same-origin',
+            keepalive: true
+        }).catch(function() {});
     });
 })();
 </script>

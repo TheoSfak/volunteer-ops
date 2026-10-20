@@ -25,12 +25,10 @@ if ($sessionToken === '' || !hash_equals($sessionToken, (string) $csrfToken)) {
     exit;
 }
 
-$ids = array_filter(array_map('intval', $input['ids'] ?? []));
-foreach ($ids as $id) {
-    dbExecute(
-        "INSERT IGNORE INTO announcement_dismissals (announcement_id, user_id, dismissed_at) VALUES (?, ?, NOW())",
-        [$id, $userId]
-    );
-}
+// footer.php already recorded what it showed, at the moment it showed it
+// (v3.396.0), so this only repeats that for the ids on the button the user
+// pressed. Kept because it is harmless and idempotent, not because anything
+// depends on it arriving.
+markAnnouncementsDismissed($userId, $input['ids'] ?? []);
 
 echo json_encode(['success' => true]);

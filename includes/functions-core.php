@@ -918,3 +918,58 @@ function hoursRankTop(int $limit = 5): array {
     $limit = max(1, min(100, $limit));
     return dbFetchAll(hoursRankSql() . " ORDER BY total_hours DESC, u.name ASC LIMIT {$limit}");
 }
+
+/**
+ * The «Νέα ανακοίνωση» popup: what this user is to be shown on this page load
+ * (v3.396.0).
+ *
+ * Partner-organisation guests and mission visitors (is_external) are never
+ * shown any. They are on the app to work one operation, and the popup used to
+ * come back on every refresh for them for a plain reason: their account may
+ * only reach the Action Room's own scripts (bootstrap.php's guest gate), so the
+ * «Κατάλαβα» request to announcement-dismiss.php was answered with a 302 to the
+ * war room, the dismissal was never written, and the next page load showed the
+ * same popup again. Nothing is read or written for them here.
+ *
+ * Everybody else sees only the latest three, newest first; anything older than
+ * that is dismissed on the spot (these are "check this out" notices, not a
+ * mandatory read, so somebody back after a long absence never faces a wall of
+ * popups). 'earlier' says how many were folded away.
+ *
+ * @return array{pending: array, earlier: int}
+ */
+function loadPendingAnnouncementsForUser(int $userId, bool $isExternalGuest): array {
+    if ($isExternalGuest) {
+        return ['pending' => [], 'earlier' => 0];
+    }
+    $all = dbFetchAll(
+        "SELECT a.id, a.version, a.title, a.body, a.created_at
+         FROM announcements a
+         LEFT JOIN announcement_dismissals ad ON ad.announcement_id = a.id AND ad.user_id = ?
+         WHERE a.is_active = 1 AND ad.id IS NULL
+         ORDER BY a.created_at DESC, a.id DESC",
+        [$userId]
+    );
+    $older = array_slice($all, 3);
+    markAnnouncementsDismissed($userId, array_column($older, 'id'));
+    return ['pending' => array_slice($all, 0, 3), 'earlier' => count($older)];
+}
+
+/**
+ * Records that this user has dealt with these announcements, for good and for
+ * every device and tab: the row is per user, not per browser. Idempotent.
+ *
+ * footer.php calls this at the moment it writes the popup into the page, not
+ * when «Κατάλαβα» is pressed. Waiting for the button meant the popup returned
+ * on every refresh whenever that request did not arrive: a phone in the field
+ * with a poor signal, a tab closed or refreshed with the popup still open, or
+ * the Action Room reloading itself under it. An announcement is shown once.
+ */
+function markAnnouncementsDismissed(int $userId, array $announcementIds): void {
+    foreach (array_filter(array_map('intval', $announcementIds)) as $announcementId) {
+        dbExecute(
+            "INSERT IGNORE INTO announcement_dismissals (announcement_id, user_id, dismissed_at) VALUES (?, ?, NOW())",
+            [$announcementId, $userId]
+        );
+    }
+}

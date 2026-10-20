@@ -45,33 +45,16 @@ if (isLoggedIn() && (isSystemAdmin() || hasPagePermission('volunteers_manage') |
     );
 }
 
-// Pending "what's new" announcements — popup shown until dismissed (see announcements.php).
-// Capped digest: only the latest 3 are ever shown at once. Anything older than that is
-// auto-dismissed right here, silently, the moment a newer one exists — these are "check this
-// out" notices, not a mandatory read, so someone back after a long absence never faces a wall
-// of back-to-back popups. footer.php renders $pendingAnnouncements into the actual modal.
+// "What's new" announcements — a popup shown ONCE per user (see announcements.php).
+// Capped digest of the latest 3, none at all for partner guests and mission visitors,
+// and footer.php records them as dealt with the moment it writes the popup out.
+// All of that lives in loadPendingAnnouncementsForUser().
 $pendingAnnouncements = [];
 $earlierAnnouncementCount = 0;
 if (isLoggedIn()) {
-    $allPendingAnnouncements = dbFetchAll(
-        "SELECT a.id, a.version, a.title, a.body, a.created_at
-         FROM announcements a
-         LEFT JOIN announcement_dismissals ad ON ad.announcement_id = a.id AND ad.user_id = ?
-         WHERE a.is_active = 1 AND ad.id IS NULL
-         ORDER BY a.created_at DESC, a.id DESC",
-        [$uid]
-    );
-    $pendingAnnouncements = array_slice($allPendingAnnouncements, 0, 3);
-    $olderAnnouncements = array_slice($allPendingAnnouncements, 3);
-    if (!empty($olderAnnouncements)) {
-        $earlierAnnouncementCount = count($olderAnnouncements);
-        foreach ($olderAnnouncements as $old) {
-            dbExecute(
-                "INSERT IGNORE INTO announcement_dismissals (announcement_id, user_id, dismissed_at) VALUES (?, ?, NOW())",
-                [$old['id'], $uid]
-            );
-        }
-    }
+    $announcementDigest = loadPendingAnnouncementsForUser((int) $uid, isExternalGuest());
+    $pendingAnnouncements = $announcementDigest['pending'];
+    $earlierAnnouncementCount = $announcementDigest['earlier'];
 }
 ?>
 <!DOCTYPE html>

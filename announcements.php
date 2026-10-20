@@ -48,8 +48,10 @@ if (isPost()) {
     redirect('announcements.php');
 }
 
-// Denominator for the "seen X / Y" column — same active-user filter used app-wide.
-$totalActiveUsers = (int) dbFetchValue("SELECT COUNT(*) FROM users WHERE is_active = 1 AND deleted_at IS NULL");
+// Denominator for the "seen X / Y" column — same active-user filter used app-wide,
+// minus partner guests and mission visitors (is_external), who are never shown
+// an announcement and would otherwise make every row look under-read.
+$totalActiveUsers = (int) dbFetchValue("SELECT COUNT(*) FROM users WHERE is_active = 1 AND deleted_at IS NULL AND is_external = 0");
 
 $announcements = dbFetchAll(
     "SELECT a.*, u.name AS creator_name,
