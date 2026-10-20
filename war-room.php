@@ -1713,6 +1713,14 @@ if (get('ajax') === '1') {
         // where nobody has pressed anything hashes identically tick after
         // tick and costs no bandwidth at all.
         'ackTracker' => $canManageWarRoom ? loadAckTrackerCardsForMission($missionId) : null,
+        // Shift list, visitors lists and the open-items warning on «Κλείσιμο
+        // αποστολής» - command cards that used to be drawn once at page load.
+        // Ready-made markup (see warRoomLiveFragment) so there is one template
+        // per card; built from the incident/shortage/SOS lists already loaded
+        // above, so the warning cannot disagree with the cards that list them.
+        'liveFragments' => $canManageWarRoom
+            ? buildCommandLiveFragments($missionId, !empty($mission['visitor_join_token']), $incidents, $shortageReports, $sosAlerts)
+            : null,
         // See $gpsParticipationSig.
         'gpsSig' => $gpsParticipationSig,
     ];
@@ -1779,16 +1787,7 @@ $participants = dbFetchAll(
 $myAssignments = array_values(array_filter($participants, fn($participant) => (int)$participant['volunteer_id'] === (int)$user['id']));
 $onlinePresenceIds = loadOnlinePresenceUserIds($missionId);
 
-$shifts = dbFetchAll(
-    "SELECT s.*, COUNT(CASE WHEN pr.status = '" . PARTICIPATION_APPROVED . "' THEN 1 END) AS approved_count,
-            COUNT(CASE WHEN pr.status = '" . PARTICIPATION_PENDING . "' THEN 1 END) AS pending_count
-     FROM shifts s
-     LEFT JOIN participation_requests pr ON pr.shift_id = s.id
-     WHERE s.mission_id = ?
-     GROUP BY s.id
-     ORDER BY s.start_time",
-    [$missionId]
-);
+$shifts = loadMissionShiftsWithCounts($missionId);
 
 $pins = $loadPins();
 
@@ -1825,20 +1824,10 @@ $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
 $voiceMessages = $canManageWarRoom ? loadUnacknowledgedVoiceMessagesForMission($missionId) : [];
 $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
 $missingPerson = ($isMissingPersonMission && ($canManageWarRoom || $isApprovedParticipant)) ? loadMissingPersonForMission($missionId) : null;
-$missionVisitorTags = $canManageWarRoom ? dbFetchAll("SELECT id, label, color, icon FROM mission_visitor_tags WHERE is_active = 1 ORDER BY sort_order") : [];
-$pendingVisitors = $canManageWarRoom ? dbFetchAll(
-    "SELECT id, name, phone, created_at FROM users
-     WHERE is_mission_visitor = 1 AND mission_visitor_mission_id = ? AND is_active = 1 AND mission_visitor_tag_id IS NULL
-     ORDER BY created_at",
-    [$missionId]
-) : [];
-$activeVisitors = $canManageWarRoom ? dbFetchAll(
-    "SELECT u.id, u.name, u.phone, mvt.label AS tag_label, mvt.color AS tag_color
-     FROM users u JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
-     WHERE u.is_mission_visitor = 1 AND u.mission_visitor_mission_id = ? AND u.is_active = 1
-     ORDER BY u.name",
-    [$missionId]
-) : [];
+// The lists only exist on the card while the mission has a visitor link.
+$missionVisitors = ($canManageWarRoom && !empty($mission['visitor_join_token']))
+    ? loadMissionVisitorsForCard($missionId)
+    : ['tags' => [], 'pending' => [], 'active' => []];
 // See the ajax branch's own copy of this block above for why these two are
 // separately gated settings rather than one flag, and why the call is
 // try/caught (a missing weather_cache table must not fail the whole page).
@@ -5472,11 +5461,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         <?php if ($canManageWarRoom): ?>
         <div class="card shadow-sm mb-4" data-card-id="shiftsCard">
             <div class="card-header"><h5 class="mb-0"><i class="bi bi-calendar-range me-1"></i><?= t('shifts.panel_title') ?></h5></div>
-            <div class="list-group list-group-flush">
-                <?php foreach ($shifts as $shift): ?>
-                <div class="list-group-item"><strong><?= formatDateTime($shift['start_time']) ?></strong><br><small class="text-muted"><?= t('hero.until') ?> <?= date('H:i', strtotime($shift['end_time'])) ?> · <?= $shift['approved_count'] ?>/<?= $shift['max_volunteers'] ?> <?= t('shifts.approved_count_suffix') ?></small></div>
-                <?php endforeach; ?>
-            </div>
+            <?= warRoomLiveFragment('missionShifts', renderMissionShiftRows($shifts), 'list-group list-group-flush') ?>
         </div>
         <?php endif; ?>
 
@@ -5652,104 +5637,18 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 </div>
 
                 <hr>
-                <h6 class="small fw-semibold text-uppercase text-muted"><?= t('visitor.pending_title') ?></h6>
-                <?php if (empty($pendingVisitors)): ?>
-                <p class="text-muted small mb-3"><?= t('visitor.pending_empty') ?></p>
-                <?php else: ?>
-                <?php foreach ($pendingVisitors as $pv): ?>
-                <div class="border rounded p-2 mb-2">
-                    <div class="fw-semibold small"><?= h($pv['name']) ?></div>
-                    <div class="text-muted small mb-2"><?= h($pv['phone']) ?></div>
-                    <div class="d-flex flex-wrap gap-1">
-                        <?php foreach ($missionVisitorTags as $tag): ?>
-                        <form method="post">
-                            <?= csrfField() ?><input type="hidden" name="action" value="classify_visitor">
-                            <input type="hidden" name="user_id" value="<?= $pv['id'] ?>">
-                            <input type="hidden" name="tag_id" value="<?= $tag['id'] ?>">
-                            <button type="submit" class="btn btn-sm" style="background-color:<?= h($tag['color']) ?>;color:#fff;"><i class="bi <?= h($tag['icon']) ?> me-1"></i><?= h($tag['label']) ?></button>
-                        </form>
-                        <?php endforeach; ?>
-                    </div>
-                </div>
-                <?php endforeach; ?>
-                <?php endif; ?>
-
-                <h6 class="small fw-semibold text-uppercase text-muted mt-3"><?= t('visitor.active_title') ?></h6>
-                <?php if (empty($activeVisitors)): ?>
-                <p class="text-muted small mb-0"><?= t('visitor.active_empty') ?></p>
-                <?php else: ?>
-                <?php foreach ($activeVisitors as $av): ?>
-                <div class="d-flex align-items-center justify-content-between border rounded p-2 mb-2">
-                    <div class="min-width-0">
-                        <div class="fw-semibold small"><?= h($av['name']) ?></div>
-                        <span class="badge" style="background-color:<?= h($av['tag_color']) ?>;"><?= h($av['tag_label']) ?></span>
-                    </div>
-                    <form method="post" onsubmit="return confirm('<?= h(addslashes(t('visitor.remove_confirm', ['name' => $av['name']]))) ?>')">
-                        <?= csrfField() ?><input type="hidden" name="action" value="remove_visitor">
-                        <input type="hidden" name="user_id" value="<?= $av['id'] ?>">
-                        <button type="submit" class="btn btn-sm btn-outline-danger" title="<?= h(t('visitor.remove_btn_title')) ?>"><i class="bi bi-person-dash"></i></button>
-                    </form>
-                </div>
-                <?php endforeach; ?>
-                <?php endif; ?>
+                <?= warRoomLiveFragment('missionVisitors', renderMissionVisitorLists($missionVisitors['pending'], $missionVisitors['active'], $missionVisitors['tags'])) ?>
                 <?php endif; ?>
             </div>
         </div>
 
-        <?php
-        // Closing is the only door out of the Action Room: every "Είδα"/"Λύθηκε"
-        // button for incidents/shortages/SOS lives exclusively behind war-room.php,
-        // which hard-redirects away the instant the mission is no longer OPEN (see
-        // the status check near the top of this file) — with no exception for
-        // admins and no other page that can act on those rows afterward. Closing
-        // with any of these still open silently stops them from ever being
-        // resolvable through the UI again, so this warns with the real counts
-        // before the generic confirm, rather than staying silent about it.
-        $openItemsCount = count($incidents) + count($shortageReports) + count($sosAlerts);
-        // One line per open item, not just the count — so the admin can see
-        // exactly what they're about to lose the ability to manage (see
-        // close_open_items_warning above), not just how many. Kept as raw
-        // (unescaped) text: the confirm() dialog below is plain text (no
-        // HTML to interpret), and the alert box further down applies h()
-        // itself per line at render time — one source, correct escaping at
-        // each of its two different output contexts.
-        $openItemsLines = [];
-        foreach ($incidents as $inc) {
-            $who = $inc['is_unknown_patient'] ? t('incident.unknown_patient_label') : ($inc['patient_name'] ?: t('incident.unknown_patient_label'));
-            $openItemsLines[] = $inc['type_label'] . ' — ' . $who . ' (' . $inc['team_label'] . ')';
-        }
-        foreach ($shortageReports as $sr) {
-            $openItemsLines[] = $sr['type_label'] . ': ' . $sr['title'] . ' (' . $sr['team_label'] . ')';
-        }
-        foreach ($sosAlerts as $sos) {
-            $openItemsLines[] = 'SOS — ' . $sos['user_name'] . ' (' . $sos['team_label'] . ')';
-        }
-        $closeConfirmMsg = t('admin.close_confirm');
-        if ($openItemsCount > 0) {
-            $closeConfirmMsg = t('admin.close_open_items_warning', [
-                'incidents' => count($incidents), 'shortages' => count($shortageReports), 'sos' => count($sosAlerts),
-            ]) . "\n" . implode("\n", array_map(fn($l) => '- ' . $l, $openItemsLines)) . "\n\n" . $closeConfirmMsg;
-        }
-        ?>
         <div class="card border-danger shadow-sm" data-card-id="missionMgmtCard">
             <div class="card-body"><h6 data-card-drag-handle><i class="bi bi-shield-exclamation text-danger me-1"></i><?= t('admin.mission_mgmt_title') ?></h6>
                 <p class="small text-muted"><?= t('admin.close_note') ?></p>
-                <?php if ($openItemsCount > 0): ?>
-                <div class="alert alert-warning small py-2 px-2 mb-2">
-                    <i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('admin.close_open_items_warning', [
-                        'incidents' => count($incidents), 'shortages' => count($shortageReports), 'sos' => count($sosAlerts),
-                    ]) ?>
-                    <ul class="mb-0 mt-1 ps-3">
-                        <?php foreach ($openItemsLines as $line): ?>
-                        <li><?= h($line) ?></li>
-                        <?php endforeach; ?>
-                    </ul>
-                </div>
-                <?php endif; ?>
-                <form method="post" onsubmit="return confirm(<?= h(json_encode($closeConfirmMsg)) ?>)">
-                    <?= csrfField() ?><input type="hidden" name="action" value="close_mission">
-                    <button class="btn btn-danger w-100"><i class="bi bi-x-octagon-fill me-1"></i><?= t('admin.close_btn') ?></button>
-                </form>
+                <?php /* The warning and the form are one live fragment: the confirm() text
+                         lists the open items, so it has to be redrawn together with them
+                         (see renderMissionClosePanel for why that list matters). */ ?>
+                <?= warRoomLiveFragment('missionClose', renderMissionClosePanel($incidents, $shortageReports, $sosAlerts)) ?>
             </div>
         </div>
         <?php endif; ?>
@@ -25311,6 +25210,24 @@ let lastPayloadHash = '';
 let pollAbortCurrent = null;
 // When the poll in flight was sent — see the visibilitychange listener below.
 let pollStartedAt = 0;
+// Redraws the command cards that are server-rendered markup rather than a JS
+// render function (shifts, visitors, the open-items warning on «Κλείσιμο
+// αποστολής» - see warRoomLiveFragment() in functions-warroom.php). A fragment
+// is swapped only when its signature differs from the one on the page, so a
+// quiet mission touches no DOM, and a card the admin has hidden through the
+// Manage Cards gear (no element) is simply skipped. Never throws: it runs
+// before lastPayloadHash is stored, and a throw here would make every later
+// poll resend the whole payload.
+function applyLiveFragments(fragments) {
+    Object.keys(fragments || {}).forEach(key => {
+        const fragment = fragments[key];
+        if (!fragment || typeof fragment.html !== 'string') return;
+        const el = document.querySelector('[data-live-fragment="' + key + '"]');
+        if (!el || el.dataset.sig === fragment.sig) return;
+        el.innerHTML = fragment.html;
+        el.dataset.sig = fragment.sig;
+    });
+}
 // Returns a promise that always settles (never rejects), so the banner's
 // button can wait for its own attempt; a call swallowed by the overlap guard
 // settles at once.
@@ -25481,6 +25398,7 @@ function pollWarRoomData() {
         if (data.nearbyTeams) renderNearbyTeams(nearbyTeams = data.nearbyTeams);
         if (data.restrictedAreaProximity) renderRestrictedAreaProximity(restrictedAreaProximity = data.restrictedAreaProximity);
         if (data.teamDistances) renderTeamDistances(teamDistances = data.teamDistances);
+        if (data.liveFragments) applyLiveFragments(data.liveFragments);
         document.getElementById('mapRefresh').textContent = data.time || '';
         if (data.banners && data.banners.length) {
             data.banners.forEach(b => {

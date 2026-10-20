@@ -11998,3 +11998,209 @@ function resolveEventTimestamp(): array {
     }
     return [$now, $reportedAtTimestamp];
 }
+
+/**
+ * Live fragments of the command view (v3.393.0).
+ *
+ * Three command cards were drawn once by PHP, when the page loaded, and never
+ * again: the shift list, the visitors lists and the open-items warning on
+ * «Κλείσιμο αποστολής». Every other card is redrawn by the five-second poll,
+ * so these were the odd ones out - an admin who left the page open saw a
+ * visitor waiting for classification only after a reload, and, worse, was
+ * shown a list of open incidents/shortages/SOS that was hours old at the very
+ * moment they were about to close the mission over them.
+ *
+ * A fragment is a piece of server-rendered markup. The page renders it with
+ * warRoomLiveFragment() and the poll sends the very same markup again through
+ * warRoomLiveFragmentPayload(), so there is ONE template per card and nothing
+ * to keep in step in JavaScript. The signature is the md5 of the markup: the
+ * browser swaps a fragment only when its signature changed, so a quiet mission
+ * redraws nothing.
+ */
+function warRoomLiveFragment(string $key, string $html, string $class = ''): string {
+    return '<div' . ($class !== '' ? ' class="' . h($class) . '"' : '')
+        . ' data-live-fragment="' . h($key) . '" data-sig="' . md5($html) . '">' . $html . '</div>';
+}
+
+function warRoomLiveFragmentPayload(string $html): array {
+    return ['sig' => md5($html), 'html' => $html];
+}
+
+/**
+ * Every shift of the mission with its approved / pending head counts.
+ */
+function loadMissionShiftsWithCounts(int $missionId): array {
+    return dbFetchAll(
+        "SELECT s.*, COUNT(CASE WHEN pr.status = '" . PARTICIPATION_APPROVED . "' THEN 1 END) AS approved_count,
+                COUNT(CASE WHEN pr.status = '" . PARTICIPATION_PENDING . "' THEN 1 END) AS pending_count
+         FROM shifts s
+         LEFT JOIN participation_requests pr ON pr.shift_id = s.id
+         WHERE s.mission_id = ?
+         GROUP BY s.id
+         ORDER BY s.start_time",
+        [$missionId]
+    );
+}
+
+/**
+ * The rows of the «Βάρδιες» card.
+ */
+function renderMissionShiftRows(array $shifts): string {
+    ob_start();
+    foreach ($shifts as $shift) {
+        ?><div class="list-group-item"><strong><?= formatDateTime($shift['start_time']) ?></strong><br><small class="text-muted"><?= t('hero.until') ?> <?= date('H:i', strtotime($shift['end_time'])) ?> · <?= (int) $shift['approved_count'] ?>/<?= (int) $shift['max_volunteers'] ?> <?= t('shifts.approved_count_suffix') ?></small></div>
+        <?php
+    }
+    return (string) ob_get_clean();
+}
+
+/**
+ * The people who registered through the mission's visitor QR code: those still
+ * waiting for a tag, those already classified, and the tags on offer. The tags
+ * are only read when somebody is waiting, since they are the only thing that
+ * needs them.
+ *
+ * @return array{tags: array, pending: array, active: array}
+ */
+function loadMissionVisitorsForCard(int $missionId): array {
+    $pending = dbFetchAll(
+        "SELECT id, name, phone, created_at FROM users
+         WHERE is_mission_visitor = 1 AND mission_visitor_mission_id = ? AND is_active = 1 AND mission_visitor_tag_id IS NULL
+         ORDER BY created_at",
+        [$missionId]
+    );
+    $active = dbFetchAll(
+        "SELECT u.id, u.name, u.phone, mvt.label AS tag_label, mvt.color AS tag_color
+         FROM users u JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
+         WHERE u.is_mission_visitor = 1 AND u.mission_visitor_mission_id = ? AND u.is_active = 1
+         ORDER BY u.name",
+        [$missionId]
+    );
+    $tags = $pending
+        ? dbFetchAll("SELECT id, label, color, icon FROM mission_visitor_tags WHERE is_active = 1 ORDER BY sort_order")
+        : [];
+    return ['tags' => $tags, 'pending' => $pending, 'active' => $active];
+}
+
+/**
+ * The «σε αναμονή» and «ενεργοί» lists of the visitors card.
+ */
+function renderMissionVisitorLists(array $pendingVisitors, array $activeVisitors, array $visitorTags): string {
+    ob_start();
+    ?>
+                <h6 class="small fw-semibold text-uppercase text-muted"><?= t('visitor.pending_title') ?></h6>
+                <?php if (empty($pendingVisitors)): ?>
+                <p class="text-muted small mb-3"><?= t('visitor.pending_empty') ?></p>
+                <?php else: ?>
+                <?php foreach ($pendingVisitors as $pv): ?>
+                <div class="border rounded p-2 mb-2">
+                    <div class="fw-semibold small"><?= h($pv['name']) ?></div>
+                    <div class="text-muted small mb-2"><?= h($pv['phone']) ?></div>
+                    <div class="d-flex flex-wrap gap-1">
+                        <?php foreach ($visitorTags as $tag): ?>
+                        <form method="post">
+                            <?= csrfField() ?><input type="hidden" name="action" value="classify_visitor">
+                            <input type="hidden" name="user_id" value="<?= (int) $pv['id'] ?>">
+                            <input type="hidden" name="tag_id" value="<?= (int) $tag['id'] ?>">
+                            <button type="submit" class="btn btn-sm" style="background-color:<?= h($tag['color']) ?>;color:#fff;"><i class="bi <?= h($tag['icon']) ?> me-1"></i><?= h($tag['label']) ?></button>
+                        </form>
+                        <?php endforeach; ?>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+                <?php endif; ?>
+
+                <h6 class="small fw-semibold text-uppercase text-muted mt-3"><?= t('visitor.active_title') ?></h6>
+                <?php if (empty($activeVisitors)): ?>
+                <p class="text-muted small mb-0"><?= t('visitor.active_empty') ?></p>
+                <?php else: ?>
+                <?php foreach ($activeVisitors as $av): ?>
+                <div class="d-flex align-items-center justify-content-between border rounded p-2 mb-2">
+                    <div class="min-width-0">
+                        <div class="fw-semibold small"><?= h($av['name']) ?></div>
+                        <span class="badge" style="background-color:<?= h($av['tag_color']) ?>;"><?= h($av['tag_label']) ?></span>
+                    </div>
+                    <form method="post" onsubmit="return confirm('<?= h(addslashes(t('visitor.remove_confirm', ['name' => $av['name']]))) ?>')">
+                        <?= csrfField() ?><input type="hidden" name="action" value="remove_visitor">
+                        <input type="hidden" name="user_id" value="<?= (int) $av['id'] ?>">
+                        <button type="submit" class="btn btn-sm btn-outline-danger" title="<?= h(t('visitor.remove_btn_title')) ?>"><i class="bi bi-person-dash"></i></button>
+                    </form>
+                </div>
+                <?php endforeach; ?>
+                <?php endif; ?>
+    <?php
+    return (string) ob_get_clean();
+}
+
+/**
+ * What still stands open when the mission is closed: the warning box with one
+ * line per open incident / shortage / SOS, and the «Κλείσιμο αποστολής» form
+ * whose confirm() repeats the same lines.
+ *
+ * Closing is the only door out of the Action Room: every "Είδα"/"Λύθηκε" button
+ * for these items lives exclusively behind war-room.php, which hard-redirects
+ * away the instant the mission is no longer OPEN, with no exception for admins
+ * and no other page that can act on those rows afterward. So the warning names
+ * the real items, not just a count, and the confirm text is kept as raw text
+ * (confirm() has no HTML to interpret) in a data attribute that h() escapes -
+ * one source, correct escaping at each of its two output contexts.
+ */
+function renderMissionClosePanel(array $incidents, array $shortageReports, array $sosAlerts): string {
+    $openItemsCount = count($incidents) + count($shortageReports) + count($sosAlerts);
+    $openItemsLines = [];
+    foreach ($incidents as $inc) {
+        $who = $inc['is_unknown_patient'] ? t('incident.unknown_patient_label') : ($inc['patient_name'] ?: t('incident.unknown_patient_label'));
+        $openItemsLines[] = $inc['type_label'] . ' — ' . $who . ' (' . $inc['team_label'] . ')';
+    }
+    foreach ($shortageReports as $sr) {
+        $openItemsLines[] = $sr['type_label'] . ': ' . $sr['title'] . ' (' . $sr['team_label'] . ')';
+    }
+    foreach ($sosAlerts as $sos) {
+        $openItemsLines[] = 'SOS — ' . $sos['user_name'] . ' (' . $sos['team_label'] . ')';
+    }
+    $warning = t('admin.close_open_items_warning', [
+        'incidents' => count($incidents), 'shortages' => count($shortageReports), 'sos' => count($sosAlerts),
+    ]);
+    $closeConfirmMsg = t('admin.close_confirm');
+    if ($openItemsCount > 0) {
+        $closeConfirmMsg = $warning . "\n" . implode("\n", array_map(fn($l) => '- ' . $l, $openItemsLines)) . "\n\n" . $closeConfirmMsg;
+    }
+    ob_start();
+    ?>
+                <?php if ($openItemsCount > 0): ?>
+                <div class="alert alert-warning small py-2 px-2 mb-2">
+                    <i class="bi bi-exclamation-triangle-fill me-1"></i><?= $warning ?>
+                    <ul class="mb-0 mt-1 ps-3">
+                        <?php foreach ($openItemsLines as $line): ?>
+                        <li><?= h($line) ?></li>
+                        <?php endforeach; ?>
+                    </ul>
+                </div>
+                <?php endif; ?>
+                <form method="post" data-confirm="<?= h($closeConfirmMsg) ?>" onsubmit="return confirm(this.dataset.confirm)">
+                    <?= csrfField() ?><input type="hidden" name="action" value="close_mission">
+                    <button class="btn btn-danger w-100"><i class="bi bi-x-octagon-fill me-1"></i><?= t('admin.close_btn') ?></button>
+                </form>
+    <?php
+    return (string) ob_get_clean();
+}
+
+/**
+ * The poll's `liveFragments` key for command staff (a volunteer's page has none
+ * of these cards, so for them the key is null). The visitors fragment exists
+ * only while the mission has a visitor link: with none, the card shows the
+ * «Ενεργοποίηση» button instead and there is no list to keep fresh.
+ */
+function buildCommandLiveFragments(int $missionId, bool $visitorsEnabled, array $incidents, array $shortageReports, array $sosAlerts): array {
+    $fragments = [
+        'missionClose' => warRoomLiveFragmentPayload(renderMissionClosePanel($incidents, $shortageReports, $sosAlerts)),
+        'missionShifts' => warRoomLiveFragmentPayload(renderMissionShiftRows(loadMissionShiftsWithCounts($missionId))),
+    ];
+    if ($visitorsEnabled) {
+        $visitors = loadMissionVisitorsForCard($missionId);
+        $fragments['missionVisitors'] = warRoomLiveFragmentPayload(
+            renderMissionVisitorLists($visitors['pending'], $visitors['active'], $visitors['tags'])
+        );
+    }
+    return $fragments;
+}
