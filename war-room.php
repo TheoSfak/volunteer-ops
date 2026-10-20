@@ -4290,14 +4290,16 @@ include __DIR__ . '/includes/header.php';
                         </ul>
                     </div>
                     <?php endif; ?>
-                    <?php if ($searchRingsOn): ?>
+                    <?php if ($searchRingsOn && $canManageWarRoom): ?>
                     <!-- One tap to hide / bring back the search rings. Starts
                          hidden (d-none): renderSearchRingsLayer() shows it only
                          once the missing person has a last-seen point and a
                          category, i.e. once there ARE rings to hide. The same
                          switch lives in the layers menu; both go through
-                         setMapOverlayShown('rings'). -->
-                    <button type="button" id="mapRingsToggle" class="btn btn-sm btn-outline-secondary active d-none<?= $canManageWarRoom ? '' : ' wr-hide-phone' ?>" aria-pressed="true" title="<?= t('map.rings_hide') ?>">
+                         setMapOverlayShown('rings'). Command only (v3.391.1):
+                         a volunteer's map has neither this button nor the menu,
+                         and every reader of the button looks it up with ?. . -->
+                    <button type="button" id="mapRingsToggle" class="btn btn-sm btn-outline-secondary active d-none" aria-pressed="true" title="<?= t('map.rings_hide') ?>">
                         <i class="bi bi-bullseye"></i>
                     </button>
                     <?php endif; ?>

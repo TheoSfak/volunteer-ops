@@ -14,6 +14,9 @@ use PHPUnit\Framework\TestCase;
  * Action Room get class wr-hide-phone on both, and a phone-width media query
  * hides it. Command keeps both on every screen size.
  *
+ * Since v3.391.1 the rings button is not rendered for a volunteer at all (any
+ * screen size); only the Σημεία control still relies on the phone rule.
+ *
  * Whether the buttons are actually gone was measured in a browser (375px and
  * 1280px, command and volunteer); these pin the three pieces that rule is made
  * of, so dropping any one of them fails here instead of showing on a phone.
@@ -36,12 +39,20 @@ final class MapToolbarPhoneButtonsTest extends TestCase
         );
     }
 
-    public function testTheRingsButtonGetsTheClassOnlyWhenTheAccountCannotManage(): void
+    public function testTheRingsButtonIsRenderedOnlyForAccountsThatCanManage(): void
     {
+        // v3.391.1: no longer just hidden on a phone — a volunteer's page has no
+        // rings button at all, like the layers button (MapLayersAdminOnlyTest).
         $this->assertMatchesRegularExpression(
-            '~id="mapRingsToggle"[^>]*class="[^"]*<\?= \$canManageWarRoom \? \'\' : \' wr-hide-phone\' \?>"~',
-            $this->source
+            '~<\?php if \(\$searchRingsOn && \$canManageWarRoom\): \?>.*?id="mapRingsToggle".*?<i class="bi bi-bullseye"></i>\s*</button>\s*<\?php endif; \?>~s',
+            $this->source,
+            'the rings button must sit inside the $canManageWarRoom gate'
         );
+        $this->assertSame(1, substr_count($this->source, 'id="mapRingsToggle"'), 'one button, one gate');
+        // Everything that reads it tolerates it being absent.
+        $this->assertStringContainsString("document.getElementById('mapRingsToggle')?.addEventListener('click'", $this->source);
+        $this->assertStringContainsString("document.getElementById('mapRingsToggle')?.classList.toggle('d-none'", $this->source);
+        $this->assertMatchesRegularExpression("~const ringsBtn = document\\.getElementById\\('mapRingsToggle'\\);\\s*if \\(ringsBtn\\) \\{~", $this->source);
     }
 
     public function testTheSigmeiaControlGetsTheClassOnlyWhenTheAccountCannotManage(): void
