@@ -1,0 +1,447 @@
+/*
+ * War Room (Action Room) - the admin «Κονσόλα» view.
+ * Layout and components only; the cards keep the page's own styles.
+ * Loaded by war-room.php when the console view is on (see assets/js/war-room-console.js).
+ */
+
+/* The page is one screen: the site's own menu folds away (a button in the hero
+   brings it back). The top padding is the script's (consolePad): it follows
+   the ticker. */
+body.wr-console-view .content-wrapper { padding-left: .9rem !important; padding-right: .9rem !important; padding-bottom: .6rem !important; }
+body.wr-console-view .main-content > footer { display: none; }
+body.wr-console-view .sidebar { transform: translateX(-100%); transition: transform .3s; }
+body.wr-console-view .sidebar.show { transform: translateX(0); }
+body.wr-console-view .main-content { margin-left: 0; }
+body.wr-console-view .sidebar-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, .5); z-index: 999; }
+body.wr-console-view .sidebar-overlay.show { display: block; }
+/* Full screen (the hero's «Πλήρης οθόνη», or the browser's own F11): the site's top
+   bar - the bell, the profile name and its menu - has nothing to do on a wall
+   display, so the console takes its height. The ☰ button goes too: the sidebar it
+   opens is gone in that mode. The script refits the console when the class flips. */
+body.wr-console-view.war-room-focus .top-navbar,
+body.wr-console-view.war-room-focus .wrc-menu-btn { display: none !important; }
+@media (display-mode: fullscreen) {
+    body.wr-console-view .top-navbar { display: none !important; }
+}
+
+/* The hero shrinks to one strip: the console is the page now, not the hero. */
+body.wr-console-view .war-room-hero {
+    display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .6rem;
+    padding: .45rem .8rem !important; margin-bottom: .5rem !important;
+}
+body.wr-console-view .war-room-hero > div.d-flex:first-of-type { margin-bottom: 0 !important; flex: 1 1 auto; align-items: center !important; min-width: 0; }
+body.wr-console-view .war-room-hero > div.d-flex:first-of-type > div:first-child > .text-uppercase,
+body.wr-console-view .war-room-hero > div.d-flex:first-of-type > div:first-child > .small { display: none; }
+body.wr-console-view .war-room-hero h1 { font-size: 1.05rem; margin: 0 !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38vw; }
+/* The counters sit in the phase bar, on the page's own light ground. */
+.wrc-kpis { display: flex; flex-wrap: wrap; gap: 4px; flex: 0 1 auto; margin-left: auto; }
+.wrc-kpi { display: inline-flex; flex-direction: column; align-items: flex-start; padding: 0 8px; min-width: 52px; border-radius: 7px; border: 1px solid #cfd7e3; background: #fff; color: #1b2430; line-height: 1.15; cursor: pointer; }
+.wrc-kpi-l { font-size: .54rem; letter-spacing: 0; text-transform: uppercase; color: #55637a; white-space: nowrap; }
+.wrc-kpi b { font-size: .92rem; font-weight: 700; }
+.wrc-kpi:hover { background: #eef2f8; }
+.wrc-kpi-bad { background: #d1423a; border-color: #b3322b; color: #fff; }
+.wrc-kpi-bad .wrc-kpi-l { color: rgba(255, 255, 255, .85); }
+.wrc-kpi-bad:hover { background: #bf3a32; }
+.wrc-kpi-warn { background: #f6b73c; border-color: #e0a800; color: #3d2600; }
+.wrc-kpi-warn .wrc-kpi-l { color: #5c3c00; }
+.wrc-kpi-warn:hover { background: #efae2c; }
+.wrc-flash { animation: wrcFlash 1.2s ease-out 1; }
+@keyframes wrcFlash { 0% { box-shadow: 0 0 0 4px rgba(29, 78, 216, .65); } 100% { box-shadow: 0 0 0 0 rgba(29, 78, 216, 0); } }
+@media (prefers-reduced-motion: reduce) { .wrc-flash { animation: none; } }
+/* The tool buttons keep their icons and lose their words (the words are their
+   tooltips): fourteen labelled buttons were two rows of hero. */
+body.wr-console-view .war-room-hero .btn:not(#wrConsoleToggle) { font-size: 0; padding: .2rem .42rem; position: relative; }
+body.wr-console-view .war-room-hero .btn:not(#wrConsoleToggle) .bi { font-size: .95rem; margin: 0 !important; }
+body.wr-console-view .war-room-hero .btn:not(#wrConsoleToggle) .assistant-badge { font-size: .62rem; }
+body.wr-console-view #wrConsoleToggle { font-size: .78rem; padding: .18rem .55rem; }
+body.wr-console-view .war-room-hero .btn:not(#wrConsoleToggle) .badge { font-size: .62rem; }
+/* «Σε εξέλιξη»: the console is open on a running mission, and the room is for the counters. */
+body.wr-console-view .war-room-hero > div.d-flex:first-of-type > div.d-flex > .badge.fs-6 { display: none; }
+body.wr-console-view #teamBoard { display: none !important; }
+
+/* The three columns. Height is set by the script to what the window has left. */
+.wrc {
+    display: grid; grid-template-columns: minmax(270px, 330px) minmax(0, 1fr) minmax(290px, 360px);
+    gap: 10px; min-height: 520px;
+}
+.wrc > * { min-height: 0; min-width: 0; }
+/* A 1366px laptop: narrower side columns, and the verbs lose their icons so they stay on one line. */
+@media (max-width: 1439.98px) and (min-width: 1200px) {
+    .wrc { grid-template-columns: minmax(250px, 300px) minmax(0, 1fr) minmax(280px, 330px); }
+    .wrc-verb { padding: 4px 8px; }
+    .wrc-verb .bi { display: none; }
+}
+@media (max-width: 1199.98px) {
+    .wrc { grid-template-columns: minmax(250px, 290px) minmax(0, 1fr); }
+    .wrc .wrc-dock { grid-column: 1 / -1; min-height: 420px; }
+}
+
+.wrc-sec, .wrc-composer, .wrc-dock {
+    background: #fff; border: 1px solid #d5dce6; border-radius: 10px; box-shadow: 0 1px 2px rgba(20, 33, 61, .06);
+}
+
+/* ── left: queue and teams ── */
+.wrc-left { display: flex; flex-direction: column; gap: 10px; }
+.wrc-sec { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.wrc-queue { flex: 0 1 auto; max-height: 44%; }
+.wrc-teams { flex: 1 1 0; }
+.wrc-sec-h { display: flex; align-items: center; gap: 7px; padding: 7px 10px; border-bottom: 1px solid #e7ecf2; flex: none; }
+.wrc-h { font-size: .72rem; letter-spacing: .07em; text-transform: uppercase; font-weight: 700; color: #55637a; }
+.wrc-cnt { min-width: 19px; height: 19px; border-radius: 10px; padding: 0 6px; display: inline-flex; align-items: center; justify-content: center; font-size: .72rem; font-weight: 700; background: #eef1f5; color: #55637a; }
+.wrc-cnt.bad { background: #a3231c; color: #fff; }
+.wrc-cnt.ok { background: #e1f2e7; color: #0f6f38; }
+.wrc-queue.wrc-hot { border-color: #d1423a; box-shadow: 0 0 0 2px rgba(209, 66, 58, .25); }
+.wrc-queue-body, .wrc-teams-body { overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.wrc-calm { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: #e1f2e7; color: #0f6f38; font-weight: 600; font-size: .85rem; }
+.wrc-link { background: none; border: 0; padding: 0; color: #1d4ed8; font-weight: 600; font-size: .78rem; cursor: pointer; }
+.wrc-link:hover { text-decoration: underline; }
+.wrc-more { align-self: flex-start; }
+.wrc-mut { color: #55637a; font-size: .78rem; }
+.wrc-empty { color: #55637a; font-size: .82rem; padding: 6px 4px; }
+
+.wrc-q { display: flex; gap: 8px; padding: 6px 9px; border-radius: 8px; border: 1px solid #d5dce6; background: #fff; cursor: default; }
+.wrc-q[data-target] { cursor: pointer; }
+.wrc-q[data-target]:hover { filter: brightness(.97); }
+.wrc-q-critical { background: #fde7e4; border-color: #efb1ac; }
+.wrc-q-high { background: #fff0d1; border-color: #ecc77c; }
+.wrc-q-warn { background: #fffbe8; border-color: #efe0a0; }
+.wrc-q-info { background: #e6edfc; border-color: #b9ccf6; }
+.wrc-q-i { font-size: 1rem; padding-top: 1px; flex: none; }
+.wrc-q-critical .wrc-q-i { color: #a3231c; }
+.wrc-q-high .wrc-q-i { color: #8a5300; }
+.wrc-q-main { min-width: 0; flex: 1; }
+.wrc-q-t { font-size: .8rem; font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.wrc-q-m { font-size: .72rem; color: #55637a; margin-top: 1px; overflow-wrap: anywhere; }
+.wrc-x { font-weight: 700; color: #55637a; }
+.wrc-audio { width: 100%; height: 30px; margin-top: 4px; }
+.wrc-q-a { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
+.wrc-btn { border: 1px solid #c3ccd8; background: #fff; border-radius: 6px; padding: 3px 9px; font-size: .75rem; font-weight: 600; cursor: pointer; }
+.wrc-btn-warn { background: #ffc107; border-color: #e0a800; color: #1b2430; }
+.wrc-btn-ok { background: #198754; border-color: #198754; color: #fff; }
+
+.wrc-team { border: 1px solid #e0e6ee; border-radius: 9px; padding: 6px 8px; background: #fff; }
+.wrc-team.picked { border-color: #1d4ed8; background: #f3f7ff; }
+.wrc-team-h { display: flex; align-items: center; gap: 8px; }
+
+/* The team's avatar: its colour inside, the progress of its current order as a ring
+   around it, a dot for whether the team can be reached, a badge for the one thing
+   that needs attention. It is also the team's tick box: a click picks the whole team. */
+.wrc-av { position: relative; flex: none; width: 38px; height: 38px; margin: 0; cursor: pointer; display: block; }
+.wrc-av .wrc-team-sel { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; z-index: 2; }
+.wrc-av-ring { position: absolute; inset: 0; width: 100%; height: 100%; }
+.wrc-av-track { fill: none; stroke: #e3e8ef; stroke-width: 3; }
+.wrc-av-track.idle { stroke: #cfd7e3; stroke-width: 2; stroke-dasharray: 2 4; }
+.wrc-av-arc { fill: none; stroke-width: 3; stroke-linecap: round; transition: stroke-dasharray .4s; }
+.wrc-ring-go { stroke: #1d4ed8; }
+.wrc-ring-on { stroke: #198754; }
+.wrc-ring-new { stroke: #8a97ad; }
+.wrc-ring-bad { stroke: #d1423a; }
+.wrc-av-in { position: absolute; left: 5px; top: 5px; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: .8rem; font-weight: 700; overflow: hidden; }
+.wrc-av.sel .wrc-av-in::after, .wrc-av.part .wrc-av-in::after { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: .95rem; }
+.wrc-av.sel .wrc-av-in::after { content: "\2713"; background: rgba(29, 78, 216, .86); }
+.wrc-av.part .wrc-av-in::after { content: "\2212"; background: rgba(29, 78, 216, .55); }
+.wrc-av:focus-within .wrc-av-in { outline: 2px solid #1d4ed8; outline-offset: 1px; }
+.wrc-av-dot { position: absolute; right: 0; bottom: 0; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; box-sizing: border-box; z-index: 1; }
+.wrc-dot-ok { background: #198754; }
+.wrc-dot-warn { background: #f0a500; }
+.wrc-dot-bad { background: #d1423a; }
+.wrc-av-badge { position: absolute; right: -4px; top: -4px; min-width: 17px; height: 17px; box-sizing: border-box; padding: 0 4px; border-radius: 9px; border: 2px solid #fff; display: flex; align-items: center; justify-content: center; font-size: .62rem; font-weight: 800; line-height: 1; z-index: 1; }
+.wrc-badge-bad { background: #d1423a; color: #fff; }
+.wrc-badge-warn { background: #f6b73c; color: #3d2600; }
+.wrc-badge-info { background: #1d4ed8; color: #fff; }
+.wrc-swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; display: inline-block; }
+.wrc-team-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; background: none; border: 0; padding: 0; text-align: left; font: inherit; cursor: pointer; }
+.wrc-team-name b { font-size: .88rem; }
+.wrc-chev { margin-left: auto; font-size: .7rem; color: #7a8aa3; transition: transform .15s; }
+.wrc-team.open .wrc-chev { transform: rotate(180deg); }
+.wrc-order { display: flex; justify-content: space-between; gap: 8px; width: 100%; margin-top: 4px; padding: 3px 7px; border-radius: 6px; border: 1px solid #dde3ec; background: #f6f8fb; font-size: .76rem; text-align: left; cursor: pointer; }
+.wrc-order > span:first-child { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wrc-order-s { font-weight: 700; white-space: nowrap; flex: none; }
+.wrc-order.wrc-tone-go { background: #e6edfc; border-color: #b9ccf6; }
+.wrc-order.wrc-tone-on { background: #e1f2e7; border-color: #b6dcc3; }
+.wrc-order.wrc-tone-bad { background: #fde7e4; border-color: #efb1ac; }
+.wrc-order-more { margin: 2px 0 0 4px; }
+/* Why the team handed the order back («Δεν μπορώ»): two lines at most; who said it, and when, is the tooltip. */
+.wrc-decline { display: flex; gap: 6px; margin: 3px 0 0 2px; font-size: .74rem; line-height: 1.3; color: #a3231c; }
+.wrc-decline .bi { flex: none; padding-top: 1px; }
+.wrc-decline span { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.wrc-idle { margin-top: 4px; font-size: .76rem; color: #55637a; }
+.wrc-members { margin-top: 6px; border-top: 1px solid #edf0f4; padding-top: 4px; display: flex; flex-direction: column; }
+.wrc-m { display: flex; align-items: center; gap: 7px; padding: 3px 2px; font-size: .8rem; cursor: pointer; margin: 0; }
+.wrc-m input { margin: 0; flex: none; }
+.wrc-m-n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wrc-m.stale .wrc-m-n { color: #a3231c; }
+.wrc-stale { color: #a3231c; }
+.wrc-tag { display: inline-block; padding: 0 7px; border-radius: 9px; font-size: .68rem; font-weight: 700; background: #e8ecf2; color: #55637a; white-space: nowrap; line-height: 1.5; }
+.wrc-tag-ok { background: #e1f2e7; color: #0f6f38; }
+.wrc-tag-warn { background: #fff0d1; color: #74470a; }
+.wrc-tag-bad { background: #fde7e4; color: #a3231c; }
+
+/* ── centre: the map, with the order form under it ── */
+.wrc-center { display: flex; flex-direction: column; gap: 10px; }
+.wrc-mapslot { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; }
+.wrc-mapslot #mapCard { flex: 1 1 0; min-height: 0; height: auto !important; margin: 0 !important; display: flex; flex-direction: column; }
+.wrc-mapslot #mapCard .card-header { flex: none; flex-wrap: wrap; gap: .35rem; padding: .35rem .6rem; }
+.wrc-mapslot #mapCard .card-body { flex: 1 1 0; min-height: 0; }
+.wrc-mapslot #mapCard #warRoomMap { height: 100% !important; border-radius: 0 0 10px 10px; }
+.wrc-mapslot #mapCard.map-fullscreen-active { position: fixed; }
+
+.wrc-composer { flex: none; padding: 8px 10px; display: flex; flex-direction: column; gap: 7px; position: relative; }
+.wrc-cmp-row { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.wrc-cmp-l { width: 34px; flex: none; font-size: .66rem; letter-spacing: .07em; text-transform: uppercase; font-weight: 700; color: #55637a; }
+.wrc-cmp-to { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; flex: 1; }
+.wrc-rcp { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border: 1px solid #d5dce6; border-radius: 13px; background: #f3f5f9; font-size: .8rem; font-weight: 600; }
+.wrc-verbs { display: flex; gap: 5px; flex-wrap: wrap; flex: 1; }
+.wrc-verb { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border: 1px solid #d5dce6; border-radius: 8px; background: #fff; font-size: .8rem; font-weight: 600; cursor: pointer; }
+.wrc-verb.on { background: #1b2430; border-color: #1b2430; color: #fff; }
+.wrc-cmp-body { padding-left: 42px; min-height: 32px; }
+.wrc-in { border: 1px solid #c3ccd8; border-radius: 7px; padding: 4px 8px; font-size: .82rem; background: #fff; min-width: 0; }
+.wrc-grow { flex: 1 1 220px; }
+.wrc-go { display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px; border: 0; border-radius: 8px; background: #1d4ed8; color: #fff; font-size: .82rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.wrc-go:disabled { background: #aab6cc; cursor: not-allowed; }
+.wrc-chk-l { display: inline-flex; align-items: center; gap: 5px; font-size: .78rem; margin: 0; }
+.wrc-toast { position: absolute; left: 10px; right: 10px; bottom: calc(100% + 6px); padding: 7px 11px; border-radius: 8px; font-size: .84rem; font-weight: 600; box-shadow: 0 6px 18px rgba(20, 33, 61, .22); z-index: 5; }
+.wrc-toast-ok { background: #e1f2e7; color: #0f6f38; border: 1px solid #b6dcc3; }
+.wrc-toast-bad { background: #fde7e4; color: #a3231c; border: 1px solid #efb1ac; }
+
+/* ── right: the dock ── */
+.wrc-dock { display: flex; flex-direction: column; overflow: hidden; }
+.wrc-tabs { display: flex; border-bottom: 1px solid #d5dce6; flex: none; }
+.wrc-tabs button { flex: 1; padding: 9px 4px 7px; border: 0; border-bottom: 2px solid transparent; background: none; font-size: .82rem; font-weight: 600; color: #55637a; display: flex; align-items: center; justify-content: center; gap: 5px; cursor: pointer; }
+.wrc-tabs button[aria-selected="true"] { color: #1b2430; border-bottom-color: #1b2430; }
+.wrc-pane { display: none; flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 8px; }
+.wrc-pane.on { display: block; }
+.wrc-pane > .card { margin-bottom: .6rem !important; }
+.wrc-chips { display: flex; flex-wrap: wrap; gap: 5px; padding-bottom: 8px; }
+.wrc-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border: 1px solid #d5dce6; border-radius: 12px; background: #fff; font-size: .74rem; font-weight: 600; cursor: pointer; }
+.wrc-chip.on { background: #1b2430; border-color: #1b2430; color: #fff; }
+.wrc-chip-n { opacity: .7; }
+.wrc-f { display: flex; gap: 8px; padding: 7px 4px; border-bottom: 1px solid #edf0f4; }
+.wrc-f-i { font-size: 1.05rem; flex: none; padding-top: 1px; color: #55637a; }
+.wrc-f.wrc-tone-bad .wrc-f-i { color: #a3231c; }
+.wrc-f.wrc-tone-warn .wrc-f-i { color: #8a5300; }
+.wrc-f-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; flex: none; background: #e8ecf2; }
+.wrc-f-main { min-width: 0; flex: 1; }
+.wrc-f-h { display: flex; align-items: center; gap: 6px; font-size: .72rem; color: #55637a; }
+.wrc-f-who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wrc-f-t { margin-left: auto; white-space: nowrap; }
+.wrc-f-x { font-size: .84rem; overflow-wrap: anywhere; }
+.wrc-f-a { display: flex; gap: 12px; margin-top: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* the plan: everything that is setup, one door */
+.wrc-acc { border: 1px solid #d5dce6; border-radius: 9px; margin-bottom: 8px; background: #f8fafc; overflow: hidden; }
+.wrc-acc-h { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 0; background: none; font-size: .78rem; letter-spacing: .05em; text-transform: uppercase; font-weight: 700; color: #33415a; cursor: pointer; text-align: left; }
+.wrc-acc-h .bi { transition: transform .15s; font-size: .7rem; }
+.wrc-acc.open .wrc-acc-h .bi { transform: rotate(90deg); }
+.wrc-acc-b { display: none; padding: 0 8px 8px; }
+.wrc-acc.open .wrc-acc-b { display: block; }
+.wrc-acc-b > .card { margin-bottom: .6rem !important; }
+.wrc-acc-b > .card:last-child { margin-bottom: 0 !important; }
+.wrc-attach { display: inline-flex; align-items: center; gap: 5px; max-width: 170px; margin: 0; }
+.wrc-attach span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── the phases: the same console, composed for preparation, live or closing ── */
+.wrc-bar { display: flex; align-items: center; gap: 12px; margin: 0 0 .45rem; min-height: 30px; }
+.wrc-phases { display: inline-flex; padding: 2px; gap: 2px; border-radius: 9px; background: #e3e8f0; border: 1px solid #cfd7e3; }
+.wrc-phase { display: inline-flex; align-items: center; gap: 6px; padding: 3px 12px; border: 0; border-radius: 7px; background: none; font-size: .8rem; font-weight: 700; color: #4a5872; cursor: pointer; }
+.wrc-phase:hover { color: #1b2430; }
+.wrc-phase[aria-selected="true"] { background: #1b2430; color: #fff; box-shadow: 0 1px 3px rgba(20, 33, 61, .3); }
+.wrc-phase .wrc-cnt { height: 17px; min-width: 17px; font-size: .68rem; }
+.wrc-bar-hint { color: #55637a; font-size: .8rem; }
+@media (max-width: 1199.98px) { .wrc-bar-hint { display: none; } }
+
+.wrc-phase-panel { display: none; flex: none; }
+.wrc[data-phase="prep"] .wrc-phase-panel, .wrc[data-phase="close"] .wrc-phase-panel { display: flex; }
+/* Nothing is being sent while preparing or closing: the map takes the room, and an empty queue goes. */
+.wrc[data-phase="prep"] .wrc-composer, .wrc[data-phase="close"] .wrc-composer { display: none; }
+.wrc[data-phase="prep"][data-q="0"] .wrc-queue, .wrc[data-phase="close"][data-q="0"] .wrc-queue { display: none; }
+.wrc-checks { padding: 8px; display: flex; flex-direction: column; gap: 5px; }
+.wrc-check { display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 5px 9px; border: 1px solid #d5dce6; border-radius: 8px; background: #fff; text-align: left; font-size: .8rem; font-weight: 600; line-height: 1.3; cursor: pointer; }
+.wrc-check .bi { flex: none; padding-top: 1px; }
+.wrc-check:hover { filter: brightness(.97); }
+.wrc-check-ok { background: #f1f8f4; border-color: #cfe6d8; color: #0f6f38; }
+.wrc-check-warn { background: #fff6e2; border-color: #ecc77c; color: #74470a; }
+.wrc-check-bad { background: #fde7e4; border-color: #efb1ac; color: #a3231c; }
+.wrc-phase-cta { padding: 0 8px 8px; }
+.wrc-phase-cta .wrc-go { width: 100%; justify-content: center; }
+
+/* ══ Dark mode ═══════════════════════════════════════════════════════════════
+   A button in the phase bar sets data-bs-theme="dark" on <html> (Bootstrap 5.3 colour
+   mode, which re-colours the cards, forms, modals and dropdowns the console relocates),
+   and the rules below do the same for what this file draws. The light styles above are
+   untouched: everything here sits behind the attribute. */
+html[data-bs-theme="dark"] {
+    --bs-body-bg: #172033; --bs-body-bg-rgb: 23, 32, 51;
+    --bs-body-color: #e6ecf5; --bs-body-color-rgb: 230, 236, 245;
+    --bs-secondary-bg: #1d283d; --bs-tertiary-bg: #1d283d;
+    --bs-border-color: #2b3a55; --bs-border-color-translucent: rgba(255, 255, 255, .12);
+    --bs-secondary-color: rgba(230, 236, 245, .7);
+    --bs-emphasis-color: #fff;
+    --wrc-page: #0e1522; --wrc-surface: #172033; --wrc-surface-2: #1d283d; --wrc-line: #2b3a55; --wrc-line-2: #233049;
+    --wrc-ink: #e6ecf5; --wrc-mut: #9aabc4; --wrc-link: #7db3ff;
+}
+html[data-bs-theme="dark"] body,
+html[data-bs-theme="dark"] .main-content,
+html[data-bs-theme="dark"] .content-wrapper { background: var(--wrc-page) !important; color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .top-navbar { background: rgba(14, 21, 34, .94) !important; border-bottom-color: var(--wrc-line) !important; color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .top-navbar .dropdown-toggle,
+html[data-bs-theme="dark"] .top-navbar .btn-link { color: var(--wrc-ink) !important; }
+/* The map tiles are bright by nature; dimmed, they stop glaring beside the dark panels. */
+html[data-bs-theme="dark"] .leaflet-tile-pane { filter: brightness(.74) contrast(1.06) saturate(.9); }
+
+html[data-bs-theme="dark"] .wrc-sec,
+html[data-bs-theme="dark"] .wrc-composer,
+html[data-bs-theme="dark"] .wrc-dock { background: var(--wrc-surface); border-color: var(--wrc-line); box-shadow: 0 1px 2px rgba(0, 0, 0, .35); color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-sec-h { border-bottom-color: var(--wrc-line-2); }
+html[data-bs-theme="dark"] .wrc-h,
+html[data-bs-theme="dark"] .wrc-cmp-l { color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-cnt { background: #26334d; color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-cnt.ok { background: rgba(34, 197, 94, .18); color: #6ee7a0; }
+html[data-bs-theme="dark"] .wrc-cnt.bad { background: #b3322b; color: #fff; }
+html[data-bs-theme="dark"] .wrc-calm { background: rgba(34, 197, 94, .14); color: #6ee7a0; }
+html[data-bs-theme="dark"] .wrc-link { color: var(--wrc-link); }
+html[data-bs-theme="dark"] .wrc-mut,
+html[data-bs-theme="dark"] .wrc-empty,
+html[data-bs-theme="dark"] .wrc-q-m,
+html[data-bs-theme="dark"] .wrc-x { color: var(--wrc-mut); }
+
+/* the bar: phase switch and counters */
+html[data-bs-theme="dark"] .wrc-phases { background: #121b2c; border-color: var(--wrc-line); }
+html[data-bs-theme="dark"] .wrc-phase { color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-phase:hover { color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-phase[aria-selected="true"] { background: #e6ecf5; color: #0e1522; box-shadow: 0 1px 3px rgba(0, 0, 0, .5); }
+html[data-bs-theme="dark"] .wrc-bar-hint { color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-kpi { background: var(--wrc-surface); border-color: var(--wrc-line); color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-kpi-l { color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-kpi:hover { background: var(--wrc-surface-2); }
+html[data-bs-theme="dark"] .wrc-kpi-bad { background: #c2382f; border-color: #e5645b; color: #fff; }
+html[data-bs-theme="dark"] .wrc-kpi-bad .wrc-kpi-l { color: rgba(255, 255, 255, .85); }
+html[data-bs-theme="dark"] .wrc-kpi-warn { background: #d99a1f; border-color: #f0b84a; color: #2b1c00; }
+html[data-bs-theme="dark"] .wrc-kpi-warn .wrc-kpi-l { color: #4a3000; }
+
+/* the queue */
+html[data-bs-theme="dark"] .wrc-q { background: var(--wrc-surface-2); border-color: var(--wrc-line); }
+html[data-bs-theme="dark"] .wrc-q-critical { background: rgba(239, 68, 68, .16); border-color: rgba(239, 68, 68, .5); }
+html[data-bs-theme="dark"] .wrc-q-high { background: rgba(245, 158, 11, .15); border-color: rgba(245, 158, 11, .5); }
+html[data-bs-theme="dark"] .wrc-q-warn { background: rgba(234, 179, 8, .12); border-color: rgba(234, 179, 8, .4); }
+html[data-bs-theme="dark"] .wrc-q-info { background: rgba(59, 130, 246, .16); border-color: rgba(59, 130, 246, .45); }
+html[data-bs-theme="dark"] .wrc-q-critical .wrc-q-i { color: #ff8f86; }
+html[data-bs-theme="dark"] .wrc-q-high .wrc-q-i { color: #fbbf4a; }
+html[data-bs-theme="dark"] .wrc-btn { background: var(--wrc-surface); border-color: #3a4b6b; color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-btn-warn { background: #f0b429; border-color: #d99a1f; color: #1b2430; }
+html[data-bs-theme="dark"] .wrc-btn-ok { background: #1f9d63; border-color: #1f9d63; color: #fff; }
+
+/* the teams */
+html[data-bs-theme="dark"] .wrc-team { background: var(--wrc-surface-2); border-color: var(--wrc-line); }
+html[data-bs-theme="dark"] .wrc-team.picked { background: rgba(59, 130, 246, .14); border-color: #4c8dff; }
+html[data-bs-theme="dark"] .wrc-order { background: #223050; border-color: var(--wrc-line); color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-order.wrc-tone-go { background: rgba(59, 130, 246, .2); border-color: rgba(59, 130, 246, .5); }
+html[data-bs-theme="dark"] .wrc-order.wrc-tone-on { background: rgba(34, 197, 94, .17); border-color: rgba(34, 197, 94, .45); }
+html[data-bs-theme="dark"] .wrc-order.wrc-tone-bad { background: rgba(239, 68, 68, .18); border-color: rgba(239, 68, 68, .5); }
+html[data-bs-theme="dark"] .wrc-decline { color: #ff9a92; }
+html[data-bs-theme="dark"] .wrc-chev { color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-members { border-top-color: var(--wrc-line); }
+html[data-bs-theme="dark"] .wrc-m.stale .wrc-m-n,
+html[data-bs-theme="dark"] .wrc-stale { color: #ff8f86; }
+html[data-bs-theme="dark"] .wrc-tag { background: #2a3956; color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-tag-ok { background: rgba(34, 197, 94, .2); color: #6ee7a0; }
+html[data-bs-theme="dark"] .wrc-tag-warn { background: rgba(245, 158, 11, .2); color: #fbbf4a; }
+html[data-bs-theme="dark"] .wrc-tag-bad { background: rgba(239, 68, 68, .2); color: #ff8f86; }
+html[data-bs-theme="dark"] .wrc-av-track { stroke: #34456a; }
+html[data-bs-theme="dark"] .wrc-av-track.idle { stroke: #3d4f78; }
+html[data-bs-theme="dark"] .wrc-av-dot,
+html[data-bs-theme="dark"] .wrc-av-badge { border-color: var(--wrc-surface-2); }
+
+/* the order form */
+html[data-bs-theme="dark"] .wrc-rcp { background: #223050; border-color: var(--wrc-line); color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-verb { background: var(--wrc-surface-2); border-color: var(--wrc-line); color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-verb.on { background: #e6ecf5; border-color: #e6ecf5; color: #0e1522; }
+html[data-bs-theme="dark"] .wrc-in { background: #121b2c; border-color: #3a4b6b; color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-in::placeholder { color: #7486a3; }
+html[data-bs-theme="dark"] .wrc-go:disabled { background: #34456a; color: #8fa0bd; }
+html[data-bs-theme="dark"] .wrc-toast-ok { background: #123524; color: #6ee7a0; border-color: #1f6b44; }
+html[data-bs-theme="dark"] .wrc-toast-bad { background: #3a1613; color: #ff9a92; border-color: #7a2a24; }
+
+/* the dock */
+html[data-bs-theme="dark"] .wrc-tabs { border-bottom-color: var(--wrc-line); }
+html[data-bs-theme="dark"] .wrc-tabs button { color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-tabs button[aria-selected="true"] { color: #fff; border-bottom-color: #e6ecf5; }
+html[data-bs-theme="dark"] .wrc-chip { background: var(--wrc-surface-2); border-color: var(--wrc-line); color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-chip.on { background: #e6ecf5; border-color: #e6ecf5; color: #0e1522; }
+html[data-bs-theme="dark"] .wrc-f { border-bottom-color: var(--wrc-line-2); }
+html[data-bs-theme="dark"] .wrc-f-i,
+html[data-bs-theme="dark"] .wrc-f-h { color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-f.wrc-tone-bad .wrc-f-i { color: #ff8f86; }
+html[data-bs-theme="dark"] .wrc-f.wrc-tone-warn .wrc-f-i { color: #fbbf4a; }
+html[data-bs-theme="dark"] .wrc-f-thumb { background: #26334d; }
+html[data-bs-theme="dark"] .wrc-acc { background: #1a2539; border-color: var(--wrc-line); }
+html[data-bs-theme="dark"] .wrc-acc-h { color: #c4d0e4; }
+
+/* the preparation and closing checklists */
+html[data-bs-theme="dark"] .wrc-check { background: var(--wrc-surface-2); border-color: var(--wrc-line); color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-check-ok { background: rgba(34, 197, 94, .12); border-color: rgba(34, 197, 94, .38); color: #6ee7a0; }
+html[data-bs-theme="dark"] .wrc-check-warn { background: rgba(245, 158, 11, .14); border-color: rgba(245, 158, 11, .45); color: #fbbf4a; }
+html[data-bs-theme="dark"] .wrc-check-bad { background: rgba(239, 68, 68, .16); border-color: rgba(239, 68, 68, .5); color: #ff9a92; }
+
+/* the switch itself */
+.wrc-theme { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 28px; padding: 0; border: 1px solid #cfd7e3; border-radius: 7px; background: #fff; color: #1b2430; cursor: pointer; font-size: .95rem; }
+.wrc-theme:hover { background: #eef2f8; }
+html[data-bs-theme="dark"] .wrc-theme { background: var(--wrc-surface); border-color: var(--wrc-line); color: #fbbf4a; }
+html[data-bs-theme="dark"] .wrc-theme:hover { background: var(--wrc-surface-2); }
+
+/* The site gives every card header, table head and alert a light gradient of its own;
+   on the dark ground those would be bright bars with pale text on them. */
+html[data-bs-theme="dark"] .card-header { background-image: none; background-color: var(--wrc-surface-2); border-bottom-color: var(--wrc-line); }
+html[data-bs-theme="dark"] .table > thead > tr > th,
+html[data-bs-theme="dark"] th { background-image: none; background-color: var(--wrc-surface-2); color: var(--wrc-mut); border-color: var(--wrc-line); }
+html[data-bs-theme="dark"] .alert { background-image: none; }
+html[data-bs-theme="dark"] .wrc-idle { color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .form-label,
+html[data-bs-theme="dark"] label { color: var(--wrc-ink); }
+/* Bootstrap keeps its grey and red outline buttons the same in the dark, which is too dim on this ground. */
+html[data-bs-theme="dark"] .btn-outline-secondary {
+    --bs-btn-color: #c4d0e4; --bs-btn-border-color: #4a5b7c;
+    --bs-btn-hover-color: #fff; --bs-btn-hover-bg: #2a3956; --bs-btn-hover-border-color: #5b6f96;
+    --bs-btn-active-color: #fff; --bs-btn-active-bg: #34456a; --bs-btn-active-border-color: #5b6f96;
+}
+html[data-bs-theme="dark"] .btn-outline-danger {
+    --bs-btn-color: #ff8f86; --bs-btn-border-color: #b3322b;
+    --bs-btn-hover-color: #fff; --bs-btn-hover-bg: #b3322b; --bs-btn-hover-border-color: #b3322b;
+}
+html[data-bs-theme="dark"] .text-muted { color: var(--wrc-mut) !important; }
+/* Bootstrap's fixed light surfaces (the strips above the dispatch and route maps, table heads, list items). */
+html[data-bs-theme="dark"] .bg-light:not(.badge),
+html[data-bs-theme="dark"] .bg-white:not(.badge),
+html[data-bs-theme="dark"] .table-light,
+html[data-bs-theme="dark"] .list-group-item-light { background-color: var(--wrc-surface-2) !important; color: var(--wrc-ink); }
+/* A badge that is light on purpose keeps its dark text and its light ground (the team chips in the teams card). */
+html[data-bs-theme="dark"] .badge.bg-light,
+html[data-bs-theme="dark"] .badge.text-bg-light { background-color: #dfe6f1 !important; color: #1b2430 !important; }
+/* Two panels in war-room.php carry their white in an inline style (the route window's side panel and a list in it). */
+html[data-bs-theme="dark"] [style*="width:360px"][style*="background:#fff"] { background: var(--wrc-surface) !important; border-left-color: var(--wrc-line) !important; }
+/* The chat box is darker than the bubbles in it, so each message stands out from it. */
+html[data-bs-theme="dark"] [style*="overflow-y:auto"][style*="background:#f8f9fa"] { background: #121b2c !important; }
+html[data-bs-theme="dark"] .bg-white.border { border-color: var(--wrc-line) !important; }
+
+/* The quiet line under the queue: orders sent a moment ago that nobody has answered yet. */
+.wrc-wait { display: flex; align-items: flex-start; gap: 7px; padding: 5px 9px; border: 1px dashed #cfd7e3; border-radius: 8px; background: #f6f8fb; color: #55637a; font-size: .76rem; line-height: 1.3; }
+.wrc-wait .bi { flex: none; padding-top: 1px; }
+html[data-bs-theme="dark"] .wrc-wait { background: var(--wrc-surface-2); border-color: #3a4b6b; color: var(--wrc-mut); }
+
+/* The counters on the dock's tabs: what arrived since the coordinator last looked there. */
+.wrc-cnt.new { background: #1d4ed8; color: #fff; }
+.wrc-room-new { display: inline-flex; align-items: center; justify-content: center; min-width: 17px; height: 17px; margin-left: 5px; padding: 0 5px; border-radius: 9px; background: #1d4ed8; color: #fff; font-size: .68rem; font-weight: 700; line-height: 1; vertical-align: middle; }
+html[data-bs-theme="dark"] .wrc-cnt.new,
+html[data-bs-theme="dark"] .wrc-room-new { background: #2563eb; color: #fff; }
+
+/* Alerts, red text and green outline buttons: the page paints these for a light ground. */
+html[data-bs-theme="dark"] .alert-warning { background-color: rgba(245, 158, 11, .14); border-color: rgba(245, 158, 11, .45); color: #fbbf4a; }
+html[data-bs-theme="dark"] .alert-danger { background-color: rgba(239, 68, 68, .16); border-color: rgba(239, 68, 68, .5); color: #ff9a92; }
+html[data-bs-theme="dark"] .alert-info { background-color: rgba(59, 130, 246, .16); border-color: rgba(59, 130, 246, .45); color: #9cc4ff; }
+html[data-bs-theme="dark"] .alert-success { background-color: rgba(34, 197, 94, .14); border-color: rgba(34, 197, 94, .4); color: #6ee7a0; }
+html[data-bs-theme="dark"] .text-danger { color: #ff8f86 !important; }
+html[data-bs-theme="dark"] .btn-outline-success {
+    --bs-btn-color: #5fd69a; --bs-btn-border-color: #1f9d63;
+    --bs-btn-hover-color: #fff; --bs-btn-hover-bg: #1f9d63; --bs-btn-hover-border-color: #1f9d63;
+}

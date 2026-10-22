@@ -1295,6 +1295,9 @@ function assembleMissionAssistantItems(array $raw, ?int $checkpointTs, int $nowT
         // instead of hardcoding "30" in a translation string that would then
         // lie the day the constant moves.
         'overdue_after_minutes' => ASSISTANT_ORDER_LATE_MINUTES,
+        // How long an order may wait for its first «Ελήφθη» before it earns a row of its own;
+        // the console shows the orders still inside this window as a quiet line.
+        'grace_minutes' => ASSISTANT_ORDER_GRACE_MINUTES,
     ];
 }
 

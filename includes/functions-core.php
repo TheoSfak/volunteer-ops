@@ -74,6 +74,16 @@ function dbTableExists(string $table): bool {
  * is always an absolute URI (required by RFC 7231).
  */
 function redirect($url) {
+    // The Action Room console posts its orders through fetch and wants the
+    // outcome, not a page (war-room.php sets this for console_ajax=1 only).
+    // ok is false for an error and for a warning (nothing was sent), so the
+    // caller can tell "done" from "asked, but nothing went out".
+    if (!empty($GLOBALS['WR_JSON_REDIRECT'])) {
+        $flash = getFlash();
+        header('Content-Type: application/json');
+        echo json_encode(['ok' => empty($flash['error']) && empty($flash['warning']), 'flash' => $flash], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
     if (!preg_match('/^https?:\/\//i', $url)) {
         $url = rtrim(BASE_URL, '/') . '/' . ltrim($url, '/');
     }
