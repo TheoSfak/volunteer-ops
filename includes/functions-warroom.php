@@ -12297,3 +12297,21 @@ function missionRosterSignature(int $missionId): string {
     );
     return substr(md5(implode(',', array_map(fn($r) => $r['pr_id'] . ':' . $r['shift_id'], $rows))), 0, 12);
 }
+
+/**
+ * How many messages every chat room of a mission holds: ['general' => ['n' => 4], '137' => ['n' => 2], ...],
+ * the general room under 'general' and a team's room under its team id. Rooms with no message are absent.
+ *
+ * For the admin console's unread counter. An admin sees every room, but the chat card only ever fetches the
+ * one that is open (and polling the others from here is exactly the burst of requests mission-chat.php's
+ * session-lock comment warns about), so this rides the 5-second poll instead: one GROUP BY over the
+ * (mission_id, team_id, id) index. A COUNT and not a last-seen id because the client works out what is new
+ * by comparing it with the count it saw when it last looked at that room.
+ */
+function loadChatRoomSummary(int $missionId): array {
+    $rooms = [];
+    foreach (dbFetchAll("SELECT team_id, COUNT(*) AS n FROM mission_chat_messages WHERE mission_id = ? GROUP BY team_id", [$missionId]) as $row) {
+        $rooms[$row['team_id'] === null ? 'general' : (string) (int) $row['team_id']] = ['n' => (int) $row['n']];
+    }
+    return $rooms;
+}

@@ -167,6 +167,39 @@ function wrcDeclineLine(decline, reasonLabel) {
     return note ? `${reasonLabel} — «${note}»` : reasonLabel;
 }
 
+// ── what is new in the dock's tabs ───────────────────────────────────────────
+
+/**
+ * The keys of what has arrived that a tab has not shown yet. `seen` is a Set of the
+ * keys the coordinator has looked at, or null the first time this mission is opened
+ * in this browser: nothing is new on a first visit (the history is not news).
+ */
+function wrcUnreadKeys(keys, seen) {
+    if (!seen) return [];
+    return keys.filter(k => !seen.has(k));
+}
+
+/**
+ * New chat messages per room, from the room sizes the poll sends ({general: {n}, '137':
+ * {n}, ...}) and the sizes seen last ({room: n}, null on a first visit). `viewed` is the
+ * room open on screen right now (or null): looking at it makes all its messages seen.
+ * A room that shrank (a message was deleted) is not owed the difference later.
+ * -> {seen: the sizes seen after this look, byRoom: {room: new}, total}
+ */
+function wrcChatUnread(rooms, seen, viewed) {
+    const next = {};
+    const byRoom = {};
+    let total = 0;
+    Object.keys(rooms || {}).forEach(key => {
+        const n = Number(rooms[key] && rooms[key].n) || 0;
+        const before = seen ? Math.min(Number(seen[key]) || 0, n) : n;
+        next[key] = key === viewed ? n : before;
+        const fresh = n - next[key];
+        if (fresh > 0) { byRoom[key] = fresh; total += fresh; }
+    });
+    return {seen: next, byRoom, total};
+}
+
 /**
  * Orders sent a moment ago that nobody has acknowledged yet - the ones the assistant
  * does not raise until they have waited out its grace period, and which therefore
@@ -251,6 +284,7 @@ if (typeof module !== 'undefined' && module.exports) {
         wrcStampKey, wrcSevRank, wrcOrderQueue, wrcSummarizeSelection,
         wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel,
         wrcOrderProgress, wrcContactTone, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts,
+        wrcUnreadKeys, wrcChatUnread,
         wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcClosingItems,
     };
 }
@@ -297,6 +331,7 @@ if (typeof module !== 'undefined' && module.exports) {
         queueMore: false,
         teams: [],                 // as the poll sends them, with a label added
         ack: [],                   // the acknowledgement panel's cards, as the last poll sent them
+        chatRooms: null,           // messages per chat room, from the last poll (null until the first one)
         stale: null,               // pingStaleness from the last poll
         live: {},                  // participantLive from the last poll
         online: [],
@@ -326,9 +361,9 @@ if (typeof module !== 'undefined' && module.exports) {
         </div>
         <div class="wrc-dock">
             <div class="wrc-tabs" role="tablist" id="wrcTabs">
-                <button type="button" role="tab" data-tab="feed">${esc(t('console.tab_feed'))}<span class="wrc-cnt" id="wrcFeedCnt"></span></button>
-                <button type="button" role="tab" data-tab="chat">${esc(t('console.tab_chat'))}<span class="wrc-cnt d-none" id="wrcChatCnt"></span></button>
-                <button type="button" role="tab" data-tab="media">${esc(t('console.tab_media'))}<span class="wrc-cnt" id="wrcMediaCnt"></span></button>
+                <button type="button" role="tab" data-tab="feed">${esc(t('console.tab_feed'))}<span class="wrc-cnt new d-none" id="wrcFeedCnt"></span></button>
+                <button type="button" role="tab" data-tab="chat">${esc(t('console.tab_chat'))}<span class="wrc-cnt new d-none" id="wrcChatCnt"></span></button>
+                <button type="button" role="tab" data-tab="media">${esc(t('console.tab_media'))}<span class="wrc-cnt new d-none" id="wrcMediaCnt"></span></button>
                 <button type="button" role="tab" data-tab="plan">${esc(t('console.tab_plan'))}</button>
             </div>
             <div class="wrc-pane" data-pane="feed" role="tabpanel">
@@ -681,10 +716,12 @@ if (typeof module !== 'undefined' && module.exports) {
         $$('#wrcTabs button', root).forEach(b => b.setAttribute('aria-selected', b.dataset.tab === tab ? 'true' : 'false'));
         $$('.wrc-pane', root).forEach(p => p.classList.toggle('on', p.dataset.pane === tab));
         if (tab === 'chat') {
-            // The chat card keeps its scroll position and its unread count by
-            // itself; it only needs to know it can be seen now.
+            // The chat card keeps its scroll position by itself; it only needs
+            // to know it can be seen now.
             document.dispatchEvent(new CustomEvent('wr-console-tab', {detail: {tab}}));
         }
+        // Going to a tab is looking at what is in it: its counter clears.
+        renderBadges();
     }
     $('#wrcTabs', root).addEventListener('click', e => {
         const b = e.target.closest('button[data-tab]');
@@ -1296,34 +1333,107 @@ if (typeof module !== 'undefined' && module.exports) {
     function feedItems() {
         const items = [];
         page.incidents().forEach(r => items.push({
-            kind: 'incident', ts: wrcStampKey(r.created_at), icon: 'bi-bandaid', tone: r.severity === 'critical' || r.severity === 'high' ? 'bad' : 'warn',
+            key: 'incident:' + r.id, kind: 'incident', ts: wrcStampKey(r.created_at), icon: 'bi-bandaid', tone: r.severity === 'critical' || r.severity === 'high' ? 'bad' : 'warn',
             tag: t('console.f_incident'), who: r.team_label, text: (r.type_label || '') + (r.severity_label ? ' · ' + r.severity_label : '') + (r.is_unknown_patient ? '' : (r.patient_name ? ' · ' + r.patient_name : '')),
             when: r.created_at, lat: r.lat, lng: r.lng, card: 'incidentsListCard',
             extra: !r.resolved_at && r.lat !== null && r.lat !== undefined && typeof openDispatchForIncident === 'function' ? {act: 'incident-send', id: r.id, label: t('incident.dispatch_btn')} : null,
         }));
         page.shortages().forEach(r => items.push({
-            kind: 'shortage', ts: wrcStampKey(r.created_at), icon: 'bi-box-seam', tone: r.severity === 'critical' ? 'bad' : 'warn',
+            key: 'shortage:' + r.id, kind: 'shortage', ts: wrcStampKey(r.created_at), icon: 'bi-box-seam', tone: r.severity === 'critical' ? 'bad' : 'warn',
             tag: t('console.f_shortage'), who: r.team_label || r.reporter_name, text: r.title || '',
             when: r.created_at, lat: r.lat, lng: r.lng, card: 'shortageListCard',
         }));
         page.media().forEach(m => items.push({
-            kind: 'photo', ts: wrcStampKey(m.time), icon: m.media_type === 'video' ? 'bi-camera-video' : 'bi-camera', tone: 'info',
+            key: 'photo:' + m.id, kind: 'photo', ts: wrcStampKey(m.time), icon: m.media_type === 'video' ? 'bi-camera-video' : 'bi-camera', tone: 'info',
             tag: t(m.media_type === 'video' ? 'console.f_video' : 'console.f_photo_one'), who: m.team_label || m.user_name, text: m.poi_note || m.user_name || '',
             when: m.time, lat: m.lat, lng: m.lng, card: 'mediaCard', thumb: m.has_thumb && !m.purged ? m.id : null,
         }));
         page.pois().forEach(p => items.push({
-            kind: 'poi', ts: wrcStampKey(p.created_at), icon: 'bi-flag', tone: p.checked_at ? 'ok' : 'info',
+            key: 'poi:' + p.id, kind: 'poi', ts: wrcStampKey(p.created_at), icon: 'bi-flag', tone: p.checked_at ? 'ok' : 'info',
             tag: t('console.f_poi_one'), who: (p.reporter_names || []).join(', '), text: ((p.photos || [])[0] || {}).note || '',
             when: p.created_at, lat: p.lat, lng: p.lng, card: 'poiListCard',
         }));
         return items.sort((a, b) => b.ts - a.ts);
     }
 
+    // ── what is new: the counters on the dock's tabs ─────────────────────────
+    // Ροή, Συνομιλία and Πολυμέσα each count what arrived since the coordinator last looked
+    // at that tab, and clear the moment they go there (or come back to a hidden window that
+    // has it open). Remembered per mission in this browser, so what came in while the page
+    // was closed still counts; a first visit counts nothing - the history is not news.
+    // Chat is counted per room: looking at one room does not make the others seen, and a
+    // small pill on each room tab says where the new messages are.
+    function loadSeenKeys(name) {
+        const raw = load(name, null);
+        if (raw === null) return null;
+        try { const list = JSON.parse(raw); return Array.isArray(list) ? new Set(list) : null; } catch (e) { return null; }
+    }
+    function loadSeenChat() {
+        const raw = load('seen-chat', null);
+        if (raw === null) return null;
+        try { const o = JSON.parse(raw); return o && typeof o === 'object' && !Array.isArray(o) ? o : null; } catch (e) { return null; }
+    }
+    const seenKeys = {feed: loadSeenKeys('seen-feed'), media: loadSeenKeys('seen-media')};
+    let seenChat = loadSeenChat();
+
+    function unreadOf(name, keys) {
+        const before = seenKeys[name];
+        if (before === null) {
+            seenKeys[name] = new Set(keys);
+            save('seen-' + name, JSON.stringify(keys));
+            return 0;
+        }
+        const viewing = state.tab === name && !document.hidden;
+        // What is gone is forgotten, and what is on screen now is seen.
+        const next = new Set(keys.filter(k => viewing || before.has(k)));
+        if (next.size !== before.size || Array.from(next).some(k => !before.has(k))) {
+            seenKeys[name] = next;
+            save('seen-' + name, JSON.stringify(Array.from(next)));
+        }
+        return keys.length - next.size;
+    }
+
+    function activeRoomKey() {
+        const tab = $('.chat-room-tab.active', root);
+        return tab && tab.dataset.teamId ? String(tab.dataset.teamId) : 'general';
+    }
+    function chatUnread() {
+        if (!state.chatRooms) return {total: 0, byRoom: {}};
+        const viewed = state.tab === 'chat' && !document.hidden ? activeRoomKey() : null;
+        const r = wrcChatUnread(state.chatRooms, seenChat, viewed);
+        if (JSON.stringify(r.seen) !== JSON.stringify(seenChat)) {
+            seenChat = r.seen;
+            save('seen-chat', JSON.stringify(r.seen));
+        }
+        return r;
+    }
+
+    function setCount(id, n) {
+        const el = $('#' + id, root);
+        const text = n > 99 ? '99+' : (n ? String(n) : '');
+        if (el.textContent !== text) el.textContent = text;
+        el.classList.toggle('d-none', n === 0);
+    }
+    function renderBadges() {
+        setCount('wrcFeedCnt', unreadOf('feed', feedItems().map(i => i.key)));
+        setCount('wrcMediaCnt', unreadOf('media', page.media().map(m => 'media:' + m.id)));
+        const chat = chatUnread();
+        setCount('wrcChatCnt', chat.total);
+        $$('.chat-room-tab', root).forEach(tab => {
+            const n = chat.byRoom[tab.dataset.teamId ? String(tab.dataset.teamId) : 'general'] || 0;
+            let pill = $('.wrc-room-new', tab);
+            if (!n) { if (pill) pill.remove(); return; }
+            if (!pill) { pill = document.createElement('span'); pill.className = 'wrc-room-new'; tab.appendChild(pill); }
+            if (pill.textContent !== String(n)) pill.textContent = String(n);
+        });
+    }
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) renderBadges(); });
+    // The room tabs are the chat card's own; its handler has switched the room by the time this runs.
+    $('.wrc-pane[data-pane="chat"]', root).addEventListener('click', e => { if (e.target.closest('.chat-room-tab')) renderBadges(); });
+
     let feedSig = '';
     function renderFeed() {
         const all = feedItems();
-        $('#wrcFeedCnt', root).textContent = all.length ? String(all.length) : '';
-        $('#wrcMediaCnt', root).textContent = page.media().length ? String(page.media().length) : '';
         const items = state.filter === 'all' ? all : all.filter(i => i.kind === state.filter);
         const chips = $('#wrcFeedChips', root);
         const chipSig = state.filter + '|' + FEED_FILTERS.map(([k]) => all.filter(i => k === 'all' || i.kind === k).length).join(',');
@@ -1375,6 +1485,7 @@ if (typeof module !== 'undefined' && module.exports) {
     // ── the poll hands over what it just applied ─────────────────────────────
     let sectorSig = '';
     function refresh() {
+        renderBadges();
         renderKpis();
         renderQueue();
         renderPhase();
@@ -1417,17 +1528,12 @@ if (typeof module !== 'undefined' && module.exports) {
             if (data.participantLive) state.live = data.participantLive;
             if (data.onlinePresence) state.online = data.onlinePresence;
             if (Array.isArray(data.ackTracker)) state.ack = data.ackTracker;
+            // An empty mission sends [] (a PHP list); a busy one an object of rooms.
+            if (data.chatRooms !== undefined && data.chatRooms !== null) state.chatRooms = Array.isArray(data.chatRooms) ? {} : data.chatRooms;
             refresh();
         },
     };
 
-    // The chat tab shows the page's own unread count.
-    document.addEventListener('wr-chat-unread', e => {
-        const el = $('#wrcChatCnt', root);
-        const n = Number(e.detail && e.detail.count) || 0;
-        el.textContent = String(n);
-        el.classList.toggle('d-none', n === 0);
-    });
     // A new team made while the page is open.
     document.addEventListener('wr-teams-updated', e => { if (e.detail && Array.isArray(e.detail.teams)) { setTeams(e.detail.teams); teamsSig = ''; refresh(); } });
 

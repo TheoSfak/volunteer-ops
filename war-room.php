@@ -1752,6 +1752,9 @@ if (get('ajax') === '1') {
         // where nobody has pressed anything hashes identically tick after
         // tick and costs no bandwidth at all.
         'ackTracker' => $canManageWarRoom ? loadAckTrackerCardsForMission($missionId) : null,
+        // How many messages each chat room holds, so the console's «Συνομιλία» tab can say how
+        // many are new in ANY room without polling every room (see loadChatRoomSummary()).
+        'chatRooms' => $canManageWarRoom ? loadChatRoomSummary($missionId) : null,
         // Shift list, visitors lists, briefing links and the open-items warning
         // on «Κλείσιμο αποστολής» - command cards that used to be drawn once at
         // page load.

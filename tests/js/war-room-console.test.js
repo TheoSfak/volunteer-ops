@@ -12,6 +12,7 @@ const {
     wrcStampKey, wrcSevRank, wrcOrderQueue, wrcSummarizeSelection,
     wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel,
     wrcOrderProgress, wrcContactTone, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts,
+    wrcUnreadKeys, wrcChatUnread,
     wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcClosingItems,
 } = require('../../assets/js/war-room-console.js');
 
@@ -271,4 +272,50 @@ test('wrcWaitingReceipts skips finished and vanished cards, and the ones the coo
 test('wrcWaitingReceipts copes with no cards at all', () => {
     assert.deepEqual(wrcWaitingReceipts(null, NOW, GRACE), {orders: 0, acked: 0, total: 0});
     assert.deepEqual(wrcWaitingReceipts([], NOW, GRACE), {orders: 0, acked: 0, total: 0});
+});
+
+// ── what is new in the dock's tabs ───────────────────────────────────────────
+
+test('wrcUnreadKeys: what has not been seen is new, and nothing is new on a first visit', () => {
+    assert.deepEqual(wrcUnreadKeys(['a', 'b', 'c'], new Set(['a'])), ['b', 'c']);
+    assert.deepEqual(wrcUnreadKeys(['a', 'b'], new Set(['a', 'b'])), []);
+    assert.deepEqual(wrcUnreadKeys(['a', 'b'], null), []);
+    assert.deepEqual(wrcUnreadKeys([], new Set(['a'])), []);
+});
+
+test('wrcChatUnread: a first visit takes the rooms as they are and counts nothing', () => {
+    const r = wrcChatUnread({general: {n: 4}, 137: {n: 2}}, null, null);
+    assert.equal(r.total, 0);
+    assert.deepEqual(r.byRoom, {});
+    assert.deepEqual(r.seen, {general: 4, 137: 2});
+});
+
+test('wrcChatUnread counts new messages per room and in all', () => {
+    const r = wrcChatUnread({general: {n: 6}, 137: {n: 2}, 138: {n: 3}}, {general: 4, 137: 2, 138: 0}, null);
+    assert.equal(r.total, 5);
+    assert.deepEqual(r.byRoom, {general: 2, 138: 3});
+});
+
+test('wrcChatUnread: looking at one room clears that room and only that room', () => {
+    const rooms = {general: {n: 6}, 137: {n: 4}};
+    const seen = {general: 4, 137: 2};
+    const r = wrcChatUnread(rooms, seen, '137');
+    assert.deepEqual(r.byRoom, {general: 2});
+    assert.equal(r.total, 2);
+    assert.deepEqual(r.seen, {general: 4, 137: 4});
+});
+
+test('wrcChatUnread: a room that appears later is new in full, and a deleted message is not owed back', () => {
+    // Bravo had no room when the sizes were last seen
+    assert.deepEqual(wrcChatUnread({138: {n: 2}}, {}, null).byRoom, {138: 2});
+    // general shrank from 5 to 3 (two deleted); one new message after that is one new message
+    const shrunk = wrcChatUnread({general: {n: 3}}, {general: 5}, null);
+    assert.equal(shrunk.total, 0);
+    assert.deepEqual(shrunk.seen, {general: 3});
+    assert.equal(wrcChatUnread({general: {n: 4}}, shrunk.seen, null).total, 1);
+});
+
+test('wrcChatUnread copes with no rooms at all', () => {
+    assert.deepEqual(wrcChatUnread({}, {general: 2}, null), {seen: {}, byRoom: {}, total: 0});
+    assert.deepEqual(wrcChatUnread(null, null, null), {seen: {}, byRoom: {}, total: 0});
 });
