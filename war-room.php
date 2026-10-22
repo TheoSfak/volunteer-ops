@@ -4205,7 +4205,7 @@ include __DIR__ . '/includes/header.php';
          then builds the queue, the team list, the order form and the feed from the
          page's own state. The two bare nodes the offline queue writes to are not
          cards and would be swept away with their legacy row, so they live here. */ ?>
-<link rel="stylesheet" href="<?= rtrim(BASE_URL, '/') ?>/assets/css/war-room-console.css?v=<?= APP_VERSION ?>">
+<link rel="stylesheet" href="<?= rtrim(BASE_URL, '/') ?>/assets/css/war-room-console.css?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/css/war-room-console.css') ?>">
 <script>document.body.classList.add('wr-console-view');try{if(localStorage.getItem('wr-console-theme')==='dark')document.documentElement.setAttribute('data-bs-theme','dark');}catch(e){}</script>
 <div id="wrConsole" class="wrc" data-mission="<?= (int) $missionId ?>" data-live="<?= !empty($liveEnabled) ? '1' : '0' ?>">
     <div id="offlineQueueBanner" class="alert alert-warning py-1 px-2 small mb-2 d-none"></div>
@@ -6549,7 +6549,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <?php if ($consoleView): ?>
 <?php /* defer: it reads the page's own state (the poll's arrays, the render
          functions), all of which are defined by the inline script further down. */ ?>
-<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-console.js?v=<?= APP_VERSION ?>" defer></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-console.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-console.js') ?>" defer></script>
 <?php endif; ?>
 <?php if (vitalsEnabled()): ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/vitals-sensor.js?v=<?= APP_VERSION ?>"></script>
