@@ -2811,6 +2811,7 @@ return [
         'archive.media_close' => 'Κλείσιμο',
         // The admin console (assets/js/war-room-console.js)
         'console.view_btn' => 'Κονσόλα',
+        'console.sector_sent' => 'Στάλθηκε ο τομέας «{sector}» στην ομάδα {team}.',
         'console.waiting_receipts' => 'Εντολές που περιμένουν επιβεβαίωση λήψης: {n} · {acked} από {total}',
         'console.waiting_hint' => 'Τα πρώτα {min} λεπτά δεν θεωρούνται καθυστέρηση· μετά ανεβαίνουν στην ουρά.',
         'console.theme_to_dark' => 'Σκούρο θέμα',
@@ -5624,6 +5625,7 @@ return [
         'archive.media_close' => 'Close',
         // The admin console (assets/js/war-room-console.js)
         'console.view_btn' => 'Console',
+        'console.sector_sent' => 'Sent sector «{sector}» to team {team}.',
         'console.waiting_receipts' => 'Orders waiting for receipt: {n} · {acked} of {total}',
         'console.waiting_hint' => 'The first {min} minutes do not count as late; after that they move up into the queue.',
         'console.theme_to_dark' => 'Dark theme',

@@ -328,6 +328,7 @@ if (typeof module !== 'undefined' && module.exports) {
         tab: load('tab-' + startPhase, wrcPhasePreset(startPhase).tab),
         filter: 'all',
         open: new Set(),           // team ids whose member list is open
+        ordersOpen: new Set(),     // team ids whose row shows all their orders, not only the first
         selected: new Set(),       // user ids the next order goes to
         verb: load('verb', 'point'),
         queueMore: false,
@@ -1088,7 +1089,7 @@ if (typeof module !== 'undefined' && module.exports) {
         $('#wrcTeamsCnt', root).textContent = String(model.length);
         const sig = JSON.stringify([model.map(m => [m.team.id, m.team.label, m.team.color, m.team.transport, m.vm, m.decl, m.items.map(i => [i.kind, i.detail, i.state, i.tone]),
             m.members.map(x => [x.user_id, x.name, isStale(x.user_id), (state.live[String(x.user_id)] || {}).field_status])]),
-            Array.from(state.open)]);
+            Array.from(state.open), Array.from(state.ordersOpen)]);
         if (sig === teamsSig) return;
         teamsSig = sig;
         if (!model.length) { body.innerHTML = `<div class="wrc-empty">${esc(t('teams.empty'))}</div>`; return; }
@@ -1107,11 +1108,11 @@ if (typeof module !== 'undefined' && module.exports) {
                     </button>
                 </div>
                 ${first
-                    ? `<button type="button" class="wrc-order wrc-tone-${esc(first.tone)}" data-tb-ref="${esc(first.ref)}">
-                            <span>${esc(t('teamboard.kind.' + first.kind))}${first.detail ? ' «' + esc(first.detail) + '»' : ''}</span>
-                            <span class="wrc-order-s">${esc(first.state)}</span></button>
-                       ${decl ? `<div class="wrc-decline" title="${esc(decl.who)}"><i class="bi bi-x-octagon"></i><span>${decl.order ? '«' + esc(decl.order) + '» · ' : ''}${esc(decl.line)}</span></div>` : ''}
-                       ${items.length > 1 ? `<div class="wrc-mut wrc-order-more">${esc(t('teamboard.more', {n: items.length - 1}))}</div>` : ''}`
+                    ? (state.ordersOpen.has(team.id) ? items : [first]).map(it => `<button type="button" class="wrc-order wrc-tone-${esc(it.tone)}" data-tb-ref="${esc(it.ref)}">
+                            <span>${esc(t('teamboard.kind.' + it.kind))}${it.detail ? ' «' + esc(it.detail) + '»' : ''}</span>
+                            <span class="wrc-order-s">${esc(it.state)}</span></button>`).join('')
+                       + (decl ? `<div class="wrc-decline" title="${esc(decl.who)}"><i class="bi bi-x-octagon"></i><span>${decl.order ? '«' + esc(decl.order) + '» · ' : ''}${esc(decl.line)}</span></div>` : '')
+                       + (items.length > 1 ? `<button type="button" class="wrc-link wrc-order-more" data-team-orders="${team.id}">${esc(state.ordersOpen.has(team.id) ? t('console.show_less') : t('teamboard.more', {n: items.length - 1}))}</button>` : '')
                     : `<div class="wrc-idle"><i class="bi bi-hourglass-split"></i> ${esc(t('teamboard.waiting'))}</div>`}
                 ${open ? `<div class="wrc-members">${members.map(memberHtml).join('') || `<div class="wrc-empty">${esc(t('route.team_has_no_members'))}</div>`}</div>` : ''}
             </div>`;
@@ -1143,6 +1144,14 @@ if (typeof module !== 'undefined' && module.exports) {
         if (order && typeof teamBoardTarget === 'function' && typeof opGotoMap === 'function') {
             const target = teamBoardTarget(order.dataset.tbRef);
             if (target) opGotoMap(target);
+            return;
+        }
+        const moreBtn = e.target.closest('[data-team-orders]');
+        if (moreBtn) {
+            const id = Number(moreBtn.dataset.teamOrders);
+            if (state.ordersOpen.has(id)) state.ordersOpen.delete(id); else state.ordersOpen.add(id);
+            teamsSig = '';
+            renderTeams();
             return;
         }
         const openBtn = e.target.closest('[data-team-open]');
@@ -1254,6 +1263,34 @@ if (typeof module !== 'undefined' && module.exports) {
     }
     function failed(e) { toast(t('common.send_failed'), 'bad'); if (window.console) console.error(e); }
 
+    /**
+     * A sector goes to a team through mission-sector.php, as the page's own sectorAdminSetTeam()
+     * does - same request, same redraw of the map - but says what happened. That function answers
+     * only with an alert() on failure and nothing at all on success: the sector shows up as one
+     * more order under a team that may already have several, so «Αποστολή» looked like it did
+     * nothing.
+     */
+    function assignSector(sectorId, teamId, go) {
+        const sec = page.sectors().find(s => String(s.id) === String(sectorId));
+        const team = state.teams.find(tm => tm.id === Number(teamId));
+        const body = new URLSearchParams({csrf_token: csrfToken, mission_id: MISSION_ID, action: 'assign', id: sectorId, team_id: teamId});
+        go.disabled = true;
+        fetch('mission-sector.php', {method: 'POST', body, credentials: 'same-origin'}).then(r => r.json()).then(res => {
+            if (res && res.ok) {
+                if (typeof map !== 'undefined' && map) map.closePopup();
+                if (typeof sectorRefreshAfter === 'function') sectorRefreshAfter(res.sectors, res.areas);
+                // The team's row opens its orders, so the one that was just sent is in view.
+                if (team) state.ordersOpen.add(team.id);
+                teamsSig = '';
+                toast(t('console.sector_sent', {sector: sec ? sec.label : '', team: team ? team.label : ''}), 'ok');
+                if (typeof retryPollNow === 'function') retryPollNow();
+                refreshSoon();
+            } else {
+                toast((res && res.error) || t('common.send_failed'), 'bad');
+            }
+        }).catch(failed).finally(() => { go.disabled = false; });
+    }
+
     function recipientFields() {
         const ids = Array.from(state.selected);
         return ids.length ? {request_scope: 'selected', volunteers: ids} : null;
@@ -1289,7 +1326,7 @@ if (typeof module !== 'undefined' && module.exports) {
             body.innerHTML = page.sectors().length
                 ? `<select class="wrc-in" id="wrcSectorPick" aria-label="${esc(t('console.verb_sector'))}">${free.map(opt).join('')}${rest.length ? '<option disabled>──────────</option>' + rest.map(opt).join('') : ''}</select>
                    <button type="button" class="wrc-go" id="wrcGoSector"${one ? '' : ' disabled'}><i class="bi bi-send-fill"></i>${esc(t('console.send'))}</button>
-                   <span class="wrc-mut">${esc(one ? t('console.sector_help') : t('console.sector_needs_team'))}</span>`
+                   <span class="${one ? 'wrc-mut' : 'wrc-need'}">${esc(one ? t('console.sector_help') : t('console.sector_needs_team'))}</span>`
                 : `<span class="wrc-mut">${esc(t('console.sector_none'))}</span>`;
         } else if (state.verb === 'task') {
             body.innerHTML = `<input type="text" class="wrc-in wrc-grow" id="wrcTaskText" maxlength="500" placeholder="${esc(t('console.task_placeholder'))}" value="${esc(bodyDraft.task)}">
@@ -1340,7 +1377,7 @@ if (typeof module !== 'undefined' && module.exports) {
             bootstrap.Modal.getOrCreateInstance(document.getElementById('routeComposerModal')).show();
         } else if (go.id === 'wrcGoSector') {
             const id = $('#wrcSectorPick', root).value;
-            if (id && plan.mode === 'team') sectorAdminSetTeam(id, plan.teamId, go);
+            if (id && plan.mode === 'team') assignSector(id, plan.teamId, go);
         } else if (go.id === 'wrcGoTask') {
             const text = $('#wrcTaskText', root).value.trim();
             const rec = recipientFields();

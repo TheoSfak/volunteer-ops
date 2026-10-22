@@ -6695,6 +6695,44 @@ VitalsSensor.init({
 <?php endif; ?>
 const missionLocation = <?= json_encode(['lat' => $mission['latitude'] ? (float)$mission['latitude'] : null, 'lng' => $mission['longitude'] ? (float)$mission['longitude'] : null, 'title' => $mission['title']]) ?>;
 let pins = <?= json_encode($pins) ?>;
+
+// Where the map window of an order (a point, an area, a route, a search area, a restricted
+// area) opens: next to the mission, at street level - not on all of Greece, which is where
+// they opened for a mission with no point of its own, and a long way from it at zoom 13
+// for one that has. In order: the mission's own point; else everything the mission already
+// has on the map (people, areas, sectors, dispatches, incidents, the command post); else
+// where the live map is looking, if it has been zoomed in from its Greece default; else
+// Greece, as before.
+function orderMapView() {
+    if (missionLocation.lat) return {center: [missionLocation.lat, missionLocation.lng], zoom: 15};
+    const pts = [];
+    const add = (lat, lng) => {
+        lat = Number(lat); lng = Number(lng);
+        if (isFinite(lat) && isFinite(lng) && (lat || lng)) pts.push([lat, lng]);
+    };
+    (pins || []).forEach(p => add(p.lat, p.lng));
+    (areas || []).forEach(a => (Array.isArray(a.geo) ? a.geo : []).forEach(pt => add(pt[0], pt[1])));
+    (sectors || []).forEach(s => (Array.isArray(s.geo) ? s.geo : []).forEach(pt => add(pt[0], pt[1])));
+    (dispatches || []).forEach(d => {
+        if (d.geo && d.geo.lat !== undefined) add(d.geo.lat, d.geo.lng);
+        else if (Array.isArray(d.geo)) d.geo.forEach(pt => add(pt[0], pt[1]));
+    });
+    (missionIncidents || []).forEach(r => add(r.lat, r.lng));
+    if (commandPost) add(commandPost.lat, commandPost.lng);
+    if (pts.length) return {bounds: L.latLngBounds(pts), zoom: 15};
+    if (typeof map !== 'undefined' && map && map.getZoom() >= 10) {
+        const c = map.getCenter();
+        return {center: [c.lat, c.lng], zoom: map.getZoom()};
+    }
+    return {center: [37.97, 23.73], zoom: 7};
+}
+function applyOrderMapView(orderMap) {
+    orderMap.invalidateSize();
+    const view = orderMapView();
+    // No animation: it is a starting position, not a journey from wherever the map last was.
+    if (view.bounds) orderMap.fitBounds(view.bounds, {padding: [30, 30], maxZoom: 16, animate: false});
+    else orderMap.setView(view.center, view.zoom, {animate: false});
+}
 // K9 handler registry, keyed by user id — the client-side twin of
 // k9Handlers() in includes/functions-warroom.php. Shipped once here and
 // refreshed from every poll so a handler added mid-mission shows up on the
@@ -26094,6 +26132,8 @@ document.querySelectorAll('.team-form').forEach(form => {
             refLayer = L.layerGroup().addTo(dispatchMap);
             dispatchMap.on('click', onMapClick);
         }
+        // Opens next to the mission, unless a seed is about to place points of its own.
+        if (!(pendingDispatchSeed && pendingDispatchSeed.points && pendingDispatchSeed.points.length)) applyOrderMapView(dispatchMap);
         renderDispatchContext();
         // Pre-fill from a ring's "send team here" button (openDispatchForRing()
         // in the map block) — one-shot, same consume-then-null pattern
@@ -27103,6 +27143,7 @@ document.querySelectorAll('.team-form').forEach(form => {
             refLayer = L.layerGroup().addTo(composerMap);
             composerMap.on('click', onMapClick);
         }
+        applyOrderMapView(composerMap);
         renderAreaComposerContext();
         document.addEventListener('keydown', keydownHandler);
         setTimeout(() => composerMap.invalidateSize(), 100);
@@ -27320,6 +27361,7 @@ document.querySelectorAll('.team-form').forEach(form => {
             refLayer = L.layerGroup().addTo(composerMap);
             composerMap.on('click', onMapClick);
         }
+        applyOrderMapView(composerMap);
         renderRestrictedAreaComposerContext();
         document.addEventListener('keydown', keydownHandler);
         setTimeout(() => composerMap.invalidateSize(), 100);
@@ -28131,6 +28173,8 @@ function renderWaypointPanel() {
                 addRouteWaypoint(e.latlng.lat, e.latlng.lng);
             });
         }
+        // Opens next to the mission, unless a seed is about to place points of its own.
+        if (!(pendingRouteSeed && pendingRouteSeed.points && pendingRouteSeed.points.length)) applyOrderMapView(routeMap);
         // Refreshed on every open, not just the first — pins/annotations may
         // well have changed since the last time this admin opened the
         // composer, even though the underlying data itself has stayed live

@@ -97,6 +97,8 @@ body.wr-console-view #teamBoard { display: none !important; }
 .wrc-link:hover { text-decoration: underline; }
 .wrc-more { align-self: flex-start; }
 .wrc-mut { color: #55637a; font-size: .78rem; }
+/* Why a button is off, when it is the coordinator's pick that is missing. */
+.wrc-need { color: #9a5b00; font-size: .78rem; font-weight: 600; }
 .wrc-empty { color: #55637a; font-size: .82rem; padding: 6px 4px; }
 
 .wrc-q { display: flex; gap: 8px; padding: 6px 9px; border-radius: 8px; border: 1px solid #d5dce6; background: #fff; cursor: default; }
@@ -301,6 +303,7 @@ html[data-bs-theme="dark"] .wrc-cnt.ok { background: rgba(34, 197, 94, .18); col
 html[data-bs-theme="dark"] .wrc-cnt.bad { background: #b3322b; color: #fff; }
 html[data-bs-theme="dark"] .wrc-calm { background: rgba(34, 197, 94, .14); color: #6ee7a0; }
 html[data-bs-theme="dark"] .wrc-link { color: var(--wrc-link); }
+html[data-bs-theme="dark"] .wrc-need { color: #fbbf4a; }
 html[data-bs-theme="dark"] .wrc-mut,
 html[data-bs-theme="dark"] .wrc-empty,
 html[data-bs-theme="dark"] .wrc-q-m,
