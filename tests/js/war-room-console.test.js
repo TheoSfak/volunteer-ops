@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
 const {
     wrcStampKey, wrcSevRank, wrcOrderQueue, wrcSummarizeSelection,
     wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel,
-    wrcOrderProgress, wrcContactTone, wrcTeamBadge,
+    wrcOrderProgress, wrcContactTone, wrcTeamBadge, wrcDeclineLine,
     wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcClosingItems,
 } = require('../../assets/js/war-room-console.js');
 
@@ -208,4 +208,19 @@ test('wrcClosingItems lists only what is open, worst first', () => {
     assert.deepEqual(items.map(x => [x.key, x.n, x.tone]), [
         ['sos', 1, 'bad'], ['orders', 3, 'warn'], ['sectors', 4, 'warn'], ['incidents', 2, 'warn'], ['overdue', 1, 'warn'],
     ]);
+});
+
+// ── «Δεν μπορώ» on a team's row ──────────────────────────────────────────────
+
+test('wrcDeclineLine is the reason, and the volunteer\'s note after a dash', () => {
+    assert.equal(wrcDeclineLine({reason: 'unsafe', note: ''}, 'Μη ασφαλές'), 'Μη ασφαλές');
+    assert.equal(wrcDeclineLine({reason: 'other', note: 'Χρειαζόμαστε σχοινιά'}, 'Άλλο'), 'Άλλο — «Χρειαζόμαστε σχοινιά»');
+    // a note of spaces is no note; a missing one neither
+    assert.equal(wrcDeclineLine({reason: 'busy', note: '   '}, 'Απασχολημένοι'), 'Απασχολημένοι');
+    assert.equal(wrcDeclineLine({reason: 'busy'}, 'Απασχολημένοι'), 'Απασχολημένοι');
+});
+
+test('wrcDeclineLine says nothing when nothing was declined', () => {
+    assert.equal(wrcDeclineLine(null, 'Άλλο'), '');
+    assert.equal(wrcDeclineLine(undefined, 'Άλλο'), '');
 });

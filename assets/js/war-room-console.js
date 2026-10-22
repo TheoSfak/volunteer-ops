@@ -157,6 +157,16 @@ function wrcTeamBadge(f) {
     return null;
 }
 
+/**
+ * «Δεν μπορώ» as the one line a team's row can hold: the reason (already
+ * translated) and, after a dash, the note the volunteer wrote with it.
+ */
+function wrcDeclineLine(decline, reasonLabel) {
+    if (!decline) return '';
+    const note = String(decline.note || '').trim();
+    return note ? `${reasonLabel} — «${note}»` : reasonLabel;
+}
+
 // ── the phases: preparation, live, closing ───────────────────────────────────
 
 const WRC_PHASES = ['prep', 'live', 'close'];
@@ -213,7 +223,7 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         wrcStampKey, wrcSevRank, wrcOrderQueue, wrcSummarizeSelection,
         wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel,
-        wrcOrderProgress, wrcContactTone, wrcTeamBadge,
+        wrcOrderProgress, wrcContactTone, wrcTeamBadge, wrcDeclineLine,
         wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcClosingItems,
     };
 }
@@ -828,6 +838,42 @@ if (typeof module !== 'undefined' && module.exports) {
         return null;
     }
 
+    /**
+     * The «Δεν μπορώ» standing behind one of the team's orders, if there is one:
+     * {reason, note, by, at}. Looked up where the team board looks (a dispatch's
+     * declines are kept per team by its label; a sector's and a route's sit on it).
+     */
+    function declineOf(item, team) {
+        const [type, rawId] = String(item.ref).split(':');
+        const id = Number(rawId);
+        if (type === 'dispatch') {
+            const d = page.dispatches().find(x => Number(x.id) === id);
+            return (d && (d.declines || []).find(x => x.team === team.label)) || null;
+        }
+        if (type === 'sector') {
+            const sec = page.sectors().find(x => Number(x.id) === id);
+            return (sec && sec.declined) || null;
+        }
+        if (type === 'route') {
+            const r = page.routes().find(x => Number(x.id) === id);
+            return (r && r.declined) || null;
+        }
+        return null;
+    }
+
+    /** The reason the team handed an order back, for the line under its order - or null. */
+    function declineModel(team, items) {
+        const hit = items.map(item => ({item, d: declineOf(item, team)})).find(x => x.d);
+        if (!hit) return null;
+        const reason = t('decline.reason.' + hit.d.reason);
+        return {
+            // The row shows the first order; if it is another one that was handed back, say which.
+            order: hit.item === items[0] ? '' : (hit.item.detail || t('teamboard.kind.' + hit.item.kind)),
+            line: wrcDeclineLine(hit.d, reason),
+            who: [hit.d.by, hit.d.at].filter(Boolean).join(' · '),
+        };
+    }
+
     /** The ring, the contact dot and the badge of one team, from what is already on the page. */
     function avatarModel(team, items, members) {
         const ids = new Set(members.map(m => Number(m.user_id)));
@@ -875,16 +921,16 @@ if (typeof module !== 'undefined' && module.exports) {
         const model = state.teams.map(team => {
             const items = board({id: team.id, label: team.label, color: team.color});
             const members = team.members || [];
-            return {team, items, members, vm: avatarModel(team, items, members)};
+            return {team, items, members, vm: avatarModel(team, items, members), decl: declineModel(team, items)};
         });
         $('#wrcTeamsCnt', root).textContent = String(model.length);
-        const sig = JSON.stringify([model.map(m => [m.team.id, m.team.label, m.team.color, m.team.transport, m.vm, m.items.map(i => [i.kind, i.detail, i.state, i.tone]),
+        const sig = JSON.stringify([model.map(m => [m.team.id, m.team.label, m.team.color, m.team.transport, m.vm, m.decl, m.items.map(i => [i.kind, i.detail, i.state, i.tone]),
             m.members.map(x => [x.user_id, x.name, isStale(x.user_id), (state.live[String(x.user_id)] || {}).field_status])]),
             Array.from(state.open)]);
         if (sig === teamsSig) return;
         teamsSig = sig;
         if (!model.length) { body.innerHTML = `<div class="wrc-empty">${esc(t('teams.empty'))}</div>`; return; }
-        body.innerHTML = model.map(({team, items, members, vm}) => {
+        body.innerHTML = model.map(({team, items, members, vm, decl}) => {
             const stale = members.filter(m => isStale(m.user_id)).length;
             const open = state.open.has(team.id);
             const first = items[0];
@@ -902,6 +948,7 @@ if (typeof module !== 'undefined' && module.exports) {
                     ? `<button type="button" class="wrc-order wrc-tone-${esc(first.tone)}" data-tb-ref="${esc(first.ref)}">
                             <span>${esc(t('teamboard.kind.' + first.kind))}${first.detail ? ' «' + esc(first.detail) + '»' : ''}</span>
                             <span class="wrc-order-s">${esc(first.state)}</span></button>
+                       ${decl ? `<div class="wrc-decline" title="${esc(decl.who)}"><i class="bi bi-x-octagon"></i><span>${decl.order ? '«' + esc(decl.order) + '» · ' : ''}${esc(decl.line)}</span></div>` : ''}
                        ${items.length > 1 ? `<div class="wrc-mut wrc-order-more">${esc(t('teamboard.more', {n: items.length - 1}))}</div>` : ''}`
                     : `<div class="wrc-idle"><i class="bi bi-hourglass-split"></i> ${esc(t('teamboard.waiting'))}</div>`}
                 ${open ? `<div class="wrc-members">${members.map(memberHtml).join('') || `<div class="wrc-empty">${esc(t('route.team_has_no_members'))}</div>`}</div>` : ''}

@@ -161,6 +161,10 @@ body.wr-console-view #teamBoard { display: none !important; }
 .wrc-order.wrc-tone-on { background: #e1f2e7; border-color: #b6dcc3; }
 .wrc-order.wrc-tone-bad { background: #fde7e4; border-color: #efb1ac; }
 .wrc-order-more { margin: 2px 0 0 4px; }
+/* Why the team handed the order back («Δεν μπορώ»): two lines at most; who said it, and when, is the tooltip. */
+.wrc-decline { display: flex; gap: 6px; margin: 3px 0 0 2px; font-size: .74rem; line-height: 1.3; color: #a3231c; }
+.wrc-decline .bi { flex: none; padding-top: 1px; }
+.wrc-decline span { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .wrc-idle { margin-top: 4px; font-size: .76rem; color: #55637a; }
 .wrc-members { margin-top: 6px; border-top: 1px solid #edf0f4; padding-top: 4px; display: flex; flex-direction: column; }
 .wrc-m { display: flex; align-items: center; gap: 7px; padding: 3px 2px; font-size: .8rem; cursor: pointer; margin: 0; }
