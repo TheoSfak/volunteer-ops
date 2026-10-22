@@ -106,6 +106,17 @@ function wrcRouteSeedFor(summary) {
 const WRC_GREEK_LETTERS = ['Α', 'Β', 'Γ', 'Δ', 'Ε', 'Ζ', 'Η', 'Θ', 'Ι', 'Κ', 'Λ', 'Μ', 'Ν', 'Ξ', 'Ο', 'Π', 'Ρ', 'Σ', 'Τ', 'Υ', 'Φ', 'Χ', 'Ψ', 'Ω'];
 
 /**
+ * The area the sector tab works in: the one asked for while it still exists, otherwise the
+ * newest (the one just drawn is the one wanted next), otherwise none.
+ */
+function wrcPickArea(areas, wantedId) {
+    const list = Array.isArray(areas) ? areas : [];
+    const wanted = list.find(a => String(a.id) === String(wantedId));
+    if (wanted) return wanted;
+    return list.reduce((best, a) => (!best || Number(a.id) > Number(best.id)) ? a : best, null);
+}
+
+/**
  * The name a freshly drawn sector starts with: «Τομέας Α», then «Τομέας Β»... the first
  * letter no existing sector already carries, and numbers once the alphabet is used up.
  * `labels` are the sectors' names as they are; `prefix` is the word for «sector».
@@ -304,7 +315,7 @@ function wrcClosingItems(f) {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         wrcStampKey, wrcSevRank, wrcOrderQueue, wrcSummarizeSelection,
-        wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel, wrcNextSectorLabel,
+        wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel, wrcNextSectorLabel, wrcPickArea,
         wrcOrderProgress, wrcContactTone, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts,
         wrcUnreadKeys, wrcChatUnread,
         wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcClosingItems,
@@ -337,6 +348,7 @@ if (typeof module !== 'undefined' && module.exports) {
         pois: () => (typeof pointsOfInterest !== 'undefined' && Array.isArray(pointsOfInterest)) ? pointsOfInterest : [],
         media: () => (typeof media !== 'undefined' && Array.isArray(media)) ? media : [],
         sectors: () => (typeof sectors !== 'undefined' && Array.isArray(sectors)) ? sectors : [],
+        areas: () => (typeof areas !== 'undefined' && Array.isArray(areas)) ? areas : [],
         dispatches: () => (typeof dispatches !== 'undefined' && Array.isArray(dispatches)) ? dispatches : [],
         routes: () => (typeof routes !== 'undefined' && Array.isArray(routes)) ? routes : [],
         assistant: () => (typeof assistantData !== 'undefined') ? assistantData : null,
@@ -351,6 +363,7 @@ if (typeof module !== 'undefined' && module.exports) {
         ordersOpen: new Set(),     // team ids whose row shows all their orders, not only the first
         selected: new Set(),       // user ids the next order goes to
         verb: load('verb', 'point'),
+        areaId: '',                // the area the sector tab is working in (see wrcPickArea)
         queueMore: false,
         teams: [],                 // as the poll sends them, with a label added
         ack: [],                   // the acknowledgement panel's cards, as the last poll sent them
@@ -1318,9 +1331,35 @@ if (typeof module !== 'undefined' && module.exports) {
 
     let bodyDraft = {task: '', say: ''};
 
+    /**
+     * The poll redraws the composer every few seconds. A body whose markup has not changed is
+     * left alone - a chosen option, a half-typed order, the box that has the cursor and a click
+     * that is under way all survive it - and one that has changed keeps what was chosen and
+     * where the cursor was, as far as it still exists.
+     */
+    let bodyDone = '';
+    function putComposerBody(body, html) {
+        const sig = state.verb + '\u0001' + html;
+        if (sig === bodyDone) return;
+        bodyDone = sig;
+        const active = body.contains(document.activeElement) ? document.activeElement : null;
+        const focused = active && active.id ? active.id : '';
+        const chosen = {};
+        body.querySelectorAll('select[id]').forEach(s => { chosen[s.id] = s.value; });
+        body.innerHTML = html;
+        Object.keys(chosen).forEach(id => {
+            const s = body.querySelector('#' + id);
+            // A select whose markup names its own choice (the area just drawn) keeps that one.
+            if (s && !s.querySelector('option[selected]') && Array.from(s.options).some(o => o.value === chosen[id])) s.value = chosen[id];
+        });
+        const back = focused ? body.querySelector('#' + focused) : null;
+        if (back) back.focus();
+    }
+
     function renderComposerBody(keepInputs) {
         $$('#wrcVerbs .wrc-verb', root).forEach(b => b.classList.toggle('on', b.dataset.verb === state.verb));
         const body = $('#wrcCmpBody', root);
+        let html = '';
         const s = summary();
         const plan = wrcDispatchPlan(s, state.teams.length);
         const need = s.total ? '' : `<span class="wrc-mut">${esc(t('console.cmp_pick_first'))}</span>`;
@@ -1331,33 +1370,48 @@ if (typeof module !== 'undefined' && module.exports) {
         if (state.verb === 'point') {
             const hint = plan.mode === 'many' ? t('console.hint_many')
                 : plan.mode === 'people' ? t('console.hint_people_point') : '';
-            body.innerHTML = `<button type="button" class="wrc-go" id="wrcGoPoint"${plan.mode === 'many' ? ' disabled' : ''}><i class="bi bi-pin-map-fill"></i>${esc(t('console.open_point_map'))}</button>
+            html = `<button type="button" class="wrc-go" id="wrcGoPoint"${plan.mode === 'many' ? ' disabled' : ''}><i class="bi bi-pin-map-fill"></i>${esc(t('console.open_point_map'))}</button>
                 <span class="wrc-mut">${esc(hint || t('console.point_help'))}</span>`;
         } else if (state.verb === 'route') {
             const canReturn = s.chips.length === 1;
-            body.innerHTML = `<button type="button" class="wrc-go" id="wrcGoRoute"><i class="bi bi-signpost-split-fill"></i>${esc(t('console.open_route_map'))}</button>
+            html = `<button type="button" class="wrc-go" id="wrcGoRoute"><i class="bi bi-signpost-split-fill"></i>${esc(t('console.open_route_map'))}</button>
                 <label class="wrc-chk-l"><input type="checkbox" id="wrcRouteReturn"${canReturn ? '' : ' disabled'}> ${esc(t('console.route_return'))}</label>
                 <span class="wrc-mut">${esc(s.total && !s.chips.every(c => c.whole) || s.chips.length > 1 ? t('console.hint_people_route') : t('console.route_help'))}</span>`;
         } else if (state.verb === 'sector') {
-            const free = page.sectors().filter(sec => !sec.team_id || sec.status === 'not_started');
-            const rest = page.sectors().filter(sec => !free.includes(sec));
-            const opt = sec => `<option value="${esc(sec.id)}">${esc(sec.label)}${sec.team_id && sec.team_label ? ' — ' + esc(sec.team_label) : ''}</option>`;
+            // The way sectors are made: an AREA first (the ground), then sectors inside it - cut
+            // into pieces, or drawn one by one - and a sector goes to a team. All of it from the
+            // map; nothing has to be prepared under Σχέδιο.
+            const allAreas = page.areas();
+            const area = wrcPickArea(allAreas, state.areaId);
+            state.areaId = area ? String(area.id) : '';
             const one = plan.mode === 'team';
-            // A sector can be drawn right here, on the map, and goes straight to the team: nothing
-            // has to be made under Σχέδιο first. With sectors already there it is the second way.
-            const draw = `<button type="button" class="wrc-go${page.sectors().length ? ' wrc-go-alt' : ''}" id="wrcGoDrawSector"${one ? '' : ' disabled'}><i class="bi bi-bounding-box"></i>${esc(t('console.sector_draw_btn'))}</button>`;
-            body.innerHTML = page.sectors().length
-                ? `<select class="wrc-in" id="wrcSectorPick" aria-label="${esc(t('console.verb_sector'))}">${free.map(opt).join('')}${rest.length ? '<option disabled>──────────</option>' + rest.map(opt).join('') : ''}</select>
-                   <button type="button" class="wrc-go" id="wrcGoSector"${one ? '' : ' disabled'}><i class="bi bi-send-fill"></i>${esc(t('console.send'))}</button>
-                   ${draw}
-                   <span class="${one ? 'wrc-mut' : 'wrc-need'}">${esc(one ? t('console.sector_help') : t('console.sector_needs_team'))}</span>`
-                : `${draw}
-                   <span class="${one ? 'wrc-mut' : 'wrc-need'}">${esc(one ? t('console.sector_none') : t('console.sector_needs_team'))}</span>`;
+            const newArea = `<button type="button" class="wrc-go wrc-go-alt" id="wrcGoNewArea"><i class="bi bi-bounding-box-circles"></i>${esc(t('console.area_new_btn'))}</button>`;
+            if (!area) {
+                html = `<div class="wrc-line">${newArea}<span class="wrc-mut">${esc(t('console.area_none'))}</span></div>`;
+            } else {
+                const inArea = page.sectors().filter(sec => String(sec.area_id) === String(area.id));
+                const free = inArea.filter(sec => !sec.team_id || sec.status === 'not_started');
+                const rest = inArea.filter(sec => !free.includes(sec));
+                const opt = sec => `<option value="${esc(sec.id)}">${esc(sec.label)}${sec.team_id && sec.team_label ? ' — ' + esc(sec.team_label) : ''}</option>`;
+                const areaOpt = a => `<option value="${esc(a.id)}"${String(a.id) === state.areaId ? ' selected' : ''}>${esc(t('console.area_option', {label: a.label, count: Number(a.sector_count) || 0}))}</option>`;
+                // The page cuts an area up only while it has no sectors (to redo it, clear it first).
+                const divide = inArea.length === 0 && !Number(area.sector_count)
+                    ? `<button type="button" class="wrc-go wrc-go-alt" id="wrcGoDivide"><i class="bi bi-scissors"></i>${esc(t('console.area_divide_btn'))}</button>` : '';
+                html = `<div class="wrc-line"><span class="wrc-sub">${esc(t('console.area_l'))}</span>
+                        <select class="wrc-in" id="wrcAreaPick" aria-label="${esc(t('console.area_l'))}">${allAreas.map(areaOpt).join('')}</select>${divide}${newArea}</div>
+                    <div class="wrc-line"><span class="wrc-sub">${esc(t('console.verb_sector'))}</span>
+                        ${inArea.length
+                            ? `<select class="wrc-in" id="wrcSectorPick" aria-label="${esc(t('console.verb_sector'))}">${free.map(opt).join('')}${rest.length ? '<option disabled>──────────</option>' + rest.map(opt).join('') : ''}</select>
+                               <button type="button" class="wrc-go" id="wrcGoSector"${one ? '' : ' disabled'} title="${esc(one ? '' : t('console.sector_needs_team'))}"><i class="bi bi-send-fill"></i>${esc(t('console.send'))}</button>`
+                            : `<span class="wrc-mut">${esc(t('console.sector_none'))}</span>`}
+                        <button type="button" class="wrc-go wrc-go-alt" id="wrcGoDrawSector"><i class="bi bi-bounding-box"></i>${esc(t('console.sector_draw_btn'))}</button></div>
+                    <div class="wrc-mut wrc-line-h">${esc(one ? t('console.sector_help') : t('console.sector_draw_help'))}</div>`;
+            }
         } else if (state.verb === 'task') {
-            body.innerHTML = `<input type="text" class="wrc-in wrc-grow" id="wrcTaskText" maxlength="500" placeholder="${esc(t('console.task_placeholder'))}" value="${esc(bodyDraft.task)}">
+            html = `<input type="text" class="wrc-in wrc-grow" id="wrcTaskText" maxlength="500" placeholder="${esc(t('console.task_placeholder'))}">
                 <button type="button" class="wrc-go" id="wrcGoTask"><i class="bi bi-send-fill"></i>${esc(t('console.send'))}</button>${need}`;
         } else if (state.verb === 'say') {
-            body.innerHTML = `<input type="text" class="wrc-in wrc-grow" id="wrcSayText" maxlength="500" placeholder="${esc(t('console.say_placeholder'))}" value="${esc(bodyDraft.say)}">
+            html = `<input type="text" class="wrc-in wrc-grow" id="wrcSayText" maxlength="500" placeholder="${esc(t('console.say_placeholder'))}">
                 <select class="wrc-in" id="wrcSayHow" aria-label="${esc(t('console.say_how'))}">
                     <option value="all">${esc(t('console.say_all'))}</option>
                     <option value="speak"${s.total ? '' : ' disabled'}>${esc(t('console.say_speak'))}</option>
@@ -1366,13 +1420,23 @@ if (typeof module !== 'undefined' && module.exports) {
                     <input type="file" id="wrcSayPhoto" accept="image/*" hidden></label>
                 <button type="button" class="wrc-go" id="wrcGoSay"><i class="bi bi-send-fill"></i>${esc(t('console.send'))}</button>`;
         } else {
-            body.innerHTML = `<select class="wrc-in" id="wrcAskKind" aria-label="${esc(t('console.verb_ask'))}">${ASKS.map(([a, l]) => `<option value="${a}">${esc(t(l))}</option>`).join('')}</select>
+            html = `<select class="wrc-in" id="wrcAskKind" aria-label="${esc(t('console.verb_ask'))}">${ASKS.map(([a, l]) => `<option value="${a}">${esc(t(l))}</option>`).join('')}</select>
                 <button type="button" class="wrc-go" id="wrcGoAsk"><i class="bi bi-send-fill"></i>${esc(t('console.send'))}</button>
                 <span class="wrc-mut">${esc(s.total ? t('console.ask_help_sel') : t('console.ask_help_all'))}</span>`;
         }
+        putComposerBody(body, html);
+        const taskBox = $('#wrcTaskText', root), sayBox = $('#wrcSayText', root);
+        if (taskBox && taskBox.value !== bodyDraft.task) taskBox.value = bodyDraft.task;
+        if (sayBox && sayBox.value !== bodyDraft.say) sayBox.value = bodyDraft.say;
     }
 
+
     cmp.addEventListener('change', e => {
+        if (e.target.id === 'wrcAreaPick') {
+            state.areaId = e.target.value;
+            renderComposerBody(true);
+            return;
+        }
         if (e.target.id !== 'wrcSayPhoto') return;
         const f = (e.target.files || [])[0];
         $('#wrcSayPhotoName', root).textContent = f ? f.name : t('console.attach_photo');
@@ -1400,11 +1464,24 @@ if (typeof module !== 'undefined' && module.exports) {
             pendingRouteSeed = Object.assign({points: [], label: '', closed: false},
                 wrcRouteSeedFor(s), {returnToStart: !!$('#wrcRouteReturn', root)?.checked});
             bootstrap.Modal.getOrCreateInstance(document.getElementById('routeComposerModal')).show();
+        } else if (go.id === 'wrcGoNewArea') {
+            // The ordinary search-area window; wr-area-created brings the console back to the new area.
+            pendingAreaSeed = null;
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('searchAreaMapModal')).show();
+        } else if (go.id === 'wrcGoDivide') {
+            const area = page.areas().find(a => String(a.id) === state.areaId);
+            if (area && typeof openDivideSectorsForArea === 'function') openDivideSectorsForArea(area.id);
         } else if (go.id === 'wrcGoDrawSector') {
-            // The search-area window, as a «draw a sector for this team» window (see pendingAreaSeed).
-            if (plan.mode !== 'team') return;
-            const team = state.teams.find(tm => tm.id === plan.teamId);
-            pendingAreaSeed = {teamId: plan.teamId, teamLabel: team ? team.label : '', label: wrcNextSectorLabel(page.sectors().map(s => s.label), t('console.verb_sector'))};
+            // The search-area window, as a «draw a sector inside this area» window (see pendingAreaSeed),
+            // for the team when one whole team is chosen, otherwise just laid out.
+            const area = page.areas().find(a => String(a.id) === state.areaId);
+            if (!area) return;
+            const team = plan.mode === 'team' ? state.teams.find(tm => tm.id === plan.teamId) : null;
+            pendingAreaSeed = {
+                areaId: area.id, areaLabel: area.label,
+                teamId: team ? team.id : null, teamLabel: team ? team.label : '',
+                label: wrcNextSectorLabel(page.sectors().map(s => s.label), t('console.verb_sector')),
+            };
             bootstrap.Modal.getOrCreateInstance(document.getElementById('searchAreaMapModal')).show();
         } else if (go.id === 'wrcGoSector') {
             const id = $('#wrcSectorPick', root).value;
@@ -1610,7 +1687,7 @@ if (typeof module !== 'undefined' && module.exports) {
         renderComposerTo();
         renderFeed();
         // The sector picker lists what the sectors are NOW.
-        const sig = JSON.stringify(page.sectors().map(sec => [sec.id, sec.team_id, sec.status, sec.label]));
+        const sig = JSON.stringify([page.sectors().map(sec => [sec.id, sec.area_id, sec.team_id, sec.status, sec.label]), page.areas().map(a => [a.id, a.label, a.sector_count])]);
         if (sig !== sectorSig) {
             sectorSig = sig;
             if (state.verb === 'sector') renderComposerBody(true);
@@ -1651,14 +1728,24 @@ if (typeof module !== 'undefined' && module.exports) {
         },
     };
 
-    // The search-area window drew a sector for a team and sent it.
+    // The search-area window saved an area: it is the one the sector tab works in from now on.
+    document.addEventListener('wr-area-created', e => {
+        const made = e.detail || {};
+        state.areaId = String(made.id);
+        if (state.verb === 'sector') renderComposerBody(true);
+        toast(t('console.area_made', {area: made.label || ''}), 'ok');
+    });
+    // The search-area window drew a sector inside an area (and sent it, when it had a team).
     document.addEventListener('wr-sector-sent', e => {
         const sent = e.detail || {};
-        const team = state.teams.find(tm => tm.id === Number(sent.teamId));
+        const team = sent.teamId ? state.teams.find(tm => tm.id === Number(sent.teamId)) : null;
         if (team) state.ordersOpen.add(team.id);
         teamsSig = '';
-        toast(t('console.sector_sent', {sector: sent.label || '', team: team ? team.label : ''}), 'ok');
+        toast(team
+            ? t('console.sector_sent', {sector: sent.label || '', team: team.label})
+            : t('console.sector_made', {sector: sent.label || '', area: sent.areaLabel || ''}), 'ok');
         if (typeof retryPollNow === 'function') retryPollNow();
+        renderComposerBody(true);
         refreshSoon();
     });
     // A new team made while the page is open.

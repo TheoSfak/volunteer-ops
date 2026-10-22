@@ -6211,7 +6211,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                         <button type="button" class="btn btn-success btn-sm" id="areaSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('sector.save_btn') ?></button>
                     </div>
                 </div>
-                <div class="small text-muted px-2 py-1 bg-light border-bottom">
+                <div class="small text-muted px-2 py-1 bg-light border-bottom" id="areaMapInstructions">
                     <?= t('sector.area_map_instructions') ?>
                 </div>
                 <div id="areaComposerMap" style="flex:1;min-height:0;"></div>
@@ -6771,8 +6771,9 @@ let pendingSplitSectorId = null;
 // label: string}.
 let pendingDispatchSeed = null;
 let pendingRouteSeed = null;
-// From the console's «Σχεδίασε τομέα»: {teamId, teamLabel, label}. The search-area window then draws a
-// SECTOR for that team - the area and the sector in one go - instead of only an area.
+// From the console's «Σχεδίασε τομέα στην περιοχή»: {areaId, areaLabel, teamId, teamLabel, label}. The
+// search-area window then draws a SECTOR inside that existing area (given to the team when there is one)
+// instead of a new area. teamId/teamLabel are empty for a sector that is only laid out.
 let pendingAreaSeed = null;
 // Team assignment moved from the (now-removed) sector composer's own select
 // to a per-sector control in its popup/list row instead (see sectorAdminSetTeam
@@ -26998,11 +26999,16 @@ document.querySelectorAll('.team-form').forEach(form => {
     let isClosed = false;
     // Undo history: {type:'add'} | {type:'move', index, from} | {type:'close'}.
     let actionStack = [];
-    // Opened from the console's «Σχεδίασε τομέα»: a sector for this team, not just an area.
+    // Opened from the console's «Σχεδίασε τομέα στην περιοχή»: a sector inside an existing area, not a new area.
     let activeSeed = null;
+    // The seeded area's outline, so the sector is drawn against the ground it belongs to.
+    let seedAreaLayer = null;
     const titleEl = modalEl.querySelector('.modal-title');
+    const hintEl = document.getElementById('areaMapInstructions');
     const defaultTitleHtml = titleEl.innerHTML;
     const defaultSendHtml = sendBtn.innerHTML;
+    const defaultHintHtml = hintEl.innerHTML;
+    const defaultPlaceholder = labelInput.placeholder;
 
     function vertexIcon() {
         return L.divIcon({className: '', html: '<div style="width:14px;height:14px;border-radius:50%;background:#fff;border:3px solid #495057;box-shadow:0 1px 3px #0006;"></div>', iconSize: [14, 14], iconAnchor: [7, 7]});
@@ -27152,17 +27158,32 @@ document.querySelectorAll('.team-form').forEach(form => {
             composerMap.on('click', onMapClick);
         }
         applyOrderMapView(composerMap);
-        // Consumed once, like the other seeds. A seed makes this a «send a sector to a team» window.
+        // Consumed once, like the other seeds. A seed makes this a «draw a sector inside this area» window.
         activeSeed = pendingAreaSeed;
         pendingAreaSeed = null;
+        const seedArea = activeSeed ? areas.find(a => String(a.id) === String(activeSeed.areaId)) : null;
+        if (activeSeed && !seedArea) activeSeed = null; // the area went while the window was opening
         if (activeSeed) {
-            titleEl.innerHTML = '<i class="bi bi-bounding-box me-1"></i>' + escapeHtml(t('console.sector_draw_title', {team: activeSeed.teamLabel}));
-            sendBtn.innerHTML = '<i class="bi bi-send-fill me-1"></i>' + escapeHtml(t('console.sector_draw_send', {team: activeSeed.teamLabel}));
+            const forTeam = !!activeSeed.teamId;
+            titleEl.innerHTML = '<i class="bi bi-bounding-box me-1"></i>' + escapeHtml(forTeam
+                ? t('console.sector_draw_title_team', {area: seedArea.label, team: activeSeed.teamLabel})
+                : t('console.sector_draw_title', {area: seedArea.label}));
+            sendBtn.innerHTML = forTeam
+                ? '<i class="bi bi-send-fill me-1"></i>' + escapeHtml(t('console.sector_draw_send', {team: activeSeed.teamLabel}))
+                : '<i class="bi bi-check-lg me-1"></i>' + escapeHtml(t('console.sector_draw_save'));
+            hintEl.textContent = t('console.sector_draw_hint');
             labelInput.value = activeSeed.label || '';
+            labelInput.placeholder = t('console.sector_label_placeholder');
+            seedAreaLayer = L.polygon(seedArea.geo, {color: '#0d6efd', weight: 3, dashArray: '8 6', fillOpacity: 0.04, interactive: false}).addTo(composerMap);
         }
         renderAreaComposerContext();
         document.addEventListener('keydown', keydownHandler);
         setTimeout(() => composerMap.invalidateSize(), 100);
+        // Close on the area, not on the whole mission: the sector is a piece of it.
+        if (seedAreaLayer) {
+            composerMap.invalidateSize();
+            composerMap.fitBounds(seedAreaLayer.getBounds(), {padding: [40, 40], animate: false});
+        }
     });
 
     modalEl.addEventListener('hidden.bs.modal', () => {
@@ -27171,9 +27192,12 @@ document.querySelectorAll('.team-form').forEach(form => {
         addressStatus.textContent = '';
         coordsInput.value = '';
         labelInput.value = '';
+        labelInput.placeholder = defaultPlaceholder;
         activeSeed = null;
+        if (seedAreaLayer) { composerMap.removeLayer(seedAreaLayer); seedAreaLayer = null; }
         titleEl.innerHTML = defaultTitleHtml;
         sendBtn.innerHTML = defaultSendHtml;
+        hintEl.innerHTML = defaultHintHtml;
         document.removeEventListener('keydown', keydownHandler);
     });
 
@@ -27201,37 +27225,28 @@ document.querySelectorAll('.team-form').forEach(form => {
         }
         const geo = JSON.stringify(drawPoints);
         const seed = activeSeed;
-        const data = new URLSearchParams({
-            csrf_token: csrfToken, action: 'create_area', mission_id: <?= $missionId ?>,
-            geo: geo, label: label,
-        });
-        sendBtn.disabled = true;
         const fail = message => { alert(message || t('common.send_failed')); sendBtn.disabled = false; };
+        // A sector belongs inside its area. Going a little over the edge is how people really trace
+        // one, so only a sector with most of its corners outside is worth a question.
+        const seedArea = seed ? areas.find(a => String(a.id) === String(seed.areaId)) : null;
+        if (seedArea) {
+            const inside = drawPoints.filter(p => pointInPolygon(p[0], p[1], seedArea.geo)).length;
+            if (inside * 2 < drawPoints.length && !confirm(t('console.sector_outside_confirm', {area: seedArea.label}))) return;
+        }
+        // Without a seed this saves an area, exactly as it always did. With one it is a sector of
+        // that area - given to the team when the seed carries one, which tells the team.
+        const data = seed
+            ? new URLSearchParams({csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>, area_id: seed.areaId, label: label, geo: geo, team_id: seed.teamId || ''})
+            : new URLSearchParams({csrf_token: csrfToken, action: 'create_area', mission_id: <?= $missionId ?>, geo: geo, label: label});
+        sendBtn.disabled = true;
         fetch('mission-sector.php', {method:'POST', body:data}).then(response => response.json()).then(result => {
             if (!result.ok) { fail(result.error); return; }
-            if (!seed) {
-                bootstrap.Modal.getInstance(modalEl).hide();
-                sectorRefreshAfter(result.sectors, result.areas);
-                return;
-            }
-            // From the console: the area is the sector's own ground, so the sector is created on it
-            // right away, already given to the team (which tells the team). If that fails the area
-            // goes again, so a failed send leaves nothing behind to tidy up in Σχέδιο.
-            const sectorData = new URLSearchParams({
-                csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>,
-                area_id: result.id, label: label, geo: geo, team_id: seed.teamId,
-            });
-            return fetch('mission-sector.php', {method:'POST', body:sectorData}).then(response => response.json()).then(made => {
-                if (made.ok) {
-                    bootstrap.Modal.getInstance(modalEl).hide();
-                    sectorRefreshAfter(made.sectors, made.areas);
-                    document.dispatchEvent(new CustomEvent('wr-sector-sent', {detail: {label: label, teamId: seed.teamId}}));
-                    return;
-                }
-                const undo = new URLSearchParams({csrf_token: csrfToken, action: 'delete_area', mission_id: <?= $missionId ?>, id: result.id});
-                // delete_area answers only {ok}; the page never saw this area, so there is nothing to redraw.
-                return fetch('mission-sector.php', {method:'POST', body:undo}).catch(() => null).then(() => fail(made.error));
-            });
+            bootstrap.Modal.getInstance(modalEl).hide();
+            sectorRefreshAfter(result.sectors, result.areas);
+            // The console listens: an area is the start of its flow, a sector the end of it.
+            document.dispatchEvent(seed
+                ? new CustomEvent('wr-sector-sent', {detail: {label: label, teamId: seed.teamId || null, areaLabel: seed.areaLabel}})
+                : new CustomEvent('wr-area-created', {detail: {id: result.id, label: label}}));
         }).catch(() => fail());
     });
 })();

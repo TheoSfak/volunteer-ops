@@ -197,6 +197,10 @@ body.wr-console-view #teamBoard { display: none !important; }
 .wrc-verb { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border: 1px solid #d5dce6; border-radius: 8px; background: #fff; font-size: .8rem; font-weight: 600; cursor: pointer; }
 .wrc-verb.on { background: #1b2430; border-color: #1b2430; color: #fff; }
 .wrc-cmp-body { padding-left: 42px; min-height: 32px; }
+/* The sector tab has two lines, the area and the sectors inside it. */
+.wrc-line { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.wrc-line-h { flex: 1 1 100%; }
+.wrc-sub { width: 54px; flex: none; font-size: .66rem; letter-spacing: .07em; text-transform: uppercase; font-weight: 700; color: #55637a; }
 .wrc-in { border: 1px solid #c3ccd8; border-radius: 7px; padding: 4px 8px; font-size: .82rem; background: #fff; min-width: 0; }
 .wrc-grow { flex: 1 1 220px; }
 .wrc-go { display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px; border: 0; border-radius: 8px; background: #1d4ed8; color: #fff; font-size: .82rem; font-weight: 700; cursor: pointer; white-space: nowrap; }
@@ -300,7 +304,8 @@ html[data-bs-theme="dark"] .wrc-composer,
 html[data-bs-theme="dark"] .wrc-dock { background: var(--wrc-surface); border-color: var(--wrc-line); box-shadow: 0 1px 2px rgba(0, 0, 0, .35); color: var(--wrc-ink); }
 html[data-bs-theme="dark"] .wrc-sec-h { border-bottom-color: var(--wrc-line-2); }
 html[data-bs-theme="dark"] .wrc-h,
-html[data-bs-theme="dark"] .wrc-cmp-l { color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-cmp-l,
+html[data-bs-theme="dark"] .wrc-sub { color: var(--wrc-mut); }
 html[data-bs-theme="dark"] .wrc-cnt { background: #26334d; color: var(--wrc-mut); }
 html[data-bs-theme="dark"] .wrc-cnt.ok { background: rgba(34, 197, 94, .18); color: #6ee7a0; }
 html[data-bs-theme="dark"] .wrc-cnt.bad { background: #b3322b; color: #fff; }

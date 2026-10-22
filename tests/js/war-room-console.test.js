@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
 const {
     wrcStampKey, wrcSevRank, wrcOrderQueue, wrcSummarizeSelection,
     wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel,
-    wrcOrderProgress, wrcContactTone, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts, wrcNextSectorLabel,
+    wrcOrderProgress, wrcContactTone, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts, wrcNextSectorLabel, wrcPickArea,
     wrcUnreadKeys, wrcChatUnread,
     wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcClosingItems,
 } = require('../../assets/js/war-room-console.js');
@@ -342,4 +342,14 @@ test('wrcNextSectorLabel goes on to numbers when the alphabet is used up', () =>
     const letters = ['Α', 'Β', 'Γ', 'Δ', 'Ε', 'Ζ', 'Η', 'Θ', 'Ι', 'Κ', 'Λ', 'Μ', 'Ν', 'Ξ', 'Ο', 'Π', 'Ρ', 'Σ', 'Τ', 'Υ', 'Φ', 'Χ', 'Ψ', 'Ω'].map(l => 'Τομέας ' + l);
     assert.equal(wrcNextSectorLabel(letters, 'Τομέας'), 'Τομέας 1');
     assert.equal(wrcNextSectorLabel(letters.concat(['Τομέας 1', 'Τομέας 2']), 'Τομέας'), 'Τομέας 3');
+});
+
+test('wrcPickArea keeps the asked-for area while it exists and otherwise takes the newest', () => {
+    const areas = [{id: 4, label: 'Α'}, {id: 9, label: 'Β'}, {id: 7, label: 'Γ'}];
+    assert.equal(wrcPickArea(areas, '4').id, 4, 'the one asked for, whatever the id type');
+    assert.equal(wrcPickArea(areas, 7).id, 7);
+    assert.equal(wrcPickArea(areas, '').id, 9, 'nothing asked for: the newest');
+    assert.equal(wrcPickArea(areas, '55').id, 9, 'the asked-for area was deleted: the newest');
+    assert.equal(wrcPickArea([], '4'), null);
+    assert.equal(wrcPickArea(undefined, '4'), null);
 });

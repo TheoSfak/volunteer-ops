@@ -139,29 +139,79 @@ final class WarRoomConsoleTest extends TestCase
         $this->assertMatchesRegularExpression('/if \(isPost\(\) && post\(\'console_ajax\'\) === \'1\'\) \{\s+\$GLOBALS\[\'WR_JSON_REDIRECT\'\] = true;/', $page);
     }
 
-    public function testASectorCanBeDrawnForATeamWithoutLeavingTheConsole(): void
+    public function testAnAreaIsDrawnFirstAndTheSectorsInsideIt(): void
     {
         $page = $this->source('war-room.php');
         $js = $this->source('assets/js/war-room-console.js');
 
         // The seed the console fills and the search-area window consumes, declared once at the top level.
         $this->assertSame(1, substr_count($page, 'let pendingAreaSeed = null;'));
-        $this->assertStringContainsString('pendingAreaSeed = {teamId: plan.teamId', $js);
+        $this->assertStringContainsString('pendingAreaSeed = {', $js);
+        $this->assertStringContainsString('areaId: area.id, areaLabel: area.label', $js);
         $this->assertStringContainsString("getOrCreateInstance(document.getElementById('searchAreaMapModal')).show()", $js);
 
-        // The window: area first, then the sector on it WITH the team (which notifies the team) - and the
-        // area goes again if the sector fails, so a failed send leaves nothing behind.
+        // Without a seed the window saves an AREA, as it always did; with one it saves a SECTOR of that area,
+        // with the team when there is one. The old way (an area plus a whole-area sector) is gone.
         $this->assertSame(1, substr_count($page, "activeSeed = pendingAreaSeed;"));
-        $this->assertStringContainsString('area_id: result.id, label: label, geo: geo, team_id: seed.teamId', $page);
-        $this->assertStringContainsString("action: 'delete_area'", $page);
-        // The console is told, to say what was sent.
+        $this->assertStringContainsString("action: 'create', mission_id: <?= \$missionId ?>, area_id: seed.areaId, label: label, geo: geo, team_id: seed.teamId || ''", $page);
+        $this->assertStringContainsString("action: 'create_area', mission_id: <?= \$missionId ?>, geo: geo, label: label", $page);
+        $this->assertStringNotContainsString("action: 'delete_area', mission_id: <?= \$missionId ?>, id: result.id", $page);
+        // The area's outline is drawn dashed on the map, and the view closes on it.
+        $this->assertStringContainsString('seedAreaLayer = L.polygon(seedArea.geo', $page);
+        $this->assertStringContainsString('composerMap.fitBounds(seedAreaLayer.getBounds()', $page);
+        // A sector mostly outside its area is asked about, not refused.
+        $this->assertStringContainsString("t('console.sector_outside_confirm'", $page);
+        // The console is told what was made, to say it and to carry on from there.
+        $this->assertStringContainsString("new CustomEvent('wr-area-created'", $page);
         $this->assertStringContainsString("new CustomEvent('wr-sector-sent'", $page);
+        $this->assertStringContainsString("document.addEventListener('wr-area-created'", $js);
         $this->assertStringContainsString("document.addEventListener('wr-sector-sent'", $js);
 
-        // Both server actions it rides on exist and take what is sent.
+        // The sector tab: pick an area, make a new one, cut it up (only while it has no sectors), draw in it.
+        foreach (['wrcAreaPick', 'wrcGoNewArea', 'wrcGoDivide', 'wrcGoDrawSector', 'wrcGoSector'] as $id) {
+            $this->assertStringContainsString($id, $js);
+        }
+        $this->assertStringContainsString('openDivideSectorsForArea(area.id)', $js);
+        $this->assertStringContainsString('inArea.length === 0 && !Number(area.sector_count)', $js);
+
+        // The server actions it rides on exist and take what is sent.
         $endpoint = $this->source('mission-sector.php');
-        foreach (["\$action === 'create_area'", "\$action === 'create'", "\$action === 'delete_area'"] as $needle) {
+        foreach (["\$action === 'create_area'", "\$action === 'create'"] as $needle) {
             $this->assertStringContainsString($needle, $endpoint);
+        }
+    }
+
+    public function testThePollDoesNotRedrawAComposerThatHasNotChanged(): void
+    {
+        $js = $this->source('assets/js/war-room-console.js');
+        // refresh() redraws the composer on every poll. Replacing it unchanged reset the chosen sector
+        // to the first one and dropped the cursor out of a half-typed order, so the redraw goes through
+        // one function that leaves an unchanged body alone.
+        $this->assertStringContainsString('function putComposerBody(body, html)', $js);
+        $this->assertStringContainsString('if (sig === bodyDone) return;', $js);
+        $start = strpos($js, 'function renderComposerBody(keepInputs)');
+        $end = strpos($js, "cmp.addEventListener('change'", $start);
+        $fn = substr($js, $start, $end - $start);
+        $this->assertStringNotContainsString('body.innerHTML', $fn, 'every branch must build `html` and let putComposerBody place it');
+        // What is typed goes in as a property afterwards: markup that carried it would differ on every key.
+        $this->assertStringNotContainsString('value="${esc(bodyDraft', $fn);
+        $this->assertStringContainsString('taskBox.value = bodyDraft.task', $fn);
+    }
+
+    public function testEveryNewConsoleStringExistsInBothLanguages(): void
+    {
+        $lang = $this->source('includes/lang/war-room.php');
+        $js = $this->source('assets/js/war-room-console.js');
+        $page = $this->source('war-room.php');
+        foreach (['area_l', 'area_option', 'area_new_btn', 'area_divide_btn', 'area_none', 'area_made',
+                  'sector_none', 'sector_draw_btn', 'sector_draw_title', 'sector_draw_title_team', 'sector_draw_send',
+                  'sector_draw_save', 'sector_draw_hint', 'sector_draw_help', 'sector_label_placeholder',
+                  'sector_outside_confirm', 'sector_made', 'sector_help', 'sector_needs_team', 'sector_sent'] as $key) {
+            $this->assertSame(2, substr_count($lang, "'console.$key' =>"), "console.$key must be in el and en");
+            $this->assertTrue(
+                str_contains($js, "console.$key") || str_contains($page, "console.$key"),
+                "console.$key is defined but nothing uses it"
+            );
         }
     }
 
