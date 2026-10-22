@@ -14,6 +14,15 @@ body.wr-console-view .sidebar.show { transform: translateX(0); }
 body.wr-console-view .main-content { margin-left: 0; }
 body.wr-console-view .sidebar-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, .5); z-index: 999; }
 body.wr-console-view .sidebar-overlay.show { display: block; }
+/* Full screen (the hero's «Πλήρης οθόνη», or the browser's own F11): the site's top
+   bar - the bell, the profile name and its menu - has nothing to do on a wall
+   display, so the console takes its height. The ☰ button goes too: the sidebar it
+   opens is gone in that mode. The script refits the console when the class flips. */
+body.wr-console-view.war-room-focus .top-navbar,
+body.wr-console-view.war-room-focus .wrc-menu-btn { display: none !important; }
+@media (display-mode: fullscreen) {
+    body.wr-console-view .top-navbar { display: none !important; }
+}
 
 /* The hero shrinks to one strip: the console is the page now, not the hero. */
 body.wr-console-view .war-room-hero {

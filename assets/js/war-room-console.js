@@ -353,7 +353,7 @@ if (typeof module !== 'undefined' && module.exports) {
     if (hero && typeof toggleSidebar === 'function') {
         const menuBtn = document.createElement('button');
         menuBtn.type = 'button';
-        menuBtn.className = 'btn btn-outline-light';
+        menuBtn.className = 'btn btn-outline-light wrc-menu-btn';
         menuBtn.title = t('console.menu');
         menuBtn.setAttribute('aria-label', t('console.menu'));
         menuBtn.innerHTML = '<i class="bi bi-list"></i>';
@@ -589,6 +589,19 @@ if (typeof module !== 'undefined' && module.exports) {
         if (typeof map !== 'undefined' && map) map.invalidateSize();
     }
     window.addEventListener('resize', fit);
+    // «Πλήρης οθόνη» (the hero's focus mode) takes the site's top bar away by CSS,
+    // which moves the top of the console. Nothing tells this script, so it watches
+    // the class; and the native fullscreen resizes the window a moment later.
+    if (window.MutationObserver) {
+        let focusWas = document.body.classList.contains('war-room-focus');
+        new MutationObserver(() => {
+            const focusNow = document.body.classList.contains('war-room-focus');
+            if (focusNow === focusWas) return;
+            focusWas = focusNow;
+            fit();
+            setTimeout(fit, 250);
+        }).observe(document.body, {attributes: true, attributeFilter: ['class']});
+    }
     if (window.ResizeObserver) {
         const mapSlot = $('#wrcMapSlot', root);
         new ResizeObserver(() => { if (typeof map !== 'undefined' && map) map.invalidateSize(); }).observe(mapSlot);
