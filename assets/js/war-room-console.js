@@ -167,6 +167,33 @@ function wrcDeclineLine(decline, reasonLabel) {
     return note ? `${reasonLabel} — «${note}»` : reasonLabel;
 }
 
+/**
+ * Orders sent a moment ago that nobody has acknowledged yet - the ones the assistant
+ * does not raise until they have waited out its grace period, and which therefore
+ * leave the queue saying «all under control» while 0 of 48 have answered.
+ * `cards` are the acknowledgement panel's cards (the poll's `ackTracker`): each has
+ * `people` ({ack_ts, declined}), `ts` (when it was sent, unix seconds), `finished`.
+ * A card counts while somebody on it has not answered («Δεν μπορώ» is an answer) and
+ * it is younger than the grace; past the grace it has its own row in the queue.
+ * `skip` holds the keys of cards the coordinator closed in the panel. -> {orders,
+ * acked, total}, where acked/total are people across those cards, as the panel counts.
+ */
+function wrcWaitingReceipts(cards, nowSec, graceSec, skip) {
+    let orders = 0, acked = 0, total = 0;
+    (cards || []).forEach(card => {
+        if (!card || card.finished || card.gone) return;
+        if (skip && skip.has(card.key)) return;
+        const people = card.people || [];
+        if (!people.length) return;
+        if (people.every(p => p.ack_ts || p.declined)) return;
+        if (nowSec - Number(card.ts) >= graceSec) return;
+        orders++;
+        total += people.length;
+        acked += people.filter(p => p.ack_ts && !p.declined).length;
+    });
+    return {orders, acked, total};
+}
+
 // ── the phases: preparation, live, closing ───────────────────────────────────
 
 const WRC_PHASES = ['prep', 'live', 'close'];
@@ -223,7 +250,7 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         wrcStampKey, wrcSevRank, wrcOrderQueue, wrcSummarizeSelection,
         wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel,
-        wrcOrderProgress, wrcContactTone, wrcTeamBadge, wrcDeclineLine,
+        wrcOrderProgress, wrcContactTone, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts,
         wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcClosingItems,
     };
 }
@@ -269,6 +296,7 @@ if (typeof module !== 'undefined' && module.exports) {
         verb: load('verb', 'point'),
         queueMore: false,
         teams: [],                 // as the poll sends them, with a label added
+        ack: [],                   // the acknowledgement panel's cards, as the last poll sent them
         stale: null,               // pingStaleness from the last poll
         live: {},                  // participantLive from the last poll
         online: [],
@@ -744,10 +772,29 @@ if (typeof module !== 'undefined' && module.exports) {
         return wrcOrderQueue(items);
     }
 
+    /**
+     * The quiet line under the queue: orders sent a moment ago that nobody has answered.
+     * The assistant waits out a grace period before it raises one, so for those first
+     * minutes the queue would say «all under control» while «0 από 48» have received
+     * anything. The line is not a queue item (it does not count, and asks nothing of
+     * the coordinator); it just tells the truth, and is replaced by the real row at
+     * the end of the grace.
+     */
+    function waitingReceipts() {
+        const a = page.assistant();
+        const graceMin = (a && Number(a.grace_minutes)) || 10;
+        const skip = (typeof ackDismissed !== 'undefined' && ackDismissed instanceof Set) ? ackDismissed : null;
+        return {w: wrcWaitingReceipts(state.ack, Math.floor(Date.now() / 1000), graceMin * 60, skip), graceMin};
+    }
+
     const QUEUE_SHOWN = 5;
     let queueSig = '';
     function renderQueue() {
         const items = queueItems();
+        const {w: waiting, graceMin} = waitingReceipts();
+        const waitHtml = waiting.orders
+            ? `<div class="wrc-wait" title="${esc(t('console.waiting_hint', {min: graceMin}))}"><i class="bi bi-hourglass-split"></i><span>${esc(t('console.waiting_receipts', {n: waiting.orders, acked: waiting.acked, total: waiting.total}))}</span></div>`
+            : '';
         // The phases that are not live drop an empty queue altogether.
         root.dataset.q = String(items.length);
         const body = $('#wrcQueueBody', root);
@@ -758,11 +805,11 @@ if (typeof module !== 'undefined' && module.exports) {
         cnt.classList.toggle('ok', items.length === 0);
         $('#wrcQueue', root).classList.toggle('wrc-hot', sosOpen > 0);
         const shown = state.queueMore ? items : items.slice(0, QUEUE_SHOWN);
-        const sig = JSON.stringify([shown.map(i => [i.k, i.id, i.title, i.meta, i.sev]), items.length, state.queueMore]);
+        const sig = JSON.stringify([shown.map(i => [i.k, i.id, i.title, i.meta, i.sev]), items.length, state.queueMore, waiting]);
         if (sig === queueSig) return;
         queueSig = sig;
         if (!items.length) {
-            body.innerHTML = `<div class="wrc-calm"><i class="bi bi-check2-circle"></i>${esc(t('console.queue_empty'))}</div>`;
+            body.innerHTML = `<div class="wrc-calm"><i class="bi bi-check2-circle"></i>${esc(t('console.queue_empty'))}</div>` + waitHtml;
             return;
         }
         body.innerHTML = shown.map((i, n) => `
@@ -777,7 +824,8 @@ if (typeof module !== 'undefined' && module.exports) {
             </div>`).join('')
             + (items.length > QUEUE_SHOWN
                 ? `<button type="button" class="wrc-link wrc-more" id="wrcQueueMore">${esc(state.queueMore ? t('console.show_less') : t('console.show_more', {n: items.length - QUEUE_SHOWN}))}</button>`
-                : '');
+                : '')
+            + waitHtml;
         body._items = shown;
     }
 
@@ -1368,6 +1416,7 @@ if (typeof module !== 'undefined' && module.exports) {
             if (data.pingStaleness) state.stale = data.pingStaleness;
             if (data.participantLive) state.live = data.participantLive;
             if (data.onlinePresence) state.online = data.onlinePresence;
+            if (Array.isArray(data.ackTracker)) state.ack = data.ackTracker;
             refresh();
         },
     };
@@ -1384,6 +1433,7 @@ if (typeof module !== 'undefined' && module.exports) {
 
     // ── go ───────────────────────────────────────────────────────────────────
     setTeams(typeof WR_TEAMS_AT_LOAD !== 'undefined' ? WR_TEAMS_AT_LOAD : []);
+    if (typeof ackTrackerCards !== 'undefined' && Array.isArray(ackTrackerCards)) state.ack = ackTrackerCards;
     setTab(state.tab);
     setPhase(state.phase, false);
     refresh();

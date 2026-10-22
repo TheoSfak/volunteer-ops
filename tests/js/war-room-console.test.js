@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
 const {
     wrcStampKey, wrcSevRank, wrcOrderQueue, wrcSummarizeSelection,
     wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel,
-    wrcOrderProgress, wrcContactTone, wrcTeamBadge, wrcDeclineLine,
+    wrcOrderProgress, wrcContactTone, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts,
     wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcClosingItems,
 } = require('../../assets/js/war-room-console.js');
 
@@ -223,4 +223,52 @@ test('wrcDeclineLine is the reason, and the volunteer\'s note after a dash', () 
 test('wrcDeclineLine says nothing when nothing was declined', () => {
     assert.equal(wrcDeclineLine(null, 'Άλλο'), '');
     assert.equal(wrcDeclineLine(undefined, 'Άλλο'), '');
+});
+
+// ── orders waiting for their first «Ελήφθη» ──────────────────────────────────
+
+const NOW = 1_800_000_000;
+const person = (extra) => Object.assign({ack_ts: null, declined: false}, extra);
+const card = (key, ageSec, people, extra) => Object.assign({key, ts: NOW - ageSec, finished: false, people}, extra);
+const GRACE = 600;
+
+test('wrcWaitingReceipts counts the orders nobody has answered yet, and the people on them', () => {
+    const cards = [
+        card('order:1', 120, Array.from({length: 8}, () => person())),
+        card('order:2', 60, Array.from({length: 32}, () => person())),
+        card('dispatch:3', 30, Array.from({length: 8}, () => person())),
+    ];
+    assert.deepEqual(wrcWaitingReceipts(cards, NOW, GRACE), {orders: 3, acked: 0, total: 48});
+});
+
+test('wrcWaitingReceipts: those who have answered count towards «από», not towards waiting', () => {
+    const cards = [card('order:1', 100, [person({ack_ts: NOW - 20}), person(), person({ack_ts: NOW - 10}), person()])];
+    assert.deepEqual(wrcWaitingReceipts(cards, NOW, GRACE), {orders: 1, acked: 2, total: 4});
+});
+
+test('wrcWaitingReceipts leaves out what has its own row: an order past the grace', () => {
+    const cards = [card('old', GRACE, [person()]), card('older', GRACE + 500, [person()]), card('new', GRACE - 1, [person()])];
+    assert.deepEqual(wrcWaitingReceipts(cards, NOW, GRACE), {orders: 1, acked: 0, total: 1});
+});
+
+test('wrcWaitingReceipts: an order everyone has answered is not waiting, and «Δεν μπορώ» is an answer', () => {
+    const answered = card('a', 60, [person({ack_ts: NOW - 5}), person({ack_ts: NOW - 4})]);
+    const declined = card('b', 60, [person({ack_ts: NOW - 5}), person({declined: true})]);
+    assert.deepEqual(wrcWaitingReceipts([answered, declined], NOW, GRACE), {orders: 0, acked: 0, total: 0});
+});
+
+test('wrcWaitingReceipts skips finished and vanished cards, and the ones the coordinator closed', () => {
+    const cards = [
+        card('fin', 60, [person()], {finished: true}),
+        card('gone', 60, [person()], {gone: {why: 'deleted'}}),
+        card('closed', 60, [person()]),
+        card('empty', 60, []),
+        card('kept', 60, [person()]),
+    ];
+    assert.deepEqual(wrcWaitingReceipts(cards, NOW, GRACE, new Set(['closed'])), {orders: 1, acked: 0, total: 1});
+});
+
+test('wrcWaitingReceipts copes with no cards at all', () => {
+    assert.deepEqual(wrcWaitingReceipts(null, NOW, GRACE), {orders: 0, acked: 0, total: 0});
+    assert.deepEqual(wrcWaitingReceipts([], NOW, GRACE), {orders: 0, acked: 0, total: 0});
 });

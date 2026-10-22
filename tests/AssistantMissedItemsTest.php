@@ -669,6 +669,7 @@ final class AssistantMissedItemsTest extends TestCase
 
         $this->assertSame(3, $out['counts']['overdue']);
         $this->assertSame(ASSISTANT_ORDER_LATE_MINUTES, $out['overdue_after_minutes']);
+        $this->assertSame(ASSISTANT_ORDER_GRACE_MINUTES, $out['grace_minutes']);
     }
 
     public function testAnOpenIncidentIsUrgentButDoesNotSoundTheOverdueAlarm(): void

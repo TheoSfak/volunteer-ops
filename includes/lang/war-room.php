@@ -2811,6 +2811,8 @@ return [
         'archive.media_close' => 'Κλείσιμο',
         // The admin console (assets/js/war-room-console.js)
         'console.view_btn' => 'Κονσόλα',
+        'console.waiting_receipts' => 'Εντολές που περιμένουν επιβεβαίωση λήψης: {n} · {acked} από {total}',
+        'console.waiting_hint' => 'Τα πρώτα {min} λεπτά δεν θεωρούνται καθυστέρηση· μετά ανεβαίνουν στην ουρά.',
         'console.theme_to_dark' => 'Σκούρο θέμα',
         'console.theme_to_light' => 'Φωτεινό θέμα',
         'console.badge_sos' => 'Ανοιχτό SOS στην ομάδα',
@@ -5622,6 +5624,8 @@ return [
         'archive.media_close' => 'Close',
         // The admin console (assets/js/war-room-console.js)
         'console.view_btn' => 'Console',
+        'console.waiting_receipts' => 'Orders waiting for receipt: {n} · {acked} of {total}',
+        'console.waiting_hint' => 'The first {min} minutes do not count as late; after that they move up into the queue.',
         'console.theme_to_dark' => 'Dark theme',
         'console.theme_to_light' => 'Light theme',
         'console.badge_sos' => 'Open SOS on this team',
