@@ -436,6 +436,34 @@ if (typeof module !== 'undefined' && module.exports) {
     bar.appendChild(kpiBox);
     root.parentNode.insertBefore(bar, root);
 
+    // ── light / dark ─────────────────────────────────────────────────────────
+    // Bootstrap's colour mode on <html>, remembered per browser (not per mission: it
+    // is how this coordinator likes to look at a screen). war-room.php applies a saved
+    // choice before the first paint, so a dark page never flashes white.
+    const THEME_KEY = 'wr-console-theme';
+    const themeBtn = document.createElement('button');
+    themeBtn.type = 'button';
+    themeBtn.className = 'wrc-theme';
+    themeBtn.id = 'wrcTheme';
+    bar.appendChild(themeBtn);
+    const currentTheme = () => document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'dark' : 'light';
+    function paintThemeButton() {
+        const dark = currentTheme() === 'dark';
+        const label = t(dark ? 'console.theme_to_light' : 'console.theme_to_dark');
+        themeBtn.innerHTML = `<i class="bi ${dark ? 'bi-sun-fill' : 'bi-moon-stars-fill'}"></i>`;
+        themeBtn.title = label;
+        themeBtn.setAttribute('aria-label', label);
+        themeBtn.setAttribute('aria-pressed', dark ? 'true' : 'false');
+    }
+    themeBtn.addEventListener('click', () => {
+        const next = currentTheme() === 'dark' ? 'light' : 'dark';
+        if (next === 'dark') document.documentElement.setAttribute('data-bs-theme', 'dark');
+        else document.documentElement.removeAttribute('data-bs-theme');
+        try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* blocked storage: it starts light next time */ }
+        paintThemeButton();
+    });
+    paintThemeButton();
+
     const CHECK_TEXT = {
         teams: ['console.chk_teams_ok', 'console.chk_teams_bad'],
         gps: ['console.chk_gps_ok', 'console.chk_gps_warn'],

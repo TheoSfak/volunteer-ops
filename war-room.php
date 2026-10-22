@@ -4203,7 +4203,7 @@ include __DIR__ . '/includes/header.php';
          page's own state. The two bare nodes the offline queue writes to are not
          cards and would be swept away with their legacy row, so they live here. */ ?>
 <link rel="stylesheet" href="<?= rtrim(BASE_URL, '/') ?>/assets/css/war-room-console.css?v=<?= APP_VERSION ?>">
-<script>document.body.classList.add('wr-console-view');</script>
+<script>document.body.classList.add('wr-console-view');try{if(localStorage.getItem('wr-console-theme')==='dark')document.documentElement.setAttribute('data-bs-theme','dark');}catch(e){}</script>
 <div id="wrConsole" class="wrc" data-mission="<?= (int) $missionId ?>" data-live="<?= !empty($liveEnabled) ? '1' : '0' ?>">
     <div id="offlineQueueBanner" class="alert alert-warning py-1 px-2 small mb-2 d-none"></div>
     <div id="offlineQueueFailures"></div>

@@ -265,3 +265,156 @@ body.wr-console-view #teamBoard { display: none !important; }
 .wrc-check-bad { background: #fde7e4; border-color: #efb1ac; color: #a3231c; }
 .wrc-phase-cta { padding: 0 8px 8px; }
 .wrc-phase-cta .wrc-go { width: 100%; justify-content: center; }
+
+/* ══ Dark mode ═══════════════════════════════════════════════════════════════
+   A button in the phase bar sets data-bs-theme="dark" on <html> (Bootstrap 5.3 colour
+   mode, which re-colours the cards, forms, modals and dropdowns the console relocates),
+   and the rules below do the same for what this file draws. The light styles above are
+   untouched: everything here sits behind the attribute. */
+html[data-bs-theme="dark"] {
+    --bs-body-bg: #172033; --bs-body-bg-rgb: 23, 32, 51;
+    --bs-body-color: #e6ecf5; --bs-body-color-rgb: 230, 236, 245;
+    --bs-secondary-bg: #1d283d; --bs-tertiary-bg: #1d283d;
+    --bs-border-color: #2b3a55; --bs-border-color-translucent: rgba(255, 255, 255, .12);
+    --bs-secondary-color: rgba(230, 236, 245, .7);
+    --bs-emphasis-color: #fff;
+    --wrc-page: #0e1522; --wrc-surface: #172033; --wrc-surface-2: #1d283d; --wrc-line: #2b3a55; --wrc-line-2: #233049;
+    --wrc-ink: #e6ecf5; --wrc-mut: #9aabc4; --wrc-link: #7db3ff;
+}
+html[data-bs-theme="dark"] body,
+html[data-bs-theme="dark"] .main-content,
+html[data-bs-theme="dark"] .content-wrapper { background: var(--wrc-page) !important; color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .top-navbar { background: rgba(14, 21, 34, .94) !important; border-bottom-color: var(--wrc-line) !important; color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .top-navbar .dropdown-toggle,
+html[data-bs-theme="dark"] .top-navbar .btn-link { color: var(--wrc-ink) !important; }
+/* The map tiles are bright by nature; dimmed, they stop glaring beside the dark panels. */
+html[data-bs-theme="dark"] .leaflet-tile-pane { filter: brightness(.74) contrast(1.06) saturate(.9); }
+
+html[data-bs-theme="dark"] .wrc-sec,
+html[data-bs-theme="dark"] .wrc-composer,
+html[data-bs-theme="dark"] .wrc-dock { background: var(--wrc-surface); border-color: var(--wrc-line); box-shadow: 0 1px 2px rgba(0, 0, 0, .35); color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-sec-h { border-bottom-color: var(--wrc-line-2); }
+html[data-bs-theme="dark"] .wrc-h,
+html[data-bs-theme="dark"] .wrc-cmp-l { color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-cnt { background: #26334d; color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-cnt.ok { background: rgba(34, 197, 94, .18); color: #6ee7a0; }
+html[data-bs-theme="dark"] .wrc-cnt.bad { background: #b3322b; color: #fff; }
+html[data-bs-theme="dark"] .wrc-calm { background: rgba(34, 197, 94, .14); color: #6ee7a0; }
+html[data-bs-theme="dark"] .wrc-link { color: var(--wrc-link); }
+html[data-bs-theme="dark"] .wrc-mut,
+html[data-bs-theme="dark"] .wrc-empty,
+html[data-bs-theme="dark"] .wrc-q-m,
+html[data-bs-theme="dark"] .wrc-x { color: var(--wrc-mut); }
+
+/* the bar: phase switch and counters */
+html[data-bs-theme="dark"] .wrc-phases { background: #121b2c; border-color: var(--wrc-line); }
+html[data-bs-theme="dark"] .wrc-phase { color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-phase:hover { color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-phase[aria-selected="true"] { background: #e6ecf5; color: #0e1522; box-shadow: 0 1px 3px rgba(0, 0, 0, .5); }
+html[data-bs-theme="dark"] .wrc-bar-hint { color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-kpi { background: var(--wrc-surface); border-color: var(--wrc-line); color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-kpi-l { color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-kpi:hover { background: var(--wrc-surface-2); }
+html[data-bs-theme="dark"] .wrc-kpi-bad { background: #c2382f; border-color: #e5645b; color: #fff; }
+html[data-bs-theme="dark"] .wrc-kpi-bad .wrc-kpi-l { color: rgba(255, 255, 255, .85); }
+html[data-bs-theme="dark"] .wrc-kpi-warn { background: #d99a1f; border-color: #f0b84a; color: #2b1c00; }
+html[data-bs-theme="dark"] .wrc-kpi-warn .wrc-kpi-l { color: #4a3000; }
+
+/* the queue */
+html[data-bs-theme="dark"] .wrc-q { background: var(--wrc-surface-2); border-color: var(--wrc-line); }
+html[data-bs-theme="dark"] .wrc-q-critical { background: rgba(239, 68, 68, .16); border-color: rgba(239, 68, 68, .5); }
+html[data-bs-theme="dark"] .wrc-q-high { background: rgba(245, 158, 11, .15); border-color: rgba(245, 158, 11, .5); }
+html[data-bs-theme="dark"] .wrc-q-warn { background: rgba(234, 179, 8, .12); border-color: rgba(234, 179, 8, .4); }
+html[data-bs-theme="dark"] .wrc-q-info { background: rgba(59, 130, 246, .16); border-color: rgba(59, 130, 246, .45); }
+html[data-bs-theme="dark"] .wrc-q-critical .wrc-q-i { color: #ff8f86; }
+html[data-bs-theme="dark"] .wrc-q-high .wrc-q-i { color: #fbbf4a; }
+html[data-bs-theme="dark"] .wrc-btn { background: var(--wrc-surface); border-color: #3a4b6b; color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-btn-warn { background: #f0b429; border-color: #d99a1f; color: #1b2430; }
+html[data-bs-theme="dark"] .wrc-btn-ok { background: #1f9d63; border-color: #1f9d63; color: #fff; }
+
+/* the teams */
+html[data-bs-theme="dark"] .wrc-team { background: var(--wrc-surface-2); border-color: var(--wrc-line); }
+html[data-bs-theme="dark"] .wrc-team.picked { background: rgba(59, 130, 246, .14); border-color: #4c8dff; }
+html[data-bs-theme="dark"] .wrc-order { background: #223050; border-color: var(--wrc-line); color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-order.wrc-tone-go { background: rgba(59, 130, 246, .2); border-color: rgba(59, 130, 246, .5); }
+html[data-bs-theme="dark"] .wrc-order.wrc-tone-on { background: rgba(34, 197, 94, .17); border-color: rgba(34, 197, 94, .45); }
+html[data-bs-theme="dark"] .wrc-order.wrc-tone-bad { background: rgba(239, 68, 68, .18); border-color: rgba(239, 68, 68, .5); }
+html[data-bs-theme="dark"] .wrc-decline { color: #ff9a92; }
+html[data-bs-theme="dark"] .wrc-chev { color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-members { border-top-color: var(--wrc-line); }
+html[data-bs-theme="dark"] .wrc-m.stale .wrc-m-n,
+html[data-bs-theme="dark"] .wrc-stale { color: #ff8f86; }
+html[data-bs-theme="dark"] .wrc-tag { background: #2a3956; color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-tag-ok { background: rgba(34, 197, 94, .2); color: #6ee7a0; }
+html[data-bs-theme="dark"] .wrc-tag-warn { background: rgba(245, 158, 11, .2); color: #fbbf4a; }
+html[data-bs-theme="dark"] .wrc-tag-bad { background: rgba(239, 68, 68, .2); color: #ff8f86; }
+html[data-bs-theme="dark"] .wrc-av-track { stroke: #34456a; }
+html[data-bs-theme="dark"] .wrc-av-track.idle { stroke: #3d4f78; }
+html[data-bs-theme="dark"] .wrc-av-dot,
+html[data-bs-theme="dark"] .wrc-av-badge { border-color: var(--wrc-surface-2); }
+
+/* the order form */
+html[data-bs-theme="dark"] .wrc-rcp { background: #223050; border-color: var(--wrc-line); color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-verb { background: var(--wrc-surface-2); border-color: var(--wrc-line); color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-verb.on { background: #e6ecf5; border-color: #e6ecf5; color: #0e1522; }
+html[data-bs-theme="dark"] .wrc-in { background: #121b2c; border-color: #3a4b6b; color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-in::placeholder { color: #7486a3; }
+html[data-bs-theme="dark"] .wrc-go:disabled { background: #34456a; color: #8fa0bd; }
+html[data-bs-theme="dark"] .wrc-toast-ok { background: #123524; color: #6ee7a0; border-color: #1f6b44; }
+html[data-bs-theme="dark"] .wrc-toast-bad { background: #3a1613; color: #ff9a92; border-color: #7a2a24; }
+
+/* the dock */
+html[data-bs-theme="dark"] .wrc-tabs { border-bottom-color: var(--wrc-line); }
+html[data-bs-theme="dark"] .wrc-tabs button { color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-tabs button[aria-selected="true"] { color: #fff; border-bottom-color: #e6ecf5; }
+html[data-bs-theme="dark"] .wrc-chip { background: var(--wrc-surface-2); border-color: var(--wrc-line); color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-chip.on { background: #e6ecf5; border-color: #e6ecf5; color: #0e1522; }
+html[data-bs-theme="dark"] .wrc-f { border-bottom-color: var(--wrc-line-2); }
+html[data-bs-theme="dark"] .wrc-f-i,
+html[data-bs-theme="dark"] .wrc-f-h { color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .wrc-f.wrc-tone-bad .wrc-f-i { color: #ff8f86; }
+html[data-bs-theme="dark"] .wrc-f.wrc-tone-warn .wrc-f-i { color: #fbbf4a; }
+html[data-bs-theme="dark"] .wrc-f-thumb { background: #26334d; }
+html[data-bs-theme="dark"] .wrc-acc { background: #1a2539; border-color: var(--wrc-line); }
+html[data-bs-theme="dark"] .wrc-acc-h { color: #c4d0e4; }
+
+/* the preparation and closing checklists */
+html[data-bs-theme="dark"] .wrc-check { background: var(--wrc-surface-2); border-color: var(--wrc-line); color: var(--wrc-ink); }
+html[data-bs-theme="dark"] .wrc-check-ok { background: rgba(34, 197, 94, .12); border-color: rgba(34, 197, 94, .38); color: #6ee7a0; }
+html[data-bs-theme="dark"] .wrc-check-warn { background: rgba(245, 158, 11, .14); border-color: rgba(245, 158, 11, .45); color: #fbbf4a; }
+html[data-bs-theme="dark"] .wrc-check-bad { background: rgba(239, 68, 68, .16); border-color: rgba(239, 68, 68, .5); color: #ff9a92; }
+
+/* the switch itself */
+.wrc-theme { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 28px; padding: 0; border: 1px solid #cfd7e3; border-radius: 7px; background: #fff; color: #1b2430; cursor: pointer; font-size: .95rem; }
+.wrc-theme:hover { background: #eef2f8; }
+html[data-bs-theme="dark"] .wrc-theme { background: var(--wrc-surface); border-color: var(--wrc-line); color: #fbbf4a; }
+html[data-bs-theme="dark"] .wrc-theme:hover { background: var(--wrc-surface-2); }
+
+/* The site gives every card header, table head and alert a light gradient of its own;
+   on the dark ground those would be bright bars with pale text on them. */
+html[data-bs-theme="dark"] .card-header { background-image: none; background-color: var(--wrc-surface-2); border-bottom-color: var(--wrc-line); }
+html[data-bs-theme="dark"] .table > thead > tr > th,
+html[data-bs-theme="dark"] th { background-image: none; background-color: var(--wrc-surface-2); color: var(--wrc-mut); border-color: var(--wrc-line); }
+html[data-bs-theme="dark"] .alert { background-image: none; }
+html[data-bs-theme="dark"] .wrc-idle { color: var(--wrc-mut); }
+html[data-bs-theme="dark"] .form-label,
+html[data-bs-theme="dark"] label { color: var(--wrc-ink); }
+/* Bootstrap keeps its grey and red outline buttons the same in the dark, which is too dim on this ground. */
+html[data-bs-theme="dark"] .btn-outline-secondary {
+    --bs-btn-color: #c4d0e4; --bs-btn-border-color: #4a5b7c;
+    --bs-btn-hover-color: #fff; --bs-btn-hover-bg: #2a3956; --bs-btn-hover-border-color: #5b6f96;
+    --bs-btn-active-color: #fff; --bs-btn-active-bg: #34456a; --bs-btn-active-border-color: #5b6f96;
+}
+html[data-bs-theme="dark"] .btn-outline-danger {
+    --bs-btn-color: #ff8f86; --bs-btn-border-color: #b3322b;
+    --bs-btn-hover-color: #fff; --bs-btn-hover-bg: #b3322b; --bs-btn-hover-border-color: #b3322b;
+}
+html[data-bs-theme="dark"] .text-muted { color: var(--wrc-mut) !important; }
+/* Bootstrap's fixed light surfaces (the strips above the dispatch and route maps, table heads, list items). */
+html[data-bs-theme="dark"] .bg-light,
+html[data-bs-theme="dark"] .bg-white,
+html[data-bs-theme="dark"] .table-light,
+html[data-bs-theme="dark"] .list-group-item-light { background-color: var(--wrc-surface-2) !important; color: var(--wrc-ink); }
+/* Two panels in war-room.php carry their white in an inline style (the route window's side panel and a list in it). */
+html[data-bs-theme="dark"] [style*="width:360px"][style*="background:#fff"] { background: var(--wrc-surface) !important; border-left-color: var(--wrc-line) !important; }
+html[data-bs-theme="dark"] [style*="overflow-y:auto"][style*="background:#f8f9fa"] { background: var(--wrc-surface-2) !important; }

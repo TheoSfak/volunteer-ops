@@ -2811,6 +2811,8 @@ return [
         'archive.media_close' => 'Κλείσιμο',
         // The admin console (assets/js/war-room-console.js)
         'console.view_btn' => 'Κονσόλα',
+        'console.theme_to_dark' => 'Σκούρο θέμα',
+        'console.theme_to_light' => 'Φωτεινό θέμα',
         'console.badge_sos' => 'Ανοιχτό SOS στην ομάδα',
         'console.badge_help' => 'Μέλος ζητά βοήθεια',
         'console.badge_blocked' => 'Η ομάδα δεν μπορεί να συνεχίσει',
@@ -5620,6 +5622,8 @@ return [
         'archive.media_close' => 'Close',
         // The admin console (assets/js/war-room-console.js)
         'console.view_btn' => 'Console',
+        'console.theme_to_dark' => 'Dark theme',
+        'console.theme_to_light' => 'Light theme',
         'console.badge_sos' => 'Open SOS on this team',
         'console.badge_help' => 'A member needs help',
         'console.badge_blocked' => 'The team cannot continue',
