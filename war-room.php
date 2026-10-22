@@ -162,9 +162,20 @@ $isAdminAccount = isActionRoomAdminAccount();
 // everyone falls back to the classic single-column layout with no other
 // change needed.
 $viewModeCookie = $_COOKIE['wr_view_mode'] ?? '';
-$volunteerTabs = ($viewModeCookie === 'tabs' || $viewModeCookie === 'full')
+// The console («Κονσόλα»): one screen, the map always in view, with the queue of
+// what needs the coordinator, the teams, the order form and the feed docked
+// around it. Command staff only, and only by their own choice (the hero button):
+// a cookie asking for it from anyone else is ignored, exactly like an unknown value.
+if ($viewModeCookie === 'console' && !$canManageWarRoom) {
+    $viewModeCookie = '';
+}
+$consoleView = $viewModeCookie === 'console';
+$volunteerTabs = in_array($viewModeCookie, ['tabs', 'full', 'console'], true)
     ? ($viewModeCookie === 'tabs')
     : !$isAdminAccount;
+// The drag/zone layout and the console are two different arrangements of the
+// same cards; this is the first of them, as it was before the console existed.
+$zoneView = $canManageWarRoom && !$volunteerTabs && !$consoleView;
 // Command staff who are in the tabbed view get a fifth tab of their own.
 // Authorization is untouched by the split above, so they still render every
 // command card (broadcast, dispatch, sectors, restricted areas, SOS alerts,
@@ -180,6 +191,13 @@ $commandTab = $volunteerTabs && $canManageWarRoom;
 // work is worse than none. Every other account keeps them.
 $canExportMissionData = !isMissionVisitor();
 
+
+// The console's order form posts through fetch. redirect() answers such a
+// request with the outcome as JSON instead of a Location header (see
+// includes/functions-core.php), so the page does not reload under the coordinator.
+if (isPost() && post('console_ajax') === '1') {
+    $GLOBALS['WR_JSON_REDIRECT'] = true;
+}
 
 if (isPost()) {
     verifyCsrf();
@@ -1040,7 +1058,12 @@ if (isPost()) {
         if (!$canManageWarRoom) {
             redirect('war-room.php?id=' . $missionId);
         }
-        $newViewMode = $volunteerTabs ? 'full' : 'tabs';
+        // The hero's console buttons name the view they want; the phone button
+        // names nothing and keeps toggling between the two it always did.
+        $askedMode = (string) post('view_mode');
+        $newViewMode = in_array($askedMode, ['console', 'full', 'tabs'], true)
+            ? $askedMode
+            : ($volunteerTabs ? 'full' : 'tabs');
         $cookieOpts = [
             'expires' => time() + 31536000, 'path' => '/',
             'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
@@ -2023,7 +2046,7 @@ $showPersonalCards = !($canManageWarRoom && !$volunteerTabs) || $isApprovedParti
 // Mirrors the #wrZoneMain/#wrZoneSidebar gate exactly — a saved drag layout is
 // only meaningful to the zone view, and $volunteerTabs now excludes it even
 // for command staff (they get the tabs instead, see the flags near the top).
-$warRoomLayout = ($canManageWarRoom && !$volunteerTabs)
+$warRoomLayout = $zoneView
     ? getWarRoomLayoutForUser((int)$user['id'], $isApprovedParticipant, !empty($teams), !empty($mission['is_special_mission']), $isMissingPersonMission, $weatherCompassOn, $liveEnabled, $showPersonalCards)
     : null;
 
@@ -3790,6 +3813,16 @@ include __DIR__ . '/includes/header.php';
         <button type="button" id="trailModeToggle" class="btn btn-outline-light"><i class="bi bi-clock-history me-1"></i><?= t('hero.btn_team_trail') ?></button>
         <button type="button" id="coverageModeToggle" class="btn btn-outline-light"><i class="bi bi-broadcast me-1"></i><?= t('hero.btn_verified_coverage') ?></button>
         <?php endif; ?>
+        <?php if ($canManageWarRoom && !$volunteerTabs): ?>
+        <form method="post">
+            <?= csrfField() ?>
+            <input type="hidden" name="action" value="toggle_view_mode">
+            <input type="hidden" name="view_mode" value="<?= $consoleView ? 'full' : 'console' ?>">
+            <button type="submit" class="btn <?= $consoleView ? 'btn-light' : 'btn-outline-light' ?>" id="wrConsoleToggle">
+                <i class="bi bi-<?= $consoleView ? 'grid-3x3-gap' : 'speedometer2' ?> me-1"></i><?= $consoleView ? t('console.classic_btn') : t('console.view_btn') ?>
+            </button>
+        </form>
+        <?php endif; ?>
         <?php if ($canManageWarRoom): ?>
         <!-- Layout override. The default now follows the account type (see the
              flags near the top of this file), which is right for the common
@@ -3812,7 +3845,7 @@ include __DIR__ . '/includes/header.php';
         <?php /* Both of these drive the drag/zone layout only — the IIFE that
                  wires them returns early when #wrZoneMain is absent, so in the
                  tabbed view they would render as two dead buttons. */ ?>
-        <?php if ($canManageWarRoom && !$volunteerTabs): ?>
+        <?php if ($zoneView): ?>
         <button type="button" id="wrLayoutLockToggle" class="btn btn-outline-light"></button>
         <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#cardVisibilityModal" title="<?= t('hero.btn_manage_cards') ?>" aria-label="<?= t('hero.btn_manage_cards') ?>">
             <i class="bi bi-gear-fill"></i>
@@ -4162,7 +4195,22 @@ include __DIR__ . '/includes/header.php';
 </nav>
 <?php endif; ?>
 
-<?php if ($canManageWarRoom && !$volunteerTabs): ?>
+<?php if ($consoleView): ?>
+<?php /* Empty on purpose, like the zones and the tab panes: every card still renders
+         in its own PHP-conditioned spot below, and assets/js/war-room-console.js
+         moves each [data-card-id] node into the console's regions (never clones),
+         then builds the queue, the team list, the order form and the feed from the
+         page's own state. The two bare nodes the offline queue writes to are not
+         cards and would be swept away with their legacy row, so they live here. */ ?>
+<link rel="stylesheet" href="<?= rtrim(BASE_URL, '/') ?>/assets/css/war-room-console.css?v=<?= APP_VERSION ?>">
+<script>document.body.classList.add('wr-console-view');</script>
+<div id="wrConsole" class="wrc" data-mission="<?= (int) $missionId ?>" data-live="<?= !empty($liveEnabled) ? '1' : '0' ?>">
+    <div id="offlineQueueBanner" class="alert alert-warning py-1 px-2 small mb-2 d-none"></div>
+    <div id="offlineQueueFailures"></div>
+</div>
+<?php endif; ?>
+
+<?php if ($zoneView): ?>
 <!-- Drag-and-drop card layout (admin desktop view only). Starts empty —
      every card below still renders in its normal PHP-conditioned spot; JS
      physically relocates each [data-card-id] node into these two zones
@@ -4416,7 +4464,7 @@ include __DIR__ . '/includes/header.php';
              exact negation of that block's own gate, $volunteerTabs included:
              command staff in the tabbed view never render the zones, so they
              need these two here. -->
-        <?php if (!($canManageWarRoom && !$volunteerTabs)): ?>
+        <?php if (!$zoneView && !$consoleView): ?>
         <div id="offlineQueueBanner" class="alert alert-warning py-1 px-2 small mb-2 d-none"></div>
         <div id="offlineQueueFailures"></div>
         <?php endif; ?>
@@ -6495,6 +6543,11 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg==" crossorigin="anonymous"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-utils.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/triage.js?v=<?= APP_VERSION ?>"></script>
+<?php if ($consoleView): ?>
+<?php /* defer: it reads the page's own state (the poll's arrays, the render
+         functions), all of which are defined by the inline script further down. */ ?>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-console.js?v=<?= APP_VERSION ?>" defer></script>
+<?php endif; ?>
 <?php if (vitalsEnabled()): ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/vitals-sensor.js?v=<?= APP_VERSION ?>"></script>
 <?php endif; ?>
@@ -8904,6 +8957,7 @@ function postDispatchAction(action, id, btnEl) {
 function scrollToCard(cardId) {
     const el = document.querySelector('[data-card-id="' + cardId + '"]');
     if (!el) return;
+    if (window.wrConsole && typeof window.wrConsole.reveal === 'function') window.wrConsole.reveal(cardId);
     el.scrollIntoView({behavior: 'smooth', block: 'start'});
     el.classList.add('wr-card-flash');
     setTimeout(() => el.classList.remove('wr-card-flash'), 1800);
@@ -17670,6 +17724,7 @@ function triageGoToCard() {
     document.dispatchEvent(new CustomEvent('wr-goto-tab', {detail: {tab: 'me'}}));
     const card = document.getElementById('triageCard');
     if (!card) return;
+    if (window.wrConsole && typeof window.wrConsole.reveal === 'function') window.wrConsole.reveal('triageCard');
     const body = document.getElementById('triageCardBody');
     if (body && !body.classList.contains('show')) bootstrap.Collapse.getOrCreateInstance(body, {toggle: false}).show();
     setTimeout(() => {
@@ -23329,6 +23384,7 @@ function assistantGoto(target) {
     }
     const card = document.querySelector('[data-card-id="' + target + '"]');
     if (!card) return;
+    if (window.wrConsole && typeof window.wrConsole.reveal === 'function') window.wrConsole.reveal(target);
     // In the tabbed view the card may be in a pane that is display:none, where
     // scrollIntoView silently does nothing. The tab bar owns its own state in
     // a closure, so ask it through the same event channel the roster already
@@ -25481,6 +25537,9 @@ function pollWarRoomData() {
         // something actually changed, so a quiet mission doesn't rewrite
         // localStorage every 5 seconds.
         saveFieldSnapshot();
+        if (window.wrConsole && typeof window.wrConsole.onPoll === 'function') {
+            try { window.wrConsole.onPoll(data); } catch (e) { console.error('console', e); }
+        }
         // Last, deliberately: every render above has now succeeded. If one of
         // them had thrown, this line is skipped, the hash stays as it was, and
         // the next poll is answered in full rather than telling a half-drawn
@@ -28106,6 +28165,25 @@ function renderWaypointPanel() {
             if (pendingRouteSeed.teamId && teamSelect) {
                 teamSelect.value = pendingRouteSeed.teamId;
                 teamSelect.dispatchEvent(new Event('change'));
+            }
+            // From the console's order form (assets/js/war-room-console.js): the
+            // people it chose, down to part of a team or people from several.
+            // Cross-team is the picker's empty value; either way the picker has
+            // just been rebuilt for that choice, so the ticks go on after it.
+            if (pendingRouteSeed.crossTeam && teamSelect) {
+                teamSelect.value = '';
+                teamSelect.dispatchEvent(new Event('change'));
+            }
+            if (Array.isArray(pendingRouteSeed.memberIds) && memberPicker) {
+                memberPicker.querySelectorAll('.route-member-check').forEach(box => {
+                    box.checked = pendingRouteSeed.memberIds.includes(Number(box.value));
+                });
+                updateRouteSendState();
+            }
+            if (pendingRouteSeed.returnToStart) {
+                const returnCheck = document.getElementById('routeReturnToStartCheck');
+                const returnWrap = document.getElementById('routeReturnToStartWrap');
+                if (returnCheck && returnWrap && !returnWrap.classList.contains('d-none')) returnCheck.checked = true;
             }
             pendingRouteRingIndex = pendingRouteSeed.ringIndex ?? null;
             // «Νέα διαδρομή από εδώ» seeds one waypoint, and fitBounds() on a

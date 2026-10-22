@@ -1,0 +1,992 @@
+/**
+ * War Room (Action Room) - the admin «Κονσόλα» view.
+ *
+ * One screen that does not scroll: the map is always in view, and around it the
+ * four things a coordinator keeps asking - what needs me, what is each team
+ * doing, what do I want to say or ask, what is coming in from the field.
+ *
+ * It is a VIEW over the page, not a second implementation. Every card is still
+ * rendered by war-room.php and still owns its handlers; this file moves the
+ * real nodes into the console's regions (never clones them), and builds four
+ * small components from state the page already keeps - the poll's arrays,
+ * assistantData (the «Βοηθός» findings), the team board's order model. The
+ * order form posts through the same actions the old cards post, and opens the
+ * same dispatch / route windows, so nothing the old layout could send is lost.
+ *
+ * Loaded (deferred) only when war-room.php renders the console view, i.e. for
+ * command staff who chose it. The pure helpers at the top are also loaded by
+ * `node --test` (tests/js/war-room-console.test.js).
+ */
+
+// ── pure helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * «18/08 23:16» (day/month hour:minute, the form the poll's lists use) as a
+ * number that sorts. The year is deliberately left out: none of those strings
+ * carries one, and a feed only ever holds one mission's worth.
+ */
+function wrcStampKey(text) {
+    const m = /^(\d{1,2})\/(\d{1,2})(?:\/\d{2,4})?\s+(\d{1,2}):(\d{2})/.exec(String(text || '').trim());
+    if (!m) return 0;
+    return ((Number(m[2]) * 100 + Number(m[1])) * 100 + Number(m[3])) * 100 + Number(m[4]);
+}
+
+const WRC_SEV_RANK = {critical: 0, high: 1, warn: 2, info: 3};
+/** Findings that fold into one line once there are this many of them. */
+const WRC_GROUPS = [
+    {key: 'orders', kinds: ['order', 'dispatch', 'sector'], min: 2, label: 'console.orders_waiting', icon: 'bi-send-check', target: 'reportModal'},
+    {key: 'silent', kinds: ['silent'], min: 3, label: 'console.silent_many', icon: 'bi-wifi-off', target: 'participantsCard'},
+];
+
+function wrcSevRank(sev) {
+    return Object.prototype.hasOwnProperty.call(WRC_SEV_RANK, sev) ? WRC_SEV_RANK[sev] : 4;
+}
+
+/** Worst first, then newest first; stable for equals. */
+function wrcOrderQueue(items) {
+    return items
+        .map((item, i) => ({item, i}))
+        .sort((a, b) => (wrcSevRank(a.item.sev) - wrcSevRank(b.item.sev))
+            || ((b.item.ts || 0) - (a.item.ts || 0))
+            || (a.i - b.i))
+        .map(x => x.item);
+}
+
+/**
+ * Who is picked, grouped by team: [{teamId, label, color, count, size, whole,
+ * ids}], and how many people in all. A team counts as «whole» when every member
+ * is picked - which is what makes the difference between sending a point to a
+ * team and sending it to two of its people.
+ */
+function wrcSummarizeSelection(teams, selected) {
+    const chips = [];
+    let total = 0;
+    (teams || []).forEach(team => {
+        const all = (team.members || []).map(m => Number(m.user_id));
+        const picked = all.filter(id => selected.has(id));
+        if (!picked.length) return;
+        total += picked.length;
+        chips.push({
+            teamId: Number(team.id), label: team.label, color: team.color || null,
+            count: picked.length, size: all.length, whole: picked.length === all.length, ids: picked,
+        });
+    });
+    return {chips, total};
+}
+
+/**
+ * How a point or an area can be sent to that selection. The dispatch window
+ * knows teams (one, or all of them), not people, so people become a one-point
+ * route - which the route window already hands to individuals.
+ *   ask    nobody picked: the window's own team list decides
+ *   team   exactly one whole team
+ *   all    every team, whole
+ *   many   several whole teams but not all: one at a time
+ *   people part of a team, or people from several
+ */
+function wrcDispatchPlan(summary, teamCount) {
+    if (!summary.total) return {mode: 'ask'};
+    const whole = summary.chips.every(c => c.whole);
+    if (whole && summary.chips.length === 1) return {mode: 'team', teamId: summary.chips[0].teamId};
+    if (whole && summary.chips.length === teamCount && teamCount > 1) return {mode: 'all'};
+    if (whole) return {mode: 'many'};
+    return {mode: 'people'};
+}
+
+/** The seed the route window takes: one team (whole or part of it), or people from several. */
+function wrcRouteSeedFor(summary) {
+    if (!summary.total) return {};
+    if (summary.chips.length === 1) {
+        const c = summary.chips[0];
+        return c.whole ? {teamId: c.teamId} : {teamId: c.teamId, memberIds: c.ids};
+    }
+    return {crossTeam: true, memberIds: summary.chips.flatMap(c => c.ids)};
+}
+
+/** One short phrase for the «Προς» line: «Alpha 1», «Alpha 1 · 2 από 4», «3 άτομα». */
+function wrcRecipientLabel(chip, ofWord) {
+    return chip.whole ? chip.label : `${chip.label} · ${chip.count} ${ofWord} ${chip.size}`;
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+    module.exports = {
+        wrcStampKey, wrcSevRank, wrcOrderQueue, wrcSummarizeSelection,
+        wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel,
+    };
+}
+
+// ── the view ─────────────────────────────────────────────────────────────────
+
+(function () {
+    'use strict';
+    if (typeof document === 'undefined') return;
+    const root = document.getElementById('wrConsole');
+    if (!root || typeof t !== 'function') return;
+
+    const MISSION_ID = Number(root.dataset.mission);
+    const STORE = 'wr-console-' + MISSION_ID + '-';
+    const $ = (sel, ctx) => (ctx || document).querySelector(sel);
+    const $$ = (sel, ctx) => Array.from((ctx || document).querySelectorAll(sel));
+    const esc = s => escapeHtml(String(s === null || s === undefined ? '' : s));
+    const load = (key, fallback) => { try { const v = localStorage.getItem(STORE + key); return v === null ? fallback : v; } catch (e) { return fallback; } };
+    const save = (key, value) => { try { localStorage.setItem(STORE + key, String(value)); } catch (e) { /* blocked storage: it just starts fresh */ } };
+
+    // What the page already knows, read defensively: a name that is not defined
+    // yet (or at all, on a mission without the feature) is an empty list.
+    const page = {
+        sos: () => (typeof sosAlerts !== 'undefined' && Array.isArray(sosAlerts)) ? sosAlerts : [],
+        voice: () => (typeof voiceMessages !== 'undefined' && Array.isArray(voiceMessages)) ? voiceMessages : [],
+        incidents: () => (typeof missionIncidents !== 'undefined' && Array.isArray(missionIncidents)) ? missionIncidents : [],
+        shortages: () => (typeof shortageReports !== 'undefined' && Array.isArray(shortageReports)) ? shortageReports : [],
+        pois: () => (typeof pointsOfInterest !== 'undefined' && Array.isArray(pointsOfInterest)) ? pointsOfInterest : [],
+        media: () => (typeof media !== 'undefined' && Array.isArray(media)) ? media : [],
+        sectors: () => (typeof sectors !== 'undefined' && Array.isArray(sectors)) ? sectors : [],
+        assistant: () => (typeof assistantData !== 'undefined') ? assistantData : null,
+    };
+
+    const state = {
+        tab: load('tab', 'feed'),
+        filter: 'all',
+        open: new Set(),           // team ids whose member list is open
+        selected: new Set(),       // user ids the next order goes to
+        verb: load('verb', 'point'),
+        queueMore: false,
+        teams: [],                 // as the poll sends them, with a label added
+        stale: null,               // pingStaleness from the last poll
+        live: {},                  // participantLive from the last poll
+        online: [],
+        sections: new Set((load('sections', '') || '').split(',').filter(Boolean)),
+    };
+
+    // ── building the regions ─────────────────────────────────────────────────
+    const offlineBanner = $('#offlineQueueBanner', root);
+    const offlineFailures = $('#offlineQueueFailures', root);
+
+    root.innerHTML = `
+        <div class="wrc-left">
+            <section class="wrc-sec wrc-queue" id="wrcQueue">
+                <header class="wrc-sec-h"><i class="bi bi-bell-fill"></i><span class="wrc-h">${esc(t('console.queue_title'))}</span><span class="wrc-cnt" id="wrcQueueCnt">0</span></header>
+                <div class="wrc-queue-body" id="wrcQueueBody"></div>
+            </section>
+            <section class="wrc-sec wrc-teams" id="wrcTeams">
+                <header class="wrc-sec-h"><i class="bi bi-people-fill"></i><span class="wrc-h">${esc(t('console.teams_title'))}</span><span class="wrc-cnt" id="wrcTeamsCnt">0</span>
+                    <button type="button" class="wrc-link ms-auto" id="wrcSelAll">${esc(t('console.select_all'))}</button></header>
+                <div class="wrc-teams-body" id="wrcTeamsBody"></div>
+            </section>
+        </div>
+        <div class="wrc-center">
+            <div class="wrc-mapslot" id="wrcMapSlot"></div>
+            <div class="wrc-composer" id="wrcComposer"></div>
+        </div>
+        <div class="wrc-dock">
+            <div class="wrc-tabs" role="tablist" id="wrcTabs">
+                <button type="button" role="tab" data-tab="feed">${esc(t('console.tab_feed'))}<span class="wrc-cnt" id="wrcFeedCnt"></span></button>
+                <button type="button" role="tab" data-tab="chat">${esc(t('console.tab_chat'))}<span class="wrc-cnt d-none" id="wrcChatCnt"></span></button>
+                <button type="button" role="tab" data-tab="media">${esc(t('console.tab_media'))}<span class="wrc-cnt" id="wrcMediaCnt"></span></button>
+                <button type="button" role="tab" data-tab="plan">${esc(t('console.tab_plan'))}</button>
+            </div>
+            <div class="wrc-pane" data-pane="feed" role="tabpanel">
+                <div class="wrc-chips" id="wrcFeedChips"></div>
+                <div class="wrc-feed" id="wrcFeed"></div>
+            </div>
+            <div class="wrc-pane" data-pane="chat" role="tabpanel"></div>
+            <div class="wrc-pane" data-pane="media" role="tabpanel"></div>
+            <div class="wrc-pane" data-pane="plan" role="tabpanel" id="wrcPlan"></div>
+        </div>`;
+    const left = $('.wrc-left', root);
+    if (offlineBanner) left.insertBefore(offlineBanner, left.firstChild);
+    if (offlineFailures) left.insertBefore(offlineFailures, offlineBanner ? offlineBanner.nextSibling : left.firstChild);
+
+    // Which pane or plan section every card lives in. A card that is on the page
+    // but named nowhere here still lands in the plan's last section: nothing the
+    // old layout showed may vanish from this one.
+    const PLAN_SECTIONS = [
+        ['teams', 'console.plan_teams', ['teamsCard', 'participantsCard', 'shiftsCard']],
+        ['areas', 'console.plan_areas', ['sectorsListCard', 'sectorsCard', 'restrictedAreasCard', 'missingPersonCard', 'weatherCard', 'poiListCard']],
+        ['orders', 'console.plan_orders', ['teamRoutesAdminCard', 'dispatchCard', 'routeOrderCard', 'requestLocationCard', 'requestPhotoCard', 'requestVideoCard', 'requestLiveCard', 'requestTaskCard', 'requestSpeakCard', 'broadcastCard', 'broadcastPhotoCard']],
+        ['field', 'console.plan_field', ['shortageListCard', 'incidentsListCard', 'activityCard', 'trailEventsCard', 'sosAlertsCard', 'voiceMessagesCard']],
+        ['mission', 'console.plan_mission', ['triageCard', 'briefingCard', 'missionVisitorsCard', 'missionMgmtCard', 'endMissionCard']],
+        ['other', 'console.plan_other', []],
+    ];
+    const PANE_CARDS = {chat: ['chatCard'], media: ['mediaCard', 'liveStreamsCard']};
+
+    const planEl = $('#wrcPlan', root);
+    planEl.innerHTML = PLAN_SECTIONS.map(([key, label]) => `
+        <section class="wrc-acc${state.sections.has(key) ? ' open' : ''}" data-sec="${key}">
+            <button type="button" class="wrc-acc-h" data-sec-toggle="${key}"><i class="bi bi-chevron-right"></i>${esc(t(label))}</button>
+            <div class="wrc-acc-b"></div>
+        </section>`).join('');
+
+    function cardNode(id) { return document.querySelector('[data-card-id="' + id + '"]'); }
+    function placeCard(id, target) { const el = cardNode(id); if (el && target) target.appendChild(el); return !!el; }
+
+    placeCard('mapCard', $('#wrcMapSlot', root));
+    Object.keys(PANE_CARDS).forEach(pane => PANE_CARDS[pane].forEach(id => placeCard(id, $('.wrc-pane[data-pane="' + pane + '"]', root))));
+    const placed = new Set(['mapCard'].concat(...Object.values(PANE_CARDS)));
+    PLAN_SECTIONS.forEach(([key, , ids]) => ids.forEach(id => {
+        if (placeCard(id, $('.wrc-acc[data-sec="' + key + '"] .wrc-acc-b', root))) placed.add(id);
+    }));
+    // Anything else: not in a legacy row of its own any more either.
+    $$('[data-card-id]').forEach(el => {
+        if (root.contains(el)) return;
+        $('.wrc-acc[data-sec="other"] .wrc-acc-b', root).appendChild(el);
+    });
+    $$('.wrc-acc', root).forEach(sec => { if (!$('.wrc-acc-b', sec).children.length) sec.remove(); });
+    // The rows the cards used to sit in are empty now. Same sweep the zones do.
+    $$('.wr-legacy-row').forEach(el => el.remove());
+
+    // ── the hero: tooltips for the icon-only buttons, and the way to the site's menu ──
+    $$('.war-room-hero .btn').forEach(btn => {
+        if (btn.id === 'wrConsoleToggle' || btn.getAttribute('title')) return;
+        const label = btn.textContent.replace(/\s+/g, ' ').trim();
+        if (label) { btn.setAttribute('title', label); btn.setAttribute('aria-label', label); }
+    });
+    const hero = $('.war-room-hero');
+    if (hero && typeof toggleSidebar === 'function') {
+        const menuBtn = document.createElement('button');
+        menuBtn.type = 'button';
+        menuBtn.className = 'btn btn-outline-light';
+        menuBtn.title = t('console.menu');
+        menuBtn.setAttribute('aria-label', t('console.menu'));
+        menuBtn.innerHTML = '<i class="bi bi-list"></i>';
+        menuBtn.addEventListener('click', toggleSidebar);
+        hero.insertBefore(menuBtn, hero.firstChild);
+    }
+
+    // ── the counters, in the hero: the whole mission in one glance ───────────
+    const kpiBox = document.createElement('div');
+    kpiBox.className = 'wrc-kpis';
+    kpiBox.id = 'wrcKpis';
+    const heroTitleBlock = hero ? $('div.d-flex', hero) : null;
+    if (hero) hero.insertBefore(kpiBox, heroTitleBlock ? heroTitleBlock.nextSibling : null);
+
+    function kpiData() {
+        const a = page.assistant();
+        const rows = (a && a.pending) || [];
+        const silent = rows.filter(r => r.kind === 'silent').reduce((n, r) => n + (Number(r.count) || 1), 0);
+        const waitingEl = document.querySelector('[data-live-fragment="missionVisitors"] [data-visitor-pending]');
+        return [
+            {k: 'teams', label: t('console.kpi_teams'), n: state.teams.length},
+            {k: 'sos', label: 'SOS', n: page.sos().length, tone: 'bad', go: 'queue'},
+            {k: 'ack', label: t('console.kpi_ack'), n: (a && a.counts && a.counts.overdue) || 0, tone: 'warn', go: 'queue'},
+            {k: 'silent', label: t('console.kpi_silent'), n: silent, tone: 'warn', go: 'queue'},
+            {k: 'incident', label: t('console.kpi_incidents'), n: page.incidents().length, filter: 'incident'},
+            {k: 'shortage', label: t('console.kpi_shortages'), n: page.shortages().length, filter: 'shortage'},
+            {k: 'visitors', label: t('console.kpi_visitors'), n: waitingEl ? Number(waitingEl.dataset.visitorPending) || 0 : 0, tone: 'warn', card: 'missionVisitorsCard'},
+        ];
+    }
+    let kpiSig = '';
+    function renderKpis() {
+        const data = kpiData();
+        const sig = JSON.stringify(data.map(d => [d.k, d.n]));
+        if (sig === kpiSig) return;
+        kpiSig = sig;
+        kpiBox.innerHTML = data.map(d => `<button type="button" class="wrc-kpi${d.n && d.tone ? ' wrc-kpi-' + d.tone : ''}" data-kpi="${esc(d.k)}"${d.go ? ` data-go="${esc(d.go)}"` : ''}${d.filter ? ` data-filter-to="${esc(d.filter)}"` : ''}${d.card ? ` data-card="${esc(d.card)}"` : ''}>
+            <span class="wrc-kpi-l">${esc(d.label)}</span><b class="num">${d.n}</b></button>`).join('');
+    }
+    kpiBox.addEventListener('click', e => {
+        const b = e.target.closest('.wrc-kpi');
+        if (!b) return;
+        if (b.dataset.go === 'queue') {
+            const q = $('#wrcQueue', root);
+            q.classList.remove('wrc-flash'); void q.offsetWidth; q.classList.add('wrc-flash');
+        } else if (b.dataset.filterTo) {
+            state.filter = b.dataset.filterTo; feedSig = ''; $('#wrcFeedChips', root).dataset.sig = '';
+            setTab('feed'); renderFeed();
+        } else if (b.dataset.card) {
+            reveal(b.dataset.card);
+            if (typeof scrollToCard === 'function') scrollToCard(b.dataset.card);
+        }
+    });
+
+    // ── fitting the screen ───────────────────────────────────────────────────
+    // The ticker floats over the site's navbar (which is 78px tall), so a ticker
+    // of one row needs no room of its own and a taller one needs only what pokes
+    // out below the navbar. The page's own spacing pads the whole banner height,
+    // which on a page that scrolls is harmless and on this one is 60px of nothing
+    // - so the console takes over the top padding, and still never lets the
+    // ticker cover it.
+    function consolePad() {
+        const cw = $('.content-wrapper');
+        if (!cw || (typeof wrTickerPos !== 'undefined' && wrTickerPos !== 'top')) return;
+        const banner = document.getElementById('warRoomBanner');
+        const fullscreen = !!document.getElementById('mapCard')?.classList.contains('map-fullscreen-active');
+        const bannerH = (banner && banner.style.display === 'flex' && !fullscreen) ? banner.offsetHeight : 0;
+        const navH = ($('.top-navbar') || {}).offsetHeight || 0;
+        cw.style.paddingTop = Math.max(8, bannerH - navH + 8) + 'px';
+    }
+    if (typeof syncTickerSpacing === 'function') {
+        const originalSync = window.syncTickerSpacing;
+        window.syncTickerSpacing = function () {
+            const result = originalSync.apply(this, arguments);
+            consolePad();
+            fit();
+            return result;
+        };
+    }
+    function fit() {
+        consolePad();
+        // The acknowledgement panel floats at the top right, where it covered the
+        // hero's counters: it starts under the hero instead.
+        if (hero) document.documentElement.style.setProperty('--wr-acktracker-top', Math.round(hero.getBoundingClientRect().bottom + 8) + 'px');
+        const top = root.getBoundingClientRect().top + window.scrollY;
+        const h = Math.max(520, window.innerHeight - (top - window.scrollY) - 10);
+        root.style.height = h + 'px';
+        if (typeof map !== 'undefined' && map) map.invalidateSize();
+    }
+    window.addEventListener('resize', fit);
+    if (window.ResizeObserver) {
+        const mapSlot = $('#wrcMapSlot', root);
+        new ResizeObserver(() => { if (typeof map !== 'undefined' && map) map.invalidateSize(); }).observe(mapSlot);
+    }
+
+    // ── tabs and plan sections ───────────────────────────────────────────────
+    function setTab(tab) {
+        if (!$('.wrc-pane[data-pane="' + tab + '"]', root)) tab = 'feed';
+        state.tab = tab;
+        save('tab', tab);
+        $$('#wrcTabs button', root).forEach(b => b.setAttribute('aria-selected', b.dataset.tab === tab ? 'true' : 'false'));
+        $$('.wrc-pane', root).forEach(p => p.classList.toggle('on', p.dataset.pane === tab));
+        if (tab === 'chat') {
+            // The chat card keeps its scroll position and its unread count by
+            // itself; it only needs to know it can be seen now.
+            document.dispatchEvent(new CustomEvent('wr-console-tab', {detail: {tab}}));
+        }
+    }
+    $('#wrcTabs', root).addEventListener('click', e => {
+        const b = e.target.closest('button[data-tab]');
+        if (b) setTab(b.dataset.tab);
+    });
+    planEl.addEventListener('click', e => {
+        const b = e.target.closest('[data-sec-toggle]');
+        if (!b) return;
+        const sec = b.closest('.wrc-acc');
+        sec.classList.toggle('open');
+        if (sec.classList.contains('open')) state.sections.add(sec.dataset.sec); else state.sections.delete(sec.dataset.sec);
+        save('sections', Array.from(state.sections).join(','));
+    });
+
+    /** Show whatever holds this card, then let the caller scroll to it. */
+    function reveal(cardId) {
+        const el = cardNode(cardId);
+        if (!el || !root.contains(el)) return;
+        const pane = el.closest('.wrc-pane');
+        if (pane && pane.dataset.pane !== state.tab) setTab(pane.dataset.pane);
+        const sec = el.closest('.wrc-acc');
+        if (sec && !sec.classList.contains('open')) {
+            sec.classList.add('open');
+            state.sections.add(sec.dataset.sec);
+            save('sections', Array.from(state.sections).join(','));
+        }
+    }
+
+    // ── the queue: what needs the coordinator ────────────────────────────────
+    function agoText(ts) {
+        return (typeof assistantAgo === 'function') ? assistantAgo(ts) : '';
+    }
+
+    function queueItems() {
+        const items = [];
+        // SOS and voice come from their own lists, not from the assistant's rows:
+        // those rows carry no id, and a row you cannot act on is only a headline.
+        page.sos().forEach(a => items.push({
+            k: 'sos', sev: a.acknowledged_at ? 'high' : 'critical', ts: Number.MAX_SAFE_INTEGER - (Number(a.id) || 0),
+            icon: 'bi-exclamation-octagon-fill', id: a.id, lat: a.lat, lng: a.lng,
+            title: '🆘 ' + (a.team_label || '') + ' — ' + esc(a.user_name),
+            meta: esc(a.created_at || '') + (a.acknowledged_at ? ' · ' + esc(t('sos.ack_at_prefix', {time: a.acknowledged_at}).replace(/^[\s·,-]+/, '')) : ''),
+            actions: [
+                a.acknowledged_at
+                    ? {cls: 'wrc-btn-ok', act: 'sos-resolve', label: t('shortage.resolve_btn')}
+                    : {cls: 'wrc-btn-warn', act: 'sos-ack', label: t('banner.ack_btn')},
+            ].concat(a.lat !== null && a.lat !== undefined
+                ? [{cls: '', act: 'locate', label: t('sos.view_on_map')}, {cls: '', act: 'nearest', label: t('console.nearest')}] : []),
+        }));
+        page.voice().forEach(v => items.push({
+            k: 'voice', sev: 'high', ts: Number.MAX_SAFE_INTEGER / 2 - (Number(v.id) || 0),
+            icon: 'bi-mic-fill', id: v.id, lat: v.lat, lng: v.lng,
+            title: '🔊 ' + (v.team_label || '') + ' — ' + esc(v.user_name),
+            meta: esc(v.created_at || '') + (v.duration_s ? ' · ' + esc(t('voice.duration_s', {n: v.duration_s})) : ''),
+            audio: 'mission-voice-play.php?id=' + encodeURIComponent(v.id),
+            actions: [{cls: 'wrc-btn-warn', act: 'voice-ack', label: t('voice.ack_btn')}],
+        }));
+        const a = page.assistant();
+        // Findings of one kind that pile up are one line, not one per finding: a
+        // mission with twenty unanswered orders, or six people out of GPS reach,
+        // is one problem to chase. A single one keeps its own line. The
+        // acknowledgement panel and the roster list the individual ones.
+        const rows = (a && a.pending) || [];
+        const grouped = new Set();
+        WRC_GROUPS.forEach(g => {
+            const hits = rows.filter(row => g.kinds.includes(row.kind));
+            const n = hits.reduce((sum, row) => sum + (Number(row.count) || 1), 0);
+            if (n < g.min) return;
+            hits.forEach(row => grouped.add(row));
+            const oldest = Math.min(...hits.map(row => Number(row.ts) || Infinity));
+            items.push({
+                k: g.key, sev: hits.some(row => row.sev === 'high' || row.sev === 'critical') ? 'high' : 'warn',
+                ts: oldest, icon: g.icon, target: g.target,
+                title: esc(t(g.label, {n})),
+                meta: '<span class="wrc-ago" data-ts="' + oldest + '">' + esc(agoText(oldest)) + '</span>',
+                actions: [],
+            });
+        });
+        rows.forEach(row => {
+            // Already shown above, with buttons; or folded into a group line.
+            if (row.kind === 'sos' || row.kind === 'voice' || grouped.has(row)) return;
+            items.push({
+                k: row.kind, sev: row.sev, ts: Number(row.ts) || 0, icon: row.icon, target: row.target,
+                title: esc(row.title) + (row.count > 1 ? ` <span class="wrc-x">×${row.count}</span>` : ''),
+                meta: (row.detail ? esc(row.detail) + ' · ' : '') + '<span class="wrc-ago" data-ts="' + Number(row.ts) + '">' + esc(agoText(Number(row.ts))) + '</span>',
+                actions: [],
+            });
+        });
+        return wrcOrderQueue(items);
+    }
+
+    const QUEUE_SHOWN = 5;
+    let queueSig = '';
+    function renderQueue() {
+        const items = queueItems();
+        const body = $('#wrcQueueBody', root);
+        const sosOpen = items.filter(i => i.sev === 'critical').length;
+        const cnt = $('#wrcQueueCnt', root);
+        cnt.textContent = String(items.length);
+        cnt.classList.toggle('bad', sosOpen > 0);
+        cnt.classList.toggle('ok', items.length === 0);
+        $('#wrcQueue', root).classList.toggle('wrc-hot', sosOpen > 0);
+        const shown = state.queueMore ? items : items.slice(0, QUEUE_SHOWN);
+        const sig = JSON.stringify([shown.map(i => [i.k, i.id, i.title, i.meta, i.sev]), items.length, state.queueMore]);
+        if (sig === queueSig) return;
+        queueSig = sig;
+        if (!items.length) {
+            body.innerHTML = `<div class="wrc-calm"><i class="bi bi-check2-circle"></i>${esc(t('console.queue_empty'))}</div>`;
+            return;
+        }
+        body.innerHTML = shown.map((i, n) => `
+            <div class="wrc-q wrc-q-${esc(i.sev)}" data-q="${n}" data-k="${esc(i.k)}"${i.target ? ' data-target="' + esc(i.target) + '"' : ''}>
+                <i class="bi ${esc(i.icon || 'bi-dot')} wrc-q-i"></i>
+                <div class="wrc-q-main">
+                    <div class="wrc-q-t">${i.title}</div>
+                    <div class="wrc-q-m">${i.meta}</div>
+                    ${i.audio ? `<audio class="wrc-audio" controls preload="none" src="${esc(i.audio)}"></audio>` : ''}
+                    ${i.actions.length ? `<div class="wrc-q-a">${i.actions.map(b => `<button type="button" class="wrc-btn ${esc(b.cls)}" data-act="${esc(b.act)}" data-id="${esc(i.id)}">${esc(b.label)}</button>`).join('')}</div>` : ''}
+                </div>
+            </div>`).join('')
+            + (items.length > QUEUE_SHOWN
+                ? `<button type="button" class="wrc-link wrc-more" id="wrcQueueMore">${esc(state.queueMore ? t('console.show_less') : t('console.show_more', {n: items.length - QUEUE_SHOWN}))}</button>`
+                : '');
+        body._items = shown;
+    }
+
+    $('#wrcQueueBody', root).addEventListener('click', e => {
+        if (e.target.closest('#wrcQueueMore')) { state.queueMore = !state.queueMore; queueSig = ''; renderQueue(); return; }
+        const btn = e.target.closest('button[data-act]');
+        const row = e.target.closest('.wrc-q');
+        if (btn) {
+            const id = btn.dataset.id;
+            // The cards' own buttons do the work (and the render that follows):
+            // one code path for an acknowledgement, whichever screen it came from.
+            if (btn.dataset.act === 'sos-ack') $('.sos-ack-btn[data-alert-id="' + id + '"]')?.click();
+            else if (btn.dataset.act === 'sos-resolve') $('.sos-resolve-btn[data-alert-id="' + id + '"]')?.click();
+            else if (btn.dataset.act === 'voice-ack') $('.voice-ack-btn[data-id="' + id + '"]')?.click();
+            else if (btn.dataset.act === 'locate' || btn.dataset.act === 'nearest') {
+                const item = (row && $('#wrcQueueBody', root)._items || [])[Number(row.dataset.q)];
+                if (item && typeof map !== 'undefined' && map) {
+                    const point = {lat: Number(item.lat), lng: Number(item.lng)};
+                    map.setView([point.lat, point.lng], 17);
+                    // The map's own «πιο κοντά» answer: which team is nearest, and how far.
+                    if (btn.dataset.act === 'nearest' && typeof measureNearest === 'function') measureNearest(point);
+                }
+            }
+            return;
+        }
+        if (e.target.closest('audio')) return;
+        if (row && row.dataset.target && typeof assistantGoto === 'function') assistantGoto(row.dataset.target);
+    });
+
+    setInterval(() => {
+        if (document.hidden) return;
+        $$('.wrc-ago', root).forEach(el => { el.textContent = agoText(Number(el.dataset.ts)); });
+    }, 30000);
+
+    // ── the teams: what each is doing, and who an order goes to ──────────────
+    function labelOf(team) { return teamLabel(team.codename, team.team_number); }
+
+    function setTeams(list) {
+        state.teams = (list || []).map(tm => Object.assign({}, tm, {id: Number(tm.id), label: labelOf(tm)}))
+            .sort((a, b) => ((Number(a.team_number) || 0) - (Number(b.team_number) || 0)) || a.label.localeCompare(b.label, jsLocale));
+        // A person who left the roster cannot stay picked.
+        const known = new Set(state.teams.flatMap(tm => (tm.members || []).map(m => Number(m.user_id))));
+        state.selected.forEach(id => { if (!known.has(id)) state.selected.delete(id); });
+    }
+
+    function isStale(uid) {
+        if (state.stale && Object.prototype.hasOwnProperty.call(state.stale, String(uid))) return !!state.stale[String(uid)];
+        const dom = document.getElementById('ping-stale-' + uid);
+        return !!dom && !dom.classList.contains('d-none');
+    }
+
+    const MEMBER_STATUS = {needs_help: ['bad', 'status.badge_needs_help'], on_site: ['ok', 'status.badge_on_site'], on_way: ['warn', 'status.badge_on_way']};
+
+    function memberHtml(m) {
+        const uid = Number(m.user_id);
+        const live = state.live[String(uid)] || {};
+        const st = MEMBER_STATUS[live.field_status];
+        const stale = isStale(uid);
+        return `<label class="wrc-m${stale ? ' stale' : ''}">
+            <input type="checkbox" data-uid="${uid}"${state.selected.has(uid) ? ' checked' : ''}>
+            <span class="wrc-m-n">${guestNameHtml(m.name, m.is_external, m.home_team_name, teamBadgeColorsJs(m.home_team_color)[0], teamBadgeColorsJs(m.home_team_color)[1], m.guest_country_code)}${k9BadgeHtml(uid, true)}${captainBadgeHtml(uid, true)}</span>
+            ${st ? `<span class="wrc-tag wrc-tag-${st[0]}">${esc(t(st[1]))}</span>` : ''}
+            ${stale ? `<i class="bi bi-wifi-off wrc-stale" title="${esc(t('console.no_contact'))}"></i>` : ''}
+            ${m.takes_part ? '' : `<i class="bi bi-geo-alt-slash wrc-mut" title="${esc(t('gps_participant.self_note'))}"></i>`}
+        </label>`;
+    }
+
+    let teamsSig = '';
+    function renderTeams() {
+        const body = $('#wrcTeamsBody', root);
+        const board = (typeof teamBoardItems === 'function') ? teamBoardItems : () => [];
+        const model = state.teams.map(team => ({
+            team, items: board({id: team.id, label: team.label, color: team.color}),
+            members: team.members || [],
+        }));
+        $('#wrcTeamsCnt', root).textContent = String(model.length);
+        const sig = JSON.stringify([model.map(m => [m.team.id, m.team.label, m.team.color, m.team.transport, m.items.map(i => [i.kind, i.detail, i.state, i.tone]),
+            m.members.map(x => [x.user_id, x.name, isStale(x.user_id), (state.live[String(x.user_id)] || {}).field_status])]),
+            Array.from(state.open)]);
+        if (sig === teamsSig) return;
+        teamsSig = sig;
+        if (!model.length) { body.innerHTML = `<div class="wrc-empty">${esc(t('teams.empty'))}</div>`; return; }
+        body.innerHTML = model.map(({team, items, members}) => {
+            const [bg] = teamBadgeColorsJs(team.color);
+            const stale = members.filter(m => isStale(m.user_id)).length;
+            const open = state.open.has(team.id);
+            const first = items[0];
+            return `<div class="wrc-team${open ? ' open' : ''}" data-team="${team.id}">
+                <div class="wrc-team-h">
+                    <input type="checkbox" class="wrc-team-sel" data-team-sel="${team.id}" aria-label="${esc(t('console.select_team', {team: team.label}))}">
+                    <span class="wrc-swatch" style="background:${esc(bg)}"></span>
+                    <button type="button" class="wrc-team-name" data-team-open="${team.id}">
+                        <b>${esc(team.label)}</b>
+                        <span class="wrc-mut">${members.length}${typeof transportGlyphSvg === 'function' ? ' ' + transportGlyphSvg(team.transport, 14, 'currentColor').replace('style="display:block"', 'aria-hidden="true" style="vertical-align:-0.15em"') : ''}</span>
+                        ${stale ? `<span class="wrc-tag wrc-tag-bad"><i class="bi bi-wifi-off"></i> ${stale}</span>` : ''}
+                        <i class="bi bi-chevron-down wrc-chev"></i>
+                    </button>
+                </div>
+                ${first
+                    ? `<button type="button" class="wrc-order wrc-tone-${esc(first.tone)}" data-tb-ref="${esc(first.ref)}">
+                            <span>${esc(t('teamboard.kind.' + first.kind))}${first.detail ? ' «' + esc(first.detail) + '»' : ''}</span>
+                            <span class="wrc-order-s">${esc(first.state)}</span></button>
+                       ${items.length > 1 ? `<div class="wrc-mut wrc-order-more">${esc(t('teamboard.more', {n: items.length - 1}))}</div>` : ''}`
+                    : `<div class="wrc-idle"><i class="bi bi-hourglass-split"></i> ${esc(t('teamboard.waiting'))}</div>`}
+                ${open ? `<div class="wrc-members">${members.map(memberHtml).join('') || `<div class="wrc-empty">${esc(t('route.team_has_no_members'))}</div>`}</div>` : ''}
+            </div>`;
+        }).join('');
+        syncSelection();
+    }
+
+    /**
+     * The ticks follow state.selected in place, without redrawing the list: a
+     * redraw on every click would drop keyboard focus and the scroll position.
+     * (A checkbox cannot be half-ticked from markup either.)
+     */
+    function syncSelection() {
+        $$('.wrc-team', root).forEach(el => {
+            const team = state.teams.find(tm => tm.id === Number(el.dataset.team));
+            const ids = team ? (team.members || []).map(m => Number(m.user_id)) : [];
+            const picked = ids.filter(id => state.selected.has(id)).length;
+            el.classList.toggle('picked', picked > 0);
+            const box = $('.wrc-team-sel', el);
+            if (box) { box.checked = picked > 0 && picked === ids.length; box.indeterminate = picked > 0 && picked < ids.length; }
+            $$('[data-uid]', el).forEach(b => { b.checked = state.selected.has(Number(b.dataset.uid)); });
+        });
+    }
+
+    $('#wrcTeamsBody', root).addEventListener('click', e => {
+        const order = e.target.closest('[data-tb-ref]');
+        if (order && typeof teamBoardTarget === 'function' && typeof opGotoMap === 'function') {
+            const target = teamBoardTarget(order.dataset.tbRef);
+            if (target) opGotoMap(target);
+            return;
+        }
+        const openBtn = e.target.closest('[data-team-open]');
+        if (openBtn) {
+            const id = Number(openBtn.dataset.teamOpen);
+            if (state.open.has(id)) state.open.delete(id); else state.open.add(id);
+            teamsSig = '';
+            renderTeams();
+        }
+    });
+    $('#wrcTeamsBody', root).addEventListener('change', e => {
+        const teamBox = e.target.closest('[data-team-sel]');
+        const memberBox = e.target.closest('[data-uid]');
+        if (teamBox) {
+            const team = state.teams.find(tm => tm.id === Number(teamBox.dataset.teamSel));
+            (team ? team.members : []).forEach(m => { if (teamBox.checked) state.selected.add(Number(m.user_id)); else state.selected.delete(Number(m.user_id)); });
+        } else if (memberBox) {
+            const uid = Number(memberBox.dataset.uid);
+            if (memberBox.checked) state.selected.add(uid); else state.selected.delete(uid);
+        } else return;
+        selectionChanged();
+    });
+    $('#wrcSelAll', root).addEventListener('click', () => {
+        const all = state.teams.flatMap(tm => (tm.members || []).map(m => Number(m.user_id)));
+        const everyone = all.length && all.every(id => state.selected.has(id));
+        state.selected.clear();
+        if (!everyone) all.forEach(id => state.selected.add(id));
+        selectionChanged();
+    });
+
+    function selectionChanged() {
+        syncSelection();
+        renderComposerTo();
+    }
+
+    // ── the order form: who, what, where ─────────────────────────────────────
+    const VERBS = [
+        ['point', 'bi-geo-alt-fill', 'console.verb_point'],
+        ['sector', 'bi-grid-3x3-gap-fill', 'console.verb_sector'],
+        ['route', 'bi-signpost-split-fill', 'console.verb_route'],
+        ['task', 'bi-clipboard-check', 'console.verb_task'],
+        ['say', 'bi-megaphone-fill', 'console.verb_say'],
+        ['ask', 'bi-camera-fill', 'console.verb_ask'],
+    ];
+    // A live stream can only be asked for where the server has one configured
+    // (the same gate the old request card has).
+    const ASKS = [
+        ['request_location', 'console.ask_location'], ['request_photo', 'console.ask_photo'],
+        ['request_video', 'console.ask_video'], ['request_live', 'console.ask_live'],
+    ].filter(([action]) => action !== 'request_live' || root.dataset.live === '1');
+
+    const cmp = $('#wrcComposer', root);
+    cmp.innerHTML = `
+        <div class="wrc-cmp-row"><span class="wrc-cmp-l">${esc(t('console.cmp_to'))}</span><div class="wrc-cmp-to" id="wrcCmpTo"></div></div>
+        <div class="wrc-cmp-row"><span class="wrc-cmp-l">${esc(t('console.cmp_what'))}</span>
+            <div class="wrc-verbs" id="wrcVerbs">${VERBS.map(([key, icon, label]) => `<button type="button" class="wrc-verb" data-verb="${key}"><i class="bi ${icon}"></i><span>${esc(t(label))}</span></button>`).join('')}</div></div>
+        <div class="wrc-cmp-row wrc-cmp-body" id="wrcCmpBody"></div>
+        <div class="wrc-toast" id="wrcToast" role="status" aria-live="polite" hidden></div>`;
+
+    function summary() { return wrcSummarizeSelection(state.teams, state.selected); }
+
+    function renderComposerTo() {
+        const s = summary();
+        const to = $('#wrcCmpTo', root);
+        if (!s.total) {
+            to.innerHTML = `<span class="wrc-mut">${esc(t('console.cmp_nobody'))}</span>`;
+        } else {
+            to.innerHTML = s.chips.map(c => {
+                const [bg] = teamBadgeColorsJs(c.color);
+                return `<span class="wrc-rcp"><span class="wrc-swatch" style="background:${esc(bg)}"></span>${esc(wrcRecipientLabel(c, t('console.of')))}</span>`;
+            }).join('') + `<button type="button" class="wrc-link" id="wrcCmpClear">${esc(t('console.clear'))}</button>`;
+        }
+        renderComposerBody(true);
+    }
+    cmp.addEventListener('click', e => {
+        if (e.target.closest('#wrcCmpClear')) { state.selected.clear(); selectionChanged(); return; }
+        const verb = e.target.closest('[data-verb]');
+        if (verb) { state.verb = verb.dataset.verb; save('verb', state.verb); renderComposerBody(false); }
+    });
+
+    function toast(text, kind) {
+        const el = $('#wrcToast', root);
+        el.textContent = text;
+        el.className = 'wrc-toast wrc-toast-' + (kind || 'ok');
+        el.hidden = false;
+        clearTimeout(toast._t);
+        toast._t = setTimeout(() => { el.hidden = true; }, 7000);
+    }
+
+    /** The old cards post these as ordinary forms; this posts the same fields through fetch. */
+    function postOrder(action, fields, file) {
+        const body = new FormData();
+        body.append('csrf_token', csrfToken);
+        body.append('console_ajax', '1');
+        body.append('action', action);
+        Object.keys(fields).forEach(k => {
+            const v = fields[k];
+            if (Array.isArray(v)) v.forEach(x => body.append(k + '[]', x)); else body.append(k, v);
+        });
+        if (file) body.append(file.name, file.file);
+        return fetch('war-room.php?id=' + MISSION_ID, {method: 'POST', body, credentials: 'same-origin'}).then(r => r.json());
+    }
+    function sent(res, okText) {
+        const flash = (res && res.flash) || {};
+        const msg = flash.error || flash.warning || flash.success || (res && res.ok ? okText : t('common.failed'));
+        toast(msg, res && res.ok ? 'ok' : 'bad');
+        if (res && res.ok && typeof retryPollNow === 'function') retryPollNow();
+        return !!(res && res.ok);
+    }
+    function failed(e) { toast(t('common.send_failed'), 'bad'); if (window.console) console.error(e); }
+
+    function recipientFields() {
+        const ids = Array.from(state.selected);
+        return ids.length ? {request_scope: 'selected', volunteers: ids} : null;
+    }
+
+    let bodyDraft = {task: '', say: ''};
+
+    function renderComposerBody(keepInputs) {
+        $$('#wrcVerbs .wrc-verb', root).forEach(b => b.classList.toggle('on', b.dataset.verb === state.verb));
+        const body = $('#wrcCmpBody', root);
+        const s = summary();
+        const plan = wrcDispatchPlan(s, state.teams.length);
+        const need = s.total ? '' : `<span class="wrc-mut">${esc(t('console.cmp_pick_first'))}</span>`;
+        // A text box must survive the re-render a changed selection causes.
+        const keep = keepInputs ? {task: ($('#wrcTaskText', root) || {}).value, say: ($('#wrcSayText', root) || {}).value} : null;
+        if (keep) { if (keep.task !== undefined) bodyDraft.task = keep.task; if (keep.say !== undefined) bodyDraft.say = keep.say; }
+
+        if (state.verb === 'point') {
+            const hint = plan.mode === 'many' ? t('console.hint_many')
+                : plan.mode === 'people' ? t('console.hint_people_point') : '';
+            body.innerHTML = `<button type="button" class="wrc-go" id="wrcGoPoint"${plan.mode === 'many' ? ' disabled' : ''}><i class="bi bi-pin-map-fill"></i>${esc(t('console.open_point_map'))}</button>
+                <span class="wrc-mut">${esc(hint || t('console.point_help'))}</span>`;
+        } else if (state.verb === 'route') {
+            const canReturn = s.chips.length === 1;
+            body.innerHTML = `<button type="button" class="wrc-go" id="wrcGoRoute"><i class="bi bi-signpost-split-fill"></i>${esc(t('console.open_route_map'))}</button>
+                <label class="wrc-chk-l"><input type="checkbox" id="wrcRouteReturn"${canReturn ? '' : ' disabled'}> ${esc(t('console.route_return'))}</label>
+                <span class="wrc-mut">${esc(s.total && !s.chips.every(c => c.whole) || s.chips.length > 1 ? t('console.hint_people_route') : t('console.route_help'))}</span>`;
+        } else if (state.verb === 'sector') {
+            const free = page.sectors().filter(sec => !sec.team_id || sec.status === 'not_started');
+            const rest = page.sectors().filter(sec => !free.includes(sec));
+            const opt = sec => `<option value="${esc(sec.id)}">${esc(sec.label)}${sec.team_id && sec.team_label ? ' — ' + esc(sec.team_label) : ''}</option>`;
+            const one = plan.mode === 'team';
+            body.innerHTML = page.sectors().length
+                ? `<select class="wrc-in" id="wrcSectorPick" aria-label="${esc(t('console.verb_sector'))}">${free.map(opt).join('')}${rest.length ? '<option disabled>──────────</option>' + rest.map(opt).join('') : ''}</select>
+                   <button type="button" class="wrc-go" id="wrcGoSector"${one ? '' : ' disabled'}><i class="bi bi-send-fill"></i>${esc(t('console.send'))}</button>
+                   <span class="wrc-mut">${esc(one ? t('console.sector_help') : t('console.sector_needs_team'))}</span>`
+                : `<span class="wrc-mut">${esc(t('console.sector_none'))}</span>`;
+        } else if (state.verb === 'task') {
+            body.innerHTML = `<input type="text" class="wrc-in wrc-grow" id="wrcTaskText" maxlength="500" placeholder="${esc(t('console.task_placeholder'))}" value="${esc(bodyDraft.task)}">
+                <button type="button" class="wrc-go" id="wrcGoTask"><i class="bi bi-send-fill"></i>${esc(t('console.send'))}</button>${need}`;
+        } else if (state.verb === 'say') {
+            body.innerHTML = `<input type="text" class="wrc-in wrc-grow" id="wrcSayText" maxlength="500" placeholder="${esc(t('console.say_placeholder'))}" value="${esc(bodyDraft.say)}">
+                <select class="wrc-in" id="wrcSayHow" aria-label="${esc(t('console.say_how'))}">
+                    <option value="all">${esc(t('console.say_all'))}</option>
+                    <option value="speak"${s.total ? '' : ' disabled'}>${esc(t('console.say_speak'))}</option>
+                </select>
+                <label class="wrc-btn wrc-attach" title="${esc(t('console.attach_photo'))}"><i class="bi bi-image"></i> <span id="wrcSayPhotoName">${esc(t('console.attach_photo'))}</span>
+                    <input type="file" id="wrcSayPhoto" accept="image/*" hidden></label>
+                <button type="button" class="wrc-go" id="wrcGoSay"><i class="bi bi-send-fill"></i>${esc(t('console.send'))}</button>`;
+        } else {
+            body.innerHTML = `<select class="wrc-in" id="wrcAskKind" aria-label="${esc(t('console.verb_ask'))}">${ASKS.map(([a, l]) => `<option value="${a}">${esc(t(l))}</option>`).join('')}</select>
+                <button type="button" class="wrc-go" id="wrcGoAsk"><i class="bi bi-send-fill"></i>${esc(t('console.send'))}</button>
+                <span class="wrc-mut">${esc(s.total ? t('console.ask_help_sel') : t('console.ask_help_all'))}</span>`;
+        }
+    }
+
+    cmp.addEventListener('change', e => {
+        if (e.target.id !== 'wrcSayPhoto') return;
+        const f = (e.target.files || [])[0];
+        $('#wrcSayPhotoName', root).textContent = f ? f.name : t('console.attach_photo');
+    });
+
+    cmp.addEventListener('click', e => {
+        const go = e.target.closest('.wrc-go');
+        if (!go) return;
+        const s = summary();
+        const plan = wrcDispatchPlan(s, state.teams.length);
+
+        if (go.id === 'wrcGoPoint') {
+            // Whole team(s) go through the dispatch window as before; part of a
+            // team, or people from several, as a one-point route (see wrcDispatchPlan).
+            if (plan.mode === 'people') {
+                pendingRouteSeed = Object.assign({points: [], label: '', closed: false}, wrcRouteSeedFor(s));
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('routeComposerModal')).show();
+            } else {
+                pendingDispatchSeed = {points: [], label: '', closed: false};
+                if (plan.mode === 'team') pendingDispatchSeed.teamId = plan.teamId;
+                else if (plan.mode === 'all') pendingDispatchSeed.teamId = 'all';
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('dispatchMapModal')).show();
+            }
+        } else if (go.id === 'wrcGoRoute') {
+            pendingRouteSeed = Object.assign({points: [], label: '', closed: false},
+                wrcRouteSeedFor(s), {returnToStart: !!$('#wrcRouteReturn', root)?.checked});
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('routeComposerModal')).show();
+        } else if (go.id === 'wrcGoSector') {
+            const id = $('#wrcSectorPick', root).value;
+            if (id && plan.mode === 'team') sectorAdminSetTeam(id, plan.teamId, go);
+        } else if (go.id === 'wrcGoTask') {
+            const text = $('#wrcTaskText', root).value.trim();
+            const rec = recipientFields();
+            if (!text) { toast(t('order.task.empty_warning'), 'bad'); return; }
+            if (!rec) { toast(t('console.cmp_pick_first'), 'bad'); return; }
+            go.disabled = true;
+            postOrder('request_task', Object.assign({task_text: text}, rec)).then(res => {
+                if (sent(res, t('order.task.sent_flash', {count: s.total}))) { bodyDraft.task = ''; $('#wrcTaskText', root).value = ''; }
+            }).catch(failed).finally(() => { go.disabled = false; });
+        } else if (go.id === 'wrcGoSay') {
+            const text = $('#wrcSayText', root).value.trim();
+            const how = $('#wrcSayHow', root).value;
+            const photo = ($('#wrcSayPhoto', root).files || [])[0] || null;
+            if (!text && !photo) { toast(t('order.speak.empty_warning'), 'bad'); return; }
+            go.disabled = true;
+            const done = res => {
+                if (sent(res, t('console.say_sent'))) {
+                    bodyDraft.say = ''; $('#wrcSayText', root).value = '';
+                    $('#wrcSayPhoto', root).value = ''; $('#wrcSayPhotoName', root).textContent = t('console.attach_photo');
+                }
+            };
+            const rec = recipientFields();
+            // A photo only travels with the message to everyone, as on the old card.
+            const call = how === 'speak' && rec
+                ? postOrder('request_speak', Object.assign({speak_text: text}, rec))
+                : postOrder('global_message', {global_message_text: text}, photo ? {name: 'global_message_photo', file: photo} : null);
+            call.then(done).catch(failed).finally(() => { go.disabled = false; });
+        } else if (go.id === 'wrcGoAsk') {
+            const action = $('#wrcAskKind', root).value;
+            const rec = recipientFields() || {request_scope: 'all'};
+            go.disabled = true;
+            postOrder(action, rec).then(res => sent(res, t('console.ask_sent'))).catch(failed).finally(() => { go.disabled = false; });
+        }
+    });
+
+    // ── the feed: what is coming in from the field ───────────────────────────
+    const FEED_FILTERS = [['all', 'console.f_all'], ['incident', 'console.f_incident'], ['shortage', 'console.f_shortage'], ['photo', 'console.f_photo'], ['poi', 'console.f_poi']];
+
+    function feedItems() {
+        const items = [];
+        page.incidents().forEach(r => items.push({
+            kind: 'incident', ts: wrcStampKey(r.created_at), icon: 'bi-bandaid', tone: r.severity === 'critical' || r.severity === 'high' ? 'bad' : 'warn',
+            tag: t('console.f_incident'), who: r.team_label, text: (r.type_label || '') + (r.severity_label ? ' · ' + r.severity_label : '') + (r.is_unknown_patient ? '' : (r.patient_name ? ' · ' + r.patient_name : '')),
+            when: r.created_at, lat: r.lat, lng: r.lng, card: 'incidentsListCard',
+            extra: !r.resolved_at && r.lat !== null && r.lat !== undefined && typeof openDispatchForIncident === 'function' ? {act: 'incident-send', id: r.id, label: t('incident.dispatch_btn')} : null,
+        }));
+        page.shortages().forEach(r => items.push({
+            kind: 'shortage', ts: wrcStampKey(r.created_at), icon: 'bi-box-seam', tone: r.severity === 'critical' ? 'bad' : 'warn',
+            tag: t('console.f_shortage'), who: r.team_label || r.reporter_name, text: r.title || '',
+            when: r.created_at, lat: r.lat, lng: r.lng, card: 'shortageListCard',
+        }));
+        page.media().forEach(m => items.push({
+            kind: 'photo', ts: wrcStampKey(m.time), icon: m.media_type === 'video' ? 'bi-camera-video' : 'bi-camera', tone: 'info',
+            tag: t(m.media_type === 'video' ? 'console.f_video' : 'console.f_photo_one'), who: m.team_label || m.user_name, text: m.poi_note || m.user_name || '',
+            when: m.time, lat: m.lat, lng: m.lng, card: 'mediaCard', thumb: m.has_thumb && !m.purged ? m.id : null,
+        }));
+        page.pois().forEach(p => items.push({
+            kind: 'poi', ts: wrcStampKey(p.created_at), icon: 'bi-flag', tone: p.checked_at ? 'ok' : 'info',
+            tag: t('console.f_poi_one'), who: (p.reporter_names || []).join(', '), text: ((p.photos || [])[0] || {}).note || '',
+            when: p.created_at, lat: p.lat, lng: p.lng, card: 'poiListCard',
+        }));
+        return items.sort((a, b) => b.ts - a.ts);
+    }
+
+    let feedSig = '';
+    function renderFeed() {
+        const all = feedItems();
+        $('#wrcFeedCnt', root).textContent = all.length ? String(all.length) : '';
+        $('#wrcMediaCnt', root).textContent = page.media().length ? String(page.media().length) : '';
+        const items = state.filter === 'all' ? all : all.filter(i => i.kind === state.filter);
+        const chips = $('#wrcFeedChips', root);
+        const chipSig = state.filter + '|' + FEED_FILTERS.map(([k]) => all.filter(i => k === 'all' || i.kind === k).length).join(',');
+        if (chips.dataset.sig !== chipSig) {
+            chips.dataset.sig = chipSig;
+            chips.innerHTML = FEED_FILTERS.map(([k, label]) => `<button type="button" class="wrc-chip${state.filter === k ? ' on' : ''}" data-filter="${k}">${esc(t(label))}<span class="wrc-chip-n">${all.filter(i => k === 'all' || i.kind === k).length}</span></button>`).join('');
+        }
+        const sig = JSON.stringify(items.map(i => [i.kind, i.ts, i.text, i.who, i.when]));
+        if (sig === feedSig) return;
+        feedSig = sig;
+        const feed = $('#wrcFeed', root);
+        feed._items = items;
+        feed.innerHTML = items.length ? items.map((i, n) => `
+            <div class="wrc-f wrc-tone-${esc(i.tone)}" data-f="${n}">
+                ${i.thumb ? `<img class="wrc-f-thumb" loading="lazy" alt="" src="mission-photo-view.php?id=${esc(i.thumb)}&thumb=1">` : `<i class="bi ${esc(i.icon)} wrc-f-i"></i>`}
+                <div class="wrc-f-main">
+                    <div class="wrc-f-h"><span class="wrc-tag">${esc(i.tag)}</span><span class="wrc-f-who">${esc(i.who || '')}</span><span class="wrc-f-t num">${esc(i.when || '')}</span></div>
+                    <div class="wrc-f-x">${esc(i.text)}</div>
+                    <div class="wrc-f-a">
+                        ${i.lat !== null && i.lat !== undefined ? `<button type="button" class="wrc-link" data-fa="map">${esc(t('console.on_map'))}</button>` : ''}
+                        ${i.extra ? `<button type="button" class="wrc-link" data-fa="${esc(i.extra.act)}" data-id="${esc(i.extra.id)}">${esc(i.extra.label)}</button>` : ''}
+                        <button type="button" class="wrc-link" data-fa="open">${esc(t('console.open'))}</button>
+                    </div>
+                </div>
+            </div>`).join('') : `<div class="wrc-empty">${esc(t('console.feed_empty'))}</div>`;
+    }
+    $('#wrcFeedChips', root).addEventListener('click', e => {
+        const b = e.target.closest('[data-filter]');
+        if (!b) return;
+        state.filter = b.dataset.filter;
+        $('#wrcFeedChips', root).dataset.sig = '';
+        feedSig = '';
+        renderFeed();
+    });
+    $('#wrcFeed', root).addEventListener('click', e => {
+        const btn = e.target.closest('[data-fa]');
+        const row = e.target.closest('.wrc-f');
+        if (!btn || !row) return;
+        const item = ($('#wrcFeed', root)._items || [])[Number(row.dataset.f)];
+        if (!item) return;
+        if (btn.dataset.fa === 'map' && typeof map !== 'undefined' && map) map.setView([Number(item.lat), Number(item.lng)], 17);
+        else if (btn.dataset.fa === 'open') { reveal(item.card); if (typeof scrollToCard === 'function') scrollToCard(item.card); }
+        else if (btn.dataset.fa === 'incident-send') {
+            const inc = page.incidents().find(r => String(r.id) === String(btn.dataset.id));
+            if (inc) openDispatchForIncident(inc);
+        }
+    });
+
+    // ── the poll hands over what it just applied ─────────────────────────────
+    let sectorSig = '';
+    function refresh() {
+        renderKpis();
+        renderQueue();
+        renderTeams();
+        renderComposerTo();
+        renderFeed();
+        // The sector picker lists what the sectors are NOW.
+        const sig = JSON.stringify(page.sectors().map(sec => [sec.id, sec.team_id, sec.status, sec.label]));
+        if (sig !== sectorSig) {
+            sectorSig = sig;
+            if (state.verb === 'sector') renderComposerBody(true);
+        }
+    }
+
+    // The page's own renderers run the moment something is acknowledged, sent or
+    // deleted; the poll comes up to five seconds later. Redraw with them, so what
+    // the coordinator just did shows at once instead of after the next tick.
+    let soon = 0;
+    function refreshSoon() {
+        if (soon) return;
+        // A timer, not requestAnimationFrame: a tab in the background never fires one.
+        soon = setTimeout(() => { soon = 0; refresh(); }, 20);
+    }
+    ['renderSosAlerts', 'renderVoiceMessages', 'renderAssistant', 'renderMissionIncidents', 'renderShortageReports',
+     'renderPointsOfInterest', 'renderMedia', 'renderTeamBoard', 'renderTeamRosters'].forEach(name => {
+        const original = window[name];
+        if (typeof original !== 'function') return;
+        window[name] = function () {
+            const result = original.apply(this, arguments);
+            refreshSoon();
+            return result;
+        };
+    });
+
+    window.wrConsole = {
+        reveal,
+        onPoll(data) {
+            if (data.teams) setTeams(data.teams);
+            if (data.pingStaleness) state.stale = data.pingStaleness;
+            if (data.participantLive) state.live = data.participantLive;
+            if (data.onlinePresence) state.online = data.onlinePresence;
+            refresh();
+        },
+    };
+
+    // The chat tab shows the page's own unread count.
+    document.addEventListener('wr-chat-unread', e => {
+        const el = $('#wrcChatCnt', root);
+        const n = Number(e.detail && e.detail.count) || 0;
+        el.textContent = String(n);
+        el.classList.toggle('d-none', n === 0);
+    });
+    // A new team made while the page is open.
+    document.addEventListener('wr-teams-updated', e => { if (e.detail && Array.isArray(e.detail.teams)) { setTeams(e.detail.teams); teamsSig = ''; refresh(); } });
+
+    // ── go ───────────────────────────────────────────────────────────────────
+    setTeams(typeof WR_TEAMS_AT_LOAD !== 'undefined' ? WR_TEAMS_AT_LOAD : []);
+    setTab(state.tab);
+    refresh();
+    fit();
+    // The hero above it settles after fonts and badges load.
+    setTimeout(fit, 400);
+    setTimeout(fit, 1500);
+    // A freshly built layout needs one more look at the map's size.
+    setTimeout(() => { if (typeof map !== 'undefined' && map) map.invalidateSize(); }, 200);
+})();
