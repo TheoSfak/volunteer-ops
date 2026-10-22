@@ -198,6 +198,21 @@ final class WarRoomConsoleTest extends TestCase
         $this->assertStringContainsString('taskBox.value = bodyDraft.task', $fn);
     }
 
+    public function testAnAreaIsNeverCalledASectorOnItsSaveButton(): void
+    {
+        $page = $this->source('war-room.php');
+        $lang = $this->source('includes/lang/war-room.php');
+        // «Αποθήκευση Τομέα» sat on the buttons that save an AREA (and a restricted area), so the
+        // area and the sector read as the same thing. Each window now has its own text.
+        $this->assertStringNotContainsString("t('sector.save_btn')", $page);
+        $this->assertMatchesRegularExpression('/id="areaSendBtn"[^>]*>.*?t\(\'sector\.area_save_btn\'\)/', $page);
+        $this->assertMatchesRegularExpression('/id="restrictedAreaSendBtn"[^>]*>.*?t\(\'restricted_area\.save_btn\'\)/', $page);
+        $this->assertStringContainsString("'sector.area_save_btn' => 'Αποθήκευση Περιοχής'", $lang);
+        $this->assertStringNotContainsString("'sector.save_btn'", $lang);
+        $this->assertSame(2, substr_count($lang, "'sector.area_save_btn' =>"));
+        $this->assertSame(2, substr_count($lang, "'restricted_area.save_btn' =>"));
+    }
+
     public function testEveryNewConsoleStringExistsInBothLanguages(): void
     {
         $lang = $this->source('includes/lang/war-room.php');

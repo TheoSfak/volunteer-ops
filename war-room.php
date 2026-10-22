@@ -6208,7 +6208,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                     <span class="badge text-bg-dark align-self-center d-none" id="areaSizeReadout"></span>
                     <div class="ms-auto d-flex gap-2">
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="areaClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
-                        <button type="button" class="btn btn-success btn-sm" id="areaSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('sector.save_btn') ?></button>
+                        <button type="button" class="btn btn-success btn-sm" id="areaSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('sector.area_save_btn') ?></button>
                     </div>
                 </div>
                 <div class="small text-muted px-2 py-1 bg-light border-bottom" id="areaMapInstructions">
@@ -6241,7 +6241,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                     <span class="badge text-bg-dark align-self-center d-none" id="restrictedAreaSizeReadout"></span>
                     <div class="ms-auto d-flex gap-2">
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="restrictedAreaClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
-                        <button type="button" class="btn btn-danger btn-sm" id="restrictedAreaSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('sector.save_btn') ?></button>
+                        <button type="button" class="btn btn-danger btn-sm" id="restrictedAreaSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('restricted_area.save_btn') ?></button>
                     </div>
                 </div>
                 <div class="small text-muted px-2 py-1 bg-light border-bottom">
