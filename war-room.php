@@ -6771,6 +6771,9 @@ let pendingSplitSectorId = null;
 // label: string}.
 let pendingDispatchSeed = null;
 let pendingRouteSeed = null;
+// From the console's «Σχεδίασε τομέα»: {teamId, teamLabel, label}. The search-area window then draws a
+// SECTOR for that team - the area and the sector in one go - instead of only an area.
+let pendingAreaSeed = null;
 // Team assignment moved from the (now-removed) sector composer's own select
 // to a per-sector control in its popup/list row instead (see sectorAdminSetTeam
 // below) — needs the team roster available client-side for that <select>'s
@@ -25137,7 +25140,7 @@ function teamBoardItems(team) {
             : {state: t('teamboard.state.sent'), tone: 'new'};
         else s = {state: sec.status_label, tone: sec.status === 'needs_recheck' ? 'bad' : 'go'};
         const area = (areas || []).find(a => a.id === sec.area_id);
-        items.push(Object.assign({ref: 'sector:' + sec.id, kind: 'sector', detail: sec.label + (area ? ' — ' + area.label : ''), all: false}, s));
+        items.push(Object.assign({ref: 'sector:' + sec.id, kind: 'sector', detail: sec.label + (area && area.label !== sec.label ? ' — ' + area.label : ''), all: false}, s));
     });
     (routes || []).forEach(r => {
         if (Number(r.team_id) !== team.id || r.status !== 'active') return;
@@ -26995,6 +26998,11 @@ document.querySelectorAll('.team-form').forEach(form => {
     let isClosed = false;
     // Undo history: {type:'add'} | {type:'move', index, from} | {type:'close'}.
     let actionStack = [];
+    // Opened from the console's «Σχεδίασε τομέα»: a sector for this team, not just an area.
+    let activeSeed = null;
+    const titleEl = modalEl.querySelector('.modal-title');
+    const defaultTitleHtml = titleEl.innerHTML;
+    const defaultSendHtml = sendBtn.innerHTML;
 
     function vertexIcon() {
         return L.divIcon({className: '', html: '<div style="width:14px;height:14px;border-radius:50%;background:#fff;border:3px solid #495057;box-shadow:0 1px 3px #0006;"></div>', iconSize: [14, 14], iconAnchor: [7, 7]});
@@ -27144,6 +27152,14 @@ document.querySelectorAll('.team-form').forEach(form => {
             composerMap.on('click', onMapClick);
         }
         applyOrderMapView(composerMap);
+        // Consumed once, like the other seeds. A seed makes this a «send a sector to a team» window.
+        activeSeed = pendingAreaSeed;
+        pendingAreaSeed = null;
+        if (activeSeed) {
+            titleEl.innerHTML = '<i class="bi bi-bounding-box me-1"></i>' + escapeHtml(t('console.sector_draw_title', {team: activeSeed.teamLabel}));
+            sendBtn.innerHTML = '<i class="bi bi-send-fill me-1"></i>' + escapeHtml(t('console.sector_draw_send', {team: activeSeed.teamLabel}));
+            labelInput.value = activeSeed.label || '';
+        }
         renderAreaComposerContext();
         document.addEventListener('keydown', keydownHandler);
         setTimeout(() => composerMap.invalidateSize(), 100);
@@ -27155,6 +27171,9 @@ document.querySelectorAll('.team-form').forEach(form => {
         addressStatus.textContent = '';
         coordsInput.value = '';
         labelInput.value = '';
+        activeSeed = null;
+        titleEl.innerHTML = defaultTitleHtml;
+        sendBtn.innerHTML = defaultSendHtml;
         document.removeEventListener('keydown', keydownHandler);
     });
 
@@ -27180,20 +27199,40 @@ document.querySelectorAll('.team-form').forEach(form => {
             alert(t('sector.invalid_label'));
             return;
         }
+        const geo = JSON.stringify(drawPoints);
+        const seed = activeSeed;
         const data = new URLSearchParams({
             csrf_token: csrfToken, action: 'create_area', mission_id: <?= $missionId ?>,
-            geo: JSON.stringify(drawPoints), label: label,
+            geo: geo, label: label,
         });
         sendBtn.disabled = true;
+        const fail = message => { alert(message || t('common.send_failed')); sendBtn.disabled = false; };
         fetch('mission-sector.php', {method:'POST', body:data}).then(response => response.json()).then(result => {
-            if (result.ok) {
+            if (!result.ok) { fail(result.error); return; }
+            if (!seed) {
                 bootstrap.Modal.getInstance(modalEl).hide();
                 sectorRefreshAfter(result.sectors, result.areas);
-            } else {
-                alert(result.error || t('common.send_failed'));
-                sendBtn.disabled = false;
+                return;
             }
-        }).catch(() => { alert(t('common.send_failed')); sendBtn.disabled = false; });
+            // From the console: the area is the sector's own ground, so the sector is created on it
+            // right away, already given to the team (which tells the team). If that fails the area
+            // goes again, so a failed send leaves nothing behind to tidy up in Σχέδιο.
+            const sectorData = new URLSearchParams({
+                csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>,
+                area_id: result.id, label: label, geo: geo, team_id: seed.teamId,
+            });
+            return fetch('mission-sector.php', {method:'POST', body:sectorData}).then(response => response.json()).then(made => {
+                if (made.ok) {
+                    bootstrap.Modal.getInstance(modalEl).hide();
+                    sectorRefreshAfter(made.sectors, made.areas);
+                    document.dispatchEvent(new CustomEvent('wr-sector-sent', {detail: {label: label, teamId: seed.teamId}}));
+                    return;
+                }
+                const undo = new URLSearchParams({csrf_token: csrfToken, action: 'delete_area', mission_id: <?= $missionId ?>, id: result.id});
+                // delete_area answers only {ok}; the page never saw this area, so there is nothing to redraw.
+                return fetch('mission-sector.php', {method:'POST', body:undo}).catch(() => null).then(() => fail(made.error));
+            });
+        }).catch(() => fail());
     });
 })();
 

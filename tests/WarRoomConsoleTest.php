@@ -139,6 +139,32 @@ final class WarRoomConsoleTest extends TestCase
         $this->assertMatchesRegularExpression('/if \(isPost\(\) && post\(\'console_ajax\'\) === \'1\'\) \{\s+\$GLOBALS\[\'WR_JSON_REDIRECT\'\] = true;/', $page);
     }
 
+    public function testASectorCanBeDrawnForATeamWithoutLeavingTheConsole(): void
+    {
+        $page = $this->source('war-room.php');
+        $js = $this->source('assets/js/war-room-console.js');
+
+        // The seed the console fills and the search-area window consumes, declared once at the top level.
+        $this->assertSame(1, substr_count($page, 'let pendingAreaSeed = null;'));
+        $this->assertStringContainsString('pendingAreaSeed = {teamId: plan.teamId', $js);
+        $this->assertStringContainsString("getOrCreateInstance(document.getElementById('searchAreaMapModal')).show()", $js);
+
+        // The window: area first, then the sector on it WITH the team (which notifies the team) - and the
+        // area goes again if the sector fails, so a failed send leaves nothing behind.
+        $this->assertSame(1, substr_count($page, "activeSeed = pendingAreaSeed;"));
+        $this->assertStringContainsString('area_id: result.id, label: label, geo: geo, team_id: seed.teamId', $page);
+        $this->assertStringContainsString("action: 'delete_area'", $page);
+        // The console is told, to say what was sent.
+        $this->assertStringContainsString("new CustomEvent('wr-sector-sent'", $page);
+        $this->assertStringContainsString("document.addEventListener('wr-sector-sent'", $js);
+
+        // Both server actions it rides on exist and take what is sent.
+        $endpoint = $this->source('mission-sector.php');
+        foreach (["\$action === 'create_area'", "\$action === 'create'", "\$action === 'delete_area'"] as $needle) {
+            $this->assertStringContainsString($needle, $endpoint);
+        }
+    }
+
     /** The JSON redirect() printed, without the probe line the helper adds after it. */
     private function jsonLine(string $output): string
     {

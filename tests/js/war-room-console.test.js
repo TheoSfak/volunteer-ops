@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
 const {
     wrcStampKey, wrcSevRank, wrcOrderQueue, wrcSummarizeSelection,
     wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel,
-    wrcOrderProgress, wrcContactTone, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts,
+    wrcOrderProgress, wrcContactTone, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts, wrcNextSectorLabel,
     wrcUnreadKeys, wrcChatUnread,
     wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcClosingItems,
 } = require('../../assets/js/war-room-console.js');
@@ -322,4 +322,24 @@ test('wrcChatUnread: a room that appears later is new in full, and a deleted mes
 test('wrcChatUnread copes with no rooms at all', () => {
     assert.deepEqual(wrcChatUnread({}, {general: 2}, null), {seen: {}, byRoom: {}, total: 0});
     assert.deepEqual(wrcChatUnread(null, null, null), {seen: {}, byRoom: {}, total: 0});
+});
+
+// ── a sector drawn from the console ──────────────────────────────────────────
+
+test('wrcNextSectorLabel starts at Α and takes the first letter nobody has', () => {
+    assert.equal(wrcNextSectorLabel([], 'Τομέας'), 'Τομέας Α');
+    assert.equal(wrcNextSectorLabel(['Τομέας Α'], 'Τομέας'), 'Τομέας Β');
+    assert.equal(wrcNextSectorLabel(['Τομέας Α', 'Τομέας Γ'], 'Τομέας'), 'Τομέας Β', 'a gap is filled before the alphabet goes on');
+});
+
+test('wrcNextSectorLabel ignores other names, other cases and the automatic grid names Α1, Α2', () => {
+    assert.equal(wrcNextSectorLabel(['Τομέας Α1', 'Τομέας Α2', 'Βάση', 'Περιοχή Α'], 'Τομέας'), 'Τομέας Α');
+    assert.equal(wrcNextSectorLabel(['τομέας α'], 'Τομέας'), 'Τομέας Β');
+    assert.equal(wrcNextSectorLabel([null, undefined, ''], 'Τομέας'), 'Τομέας Α');
+});
+
+test('wrcNextSectorLabel goes on to numbers when the alphabet is used up', () => {
+    const letters = ['Α', 'Β', 'Γ', 'Δ', 'Ε', 'Ζ', 'Η', 'Θ', 'Ι', 'Κ', 'Λ', 'Μ', 'Ν', 'Ξ', 'Ο', 'Π', 'Ρ', 'Σ', 'Τ', 'Υ', 'Φ', 'Χ', 'Ψ', 'Ω'].map(l => 'Τομέας ' + l);
+    assert.equal(wrcNextSectorLabel(letters, 'Τομέας'), 'Τομέας 1');
+    assert.equal(wrcNextSectorLabel(letters.concat(['Τομέας 1', 'Τομέας 2']), 'Τομέας'), 'Τομέας 3');
 });

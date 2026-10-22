@@ -103,6 +103,26 @@ function wrcRouteSeedFor(summary) {
     return {crossTeam: true, memberIds: summary.chips.flatMap(c => c.ids)};
 }
 
+const WRC_GREEK_LETTERS = ['Α', 'Β', 'Γ', 'Δ', 'Ε', 'Ζ', 'Η', 'Θ', 'Ι', 'Κ', 'Λ', 'Μ', 'Ν', 'Ξ', 'Ο', 'Π', 'Ρ', 'Σ', 'Τ', 'Υ', 'Φ', 'Χ', 'Ψ', 'Ω'];
+
+/**
+ * The name a freshly drawn sector starts with: «Τομέας Α», then «Τομέας Β»... the first
+ * letter no existing sector already carries, and numbers once the alphabet is used up.
+ * `labels` are the sectors' names as they are; `prefix` is the word for «sector».
+ */
+function wrcNextSectorLabel(labels, prefix) {
+    const head = String(prefix).trim().toLowerCase() + ' ';
+    const used = new Set();
+    (labels || []).forEach(label => {
+        const text = String(label || '').trim();
+        if (text.toLowerCase().startsWith(head)) used.add(text.slice(head.length).trim().toUpperCase());
+    });
+    for (const letter of WRC_GREEK_LETTERS) if (!used.has(letter)) return prefix + ' ' + letter;
+    let n = 1;
+    while (used.has(String(n))) n++;
+    return prefix + ' ' + n;
+}
+
 /** One short phrase for the «Προς» line: «Alpha 1», «Alpha 1 · 2 από 4», «3 άτομα». */
 function wrcRecipientLabel(chip, ofWord) {
     return chip.whole ? chip.label : `${chip.label} · ${chip.count} ${ofWord} ${chip.size}`;
@@ -284,7 +304,7 @@ function wrcClosingItems(f) {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         wrcStampKey, wrcSevRank, wrcOrderQueue, wrcSummarizeSelection,
-        wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel,
+        wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel, wrcNextSectorLabel,
         wrcOrderProgress, wrcContactTone, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts,
         wrcUnreadKeys, wrcChatUnread,
         wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcClosingItems,
@@ -1323,11 +1343,16 @@ if (typeof module !== 'undefined' && module.exports) {
             const rest = page.sectors().filter(sec => !free.includes(sec));
             const opt = sec => `<option value="${esc(sec.id)}">${esc(sec.label)}${sec.team_id && sec.team_label ? ' — ' + esc(sec.team_label) : ''}</option>`;
             const one = plan.mode === 'team';
+            // A sector can be drawn right here, on the map, and goes straight to the team: nothing
+            // has to be made under Σχέδιο first. With sectors already there it is the second way.
+            const draw = `<button type="button" class="wrc-go${page.sectors().length ? ' wrc-go-alt' : ''}" id="wrcGoDrawSector"${one ? '' : ' disabled'}><i class="bi bi-bounding-box"></i>${esc(t('console.sector_draw_btn'))}</button>`;
             body.innerHTML = page.sectors().length
                 ? `<select class="wrc-in" id="wrcSectorPick" aria-label="${esc(t('console.verb_sector'))}">${free.map(opt).join('')}${rest.length ? '<option disabled>──────────</option>' + rest.map(opt).join('') : ''}</select>
                    <button type="button" class="wrc-go" id="wrcGoSector"${one ? '' : ' disabled'}><i class="bi bi-send-fill"></i>${esc(t('console.send'))}</button>
+                   ${draw}
                    <span class="${one ? 'wrc-mut' : 'wrc-need'}">${esc(one ? t('console.sector_help') : t('console.sector_needs_team'))}</span>`
-                : `<span class="wrc-mut">${esc(t('console.sector_none'))}</span>`;
+                : `${draw}
+                   <span class="${one ? 'wrc-mut' : 'wrc-need'}">${esc(one ? t('console.sector_none') : t('console.sector_needs_team'))}</span>`;
         } else if (state.verb === 'task') {
             body.innerHTML = `<input type="text" class="wrc-in wrc-grow" id="wrcTaskText" maxlength="500" placeholder="${esc(t('console.task_placeholder'))}" value="${esc(bodyDraft.task)}">
                 <button type="button" class="wrc-go" id="wrcGoTask"><i class="bi bi-send-fill"></i>${esc(t('console.send'))}</button>${need}`;
@@ -1375,6 +1400,12 @@ if (typeof module !== 'undefined' && module.exports) {
             pendingRouteSeed = Object.assign({points: [], label: '', closed: false},
                 wrcRouteSeedFor(s), {returnToStart: !!$('#wrcRouteReturn', root)?.checked});
             bootstrap.Modal.getOrCreateInstance(document.getElementById('routeComposerModal')).show();
+        } else if (go.id === 'wrcGoDrawSector') {
+            // The search-area window, as a «draw a sector for this team» window (see pendingAreaSeed).
+            if (plan.mode !== 'team') return;
+            const team = state.teams.find(tm => tm.id === plan.teamId);
+            pendingAreaSeed = {teamId: plan.teamId, teamLabel: team ? team.label : '', label: wrcNextSectorLabel(page.sectors().map(s => s.label), t('console.verb_sector'))};
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('searchAreaMapModal')).show();
         } else if (go.id === 'wrcGoSector') {
             const id = $('#wrcSectorPick', root).value;
             if (id && plan.mode === 'team') assignSector(id, plan.teamId, go);
@@ -1620,6 +1651,16 @@ if (typeof module !== 'undefined' && module.exports) {
         },
     };
 
+    // The search-area window drew a sector for a team and sent it.
+    document.addEventListener('wr-sector-sent', e => {
+        const sent = e.detail || {};
+        const team = state.teams.find(tm => tm.id === Number(sent.teamId));
+        if (team) state.ordersOpen.add(team.id);
+        teamsSig = '';
+        toast(t('console.sector_sent', {sector: sent.label || '', team: team ? team.label : ''}), 'ok');
+        if (typeof retryPollNow === 'function') retryPollNow();
+        refreshSoon();
+    });
     // A new team made while the page is open.
     document.addEventListener('wr-teams-updated', e => { if (e.detail && Array.isArray(e.detail.teams)) { setTeams(e.detail.teams); teamsSig = ''; refresh(); } });
 
