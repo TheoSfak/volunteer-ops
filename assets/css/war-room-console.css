@@ -230,6 +230,7 @@ body.wr-console-view #teamBoard { display: none !important; }
 .wrc-f.wrc-tone-bad .wrc-f-i { color: #a3231c; }
 .wrc-f.wrc-tone-warn .wrc-f-i { color: #8a5300; }
 .wrc-f-thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; flex: none; background: #e8ecf2; }
+.wrc-f-thumb.media-view-delegate { cursor: zoom-in; }
 .wrc-f-main { min-width: 0; flex: 1; }
 .wrc-f-h { display: flex; align-items: center; gap: 6px; font-size: .72rem; color: #55637a; }
 .wrc-f-who { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

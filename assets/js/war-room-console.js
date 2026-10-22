@@ -1541,12 +1541,18 @@ if (typeof module !== 'undefined' && module.exports) {
             key: 'photo:' + m.id, kind: 'photo', ts: wrcStampKey(m.time), icon: m.media_type === 'video' ? 'bi-camera-video' : 'bi-camera', tone: 'info',
             tag: t(m.media_type === 'video' ? 'console.f_video' : 'console.f_photo_one'), who: m.team_label || m.user_name, text: m.poi_note || m.user_name || '',
             when: m.time, lat: m.lat, lng: m.lng, card: 'mediaCard', thumb: m.has_thumb && !m.purged ? m.id : null,
+            thumbType: m.media_type, note: m.poi_note || '',
         }));
-        page.pois().forEach(p => items.push({
-            key: 'poi:' + p.id, kind: 'poi', ts: wrcStampKey(p.created_at), icon: 'bi-flag', tone: p.checked_at ? 'ok' : 'info',
-            tag: t('console.f_poi_one'), who: (p.reporter_names || []).join(', '), text: ((p.photos || [])[0] || {}).note || '',
-            when: p.created_at, lat: p.lat, lng: p.lng, card: 'poiListCard',
-        }));
+        page.pois().forEach(p => {
+            // The first photo that has a thumbnail stands for the point; clicking it opens that photo.
+            const shot = (p.photos || []).find(x => x.has_thumb) || null;
+            items.push({
+                key: 'poi:' + p.id, kind: 'poi', ts: wrcStampKey(p.created_at), icon: 'bi-flag', tone: p.checked_at ? 'ok' : 'info',
+                tag: t('console.f_poi_one'), who: (p.reporter_names || []).join(', '), text: ((p.photos || [])[0] || {}).note || '',
+                when: p.created_at, lat: p.lat, lng: p.lng, card: 'poiListCard',
+                thumb: shot ? shot.id : null, thumbType: shot ? shot.media_type : null, note: shot ? (shot.note || '') : '',
+            });
+        });
         return items.sort((a, b) => b.ts - a.ts);
     }
 
@@ -1635,14 +1641,14 @@ if (typeof module !== 'undefined' && module.exports) {
             chips.dataset.sig = chipSig;
             chips.innerHTML = FEED_FILTERS.map(([k, label]) => `<button type="button" class="wrc-chip${state.filter === k ? ' on' : ''}" data-filter="${k}">${esc(t(label))}<span class="wrc-chip-n">${all.filter(i => k === 'all' || i.kind === k).length}</span></button>`).join('');
         }
-        const sig = JSON.stringify(items.map(i => [i.kind, i.ts, i.text, i.who, i.when]));
+        const sig = JSON.stringify(items.map(i => [i.kind, i.ts, i.text, i.who, i.when, i.thumb]));
         if (sig === feedSig) return;
         feedSig = sig;
         const feed = $('#wrcFeed', root);
         feed._items = items;
         feed.innerHTML = items.length ? items.map((i, n) => `
             <div class="wrc-f wrc-tone-${esc(i.tone)}" data-f="${n}">
-                ${i.thumb ? `<img class="wrc-f-thumb" loading="lazy" alt="" src="mission-photo-view.php?id=${esc(i.thumb)}&thumb=1">` : `<i class="bi ${esc(i.icon)} wrc-f-i"></i>`}
+                ${i.thumb ? `<img class="wrc-f-thumb media-view-delegate" loading="lazy" alt="" src="mission-photo-view.php?id=${esc(i.thumb)}&thumb=1" data-id="${esc(i.thumb)}" data-media-type="${esc(i.thumbType || 'photo')}" data-note="${esc(i.note || '')}" data-meta="${esc([i.who, i.when].filter(Boolean).join(' \u00b7 '))}">` : `<i class="bi ${esc(i.icon)} wrc-f-i"></i>`}
                 <div class="wrc-f-main">
                     <div class="wrc-f-h"><span class="wrc-tag">${esc(i.tag)}</span><span class="wrc-f-who">${esc(i.who || '')}</span><span class="wrc-f-t num">${esc(i.when || '')}</span></div>
                     <div class="wrc-f-x">${esc(i.text)}</div>

@@ -14182,6 +14182,16 @@ function openMediaViewModal(id, mediaType, context) {
 document.getElementById('mediaViewModal').addEventListener('hidden.bs.modal', () => {
     document.getElementById('mediaViewModalBody').innerHTML = '';
 });
+// Any thumbnail marked .media-view-delegate (data-id, data-media-type, optional data-note/data-meta)
+// opens the lightbox. Wired once here and not per list: the Points of Interest list, the console's
+// feed and a route point's photo each had a thumbnail that looked clickable and did nothing, because
+// each list had to remember to attach its own handler. Capture phase, because a Leaflet popup stops
+// clicks from bubbling out of itself.
+document.addEventListener('click', e => {
+    const el = e.target && e.target.closest ? e.target.closest('.media-view-delegate') : null;
+    if (!el) return;
+    openMediaViewModal(el.dataset.id, el.dataset.mediaType, {note: el.dataset.note, meta: el.dataset.meta});
+}, true);
 
 // ── "Οι Εντολές μου" — one inbox for everything asked of this volunteer ─────
 // This card used to list mission_orders rows only, which left three of the
@@ -16816,8 +16826,8 @@ function renderRouteWaypointClosed(wp) {
     }
     const mediaHtml = (wp.photo || wp.video)
         ? `<div class="d-flex gap-2 mt-1">
-            ${wp.photo ? `<img src="mission-photo-view.php?id=${wp.photo.id}&thumb=1" style="max-height:70px;border-radius:4px;">` : ''}
-            ${wp.video ? `<video src="mission-photo-view.php?id=${wp.video.id}" style="max-height:70px;border-radius:4px;" muted${wp.video.has_thumb ? ` poster="mission-photo-view.php?id=${wp.video.id}&thumb=1"` : ''}></video>` : ''}
+            ${wp.photo ? `<img src="mission-photo-view.php?id=${wp.photo.id}&thumb=1" class="media-view-delegate" data-id="${wp.photo.id}" data-media-type="photo" style="max-height:70px;border-radius:4px;cursor:pointer;">` : ''}
+            ${wp.video ? `<video src="mission-photo-view.php?id=${wp.video.id}" class="media-view-delegate" data-id="${wp.video.id}" data-media-type="video" style="max-height:70px;border-radius:4px;cursor:pointer;" muted${wp.video.has_thumb ? ` poster="mission-photo-view.php?id=${wp.video.id}&thumb=1"` : ''}></video>` : ''}
           </div>`
         : '';
     const distanceHtml = routeDistanceBadgeHtml(wp);
@@ -18529,8 +18539,8 @@ function renderPointsOfInterest(items) {
             ? t('poi.reported_by_multiple', {count: String(p.reporter_names.length), names: p.reporter_names.map(escapeHtml).join(', ')})
             : t('poi.reported_by_one', {name: escapeHtml(p.reporter_names[0] || '—')});
         const thumbs = p.photos.map(photo => photo.media_type === 'video'
-            ? `<video src="mission-photo-view.php?id=${photo.id}" class="media-view-trigger" data-id="${photo.id}" data-media-type="video" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;background:#000;" title="${escapeHtml(photo.reporter_name)} · ${photo.time}" preload="metadata"${photo.has_thumb ? ` poster="mission-photo-view.php?id=${photo.id}&thumb=1"` : ''}></video>`
-            : `<img src="mission-photo-view.php?id=${photo.id}&thumb=1" class="media-view-trigger" data-id="${photo.id}" data-media-type="photo" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;" title="${escapeHtml(photo.reporter_name)} · ${photo.time}">`
+            ? `<video src="mission-photo-view.php?id=${photo.id}" class="media-view-delegate" data-id="${photo.id}" data-media-type="video" data-note="${escapeHtml(photo.note || '')}" data-meta="${escapeHtml([photo.reporter_name, photo.time].filter(Boolean).join(' \u00b7 '))}" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;background:#000;" title="${escapeHtml(photo.reporter_name)} · ${photo.time}" preload="metadata"${photo.has_thumb ? ` poster="mission-photo-view.php?id=${photo.id}&thumb=1"` : ''}></video>`
+            : `<img src="mission-photo-view.php?id=${photo.id}&thumb=1" class="media-view-delegate" data-id="${photo.id}" data-media-type="photo" data-note="${escapeHtml(photo.note || '')}" data-meta="${escapeHtml([photo.reporter_name, photo.time].filter(Boolean).join(' \u00b7 '))}" style="width:56px;height:56px;object-fit:cover;border-radius:6px;cursor:pointer;" title="${escapeHtml(photo.reporter_name)} · ${photo.time}">`
         ).join('');
         // One line per note, attributed — a merged POI can have a note from
         // each reporter (e.g. one says "found a shoe", another adds "there's
