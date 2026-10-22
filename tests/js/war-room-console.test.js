@@ -11,6 +11,8 @@ const assert = require('node:assert/strict');
 const {
     wrcStampKey, wrcSevRank, wrcOrderQueue, wrcSummarizeSelection,
     wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel,
+    wrcOrderProgress, wrcContactTone, wrcTeamBadge,
+    wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcClosingItems,
 } = require('../../assets/js/war-room-console.js');
 
 const teams = [
@@ -97,4 +99,113 @@ test('wrcRecipientLabel names a whole team plainly and part of one with its size
     const [part, whole] = wrcSummarizeSelection(teams, new Set([11, 12, 21, 22])).chips;
     assert.equal(wrcRecipientLabel(part, 'από'), 'Alpha 1 · 2 από 4');
     assert.equal(wrcRecipientLabel(whole, 'από'), 'Bravo 2');
+});
+
+// ── the team avatars ─────────────────────────────────────────────────────────
+
+test('wrcOrderProgress: a dispatch moves from sent, to under way, to arrived', () => {
+    const p = o => wrcOrderProgress(Object.assign({type: 'dispatch'}, o));
+    assert.ok(p({}) > 0, 'a sent order still shows a sliver of ring');
+    assert.ok(p({departed: true}) > p({}));
+    assert.ok(p({departed: true, arrived: true}) > p({departed: true}));
+    // arriving without ever pressing «Ξεκινάω» still counts as arrived
+    assert.equal(p({arrived: true}), p({departed: true, arrived: true}));
+});
+
+test('wrcOrderProgress: a sector goes sent, received, under way, working; a lost one shows nothing', () => {
+    const s = (status, acked) => wrcOrderProgress({type: 'sector', status, acked});
+    assert.ok(s('assigned', true) > s('assigned', false));
+    assert.ok(s('en_route') > s('assigned', true));
+    assert.ok(s('in_progress') > s('en_route'));
+    assert.equal(s('needs_recheck'), s('in_progress'));
+    assert.equal(s('not_started'), 0);
+    assert.equal(s('something-new'), 0);
+});
+
+test('wrcOrderProgress: a route is the share of its points done, never an empty ring', () => {
+    const r = (done, total) => wrcOrderProgress({type: 'route', done, total});
+    assert.equal(r(2, 4), 0.5);
+    assert.equal(r(0, 4), 0.1);
+    assert.equal(r(4, 4), 1);
+    assert.equal(r(0, 0), 0.1);
+    assert.equal(r(9, 4), 1, 'more done than points never overshoots the ring');
+});
+
+test('wrcOrderProgress: nothing, or something it does not know, is an empty ring', () => {
+    assert.equal(wrcOrderProgress(null), 0);
+    assert.equal(wrcOrderProgress({type: 'mystery'}), 0);
+});
+
+test('wrcContactTone: nobody, everybody, some, none', () => {
+    assert.equal(wrcContactTone(0, 0), 'none');
+    assert.equal(wrcContactTone(4, 0), 'ok');
+    assert.equal(wrcContactTone(4, 1), 'warn');
+    assert.equal(wrcContactTone(4, 4), 'bad');
+    assert.equal(wrcContactTone(1, 1), 'bad');
+});
+
+test('wrcTeamBadge shows the worst thing only, and nothing for a quiet team', () => {
+    assert.equal(wrcTeamBadge({sos: 0, needsHelp: 0, blocked: 0, orders: 0}), null);
+    assert.equal(wrcTeamBadge({sos: 0, needsHelp: 0, blocked: 0, orders: 1}), null);
+    assert.deepEqual(wrcTeamBadge({sos: 0, needsHelp: 0, blocked: 0, orders: 3}), {kind: 'more', tone: 'info', text: '+2'});
+    assert.deepEqual(wrcTeamBadge({sos: 0, needsHelp: 0, blocked: 1, orders: 3}), {kind: 'blocked', tone: 'warn', text: '!'});
+    assert.equal(wrcTeamBadge({sos: 0, needsHelp: 2, blocked: 1, orders: 3}).kind, 'help');
+    assert.equal(wrcTeamBadge({sos: 1, needsHelp: 2, blocked: 1, orders: 3}).kind, 'sos');
+});
+
+// ── the phases ───────────────────────────────────────────────────────────────
+
+test('wrcNormalizePhase falls back to live for anything it does not know', () => {
+    assert.deepEqual(['prep', 'live', 'close'].map(wrcNormalizePhase), ['prep', 'live', 'close']);
+    assert.equal(wrcNormalizePhase('archive'), 'live');
+    assert.equal(wrcNormalizePhase(null), 'live');
+    assert.equal(wrcNormalizePhase(undefined), 'live');
+});
+
+test('wrcPhasePreset: preparation opens the plan, live the feed with the order form, closing the feed', () => {
+    assert.deepEqual(wrcPhasePreset('prep'), {tab: 'plan', sections: ['teams', 'areas'], composer: false});
+    assert.deepEqual(wrcPhasePreset('live'), {tab: 'feed', sections: [], composer: true});
+    assert.deepEqual(wrcPhasePreset('close'), {tab: 'feed', sections: ['mission'], composer: false});
+    assert.deepEqual(wrcPhasePreset('x'), wrcPhasePreset('live'));
+});
+
+const readyFacts = {teams: 3, people: 12, noGps: 0, sectors: 4, sectorsFree: 0, stale: 0};
+
+test('wrcReadiness: a mission with everything in place is ready', () => {
+    const r = wrcReadiness(readyFacts);
+    assert.equal(r.ready, true);
+    assert.equal(r.open, 0);
+    assert.deepEqual(r.rows.map(x => x.key), ['teams', 'gps', 'sectors', 'assigned', 'contact']);
+    assert.ok(r.rows.every(x => x.tone === 'ok'));
+});
+
+test('wrcReadiness: no teams is bad, the rest are warnings, and each says what it is about', () => {
+    const r = wrcReadiness({teams: 0, people: 0, noGps: 0, sectors: 0, sectorsFree: 0, stale: 0});
+    assert.equal(r.ready, false);
+    assert.equal(r.rows.find(x => x.key === 'teams').tone, 'bad');
+    assert.equal(r.rows.find(x => x.key === 'sectors').tone, 'warn');
+    // with no sectors there is nothing to assign: that row is left out, not failed
+    assert.equal(r.rows.find(x => x.key === 'assigned'), undefined);
+    assert.equal(r.open, 2);
+});
+
+test('wrcReadiness: unassigned sectors, silent people and people outside GPS each count', () => {
+    const r = wrcReadiness({teams: 2, people: 10, noGps: 3, sectors: 5, sectorsFree: 2, stale: 4});
+    assert.deepEqual(r.rows.map(x => [x.key, x.tone]), [['teams', 'ok'], ['gps', 'warn'], ['sectors', 'ok'], ['assigned', 'warn'], ['contact', 'warn']]);
+    assert.equal(r.open, 3);
+    const assigned = r.rows.find(x => x.key === 'assigned');
+    assert.deepEqual([assigned.n, assigned.of], [3, 5], 'three of five sectors have a team');
+    assert.deepEqual([r.rows.find(x => x.key === 'gps').n, r.rows.find(x => x.key === 'gps').of], [3, 10]);
+});
+
+test('wrcReadiness names the card each row leads to', () => {
+    wrcReadiness(readyFacts).rows.forEach(x => assert.match(x.card, /Card$/));
+});
+
+test('wrcClosingItems lists only what is open, worst first', () => {
+    assert.deepEqual(wrcClosingItems({sos: 0, incidents: 0, shortages: 0, orders: 0, sectorsOpen: 0, overdue: 0}), []);
+    const items = wrcClosingItems({sos: 1, incidents: 2, shortages: 0, orders: 3, sectorsOpen: 4, overdue: 1});
+    assert.deepEqual(items.map(x => [x.key, x.n, x.tone]), [
+        ['sos', 1, 'bad'], ['orders', 3, 'warn'], ['sectors', 4, 'warn'], ['incidents', 2, 'warn'], ['overdue', 1, 'warn'],
+    ]);
 });

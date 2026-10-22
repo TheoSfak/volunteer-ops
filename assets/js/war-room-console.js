@@ -108,10 +108,113 @@ function wrcRecipientLabel(chip, ofWord) {
     return chip.whole ? chip.label : `${chip.label} · ${chip.count} ${ofWord} ${chip.size}`;
 }
 
+// ── the team avatars: a ring, a contact dot, a badge ─────────────────────────
+
+/**
+ * How far along an order is, 0..1 - the arc of the ring around a team's avatar.
+ * The descriptor is what the page knows of the order, not the order itself:
+ *   {type: 'dispatch', departed, arrived}   «Ξεκινάω» / «Έφτασα» were pressed
+ *   {type: 'sector', status, acked}         the sector's status and whether it was received
+ *   {type: 'route', done, total}            waypoints finished of all
+ * (Finished orders never reach here: the team board leaves them out.)
+ */
+const WRC_SECTOR_STAGE = {en_route: 0.45, in_progress: 0.7, needs_recheck: 0.7};
+
+function wrcOrderProgress(o) {
+    if (!o) return 0;
+    if (o.type === 'dispatch') return o.arrived ? 0.85 : (o.departed ? 0.5 : 0.1);
+    if (o.type === 'sector') {
+        if (o.status === 'assigned') return o.acked ? 0.25 : 0.1;
+        return Object.prototype.hasOwnProperty.call(WRC_SECTOR_STAGE, o.status) ? WRC_SECTOR_STAGE[o.status] : 0;
+    }
+    if (o.type === 'route') {
+        const total = Number(o.total) || 0;
+        if (total <= 0) return 0.1;
+        return Math.min(1, Math.max(0.1, (Number(o.done) || 0) / total));
+    }
+    return 0;
+}
+
+/** none: nobody on the team; ok: everyone reachable; warn: some silent; bad: all of them silent. */
+function wrcContactTone(total, stale) {
+    if (!(total > 0)) return 'none';
+    if (!(stale > 0)) return 'ok';
+    return stale >= total ? 'bad' : 'warn';
+}
+
+/**
+ * The one thing worth a badge on a team's avatar, worst first:
+ * {sos, needsHelp, blocked, orders} -> {kind, tone, text} or null.
+ *   sos / help   someone on the team needs help now
+ *   blocked      the team said «Δεν μπορώ», or stands at a locked route point
+ *   more         it has more than one order running
+ */
+function wrcTeamBadge(f) {
+    if (f.sos > 0) return {kind: 'sos', tone: 'bad', text: '!'};
+    if (f.needsHelp > 0) return {kind: 'help', tone: 'bad', text: '!'};
+    if (f.blocked > 0) return {kind: 'blocked', tone: 'warn', text: '!'};
+    if (f.orders > 1) return {kind: 'more', tone: 'info', text: '+' + (f.orders - 1)};
+    return null;
+}
+
+// ── the phases: preparation, live, closing ───────────────────────────────────
+
+const WRC_PHASES = ['prep', 'live', 'close'];
+
+function wrcNormalizePhase(value) {
+    return WRC_PHASES.includes(value) ? value : 'live';
+}
+
+/** Where the dock opens, and which plan sections come open, when a phase begins. */
+function wrcPhasePreset(phase) {
+    switch (wrcNormalizePhase(phase)) {
+        case 'prep': return {tab: 'plan', sections: ['teams', 'areas'], composer: false};
+        case 'close': return {tab: 'feed', sections: ['mission'], composer: false};
+        default: return {tab: 'feed', sections: [], composer: true};
+    }
+}
+
+/**
+ * «Είμαστε έτοιμοι;» - what has to be true before the mission goes live.
+ * facts: {teams, people, noGps, sectors, sectorsFree, stale}
+ * -> rows {key, tone, n, of} in the order they should be fixed in; tone is
+ * ok / warn / bad, and `ready` is true only when nothing is wrong.
+ */
+function wrcReadiness(f) {
+    const rows = [
+        {key: 'teams', tone: f.teams > 0 ? 'ok' : 'bad', n: f.teams, of: 0, card: 'teamsCard'},
+        {key: 'gps', tone: f.noGps > 0 ? 'warn' : 'ok', n: f.noGps, of: f.people, card: 'participantsCard'},
+        {key: 'sectors', tone: f.sectors > 0 ? 'ok' : 'warn', n: f.sectors, of: 0, card: 'sectorsCard'},
+        {key: 'assigned', tone: f.sectorsFree > 0 ? 'warn' : 'ok', n: f.sectors - f.sectorsFree, of: f.sectors, card: 'sectorsListCard'},
+        {key: 'contact', tone: f.stale > 0 ? 'warn' : 'ok', n: f.stale, of: f.people, card: 'participantsCard'},
+    ];
+    // Sectors that are not there cannot be assigned: that row has nothing to say.
+    const shown = rows.filter(r => !(r.key === 'assigned' && f.sectors === 0));
+    return {rows: shown, ready: shown.every(r => r.tone === 'ok'), open: shown.filter(r => r.tone !== 'ok').length};
+}
+
+/**
+ * «Τι μένει ανοιχτό» before closing: only the things that are open, worst first.
+ * facts: {sos, incidents, shortages, orders, sectorsOpen, overdue}
+ */
+function wrcClosingItems(f) {
+    const all = [
+        {key: 'sos', n: f.sos, tone: 'bad'},
+        {key: 'orders', n: f.orders, tone: 'warn'},
+        {key: 'sectors', n: f.sectorsOpen, tone: 'warn'},
+        {key: 'incidents', n: f.incidents, tone: 'warn'},
+        {key: 'shortages', n: f.shortages, tone: 'warn'},
+        {key: 'overdue', n: f.overdue, tone: 'warn'},
+    ];
+    return all.filter(r => r.n > 0);
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         wrcStampKey, wrcSevRank, wrcOrderQueue, wrcSummarizeSelection,
         wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel,
+        wrcOrderProgress, wrcContactTone, wrcTeamBadge,
+        wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcClosingItems,
     };
 }
 
@@ -141,11 +244,15 @@ if (typeof module !== 'undefined' && module.exports) {
         pois: () => (typeof pointsOfInterest !== 'undefined' && Array.isArray(pointsOfInterest)) ? pointsOfInterest : [],
         media: () => (typeof media !== 'undefined' && Array.isArray(media)) ? media : [],
         sectors: () => (typeof sectors !== 'undefined' && Array.isArray(sectors)) ? sectors : [],
+        dispatches: () => (typeof dispatches !== 'undefined' && Array.isArray(dispatches)) ? dispatches : [],
+        routes: () => (typeof routes !== 'undefined' && Array.isArray(routes)) ? routes : [],
         assistant: () => (typeof assistantData !== 'undefined') ? assistantData : null,
     };
 
+    const startPhase = wrcNormalizePhase(load('phase', 'live'));
     const state = {
-        tab: load('tab', 'feed'),
+        phase: startPhase,         // prep / live / close: how the console is composed
+        tab: load('tab-' + startPhase, wrcPhasePreset(startPhase).tab),
         filter: 'all',
         open: new Set(),           // team ids whose member list is open
         selected: new Set(),       // user ids the next order goes to
@@ -164,6 +271,7 @@ if (typeof module !== 'undefined' && module.exports) {
 
     root.innerHTML = `
         <div class="wrc-left">
+            <section class="wrc-sec wrc-phase-panel" id="wrcPhasePanel"></section>
             <section class="wrc-sec wrc-queue" id="wrcQueue">
                 <header class="wrc-sec-h"><i class="bi bi-bell-fill"></i><span class="wrc-h">${esc(t('console.queue_title'))}</span><span class="wrc-cnt" id="wrcQueueCnt">0</span></header>
                 <div class="wrc-queue-body" id="wrcQueueBody"></div>
@@ -253,12 +361,10 @@ if (typeof module !== 'undefined' && module.exports) {
         hero.insertBefore(menuBtn, hero.firstChild);
     }
 
-    // ── the counters, in the hero: the whole mission in one glance ───────────
+    // ── the counters: the whole mission in one glance (they sit in the phase bar below) ──
     const kpiBox = document.createElement('div');
     kpiBox.className = 'wrc-kpis';
     kpiBox.id = 'wrcKpis';
-    const heroTitleBlock = hero ? $('div.d-flex', hero) : null;
-    if (hero) hero.insertBefore(kpiBox, heroTitleBlock ? heroTitleBlock.nextSibling : null);
 
     function kpiData() {
         const a = page.assistant();
@@ -284,19 +390,166 @@ if (typeof module !== 'undefined' && module.exports) {
         kpiBox.innerHTML = data.map(d => `<button type="button" class="wrc-kpi${d.n && d.tone ? ' wrc-kpi-' + d.tone : ''}" data-kpi="${esc(d.k)}"${d.go ? ` data-go="${esc(d.go)}"` : ''}${d.filter ? ` data-filter-to="${esc(d.filter)}"` : ''}${d.card ? ` data-card="${esc(d.card)}"` : ''}>
             <span class="wrc-kpi-l">${esc(d.label)}</span><b class="num">${d.n}</b></button>`).join('');
     }
+    /** Where a counter or a checklist row leads: a flash on a region, a feed filter, or a card. */
+    function jump(ds) {
+        if (ds.go) {
+            const region = $(ds.go === 'teams' ? '#wrcTeams' : '#wrcQueue', root);
+            region.classList.remove('wrc-flash'); void region.offsetWidth; region.classList.add('wrc-flash');
+        } else if (ds.filterTo) {
+            state.filter = ds.filterTo; feedSig = ''; $('#wrcFeedChips', root).dataset.sig = '';
+            setTab('feed'); renderFeed();
+        } else if (ds.card) {
+            reveal(ds.card);
+            if (typeof scrollToCard === 'function') scrollToCard(ds.card);
+        }
+    }
     kpiBox.addEventListener('click', e => {
         const b = e.target.closest('.wrc-kpi');
-        if (!b) return;
-        if (b.dataset.go === 'queue') {
-            const q = $('#wrcQueue', root);
-            q.classList.remove('wrc-flash'); void q.offsetWidth; q.classList.add('wrc-flash');
-        } else if (b.dataset.filterTo) {
-            state.filter = b.dataset.filterTo; feedSig = ''; $('#wrcFeedChips', root).dataset.sig = '';
-            setTab('feed'); renderFeed();
-        } else if (b.dataset.card) {
-            reveal(b.dataset.card);
-            if (typeof scrollToCard === 'function') scrollToCard(b.dataset.card);
+        if (b) jump(b.dataset);
+    });
+
+    // ── the phases: one console, composed for what the mission is doing ──────
+    // Preparation puts the checklist and the plan in front; live is the cockpit;
+    // closing lists what is still open. It only changes what is shown (and where
+    // the dock opens): nothing about the mission itself, and nothing is removed.
+    const PHASE_META = {
+        prep: ['bi-clipboard-check', 'console.phase_prep', 'console.phase_prep_hint'],
+        live: ['bi-broadcast', 'console.phase_live', 'console.phase_live_hint'],
+        close: ['bi-flag-fill', 'console.phase_close', 'console.phase_close_hint'],
+    };
+    const bar = document.createElement('div');
+    bar.className = 'wrc-bar';
+    bar.id = 'wrcBar';
+    bar.innerHTML = `<div class="wrc-phases" role="tablist" id="wrcPhases" aria-label="${esc(t('console.phase_aria'))}">${WRC_PHASES.map(p =>
+        `<button type="button" role="tab" class="wrc-phase" data-phase="${p}"><i class="bi ${PHASE_META[p][0]}"></i><span>${esc(t(PHASE_META[p][1]))}</span>${p === 'close' ? '<span class="wrc-cnt bad d-none" id="wrcCloseCnt"></span>' : ''}</button>`).join('')}</div>
+        <span class="wrc-bar-hint" id="wrcPhaseHint"></span>`;
+    bar.appendChild(kpiBox);
+    root.parentNode.insertBefore(bar, root);
+
+    const CHECK_TEXT = {
+        teams: ['console.chk_teams_ok', 'console.chk_teams_bad'],
+        gps: ['console.chk_gps_ok', 'console.chk_gps_warn'],
+        sectors: ['console.chk_sectors_ok', 'console.chk_sectors_warn'],
+        assigned: ['console.chk_assigned_ok', 'console.chk_assigned_warn'],
+        contact: ['console.chk_contact_ok', 'console.chk_contact_warn'],
+    };
+    const CLOSE_TEXT = {
+        sos: 'console.chk_close_sos', orders: 'console.chk_close_orders', sectors: 'console.chk_close_sectors',
+        incidents: 'console.chk_close_incidents', shortages: 'console.chk_close_shortages', overdue: 'console.chk_close_overdue',
+    };
+    const CLOSE_GO = {
+        sos: {go: 'queue'}, orders: {go: 'teams'}, sectors: {card: 'sectorsListCard'},
+        incidents: {filterTo: 'incident'}, shortages: {filterTo: 'shortage'}, overdue: {go: 'queue'},
+    };
+    const CHECK_ICON = {ok: 'bi-check-circle-fill', warn: 'bi-exclamation-triangle-fill', bad: 'bi-x-circle-fill'};
+
+    function readinessFacts() {
+        const members = state.teams.flatMap(tm => tm.members || []);
+        const secs = page.sectors();
+        return {
+            teams: state.teams.length, people: members.length,
+            noGps: members.filter(m => !m.takes_part).length,
+            sectors: secs.length, sectorsFree: secs.filter(sec => !sec.team_id).length,
+            stale: members.filter(m => isStale(m.user_id)).length,
+        };
+    }
+    function closingFacts() {
+        const board = (typeof teamBoardItems === 'function') ? teamBoardItems : () => [];
+        const a = page.assistant();
+        // One order to every team is one order, not one per team; and a sector is
+        // an order too, but it is counted once, as a sector.
+        const orders = new Set();
+        state.teams.forEach(tm => board({id: tm.id, label: tm.label, color: tm.color}).forEach(i => { if (i.kind !== 'sector') orders.add(i.ref); }));
+        return {
+            sos: page.sos().length,
+            incidents: page.incidents().filter(r => !r.resolved_at).length,
+            shortages: page.shortages().filter(r => !r.resolved_at).length,
+            orders: orders.size,
+            sectorsOpen: page.sectors().filter(sec => ['assigned', 'en_route', 'in_progress', 'needs_recheck'].includes(sec.status)).length,
+            overdue: (a && a.counts && a.counts.overdue) || 0,
+        };
+    }
+
+    function checkRow(tone, text, jumpTo) {
+        const attrs = jumpTo.go ? ` data-go="${esc(jumpTo.go)}"` : jumpTo.filterTo ? ` data-filter-to="${esc(jumpTo.filterTo)}"` : jumpTo.card ? ` data-card="${esc(jumpTo.card)}"` : '';
+        return `<button type="button" class="wrc-check wrc-check-${tone}"${attrs}><i class="bi ${CHECK_ICON[tone]}"></i><span>${esc(text)}</span></button>`;
+    }
+
+    let phaseSig = '';
+    function renderPhase() {
+        const closing = wrcClosingItems(closingFacts());
+        const closeCnt = $('#wrcCloseCnt', bar);
+        closeCnt.textContent = String(closing.length);
+        closeCnt.classList.toggle('d-none', closing.length === 0);
+        if (state.phase === 'live') { phaseSig = ''; return; }
+
+        const panel = $('#wrcPhasePanel', root);
+        let sig, html;
+        if (state.phase === 'prep') {
+            const r = wrcReadiness(readinessFacts());
+            sig = JSON.stringify(['prep', r.rows.map(x => [x.key, x.tone, x.n, x.of])]);
+            if (sig === phaseSig) return;
+            html = `<header class="wrc-sec-h"><i class="bi bi-clipboard-check"></i><span class="wrc-h">${esc(t('console.panel_prep'))}</span>
+                    <span class="wrc-cnt ${r.ready ? 'ok' : 'bad'}">${r.rows.length - r.open}/${r.rows.length}</span></header>
+                <div class="wrc-checks">${r.rows.map(x => checkRow(x.tone, t(CHECK_TEXT[x.key][x.tone === 'ok' ? 0 : 1], {n: x.n, of: x.of}), {card: x.card})).join('')}</div>
+                <div class="wrc-phase-cta"><button type="button" class="wrc-go" data-phase-go="live"><i class="bi bi-broadcast"></i>${esc(t('console.cta_live'))}</button></div>`;
+        } else {
+            sig = JSON.stringify(['close', closing.map(x => [x.key, x.n]), !!cardNode('endMissionCard')]);
+            if (sig === phaseSig) return;
+            html = `<header class="wrc-sec-h"><i class="bi bi-flag-fill"></i><span class="wrc-h">${esc(t('console.panel_close'))}</span>
+                    <span class="wrc-cnt ${closing.length ? 'bad' : 'ok'}">${closing.length}</span></header>
+                <div class="wrc-checks">${closing.length
+                    ? closing.map(x => checkRow(x.tone, t(CLOSE_TEXT[x.key], {n: x.n}), CLOSE_GO[x.key])).join('')
+                    : `<div class="wrc-calm"><i class="bi bi-check2-circle"></i>${esc(t('console.close_clear'))}</div>`}</div>
+                ${cardNode('endMissionCard') ? `<div class="wrc-phase-cta"><button type="button" class="wrc-go" data-phase-go="end"><i class="bi bi-flag-fill"></i>${esc(t('console.cta_close'))}</button></div>` : ''}`;
         }
+        phaseSig = sig;
+        panel.innerHTML = html;
+    }
+    $('#wrcPhasePanel', root).addEventListener('click', e => {
+        const go = e.target.closest('[data-phase-go]');
+        if (go) {
+            if (go.dataset.phaseGo === 'live') setPhase('live', true);
+            else if (cardNode('endMissionCard')) { reveal('endMissionCard'); if (typeof scrollToCard === 'function') scrollToCard('endMissionCard'); }
+            return;
+        }
+        const row = e.target.closest('.wrc-check');
+        if (row) jump(row.dataset);
+    });
+
+    function openSection(key) {
+        const sec = $('.wrc-acc[data-sec="' + key + '"]', root);
+        if (!sec || sec.classList.contains('open')) return;
+        sec.classList.add('open');
+        state.sections.add(key);
+        save('sections', Array.from(state.sections).join(','));
+    }
+    /**
+     * Switching phase by hand also sets the dock the way the phase wants it - the
+     * tab last used in that phase, or its default - and opens the plan sections it
+     * works with. Opening the page in a phase restores what was left, untouched.
+     */
+    function setPhase(phase, byHand) {
+        phase = wrcNormalizePhase(phase);
+        const changed = phase !== state.phase;
+        state.phase = phase;
+        save('phase', phase);
+        root.dataset.phase = phase;
+        $$('#wrcPhases .wrc-phase', bar).forEach(b => b.setAttribute('aria-selected', b.dataset.phase === phase ? 'true' : 'false'));
+        $('#wrcPhaseHint', bar).textContent = t(PHASE_META[phase][2]);
+        if (changed && byHand) {
+            const preset = wrcPhasePreset(phase);
+            setTab(load('tab-' + phase, preset.tab));
+            preset.sections.forEach(openSection);
+        }
+        phaseSig = '';
+        renderPhase();
+        // The order form comes and goes with the phase: the map takes the room.
+        if (typeof map !== 'undefined' && map) setTimeout(() => map.invalidateSize(), 60);
+    }
+    bar.addEventListener('click', e => {
+        const b = e.target.closest('.wrc-phase');
+        if (b) setPhase(b.dataset.phase, true);
     });
 
     // ── fitting the screen ───────────────────────────────────────────────────
@@ -328,7 +581,8 @@ if (typeof module !== 'undefined' && module.exports) {
         consolePad();
         // The acknowledgement panel floats at the top right, where it covered the
         // hero's counters: it starts under the hero instead.
-        if (hero) document.documentElement.style.setProperty('--wr-acktracker-top', Math.round(hero.getBoundingClientRect().bottom + 8) + 'px');
+        const above = bar || hero;
+        if (above) document.documentElement.style.setProperty('--wr-acktracker-top', Math.round(above.getBoundingClientRect().bottom + 8) + 'px');
         const top = root.getBoundingClientRect().top + window.scrollY;
         const h = Math.max(520, window.innerHeight - (top - window.scrollY) - 10);
         root.style.height = h + 'px';
@@ -344,7 +598,7 @@ if (typeof module !== 'undefined' && module.exports) {
     function setTab(tab) {
         if (!$('.wrc-pane[data-pane="' + tab + '"]', root)) tab = 'feed';
         state.tab = tab;
-        save('tab', tab);
+        save('tab-' + state.phase, tab);
         $$('#wrcTabs button', root).forEach(b => b.setAttribute('aria-selected', b.dataset.tab === tab ? 'true' : 'false'));
         $$('.wrc-pane', root).forEach(p => p.classList.toggle('on', p.dataset.pane === tab));
         if (tab === 'chat') {
@@ -373,11 +627,7 @@ if (typeof module !== 'undefined' && module.exports) {
         const pane = el.closest('.wrc-pane');
         if (pane && pane.dataset.pane !== state.tab) setTab(pane.dataset.pane);
         const sec = el.closest('.wrc-acc');
-        if (sec && !sec.classList.contains('open')) {
-            sec.classList.add('open');
-            state.sections.add(sec.dataset.sec);
-            save('sections', Array.from(state.sections).join(','));
-        }
+        if (sec) openSection(sec.dataset.sec);
     }
 
     // ── the queue: what needs the coordinator ────────────────────────────────
@@ -447,6 +697,8 @@ if (typeof module !== 'undefined' && module.exports) {
     let queueSig = '';
     function renderQueue() {
         const items = queueItems();
+        // The phases that are not live drop an empty queue altogether.
+        root.dataset.q = String(items.length);
         const body = $('#wrcQueueBody', root);
         const sosOpen = items.filter(i => i.sev === 'critical').length;
         const cnt = $('#wrcQueueCnt', root);
@@ -542,30 +794,90 @@ if (typeof module !== 'undefined' && module.exports) {
         </label>`;
     }
 
+    /** What the page knows of one order, in the shape wrcOrderProgress takes. */
+    function orderDescriptor(item, team) {
+        const [type, rawId] = String(item.ref).split(':');
+        const id = Number(rawId);
+        if (type === 'dispatch') {
+            const d = page.dispatches().find(x => Number(x.id) === id);
+            const prog = d && (d.progress || []).find(p => p.label === team.label);
+            return {type, departed: !!(prog && prog.departed), arrived: !!(prog && prog.arrived)};
+        }
+        if (type === 'sector') {
+            const sec = page.sectors().find(x => Number(x.id) === id);
+            return {type, status: sec ? sec.status : '', acked: !!(sec && sec.acknowledged_at)};
+        }
+        if (type === 'route') {
+            const r = page.routes().find(x => Number(x.id) === id);
+            const wps = (r && r.waypoints) || [];
+            return {type, total: wps.length, done: wps.filter(w => w.completed_at || w.skipped_at).length};
+        }
+        return null;
+    }
+
+    /** The ring, the contact dot and the badge of one team, from what is already on the page. */
+    function avatarModel(team, items, members) {
+        const ids = new Set(members.map(m => Number(m.user_id)));
+        const stale = members.filter(m => isStale(m.user_id)).length;
+        const first = items[0];
+        return {
+            ring: first ? {f: Math.round(wrcOrderProgress(orderDescriptor(first, team)) * 100) / 100, tone: first.tone} : null,
+            contact: {tone: wrcContactTone(members.length, stale), stale, total: members.length},
+            badge: wrcTeamBadge({
+                sos: page.sos().filter(a => ids.has(Number(a.user_id))).length,
+                needsHelp: members.filter(m => (state.live[String(m.user_id)] || {}).field_status === 'needs_help').length,
+                blocked: items.filter(i => i.tone === 'bad').length,
+                orders: items.length,
+            }),
+        };
+    }
+
+    const RING_R = 16;
+    const RING_C = 2 * Math.PI * RING_R;
+    const BADGE_TITLES = {sos: 'console.badge_sos', help: 'console.badge_help', blocked: 'console.badge_blocked'};
+    function avatarHtml(team, vm) {
+        const [bg, fg] = teamBadgeColorsJs(team.color);
+        const mark = Number(team.team_number) > 0 ? String(Number(team.team_number)) : String(team.label || '?').trim().charAt(0).toUpperCase();
+        const arc = vm.ring ? vm.ring.f * RING_C : 0;
+        const contactTitle = vm.contact.tone === 'bad' ? t('console.contact_bad')
+            : vm.contact.tone === 'warn' ? t('console.contact_warn', {n: vm.contact.stale, total: vm.contact.total})
+            : vm.contact.tone === 'ok' ? t('console.contact_ok') : '';
+        const badgeTitle = vm.badge ? (vm.badge.kind === 'more' ? t('console.badge_more', {n: vm.badge.text.slice(1)}) : t(BADGE_TITLES[vm.badge.kind])) : '';
+        return `<label class="wrc-av" title="${esc(t('console.select_team', {team: team.label}))}">
+            <input type="checkbox" class="wrc-team-sel" data-team-sel="${team.id}" aria-label="${esc(t('console.select_team', {team: team.label}))}">
+            <svg class="wrc-av-ring" viewBox="0 0 38 38" aria-hidden="true">
+                <circle class="wrc-av-track${vm.ring ? '' : ' idle'}" cx="19" cy="19" r="${RING_R}"/>
+                ${vm.ring ? `<circle class="wrc-av-arc wrc-ring-${esc(vm.ring.tone)}" cx="19" cy="19" r="${RING_R}" stroke-dasharray="${arc.toFixed(1)} ${RING_C.toFixed(1)}" transform="rotate(-90 19 19)"/>` : ''}
+            </svg>
+            <span class="wrc-av-in" style="background:${esc(bg)};color:${esc(fg)}">${esc(mark)}</span>
+            ${vm.contact.tone !== 'none' ? `<span class="wrc-av-dot wrc-dot-${vm.contact.tone}" title="${esc(contactTitle)}"></span>` : ''}
+            ${vm.badge ? `<span class="wrc-av-badge wrc-badge-${esc(vm.badge.tone)}" title="${esc(badgeTitle)}">${esc(vm.badge.text)}</span>` : ''}
+        </label>`;
+    }
+
     let teamsSig = '';
     function renderTeams() {
         const body = $('#wrcTeamsBody', root);
         const board = (typeof teamBoardItems === 'function') ? teamBoardItems : () => [];
-        const model = state.teams.map(team => ({
-            team, items: board({id: team.id, label: team.label, color: team.color}),
-            members: team.members || [],
-        }));
+        const model = state.teams.map(team => {
+            const items = board({id: team.id, label: team.label, color: team.color});
+            const members = team.members || [];
+            return {team, items, members, vm: avatarModel(team, items, members)};
+        });
         $('#wrcTeamsCnt', root).textContent = String(model.length);
-        const sig = JSON.stringify([model.map(m => [m.team.id, m.team.label, m.team.color, m.team.transport, m.items.map(i => [i.kind, i.detail, i.state, i.tone]),
+        const sig = JSON.stringify([model.map(m => [m.team.id, m.team.label, m.team.color, m.team.transport, m.vm, m.items.map(i => [i.kind, i.detail, i.state, i.tone]),
             m.members.map(x => [x.user_id, x.name, isStale(x.user_id), (state.live[String(x.user_id)] || {}).field_status])]),
             Array.from(state.open)]);
         if (sig === teamsSig) return;
         teamsSig = sig;
         if (!model.length) { body.innerHTML = `<div class="wrc-empty">${esc(t('teams.empty'))}</div>`; return; }
-        body.innerHTML = model.map(({team, items, members}) => {
-            const [bg] = teamBadgeColorsJs(team.color);
+        body.innerHTML = model.map(({team, items, members, vm}) => {
             const stale = members.filter(m => isStale(m.user_id)).length;
             const open = state.open.has(team.id);
             const first = items[0];
             return `<div class="wrc-team${open ? ' open' : ''}" data-team="${team.id}">
                 <div class="wrc-team-h">
-                    <input type="checkbox" class="wrc-team-sel" data-team-sel="${team.id}" aria-label="${esc(t('console.select_team', {team: team.label}))}">
-                    <span class="wrc-swatch" style="background:${esc(bg)}"></span>
+                    ${avatarHtml(team, vm)}
                     <button type="button" class="wrc-team-name" data-team-open="${team.id}">
                         <b>${esc(team.label)}</b>
                         <span class="wrc-mut">${members.length}${typeof transportGlyphSvg === 'function' ? ' ' + transportGlyphSvg(team.transport, 14, 'currentColor').replace('style="display:block"', 'aria-hidden="true" style="vertical-align:-0.15em"') : ''}</span>
@@ -598,6 +910,8 @@ if (typeof module !== 'undefined' && module.exports) {
             el.classList.toggle('picked', picked > 0);
             const box = $('.wrc-team-sel', el);
             if (box) { box.checked = picked > 0 && picked === ids.length; box.indeterminate = picked > 0 && picked < ids.length; }
+            const av = $('.wrc-av', el);
+            if (av) { av.classList.toggle('sel', picked > 0 && picked === ids.length); av.classList.toggle('part', picked > 0 && picked < ids.length); }
             $$('[data-uid]', el).forEach(b => { b.checked = state.selected.has(Number(b.dataset.uid)); });
         });
     }
@@ -927,6 +1241,7 @@ if (typeof module !== 'undefined' && module.exports) {
     function refresh() {
         renderKpis();
         renderQueue();
+        renderPhase();
         renderTeams();
         renderComposerTo();
         renderFeed();
@@ -982,6 +1297,7 @@ if (typeof module !== 'undefined' && module.exports) {
     // ── go ───────────────────────────────────────────────────────────────────
     setTeams(typeof WR_TEAMS_AT_LOAD !== 'undefined' ? WR_TEAMS_AT_LOAD : []);
     setTab(state.tab);
+    setPhase(state.phase, false);
     refresh();
     fit();
     // The hero above it settles after fonts and badges load.

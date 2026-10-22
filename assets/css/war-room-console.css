@@ -23,14 +23,19 @@ body.wr-console-view .war-room-hero {
 body.wr-console-view .war-room-hero > div.d-flex:first-of-type { margin-bottom: 0 !important; flex: 1 1 auto; align-items: center !important; min-width: 0; }
 body.wr-console-view .war-room-hero > div.d-flex:first-of-type > div:first-child > .text-uppercase,
 body.wr-console-view .war-room-hero > div.d-flex:first-of-type > div:first-child > .small { display: none; }
-body.wr-console-view .war-room-hero h1 { font-size: 1.05rem; margin: 0 !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 22vw; }
-.wrc-kpis { display: flex; flex-wrap: wrap; gap: 4px; flex: 0 1 auto; }
-.wrc-kpi { display: inline-flex; flex-direction: column; align-items: flex-start; padding: 0 7px; min-width: 50px; border-radius: 7px; border: 1px solid rgba(255, 255, 255, .3); background: rgba(255, 255, 255, .14); color: #fff; line-height: 1.15; cursor: pointer; }
-.wrc-kpi-l { font-size: .54rem; letter-spacing: 0; text-transform: uppercase; opacity: .9; white-space: nowrap; }
+body.wr-console-view .war-room-hero h1 { font-size: 1.05rem; margin: 0 !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38vw; }
+/* The counters sit in the phase bar, on the page's own light ground. */
+.wrc-kpis { display: flex; flex-wrap: wrap; gap: 4px; flex: 0 1 auto; margin-left: auto; }
+.wrc-kpi { display: inline-flex; flex-direction: column; align-items: flex-start; padding: 0 8px; min-width: 52px; border-radius: 7px; border: 1px solid #cfd7e3; background: #fff; color: #1b2430; line-height: 1.15; cursor: pointer; }
+.wrc-kpi-l { font-size: .54rem; letter-spacing: 0; text-transform: uppercase; color: #55637a; white-space: nowrap; }
 .wrc-kpi b { font-size: .92rem; font-weight: 700; }
-.wrc-kpi:hover { background: rgba(255, 255, 255, .24); }
-.wrc-kpi-bad { background: #d1423a; border-color: #ff9d96; }
-.wrc-kpi-warn { background: #f6b73c; border-color: #ffd98a; color: #3d2600; }
+.wrc-kpi:hover { background: #eef2f8; }
+.wrc-kpi-bad { background: #d1423a; border-color: #b3322b; color: #fff; }
+.wrc-kpi-bad .wrc-kpi-l { color: rgba(255, 255, 255, .85); }
+.wrc-kpi-bad:hover { background: #bf3a32; }
+.wrc-kpi-warn { background: #f6b73c; border-color: #e0a800; color: #3d2600; }
+.wrc-kpi-warn .wrc-kpi-l { color: #5c3c00; }
+.wrc-kpi-warn:hover { background: #efae2c; }
 .wrc-flash { animation: wrcFlash 1.2s ease-out 1; }
 @keyframes wrcFlash { 0% { box-shadow: 0 0 0 4px rgba(29, 78, 216, .65); } 100% { box-shadow: 0 0 0 0 rgba(29, 78, 216, 0); } }
 @media (prefers-reduced-motion: reduce) { .wrc-flash { animation: none; } }
@@ -107,8 +112,34 @@ body.wr-console-view #teamBoard { display: none !important; }
 
 .wrc-team { border: 1px solid #e0e6ee; border-radius: 9px; padding: 6px 8px; background: #fff; }
 .wrc-team.picked { border-color: #1d4ed8; background: #f3f7ff; }
-.wrc-team-h { display: flex; align-items: center; gap: 7px; }
-.wrc-team-sel { flex: none; width: 1rem; height: 1rem; margin: 0; cursor: pointer; }
+.wrc-team-h { display: flex; align-items: center; gap: 8px; }
+
+/* The team's avatar: its colour inside, the progress of its current order as a ring
+   around it, a dot for whether the team can be reached, a badge for the one thing
+   that needs attention. It is also the team's tick box: a click picks the whole team. */
+.wrc-av { position: relative; flex: none; width: 38px; height: 38px; margin: 0; cursor: pointer; display: block; }
+.wrc-av .wrc-team-sel { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; z-index: 2; }
+.wrc-av-ring { position: absolute; inset: 0; width: 100%; height: 100%; }
+.wrc-av-track { fill: none; stroke: #e3e8ef; stroke-width: 3; }
+.wrc-av-track.idle { stroke: #cfd7e3; stroke-width: 2; stroke-dasharray: 2 4; }
+.wrc-av-arc { fill: none; stroke-width: 3; stroke-linecap: round; transition: stroke-dasharray .4s; }
+.wrc-ring-go { stroke: #1d4ed8; }
+.wrc-ring-on { stroke: #198754; }
+.wrc-ring-new { stroke: #8a97ad; }
+.wrc-ring-bad { stroke: #d1423a; }
+.wrc-av-in { position: absolute; left: 5px; top: 5px; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: .8rem; font-weight: 700; overflow: hidden; }
+.wrc-av.sel .wrc-av-in::after, .wrc-av.part .wrc-av-in::after { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #fff; font-size: .95rem; }
+.wrc-av.sel .wrc-av-in::after { content: "\2713"; background: rgba(29, 78, 216, .86); }
+.wrc-av.part .wrc-av-in::after { content: "\2212"; background: rgba(29, 78, 216, .55); }
+.wrc-av:focus-within .wrc-av-in { outline: 2px solid #1d4ed8; outline-offset: 1px; }
+.wrc-av-dot { position: absolute; right: 0; bottom: 0; width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff; box-sizing: border-box; z-index: 1; }
+.wrc-dot-ok { background: #198754; }
+.wrc-dot-warn { background: #f0a500; }
+.wrc-dot-bad { background: #d1423a; }
+.wrc-av-badge { position: absolute; right: -4px; top: -4px; min-width: 17px; height: 17px; box-sizing: border-box; padding: 0 4px; border-radius: 9px; border: 2px solid #fff; display: flex; align-items: center; justify-content: center; font-size: .62rem; font-weight: 800; line-height: 1; z-index: 1; }
+.wrc-badge-bad { background: #d1423a; color: #fff; }
+.wrc-badge-warn { background: #f6b73c; color: #3d2600; }
+.wrc-badge-info { background: #1d4ed8; color: #fff; }
 .wrc-swatch { width: 10px; height: 10px; border-radius: 50%; flex: none; display: inline-block; }
 .wrc-team-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; background: none; border: 0; padding: 0; text-align: left; font: inherit; cursor: pointer; }
 .wrc-team-name b { font-size: .88rem; }
@@ -196,3 +227,28 @@ body.wr-console-view #teamBoard { display: none !important; }
 .wrc-acc-b > .card:last-child { margin-bottom: 0 !important; }
 .wrc-attach { display: inline-flex; align-items: center; gap: 5px; max-width: 170px; margin: 0; }
 .wrc-attach span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── the phases: the same console, composed for preparation, live or closing ── */
+.wrc-bar { display: flex; align-items: center; gap: 12px; margin: 0 0 .45rem; min-height: 30px; }
+.wrc-phases { display: inline-flex; padding: 2px; gap: 2px; border-radius: 9px; background: #e3e8f0; border: 1px solid #cfd7e3; }
+.wrc-phase { display: inline-flex; align-items: center; gap: 6px; padding: 3px 12px; border: 0; border-radius: 7px; background: none; font-size: .8rem; font-weight: 700; color: #4a5872; cursor: pointer; }
+.wrc-phase:hover { color: #1b2430; }
+.wrc-phase[aria-selected="true"] { background: #1b2430; color: #fff; box-shadow: 0 1px 3px rgba(20, 33, 61, .3); }
+.wrc-phase .wrc-cnt { height: 17px; min-width: 17px; font-size: .68rem; }
+.wrc-bar-hint { color: #55637a; font-size: .8rem; }
+@media (max-width: 1199.98px) { .wrc-bar-hint { display: none; } }
+
+.wrc-phase-panel { display: none; flex: none; }
+.wrc[data-phase="prep"] .wrc-phase-panel, .wrc[data-phase="close"] .wrc-phase-panel { display: flex; }
+/* Nothing is being sent while preparing or closing: the map takes the room, and an empty queue goes. */
+.wrc[data-phase="prep"] .wrc-composer, .wrc[data-phase="close"] .wrc-composer { display: none; }
+.wrc[data-phase="prep"][data-q="0"] .wrc-queue, .wrc[data-phase="close"][data-q="0"] .wrc-queue { display: none; }
+.wrc-checks { padding: 8px; display: flex; flex-direction: column; gap: 5px; }
+.wrc-check { display: flex; align-items: flex-start; gap: 8px; width: 100%; padding: 5px 9px; border: 1px solid #d5dce6; border-radius: 8px; background: #fff; text-align: left; font-size: .8rem; font-weight: 600; line-height: 1.3; cursor: pointer; }
+.wrc-check .bi { flex: none; padding-top: 1px; }
+.wrc-check:hover { filter: brightness(.97); }
+.wrc-check-ok { background: #f1f8f4; border-color: #cfe6d8; color: #0f6f38; }
+.wrc-check-warn { background: #fff6e2; border-color: #ecc77c; color: #74470a; }
+.wrc-check-bad { background: #fde7e4; border-color: #efb1ac; color: #a3231c; }
+.wrc-phase-cta { padding: 0 8px 8px; }
+.wrc-phase-cta .wrc-go { width: 100%; justify-content: center; }
