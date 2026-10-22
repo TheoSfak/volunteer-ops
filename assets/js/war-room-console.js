@@ -174,6 +174,18 @@ function wrcContactTone(total, stale) {
 }
 
 /**
+ * Who a contact figure is about: only the people whose GPS is on. Somebody without the
+ * GPS tick is never asked for a position, so "no position" is neither true nor false of
+ * them, and they must not sit in the total either - "3 of 20" and "3 of 5" are different
+ * statements when fifteen of the twenty were never being measured.
+ * members -> {total, silent}; silentOf(userId) says whether one of them has gone quiet.
+ */
+function wrcContactOf(members, silentOf) {
+    const measured = (members || []).filter(m => m.takes_part);
+    return {total: measured.length, silent: measured.filter(m => silentOf(m.user_id)).length};
+}
+
+/**
  * The one thing worth a badge on a team's avatar, worst first:
  * {sos, needsHelp, blocked, orders} -> {kind, tone, text} or null.
  *   sos / help   someone on the team needs help now
@@ -279,7 +291,8 @@ function wrcPhasePreset(phase) {
 
 /**
  * «Είμαστε έτοιμοι;» - what has to be true before the mission goes live.
- * facts: {teams, people, noGps, sectors, sectorsFree, stale}
+ * facts: {teams, people, noGps, gpsPeople, sectors, sectorsFree, stale}
+ *   gpsPeople  how many of `people` have their GPS on; `stale` is out of THEM, never out of everybody
  * -> rows {key, tone, n, of} in the order they should be fixed in; tone is
  * ok / warn / bad, and `ready` is true only when nothing is wrong.
  */
@@ -289,10 +302,12 @@ function wrcReadiness(f) {
         {key: 'gps', tone: f.noGps > 0 ? 'warn' : 'ok', n: f.noGps, of: f.people, card: 'participantsCard'},
         {key: 'sectors', tone: f.sectors > 0 ? 'ok' : 'warn', n: f.sectors, of: 0, card: 'sectorsCard'},
         {key: 'assigned', tone: f.sectorsFree > 0 ? 'warn' : 'ok', n: f.sectors - f.sectorsFree, of: f.sectors, card: 'sectorsListCard'},
-        {key: 'contact', tone: f.stale > 0 ? 'warn' : 'ok', n: f.stale, of: f.people, card: 'participantsCard'},
+        {key: 'contact', tone: f.stale > 0 ? 'warn' : 'ok', n: f.stale, of: f.gpsPeople, card: 'participantsCard'},
     ];
-    // Sectors that are not there cannot be assigned: that row has nothing to say.
-    const shown = rows.filter(r => !(r.key === 'assigned' && f.sectors === 0));
+    // Sectors that are not there cannot be assigned, and with nobody on GPS there is
+    // nobody whose contact could be measured (the GPS row above already says so): those
+    // rows have nothing to say.
+    const shown = rows.filter(r => !(r.key === 'assigned' && f.sectors === 0) && !(r.key === 'contact' && !(f.gpsPeople > 0)));
     return {rows: shown, ready: shown.every(r => r.tone === 'ok'), open: shown.filter(r => r.tone !== 'ok').length};
 }
 
@@ -316,7 +331,7 @@ if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         wrcStampKey, wrcSevRank, wrcOrderQueue, wrcSummarizeSelection,
         wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel, wrcNextSectorLabel, wrcPickArea,
-        wrcOrderProgress, wrcContactTone, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts,
+        wrcOrderProgress, wrcContactTone, wrcContactOf, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts,
         wrcUnreadKeys, wrcChatUnread,
         wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcClosingItems,
     };
@@ -585,11 +600,14 @@ if (typeof module !== 'undefined' && module.exports) {
     function readinessFacts() {
         const members = state.teams.flatMap(tm => tm.members || []);
         const secs = page.sectors();
+        // Contact is judged among the people whose GPS is on, never among everybody.
+        const contact = wrcContactOf(members, isStale);
         return {
             teams: state.teams.length, people: members.length,
             noGps: members.filter(m => !m.takes_part).length,
+            gpsPeople: contact.total,
             sectors: secs.length, sectorsFree: secs.filter(sec => !sec.team_id).length,
-            stale: members.filter(m => isStale(m.user_id)).length,
+            stale: contact.silent,
         };
     }
     function closingFacts() {
@@ -1073,11 +1091,13 @@ if (typeof module !== 'undefined' && module.exports) {
     /** The ring, the contact dot and the badge of one team, from what is already on the page. */
     function avatarModel(team, items, members) {
         const ids = new Set(members.map(m => Number(m.user_id)));
-        const stale = members.filter(m => isStale(m.user_id)).length;
+        // Only the members whose GPS is on count, in the total as well as among the quiet:
+        // a team of eight with one phone on GPS is one person to reach, not eight.
+        const contact = wrcContactOf(members, isStale);
         const first = items[0];
         return {
             ring: first ? {f: Math.round(wrcOrderProgress(orderDescriptor(first, team)) * 100) / 100, tone: first.tone} : null,
-            contact: {tone: wrcContactTone(members.length, stale), stale, total: members.length},
+            contact: {tone: wrcContactTone(contact.total, contact.silent), stale: contact.silent, total: contact.total},
             badge: wrcTeamBadge({
                 sos: page.sos().filter(a => ids.has(Number(a.user_id))).length,
                 needsHelp: members.filter(m => (state.live[String(m.user_id)] || {}).field_status === 'needs_help').length,
@@ -1127,7 +1147,7 @@ if (typeof module !== 'undefined' && module.exports) {
         teamsSig = sig;
         if (!model.length) { body.innerHTML = `<div class="wrc-empty">${esc(t('teams.empty'))}</div>`; return; }
         body.innerHTML = model.map(({team, items, members, vm, decl}) => {
-            const stale = members.filter(m => isStale(m.user_id)).length;
+            const stale = wrcContactOf(members, isStale).silent;
             const open = state.open.has(team.id);
             const first = items[0];
             return `<div class="wrc-team${open ? ' open' : ''}" data-team="${team.id}">

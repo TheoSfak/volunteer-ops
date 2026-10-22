@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
 const {
     wrcStampKey, wrcSevRank, wrcOrderQueue, wrcSummarizeSelection,
     wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel,
-    wrcOrderProgress, wrcContactTone, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts, wrcNextSectorLabel, wrcPickArea,
+    wrcOrderProgress, wrcContactTone, wrcContactOf, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts, wrcNextSectorLabel, wrcPickArea,
     wrcUnreadKeys, wrcChatUnread,
     wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcClosingItems,
 } = require('../../assets/js/war-room-console.js');
@@ -174,7 +174,7 @@ test('wrcPhasePreset never opens a plan section by itself: Σχέδιο starts f
     ['prep', 'live', 'close', 'anything'].forEach(phase => assert.deepEqual(wrcPhasePreset(phase).sections, []));
 });
 
-const readyFacts = {teams: 3, people: 12, noGps: 0, sectors: 4, sectorsFree: 0, stale: 0};
+const readyFacts = {teams: 3, people: 12, noGps: 0, gpsPeople: 12, sectors: 4, sectorsFree: 0, stale: 0};
 
 test('wrcReadiness: a mission with everything in place is ready', () => {
     const r = wrcReadiness(readyFacts);
@@ -185,7 +185,7 @@ test('wrcReadiness: a mission with everything in place is ready', () => {
 });
 
 test('wrcReadiness: no teams is bad, the rest are warnings, and each says what it is about', () => {
-    const r = wrcReadiness({teams: 0, people: 0, noGps: 0, sectors: 0, sectorsFree: 0, stale: 0});
+    const r = wrcReadiness({teams: 0, people: 0, noGps: 0, gpsPeople: 0, sectors: 0, sectorsFree: 0, stale: 0});
     assert.equal(r.ready, false);
     assert.equal(r.rows.find(x => x.key === 'teams').tone, 'bad');
     assert.equal(r.rows.find(x => x.key === 'sectors').tone, 'warn');
@@ -195,12 +195,52 @@ test('wrcReadiness: no teams is bad, the rest are warnings, and each says what i
 });
 
 test('wrcReadiness: unassigned sectors, silent people and people outside GPS each count', () => {
-    const r = wrcReadiness({teams: 2, people: 10, noGps: 3, sectors: 5, sectorsFree: 2, stale: 4});
+    const r = wrcReadiness({teams: 2, people: 10, noGps: 3, gpsPeople: 7, sectors: 5, sectorsFree: 2, stale: 4});
     assert.deepEqual(r.rows.map(x => [x.key, x.tone]), [['teams', 'ok'], ['gps', 'warn'], ['sectors', 'ok'], ['assigned', 'warn'], ['contact', 'warn']]);
     assert.equal(r.open, 3);
     const assigned = r.rows.find(x => x.key === 'assigned');
     assert.deepEqual([assigned.n, assigned.of], [3, 5], 'three of five sectors have a team');
     assert.deepEqual([r.rows.find(x => x.key === 'gps').n, r.rows.find(x => x.key === 'gps').of], [3, 10]);
+});
+
+test('wrcReadiness: "no position" is out of the people whose GPS is on, not out of everybody', () => {
+    // Twenty people, five of them on GPS, three of those five quiet: "3 of 5", never "3 of 20".
+    const r = wrcReadiness({teams: 2, people: 20, noGps: 15, gpsPeople: 5, sectors: 4, sectorsFree: 0, stale: 3});
+    const contact = r.rows.find(x => x.key === 'contact');
+    assert.deepEqual([contact.n, contact.of], [3, 5]);
+    // the GPS row is the one that is about everybody: 15 of the 20 are not on GPS
+    const gps = r.rows.find(x => x.key === 'gps');
+    assert.deepEqual([gps.n, gps.of], [15, 20]);
+});
+
+test('wrcReadiness: with nobody on GPS there is no contact to measure, so no contact row', () => {
+    const r = wrcReadiness({teams: 2, people: 6, noGps: 6, gpsPeople: 0, sectors: 3, sectorsFree: 0, stale: 0});
+    assert.equal(r.rows.find(x => x.key === 'contact'), undefined);
+    // ...and the GPS row says why
+    assert.equal(r.rows.find(x => x.key === 'gps').tone, 'warn');
+});
+
+test('wrcContactOf counts only the members whose GPS is on, in the total and among the quiet', () => {
+    const members = [
+        {user_id: 1, takes_part: true}, {user_id: 2, takes_part: true}, {user_id: 3, takes_part: false},
+        {user_id: 4, takes_part: false}, {user_id: 5, takes_part: false},
+    ];
+    // user 2 (on GPS) and user 4 (not) are both "stale" to the page; only the first is a finding.
+    assert.deepEqual(wrcContactOf(members, id => id === 2 || id === 4), {total: 2, silent: 1});
+    assert.deepEqual(wrcContactOf(members, () => false), {total: 2, silent: 0});
+    assert.deepEqual(wrcContactOf([{user_id: 3, takes_part: false}], () => true), {total: 0, silent: 0});
+    assert.deepEqual(wrcContactOf(undefined, () => true), {total: 0, silent: 0});
+});
+
+test('a team where only one phone is on GPS is "all quiet" when that phone is, not "1 of 8"', () => {
+    const team = Array.from({length: 8}, (_, i) => ({user_id: 100 + i, takes_part: i === 0}));
+    const c = wrcContactOf(team, id => id === 100);
+    assert.equal(wrcContactTone(c.total, c.silent), 'bad');
+    const fine = wrcContactOf(team, () => false);
+    assert.equal(wrcContactTone(fine.total, fine.silent), 'ok');
+    // a team nobody carries a phone for has no contact state at all
+    const none = wrcContactOf(team.map(m => ({...m, takes_part: false})), () => true);
+    assert.equal(wrcContactTone(none.total, none.silent), 'none');
 });
 
 test('wrcReadiness names the card each row leads to', () => {

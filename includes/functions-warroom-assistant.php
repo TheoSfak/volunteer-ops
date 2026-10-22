@@ -180,10 +180,16 @@ function assistantStalledTeams(int $missionId, array $shiftBinds, int $nowTs): a
         return [];
     }
 
+    // Only members whose GPS is on: somebody the coordinator switched off
+    // mid-operation still has the fixes from before that in this window, and a
+    // team whose only remaining samples are theirs would be reported as having
+    // stopped moving when nobody is being measured any more.
     $members = dbFetchAll(
         "SELECT m.team_id, m.user_id, t.codename, t.team_number
            FROM mission_team_members m
            JOIN mission_teams t ON t.id = m.team_id
+           JOIN mission_action_room_participants arp
+                ON arp.mission_id = m.mission_id AND arp.user_id = m.user_id
           WHERE m.mission_id = ?",
         [$missionId]
     );
