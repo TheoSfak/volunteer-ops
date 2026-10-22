@@ -235,11 +235,13 @@ function wrcNormalizePhase(value) {
     return WRC_PHASES.includes(value) ? value : 'live';
 }
 
-/** Where the dock opens, and which plan sections come open, when a phase begins. */
+/** Where the dock opens when a phase begins (and, were there any, which plan sections come open: none do). */
 function wrcPhasePreset(phase) {
     switch (wrcNormalizePhase(phase)) {
-        case 'prep': return {tab: 'plan', sections: ['teams', 'areas'], composer: false};
-        case 'close': return {tab: 'feed', sections: ['mission'], composer: false};
+        // Σχέδιο opens with every card folded in every phase: the checklists' own rows
+        // open the card a finding is about, and the rest is the coordinator's to open.
+        case 'prep': return {tab: 'plan', sections: [], composer: false};
+        case 'close': return {tab: 'feed', sections: [], composer: false};
         default: return {tab: 'feed', sections: [], composer: true};
     }
 }
@@ -335,7 +337,9 @@ if (typeof module !== 'undefined' && module.exports) {
         stale: null,               // pingStaleness from the last poll
         live: {},                  // participantLive from the last poll
         online: [],
-        sections: new Set((load('sections', '') || '').split(',').filter(Boolean)),
+        // 'sections2': the first version of this list also took what the phase presets opened,
+        // and Σχέδιο now starts closed - so an old list is not carried over.
+        sections: new Set((load('sections2', '') || '').split(',').filter(Boolean)),
     };
 
     // ── building the regions ─────────────────────────────────────────────────
@@ -618,12 +622,14 @@ if (typeof module !== 'undefined' && module.exports) {
         if (row) jump(row.dataset);
     });
 
-    function openSection(key) {
+    /** Opens a plan section; `remember` = false for a jump to a card, which should not change what a later visit starts with. */
+    function openSection(key, remember) {
         const sec = $('.wrc-acc[data-sec="' + key + '"]', root);
         if (!sec || sec.classList.contains('open')) return;
         sec.classList.add('open');
+        if (remember === false) return;
         state.sections.add(key);
-        save('sections', Array.from(state.sections).join(','));
+        save('sections2', Array.from(state.sections).join(','));
     }
     /**
      * Switching phase by hand also sets the dock the way the phase wants it - the
@@ -641,7 +647,7 @@ if (typeof module !== 'undefined' && module.exports) {
         if (changed && byHand) {
             const preset = wrcPhasePreset(phase);
             setTab(load('tab-' + phase, preset.tab));
-            preset.sections.forEach(openSection);
+            preset.sections.forEach(key => openSection(key));
         }
         phaseSig = '';
         renderPhase();
@@ -733,8 +739,46 @@ if (typeof module !== 'undefined' && module.exports) {
         const sec = b.closest('.wrc-acc');
         sec.classList.toggle('open');
         if (sec.classList.contains('open')) state.sections.add(sec.dataset.sec); else state.sections.delete(sec.dataset.sec);
-        save('sections', Array.from(state.sections).join(','));
+        save('sections2', Array.from(state.sections).join(','));
     });
+
+    // ── the plan: every card starts folded ───────────────────────────────────
+    // The cards under Σχέδιο are the page's own, each with a header that folds it. They
+    // all start folded here - the coordinator opens the ones needed - and a card stays
+    // open on later visits only if it was the coordinator who opened it. That choice is
+    // kept in this browser under a key of the console's own: the page's own record of
+    // folded cards (shared with the classic view) is deliberately not written by the
+    // default, only by the clicks. The fold is done on the DOM, not through Bootstrap's
+    // Collapse, so the default is not recorded as a choice.
+    const OPEN_CARDS_KEY = 'wr-console-plan-open-cards';
+    const openCards = (() => {
+        try { const list = JSON.parse(localStorage.getItem(OPEN_CARDS_KEY) || '[]'); return new Set(Array.isArray(list) ? list.map(String) : []); } catch (e) { return new Set(); }
+    })();
+    function saveOpenCards() { try { localStorage.setItem(OPEN_CARDS_KEY, JSON.stringify(Array.from(openCards))); } catch (e) { /* blocked storage: they start folded next time */ } }
+    /** The header that folds a card and the body it folds, or null for a card that does not fold. */
+    function cardFold(card) {
+        const header = card.querySelector('.wr-collapsible-header[aria-controls]');
+        const target = header && document.getElementById(header.getAttribute('aria-controls'));
+        return target ? {header, target} : null;
+    }
+    function setCardOpen(card, open) {
+        const fold = cardFold(card);
+        if (!fold) return;
+        fold.target.classList.toggle('show', open);
+        fold.header.classList.toggle('collapsed', !open);
+        fold.header.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    $$('.wrc-acc-b .card[data-card-id]', root).forEach(card => setCardOpen(card, openCards.has(card.dataset.cardId)));
+    // What the coordinator opens or folds by hand (not a card's inner collapses).
+    function noteCardToggle(e, open) {
+        const card = e.target.closest('.card[data-card-id]');
+        const fold = card && cardFold(card);
+        if (!fold || fold.target !== e.target || !card.closest('.wrc-acc')) return;
+        if (open) openCards.add(card.dataset.cardId); else openCards.delete(card.dataset.cardId);
+        saveOpenCards();
+    }
+    planEl.addEventListener('shown.bs.collapse', e => noteCardToggle(e, true));
+    planEl.addEventListener('hidden.bs.collapse', e => noteCardToggle(e, false));
 
     /** Show whatever holds this card, then let the caller scroll to it. */
     function reveal(cardId) {
@@ -743,7 +787,12 @@ if (typeof module !== 'undefined' && module.exports) {
         const pane = el.closest('.wrc-pane');
         if (pane && pane.dataset.pane !== state.tab) setTab(pane.dataset.pane);
         const sec = el.closest('.wrc-acc');
-        if (sec) openSection(sec.dataset.sec);
+        if (sec) {
+            // A jump is for now: neither the section nor the card is remembered as opened.
+            openSection(sec.dataset.sec, false);
+            // Someone sent here to see this card is not helped by its folded header.
+            setCardOpen(el, true);
+        }
     }
 
     // ── the queue: what needs the coordinator ────────────────────────────────

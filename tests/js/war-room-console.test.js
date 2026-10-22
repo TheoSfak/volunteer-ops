@@ -163,11 +163,15 @@ test('wrcNormalizePhase falls back to live for anything it does not know', () =>
     assert.equal(wrcNormalizePhase(undefined), 'live');
 });
 
-test('wrcPhasePreset: preparation opens the plan, live the feed with the order form, closing the feed', () => {
-    assert.deepEqual(wrcPhasePreset('prep'), {tab: 'plan', sections: ['teams', 'areas'], composer: false});
+test('wrcPhasePreset: preparation goes to the plan, live to the feed with the order form, closing to the feed', () => {
+    assert.deepEqual(wrcPhasePreset('prep'), {tab: 'plan', sections: [], composer: false});
     assert.deepEqual(wrcPhasePreset('live'), {tab: 'feed', sections: [], composer: true});
-    assert.deepEqual(wrcPhasePreset('close'), {tab: 'feed', sections: ['mission'], composer: false});
+    assert.deepEqual(wrcPhasePreset('close'), {tab: 'feed', sections: [], composer: false});
     assert.deepEqual(wrcPhasePreset('x'), wrcPhasePreset('live'));
+});
+
+test('wrcPhasePreset never opens a plan section by itself: Σχέδιο starts folded in every phase', () => {
+    ['prep', 'live', 'close', 'anything'].forEach(phase => assert.deepEqual(wrcPhasePreset(phase).sections, []));
 });
 
 const readyFacts = {teams: 3, people: 12, noGps: 0, sectors: 4, sectorsFree: 0, stale: 0};
