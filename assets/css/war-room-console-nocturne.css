@@ -1,0 +1,254 @@
+/*
+ * War Room (Action Room) «Κονσόλα» - the Nocturne look.
+ *
+ * A skin, not a layout: the console's markup, its columns and every control stay
+ * exactly where assets/css/war-room-console.css and assets/js/war-room-console.js put
+ * them. This file only changes how they look - glass panels over a drawn relief map,
+ * neon cyan on night blue, Tektur for the numbers. It is loaded by war-room.php
+ * after the console's own sheet when Settings → «Εμφάνιση Κονσόλας» says Nocturne,
+ * and every rule sits behind html[data-wrc-skin="nocturne"] (set before the first
+ * paint, together with Bootstrap's dark colour mode, which re-colours the cards and
+ * forms the console relocates) so nothing here can touch another look.
+ */
+
+html[data-wrc-skin="nocturne"] {
+    --nx-cy: #37e6ff; --nx-vi: #9a7bff; --nx-ok: #35f5a1; --nx-warn: #ffb83d; --nx-bad: #ff3b5c;
+    --nx-line: rgba(110, 220, 255, .18);
+    --nx-glass: linear-gradient(180deg, rgba(14, 28, 52, .70), rgba(6, 12, 26, .66));
+    --nx-glass-2: rgba(10, 22, 44, .62);
+    --nx-display: Tektur, Inter, system-ui, sans-serif;
+    --nx-mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+    /* the console's own dark palette, retuned: everything that reads these follows */
+    --wrc-page: #04070f; --wrc-surface: rgba(10, 22, 44, .72); --wrc-surface-2: rgba(16, 32, 60, .70);
+    --wrc-line: rgba(110, 220, 255, .22); --wrc-line-2: rgba(110, 220, 255, .12);
+    --wrc-ink: #e6f7ff; --wrc-mut: #8ea9c4; --wrc-link: #62e3ff;
+    --bs-body-bg: #060c18; --bs-body-bg-rgb: 6, 12, 24;
+    --bs-secondary-bg: #0b1628; --bs-tertiary-bg: #0b1628;
+    --bs-border-color: rgba(110, 220, 255, .22);
+    color-scheme: dark;
+}
+
+/* ── the ground: a relief map drawn in light, under everything ── */
+html[data-wrc-skin="nocturne"] body.wr-console-view {
+    background: #04070f url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1600 1000' preserveAspectRatio='xMidYMid slice'%3E%3Cdefs%3E%3Cfilter id='r' x='0' y='0' width='100%25' height='100%25' color-interpolation-filters='sRGB'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.0021 0.003' numOctaves='4' seed='11' result='n0'/%3E%3CfeComponentTransfer in='n0' result='n'%3E%3CfeFuncR type='linear' slope='1.9' intercept='-.42'/%3E%3C/feComponentTransfer%3E%3CfeColorMatrix in='n' type='matrix' values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0' result='h'/%3E%3CfeDiffuseLighting in='h' surfaceScale='20' diffuseConstant='1' lighting-color='%23d8f3ff' result='lit'%3E%3CfeDistantLight azimuth='232' elevation='46'/%3E%3C/feDiffuseLighting%3E%3CfeColorMatrix in='lit' type='matrix' values='.05 0 0 0 .01 0 .15 0 0 .035 0 0 .26 0 .075 0 0 0 0 1' result='tint'/%3E%3CfeColorMatrix in='n' type='matrix' values='1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 0 0 1 0' result='g'/%3E%3CfeComponentTransfer in='g' result='b1'%3E%3CfeFuncR type='discrete' tableValues='0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1'/%3E%3CfeFuncG type='discrete' tableValues='0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1'/%3E%3CfeFuncB type='discrete' tableValues='0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1'/%3E%3C/feComponentTransfer%3E%3CfeConvolveMatrix in='b1' order='3' kernelMatrix='-1 -1 -1 -1 8 -1 -1 -1 -1' divisor='1' bias='0' preserveAlpha='true' result='e1'/%3E%3CfeColorMatrix in='e1' type='matrix' values='0 0 0 0 .25 0 0 0 0 .8 0 0 0 0 .95 .24 0 0 0 0' result='minor'/%3E%3CfeMerge%3E%3CfeMergeNode in='tint'/%3E%3CfeMergeNode in='minor'/%3E%3C/feMerge%3E%3C/filter%3E%3C/defs%3E%3Crect width='1600' height='1000' filter='url(%23r)'/%3E%3C/svg%3E") center / cover fixed no-repeat !important;
+}
+html[data-wrc-skin="nocturne"] .main-content,
+html[data-wrc-skin="nocturne"] .content-wrapper { background: transparent !important; }
+/* darker towards the edges, and a faint scan on top of the relief (behind every panel) */
+html[data-wrc-skin="nocturne"] body.wr-console-view::before {
+    content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background:
+        repeating-linear-gradient(0deg, rgba(120, 220, 255, .028) 0 1px, transparent 1px 3px),
+        radial-gradient(120% 90% at 50% 45%, transparent 35%, rgba(2, 5, 12, .55) 78%, rgba(2, 5, 12, .92) 100%);
+}
+html[data-wrc-skin="nocturne"] body.wr-console-view .top-navbar {
+    background: rgba(5, 11, 22, .72) !important; backdrop-filter: blur(14px); border-bottom-color: var(--nx-line) !important;
+}
+
+/* ── the hero strip: one bar of glass with a red edge for «live» ── */
+html[data-wrc-skin="nocturne"] body.wr-console-view .war-room-hero {
+    background: linear-gradient(90deg, rgba(255, 59, 92, .26), rgba(8, 18, 36, .78) 38%, rgba(8, 18, 36, .66)) !important;
+    border: 1px solid var(--nx-line) !important; border-left: 3px solid var(--nx-bad) !important; border-radius: 14px !important;
+    backdrop-filter: blur(14px) saturate(1.4); box-shadow: 0 18px 44px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(160, 235, 255, .1) !important;
+}
+html[data-wrc-skin="nocturne"] body.wr-console-view .war-room-hero h1 { font-family: var(--nx-display); font-weight: 600; letter-spacing: .02em; color: #fff; text-shadow: 0 0 18px rgba(55, 230, 255, .35); }
+html[data-wrc-skin="nocturne"] body.wr-console-view .war-room-hero .btn:not(#wrConsoleToggle) {
+    background: rgba(10, 22, 44, .7); border: 1px solid var(--nx-line); color: var(--wrc-mut); transition: border-color .2s, color .2s, box-shadow .2s;
+}
+html[data-wrc-skin="nocturne"] body.wr-console-view .war-room-hero .btn:not(#wrConsoleToggle):hover { color: #fff; border-color: rgba(55, 230, 255, .6); box-shadow: 0 0 16px rgba(55, 230, 255, .25); }
+html[data-wrc-skin="nocturne"] body.wr-console-view #wrConsoleToggle { background: rgba(10, 22, 44, .7); border: 1px solid var(--nx-line); color: #fff; }
+
+/* ── the panels: frosted glass with cyan corner marks ── */
+html[data-wrc-skin="nocturne"] .wrc-sec,
+html[data-wrc-skin="nocturne"] .wrc-composer,
+html[data-wrc-skin="nocturne"] .wrc-dock {
+    position: relative; background: var(--nx-glass); border: 1px solid var(--nx-line); border-radius: 14px;
+    backdrop-filter: blur(16px) saturate(1.5); -webkit-backdrop-filter: blur(16px) saturate(1.5);
+    box-shadow: 0 22px 52px rgba(0, 0, 0, .5), inset 0 1px 0 rgba(160, 235, 255, .11);
+}
+html[data-wrc-skin="nocturne"] .wrc-sec::after,
+html[data-wrc-skin="nocturne"] .wrc-composer::after,
+html[data-wrc-skin="nocturne"] .wrc-dock::after {
+    content: ""; position: absolute; inset: 0; border-radius: 14px; pointer-events: none; z-index: 3;
+    background:
+        linear-gradient(var(--nx-cy), var(--nx-cy)) top left / 16px 1.5px no-repeat,
+        linear-gradient(var(--nx-cy), var(--nx-cy)) top left / 1.5px 16px no-repeat,
+        linear-gradient(var(--nx-cy), var(--nx-cy)) bottom right / 16px 1.5px no-repeat,
+        linear-gradient(var(--nx-cy), var(--nx-cy)) bottom right / 1.5px 16px no-repeat;
+    opacity: .85;
+}
+html[data-wrc-skin="nocturne"] .wrc-queue.wrc-hot { border-color: rgba(255, 59, 92, .6); box-shadow: 0 0 0 1px rgba(255, 59, 92, .35), 0 0 30px rgba(255, 59, 92, .22), 0 22px 52px rgba(0, 0, 0, .5); }
+html[data-wrc-skin="nocturne"] .wrc-sec-h { border-bottom-color: var(--wrc-line-2); padding: 9px 12px 8px; }
+html[data-wrc-skin="nocturne"] .wrc-h { font-family: var(--nx-mono); font-size: .66rem; letter-spacing: .16em; color: var(--wrc-mut); }
+html[data-wrc-skin="nocturne"] .wrc-sec-h .bi { color: var(--nx-cy); }
+html[data-wrc-skin="nocturne"] .wrc-cnt { font-family: var(--nx-mono); background: rgba(55, 230, 255, .12); color: #7df3ff; border: 1px solid rgba(55, 230, 255, .35); }
+html[data-wrc-skin="nocturne"] .wrc-cnt.bad { background: rgba(255, 59, 92, .2); color: #ff8aa0; border-color: rgba(255, 59, 92, .55); box-shadow: 0 0 12px rgba(255, 59, 92, .35); }
+html[data-wrc-skin="nocturne"] .wrc-cnt.ok { background: rgba(53, 245, 161, .14); color: #7dffc6; border-color: rgba(53, 245, 161, .4); }
+html[data-wrc-skin="nocturne"] .wrc-cnt.new,
+html[data-wrc-skin="nocturne"] .wrc-room-new { background: var(--nx-cy); color: #04121c; border-color: var(--nx-cy); box-shadow: 0 0 10px rgba(55, 230, 255, .5); }
+html[data-wrc-skin="nocturne"] .wrc-link { color: var(--wrc-link); }
+html[data-wrc-skin="nocturne"] .wrc-calm { background: rgba(53, 245, 161, .1); color: #7dffc6; border: 1px solid rgba(53, 245, 161, .3); }
+
+/* ── the bar: phases and counters ── */
+html[data-wrc-skin="nocturne"] .wrc-bar { margin-bottom: .6rem; }
+html[data-wrc-skin="nocturne"] .wrc-phases { background: rgba(5, 12, 26, .72); border: 1px solid var(--nx-line); border-radius: 12px; padding: 3px; backdrop-filter: blur(12px); }
+html[data-wrc-skin="nocturne"] .wrc-phase { font-family: var(--nx-mono); font-size: .66rem; letter-spacing: .12em; text-transform: uppercase; padding: 5px 14px; border-radius: 9px; color: var(--wrc-mut); transition: color .2s, background .2s, box-shadow .2s; }
+html[data-wrc-skin="nocturne"] .wrc-phase:hover { color: #fff; }
+html[data-wrc-skin="nocturne"] .wrc-phase[aria-selected="true"] {
+    background: linear-gradient(180deg, rgba(55, 230, 255, .24), rgba(55, 230, 255, .08)); color: #fff;
+    box-shadow: inset 0 0 0 1px rgba(55, 230, 255, .55), 0 0 22px rgba(55, 230, 255, .28);
+}
+html[data-wrc-skin="nocturne"] .wrc-kpis { gap: 7px; }
+html[data-wrc-skin="nocturne"] .wrc-kpi {
+    position: relative; min-width: 68px; padding: 4px 9px 5px; align-items: center; text-align: center; overflow: hidden; border-radius: 11px;
+    background: linear-gradient(180deg, rgba(14, 28, 52, .7), rgba(6, 12, 26, .66)); border: 1px solid var(--nx-line); color: #fff;
+    backdrop-filter: blur(12px); transition: transform .2s, border-color .2s;
+}
+html[data-wrc-skin="nocturne"] .wrc-kpi::after { content: ""; position: absolute; left: 14%; right: 14%; bottom: 0; height: 2px; border-radius: 2px; background: var(--nx-cy); box-shadow: 0 0 10px var(--nx-cy); }
+html[data-wrc-skin="nocturne"] .wrc-kpi:hover { background: linear-gradient(180deg, rgba(20, 38, 68, .8), rgba(8, 16, 32, .7)); transform: translateY(-1px); border-color: rgba(55, 230, 255, .5); }
+html[data-wrc-skin="nocturne"] .wrc-kpi b { order: -1; font-family: var(--nx-display); font-size: 1.45rem; font-weight: 700; line-height: 1.05; color: var(--nx-cy); text-shadow: 0 0 16px rgba(55, 230, 255, .55); }
+html[data-wrc-skin="nocturne"] .wrc-kpi-l { font-family: var(--nx-mono); font-size: .5rem; letter-spacing: .1em; color: var(--wrc-mut); }
+html[data-wrc-skin="nocturne"] .wrc-kpi-bad { background: linear-gradient(180deg, rgba(60, 12, 26, .8), rgba(30, 6, 14, .7)); border-color: rgba(255, 59, 92, .6); }
+html[data-wrc-skin="nocturne"] .wrc-kpi-bad::after { background: var(--nx-bad); box-shadow: 0 0 10px var(--nx-bad); }
+html[data-wrc-skin="nocturne"] .wrc-kpi-bad b { color: var(--nx-bad); text-shadow: 0 0 16px rgba(255, 59, 92, .6); }
+html[data-wrc-skin="nocturne"] .wrc-kpi-bad .wrc-kpi-l { color: #ffb3c0; }
+html[data-wrc-skin="nocturne"] .wrc-kpi-warn { background: linear-gradient(180deg, rgba(56, 38, 6, .8), rgba(28, 18, 4, .7)); border-color: rgba(255, 184, 61, .6); }
+html[data-wrc-skin="nocturne"] .wrc-kpi-warn::after { background: var(--nx-warn); box-shadow: 0 0 10px var(--nx-warn); }
+html[data-wrc-skin="nocturne"] .wrc-kpi-warn b { color: var(--nx-warn); text-shadow: 0 0 16px rgba(255, 184, 61, .55); }
+html[data-wrc-skin="nocturne"] .wrc-kpi-warn .wrc-kpi-l { color: #ffd896; }
+/* the light / dark switch has no meaning on a dark look */
+html[data-wrc-skin="nocturne"] .wrc-theme { display: none; }
+
+/* ── the queue ── */
+html[data-wrc-skin="nocturne"] .wrc-q {
+    position: relative; flex: none; padding: 8px 10px 8px 13px; border-radius: 11px; background: rgba(10, 22, 44, .62); border: 1px solid rgba(110, 220, 255, .1); overflow: hidden; transition: transform .2s, border-color .2s, background .2s;
+}
+html[data-wrc-skin="nocturne"] .wrc-q::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--q, var(--nx-cy)); box-shadow: 0 0 12px var(--q, var(--nx-cy)); }
+html[data-wrc-skin="nocturne"] .wrc-q[data-target]:hover { filter: none; transform: translateX(3px); background: rgba(16, 32, 60, .85); border-color: rgba(55, 230, 255, .4); }
+html[data-wrc-skin="nocturne"] .wrc-q-critical { --q: var(--nx-bad); background: rgba(70, 12, 28, .46); border-color: rgba(255, 59, 92, .45); }
+html[data-wrc-skin="nocturne"] .wrc-q-high { --q: var(--nx-warn); background: rgba(64, 42, 6, .42); border-color: rgba(255, 184, 61, .4); }
+html[data-wrc-skin="nocturne"] .wrc-q-warn { --q: #ffd84a; background: rgba(60, 52, 8, .34); border-color: rgba(255, 216, 74, .3); }
+html[data-wrc-skin="nocturne"] .wrc-q-info { --q: var(--nx-cy); background: rgba(10, 44, 66, .42); border-color: rgba(55, 230, 255, .35); }
+html[data-wrc-skin="nocturne"] .wrc-q-i { color: var(--q, var(--nx-cy)) !important; filter: drop-shadow(0 0 6px var(--q, var(--nx-cy))); }
+html[data-wrc-skin="nocturne"] .wrc-q-t { color: #fff; }
+html[data-wrc-skin="nocturne"] .wrc-btn { font-family: var(--nx-mono); font-size: .66rem; letter-spacing: .05em; background: transparent; border: 1px solid rgba(110, 220, 255, .35); color: var(--wrc-ink); border-radius: 7px; transition: border-color .15s, background .15s; }
+html[data-wrc-skin="nocturne"] .wrc-btn:hover { background: rgba(55, 230, 255, .14); border-color: var(--nx-cy); }
+html[data-wrc-skin="nocturne"] .wrc-btn-warn { background: var(--nx-warn); border-color: var(--nx-warn); color: #1a1000; }
+html[data-wrc-skin="nocturne"] .wrc-btn-warn:hover { background: #ffc85f; }
+html[data-wrc-skin="nocturne"] .wrc-btn-ok { background: var(--nx-ok); border-color: var(--nx-ok); color: #00180d; }
+html[data-wrc-skin="nocturne"] .wrc-wait { background: rgba(10, 22, 44, .5); border-color: rgba(110, 220, 255, .22); }
+
+/* ── the teams ── */
+html[data-wrc-skin="nocturne"] .wrc-team { background: rgba(9, 20, 40, .66); border: 1px solid rgba(110, 220, 255, .1); border-radius: 12px; transition: border-color .2s, box-shadow .2s; }
+html[data-wrc-skin="nocturne"] .wrc-team:hover { border-color: rgba(55, 230, 255, .35); }
+html[data-wrc-skin="nocturne"] .wrc-team.picked { background: linear-gradient(90deg, rgba(55, 230, 255, .16), rgba(9, 20, 40, .66) 70%); border-color: rgba(55, 230, 255, .7); box-shadow: 0 0 24px rgba(55, 230, 255, .2); }
+html[data-wrc-skin="nocturne"] .wrc-team-name b { font-family: var(--nx-display); font-size: .95rem; letter-spacing: .05em; color: #fff; }
+html[data-wrc-skin="nocturne"] .wrc-av-arc { filter: drop-shadow(0 0 3px currentColor); }
+html[data-wrc-skin="nocturne"] .wrc-ring-go { stroke: var(--nx-cy); }
+html[data-wrc-skin="nocturne"] .wrc-ring-on { stroke: var(--nx-ok); }
+html[data-wrc-skin="nocturne"] .wrc-ring-bad { stroke: var(--nx-bad); }
+html[data-wrc-skin="nocturne"] .wrc-dot-ok { background: var(--nx-ok); box-shadow: 0 0 8px var(--nx-ok); }
+html[data-wrc-skin="nocturne"] .wrc-dot-warn { background: var(--nx-warn); box-shadow: 0 0 8px var(--nx-warn); }
+html[data-wrc-skin="nocturne"] .wrc-dot-bad { background: var(--nx-bad); box-shadow: 0 0 8px var(--nx-bad); }
+html[data-wrc-skin="nocturne"] .wrc-order { background: rgba(14, 30, 56, .7); border-color: rgba(110, 220, 255, .14); border-radius: 8px; }
+html[data-wrc-skin="nocturne"] .wrc-order.wrc-tone-go { background: rgba(55, 230, 255, .12); border-color: rgba(55, 230, 255, .45); }
+html[data-wrc-skin="nocturne"] .wrc-order.wrc-tone-on { background: rgba(53, 245, 161, .1); border-color: rgba(53, 245, 161, .42); }
+html[data-wrc-skin="nocturne"] .wrc-order.wrc-tone-bad { background: rgba(255, 59, 92, .13); border-color: rgba(255, 59, 92, .5); }
+html[data-wrc-skin="nocturne"] .wrc-tag { font-family: var(--nx-mono); background: rgba(138, 169, 196, .14); color: var(--wrc-mut); }
+html[data-wrc-skin="nocturne"] .wrc-tag-ok { background: rgba(53, 245, 161, .16); color: #7dffc6; }
+html[data-wrc-skin="nocturne"] .wrc-tag-warn { background: rgba(255, 184, 61, .16); color: #ffd08a; }
+html[data-wrc-skin="nocturne"] .wrc-tag-bad { background: rgba(255, 59, 92, .18); color: #ff8aa0; }
+
+/* ── the map ── */
+html[data-wrc-skin="nocturne"] .wrc-mapslot #mapCard {
+    position: relative; background: var(--nx-glass); border: 1px solid var(--nx-line); border-radius: 14px; overflow: hidden;
+    box-shadow: 0 22px 52px rgba(0, 0, 0, .5), inset 0 1px 0 rgba(160, 235, 255, .11);
+}
+html[data-wrc-skin="nocturne"] .wrc-mapslot #mapCard .card-header { background: rgba(6, 14, 28, .78); border-bottom: 1px solid var(--wrc-line-2); backdrop-filter: blur(12px); }
+html[data-wrc-skin="nocturne"] .wrc-mapslot #mapCard .card-header h5 { font-family: var(--nx-display); font-size: 1rem; letter-spacing: .06em; color: #fff; }
+html[data-wrc-skin="nocturne"] .wrc-mapslot #mapCard .card-header .bi-map { color: var(--nx-cy); }
+html[data-wrc-skin="nocturne"] .wrc-mapslot #mapCard #warRoomMap { border-radius: 0 0 14px 14px; background: #050b16; }
+/* the street map is dark and cold: the same tiles, inverted and tinted blue. A satellite map is a photograph and is only dimmed. */
+html[data-wrc-skin="nocturne"] .leaflet-tile-pane { filter: none; }
+html[data-wrc-skin="nocturne"] .leaflet-tile-pane img[src*="openstreetmap"] { filter: invert(1) sepia(1) hue-rotate(168deg) saturate(2.4) brightness(1.3) contrast(1.15); }
+html[data-wrc-skin="nocturne"] .leaflet-tile-pane img:not([src*="openstreetmap"]) { filter: brightness(.78) saturate(.9) contrast(1.05); }
+html[data-wrc-skin="nocturne"] .leaflet-container { background: #050b16; }
+html[data-wrc-skin="nocturne"] .leaflet-bar a { background: rgba(8, 18, 36, .92); color: #cfeeff; border-bottom-color: var(--nx-line); }
+html[data-wrc-skin="nocturne"] .leaflet-bar a:hover { background: rgba(20, 44, 76, .95); color: #fff; }
+html[data-wrc-skin="nocturne"] .leaflet-bar { border: 1px solid var(--nx-line); box-shadow: 0 0 16px rgba(0, 0, 0, .5); }
+html[data-wrc-skin="nocturne"] .leaflet-control-attribution { background: rgba(4, 9, 18, .78); color: var(--wrc-mut); }
+html[data-wrc-skin="nocturne"] .leaflet-control-attribution a { color: #7df3ff; }
+html[data-wrc-skin="nocturne"] .leaflet-popup-content-wrapper,
+html[data-wrc-skin="nocturne"] .leaflet-popup-tip { background: rgba(8, 18, 36, .96); color: var(--wrc-ink); border: 1px solid var(--nx-line); box-shadow: 0 12px 36px rgba(0, 0, 0, .6); }
+html[data-wrc-skin="nocturne"] .leaflet-popup-content a { color: #7df3ff; }
+html[data-wrc-skin="nocturne"] .leaflet-tooltip { background: rgba(4, 10, 22, .9); color: #eaf9ff; border: 1px solid var(--nx-line); box-shadow: 0 0 12px rgba(0, 0, 0, .5); }
+html[data-wrc-skin="nocturne"] .leaflet-tooltip-top::before { border-top-color: rgba(4, 10, 22, .9); }
+html[data-wrc-skin="nocturne"] .wrc-mapslot #mapCard .card-body { position: relative; }
+/* a line of light sweeps down the map, slowly */
+html[data-wrc-skin="nocturne"] .wrc-mapslot #mapCard .card-body::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; z-index: 451; pointer-events: none;
+    background: linear-gradient(90deg, transparent, rgba(55, 230, 255, .6), transparent); box-shadow: 0 0 18px rgba(55, 230, 255, .5);
+    animation: nxScan 9s linear infinite;
+}
+@keyframes nxScan { from { top: -2px; } to { top: 100%; } }
+html[data-wrc-skin="nocturne"] .wrc-mapslot #mapCard .card-body::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 450;
+    background: repeating-linear-gradient(0deg, rgba(120, 220, 255, .035) 0 1px, transparent 1px 3px), radial-gradient(120% 100% at 50% 50%, transparent 55%, rgba(2, 6, 14, .45));
+}
+
+/* ── the order form ── */
+html[data-wrc-skin="nocturne"] .wrc-composer { padding: 10px 12px 12px; animation: nxRise .7s cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes nxRise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+html[data-wrc-skin="nocturne"] .wrc-cmp-l,
+html[data-wrc-skin="nocturne"] .wrc-sub { font-family: var(--nx-mono); letter-spacing: .16em; color: var(--wrc-mut); }
+html[data-wrc-skin="nocturne"] .wrc-rcp { background: rgba(55, 230, 255, .12); border: 1px solid rgba(55, 230, 255, .45); color: #fff; }
+html[data-wrc-skin="nocturne"] .wrc-verbs { padding: 3px; gap: 3px; border-radius: 12px; background: rgba(5, 12, 26, .72); border: 1px solid var(--nx-line); flex: 0 1 auto; }
+html[data-wrc-skin="nocturne"] .wrc-verb { border: 0; background: transparent; border-radius: 9px; color: var(--wrc-mut); font-weight: 600; transition: color .2s, background .2s, box-shadow .2s; }
+html[data-wrc-skin="nocturne"] .wrc-verb:hover { color: #fff; background: rgba(55, 230, 255, .08); }
+html[data-wrc-skin="nocturne"] .wrc-verb.on { color: #fff; background: linear-gradient(180deg, rgba(55, 230, 255, .26), rgba(55, 230, 255, .07)); box-shadow: inset 0 0 0 1px rgba(55, 230, 255, .55), 0 0 20px rgba(55, 230, 255, .25); }
+html[data-wrc-skin="nocturne"] .wrc-in { background: rgba(5, 12, 26, .85); border: 1px solid var(--nx-line); color: var(--wrc-ink); border-radius: 9px; }
+html[data-wrc-skin="nocturne"] .wrc-in:focus { outline: none; border-color: var(--nx-cy); box-shadow: 0 0 0 3px rgba(55, 230, 255, .16); }
+html[data-wrc-skin="nocturne"] .wrc-go {
+    font-family: var(--nx-mono); font-size: .74rem; letter-spacing: .12em; text-transform: uppercase; border-radius: 10px; color: #02121c;
+    background: linear-gradient(180deg, #7df3ff, #2fd8f5); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .4), 0 8px 26px rgba(55, 230, 255, .38); transition: transform .2s, box-shadow .2s;
+}
+html[data-wrc-skin="nocturne"] .wrc-go:hover:not(:disabled) { transform: translateY(-1px); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .5), 0 12px 34px rgba(55, 230, 255, .55); }
+html[data-wrc-skin="nocturne"] .wrc-go:disabled { background: rgba(138, 169, 196, .18); box-shadow: none; color: #6f8aa3; }
+html[data-wrc-skin="nocturne"] .wrc-go-alt { background: transparent; color: var(--nx-cy); box-shadow: inset 0 0 0 1.5px rgba(55, 230, 255, .7); }
+html[data-wrc-skin="nocturne"] .wrc-go-alt:hover:not(:disabled) { background: rgba(55, 230, 255, .1); }
+html[data-wrc-skin="nocturne"] .wrc-go-alt:disabled { background: transparent; color: #5f7893; box-shadow: inset 0 0 0 1.5px rgba(110, 220, 255, .18); }
+html[data-wrc-skin="nocturne"] .wrc-toast { backdrop-filter: blur(12px); }
+
+/* ── the dock ── */
+html[data-wrc-skin="nocturne"] .wrc-tabs { border-bottom-color: var(--wrc-line-2); padding: 6px 6px 0; gap: 2px; }
+html[data-wrc-skin="nocturne"] .wrc-tabs button { position: relative; border-bottom: 0; font-size: .8rem; color: var(--wrc-mut); transition: color .2s; }
+html[data-wrc-skin="nocturne"] .wrc-tabs button:hover { color: #fff; }
+html[data-wrc-skin="nocturne"] .wrc-tabs button[aria-selected="true"] { color: #fff; }
+html[data-wrc-skin="nocturne"] .wrc-tabs button[aria-selected="true"]::after { content: ""; position: absolute; left: 12%; right: 12%; bottom: -1px; height: 2px; background: var(--nx-cy); box-shadow: 0 0 12px var(--nx-cy); }
+html[data-wrc-skin="nocturne"] .wrc-chip { font-family: var(--nx-mono); font-size: .66rem; letter-spacing: .06em; background: transparent; border: 1px solid var(--nx-line); color: var(--wrc-mut); }
+html[data-wrc-skin="nocturne"] .wrc-chip:hover { color: #fff; border-color: rgba(55, 230, 255, .5); }
+html[data-wrc-skin="nocturne"] .wrc-chip.on { background: var(--nx-cy); border-color: var(--nx-cy); color: #04121c; box-shadow: 0 0 14px rgba(55, 230, 255, .35); }
+html[data-wrc-skin="nocturne"] .wrc-f { position: relative; padding: 9px 6px 9px 10px; border-bottom-color: var(--wrc-line-2); }
+html[data-wrc-skin="nocturne"] .wrc-f::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; background: var(--wrc-mut); }
+html[data-wrc-skin="nocturne"] .wrc-f.wrc-tone-bad::before { background: var(--nx-bad); box-shadow: 0 0 10px var(--nx-bad); }
+html[data-wrc-skin="nocturne"] .wrc-f.wrc-tone-warn::before { background: var(--nx-warn); box-shadow: 0 0 10px var(--nx-warn); }
+html[data-wrc-skin="nocturne"] .wrc-f.wrc-tone-info::before { background: var(--nx-cy); box-shadow: 0 0 10px var(--nx-cy); }
+html[data-wrc-skin="nocturne"] .wrc-f.wrc-tone-bad .wrc-f-i { color: var(--nx-bad); filter: drop-shadow(0 0 5px var(--nx-bad)); }
+html[data-wrc-skin="nocturne"] .wrc-f.wrc-tone-warn .wrc-f-i { color: var(--nx-warn); filter: drop-shadow(0 0 5px var(--nx-warn)); }
+html[data-wrc-skin="nocturne"] .wrc-f-thumb { border: 1px solid var(--nx-line); }
+html[data-wrc-skin="nocturne"] .wrc-f-x { color: #e9f6ff; }
+html[data-wrc-skin="nocturne"] .wrc-acc { background: rgba(9, 20, 40, .6); border-color: var(--nx-line); border-radius: 11px; }
+html[data-wrc-skin="nocturne"] .wrc-acc-h { font-family: var(--nx-mono); font-size: .68rem; letter-spacing: .12em; color: #bfd6ea; }
+html[data-wrc-skin="nocturne"] .wrc-pane .card { background: rgba(9, 20, 40, .62); border-color: var(--nx-line); border-radius: 11px; }
+
+/* ── preparation and closing checklists ── */
+html[data-wrc-skin="nocturne"] .wrc-check { border-radius: 9px; }
+html[data-wrc-skin="nocturne"] .wrc-check-ok { background: rgba(53, 245, 161, .1); border-color: rgba(53, 245, 161, .35); color: #7dffc6; }
+html[data-wrc-skin="nocturne"] .wrc-check-warn { background: rgba(255, 184, 61, .12); border-color: rgba(255, 184, 61, .45); color: #ffd08a; }
+html[data-wrc-skin="nocturne"] .wrc-check-bad { background: rgba(255, 59, 92, .14); border-color: rgba(255, 59, 92, .5); color: #ff9fb0; }
+
+@media (prefers-reduced-motion: reduce) {
+    html[data-wrc-skin="nocturne"] .wrc-composer,
+    html[data-wrc-skin="nocturne"] .wrc-mapslot #mapCard .card-body::before { animation: none; }
+    html[data-wrc-skin="nocturne"] * { transition-duration: 0s !important; }
+}

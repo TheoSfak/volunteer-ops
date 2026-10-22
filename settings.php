@@ -45,6 +45,7 @@ $defaults = [
     'war_room_banner_font_size' => '1.35',
     'war_room_ticker_position' => 'top',
     'war_room_ticker_mode' => 'scroll',
+    'war_room_console_skin' => 'classic',
     'war_room_auto_ping_seconds' => '180',
     'war_room_auto_ping_high_accuracy' => '1',
     'war_room_native_sampling' => '1',
@@ -515,7 +516,7 @@ function runHealthChecks() {
 // none of these appear in the general form any more — a key in both lists
 // would be wiped by whichever tab was saved last.
 $actionRoomFields = [
-    'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_ticker_mode', 'war_room_area_unit',
+    'war_room_banner_font_size', 'war_room_ticker_position', 'war_room_ticker_mode', 'war_room_console_skin', 'war_room_area_unit',
     'war_room_grid_max_size_m', 'war_room_grid_max_cells',
     'war_room_auto_ping_seconds', 'war_room_auto_ping_high_accuracy',
     'war_room_native_sampling', 'war_room_native_full_tracking',
@@ -661,6 +662,11 @@ if (isPost()) {
                     // three, and anything else falls back to today's behaviour.
                     if ($field === 'war_room_ticker_mode' && !in_array($value, ['scroll', 'static', 'hidden'], true)) {
                         $value = 'scroll';
+                    }
+                    // The Κονσόλα's look: war-room.php loads a stylesheet named after this value,
+                    // so only a skin that exists is ever stored; anything else is today's console.
+                    if ($field === 'war_room_console_skin' && !in_array($value, ['classic', 'nocturne', 'aurora'], true)) {
+                        $value = 'classic';
                     }
 
                     // Same closed-list reasoning: the clock prints this on every
@@ -2475,6 +2481,41 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                             <option value="hidden" <?= ($settings['war_room_ticker_mode'] ?? 'scroll') === 'hidden' ? 'selected' : '' ?>>Κρυφά — εκτός από SOS και επικίνδυνη ζώνη</option>
                         </select>
                         <small class="text-muted"><strong>Ακίνητα:</strong> τα μηνύματα εμφανίζονται κανονικά, αλλά στέκονται και αναδιπλώνονται σε όσες γραμμές χρειάζεται, και στη μπάρα και στις οθόνες SOS / επικίνδυνης ζώνης / επιστροφής στη βάση. <strong>Κρυφά:</strong> οι γραμμές ανακοινώσεων και ενημερώσεων δεν εμφανίζονται ούτε ηχούν, ούτε η γραμμή «ΕΚΚΡΕΜΕΙ ΑΠΑΝΤΗΣΗ». Μένουν πάντα οι γραμμές SOS, επικίνδυνης ζώνης και φωνητικού μηνύματος, η οθόνη «Επιστροφή στη βάση», και μια εντολή προς τον ίδιο τον χρήστη αν δεν μπόρεσε να ανοίξει ως αναδυόμενο παράθυρο. Οι εντολές φτάνουν κανονικά με το αναδυόμενο παράθυρο και οι επιβεβαιώσεις με τον πίνακα «Επιβεβαιώσεις λήψης».</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Εμφάνιση Κονσόλας Action Room</label>
+                        <?php $consoleSkin = $settings['war_room_console_skin'] ?? 'classic'; ?>
+                        <style>
+                            .skin-pick { display: grid; grid-template-columns: minmax(0, 1fr); gap: .6rem; max-width: 560px; }
+                            .skin-card { position: relative; display: grid; grid-template-columns: 116px minmax(0, 1fr); gap: .75rem; align-items: center; margin: 0; padding: .5rem; border: 2px solid var(--bs-border-color); border-radius: .6rem; cursor: pointer; background: var(--bs-body-bg); }
+                            .skin-card:hover { border-color: var(--bs-secondary-color); }
+                            .skin-card input { position: absolute; opacity: 0; }
+                            .skin-card:has(input:checked) { border-color: #1d4ed8; box-shadow: 0 0 0 3px rgba(29, 78, 216, .18); }
+                            .skin-card:has(input:focus-visible) { outline: 2px solid #1d4ed8; outline-offset: 2px; }
+                            .skin-prev { height: 66px; border-radius: .4rem; display: grid; grid-template-columns: 26% 1fr 24%; gap: 4px; padding: 5px; }
+                            .skin-prev i { display: block; border-radius: 3px; }
+                            .skin-prev.p-classic { background: #eef2f7; }
+                            .skin-prev.p-classic i { background: #fff; border: 1px solid #d5dce6; }
+                            .skin-prev.p-classic i:nth-child(2) { background: #cfd9e6; }
+                            .skin-prev.p-nocturne { background: radial-gradient(circle at 60% 40%, #123a52, #04070f 70%); }
+                            .skin-prev.p-nocturne i { background: rgba(14, 30, 56, .85); border: 1px solid rgba(55, 230, 255, .55); box-shadow: 0 0 8px rgba(55, 230, 255, .25); }
+                            .skin-prev.p-nocturne i:nth-child(2) { background: rgba(8, 30, 48, .6); }
+                            .skin-prev.p-aurora { background: linear-gradient(135deg, #cfc9ff, #ffd0e4 48%, #bdeee0); }
+                            .skin-prev.p-aurora i { background: rgba(255, 255, 255, .72); border: 1px solid rgba(255, 255, 255, .9); border-radius: 9px; }
+                            .skin-prev.p-aurora i:nth-child(2) { background: rgba(255, 255, 255, .45); }
+                        </style>
+                        <div class="skin-pick" role="radiogroup" aria-label="Εμφάνιση Κονσόλας">
+                            <label class="skin-card"><input type="radio" name="war_room_console_skin" value="classic" <?= $consoleSkin === 'classic' ? 'checked' : '' ?>>
+                                <div class="skin-prev p-classic" aria-hidden="true"><i></i><i></i><i></i></div>
+                                <div><strong class="d-block small">Κλασική</strong><small class="text-muted">Η Κονσόλα όπως είναι σήμερα. Προεπιλογή.</small></div></label>
+                            <label class="skin-card"><input type="radio" name="war_room_console_skin" value="nocturne" <?= $consoleSkin === 'nocturne' ? 'checked' : '' ?>>
+                                <div class="skin-prev p-nocturne" aria-hidden="true"><i></i><i></i><i></i></div>
+                                <div><strong class="d-block small">Nocturne</strong><small class="text-muted">Σκούρο πιλοτήριο: γυάλινα πάνελ, νέον κυανό, ανάγλυφος χάρτης.</small></div></label>
+                            <label class="skin-card"><input type="radio" name="war_room_console_skin" value="aurora" <?= $consoleSkin === 'aurora' ? 'checked' : '' ?>>
+                                <div class="skin-prev p-aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+                                <div><strong class="d-block small">Aurora</strong><small class="text-muted">Φωτεινό γυαλί με αυγή από χρώματα, και σκούρο θέμα με το κουμπί της Κονσόλας.</small></div></label>
+                        </div>
+                        <small class="text-muted d-block mt-2">Αλλάζει μόνο το πώς φαίνεται η Κονσόλα (χρώματα, γράμματα, υλικά και κινήσεις) — όλα τα πάνελ, τα κουμπιά και οι λειτουργίες μένουν ίδια και στο ίδιο σημείο. Ισχύει για όλους τους διαχειριστές με την επόμενη φόρτωση της Κονσόλας· η «Κλασική όψη» του Action Room δεν αλλάζει.</small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Μέγιστο Μέγεθος Τομέα Αυτόματου Πλέγματος (μ.)</label>

@@ -1164,6 +1164,11 @@ $warRoomCriticalShiftMinutes = (int) round($warRoomMaxShiftMinutes * 1.5);
 // save, because the CSS block and WR_TICKER_MODE below branch on it verbatim.
 $wrTickerMode = getSetting('war_room_ticker_mode', 'scroll');
 if (!in_array($wrTickerMode, ['scroll', 'static', 'hidden'], true)) $wrTickerMode = 'scroll';
+// Settings → «Εμφάνιση Κονσόλας Action Room»: 'classic' is the console as it always was; a skin
+// is one more stylesheet (assets/css/war-room-console-<skin>.css) over the very same markup. The
+// name goes into a file path below, so it is only ever one of these.
+$wrConsoleSkin = getSetting('war_room_console_skin', 'classic');
+if (!in_array($wrConsoleSkin, ['classic', 'nocturne', 'aurora'], true)) $wrConsoleSkin = 'classic';
 // last_ping_at was a correlated MAX(vp.created_at) per participant. created_at
 // is not in any index that also covers user_id+shift_id, so each participant
 // meant reading every one of their own ping rows off the table: 147ms on a
@@ -4206,7 +4211,13 @@ include __DIR__ . '/includes/header.php';
          page's own state. The two bare nodes the offline queue writes to are not
          cards and would be swept away with their legacy row, so they live here. */ ?>
 <link rel="stylesheet" href="<?= rtrim(BASE_URL, '/') ?>/assets/css/war-room-console.css?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/css/war-room-console.css') ?>">
-<script>document.body.classList.add('wr-console-view');try{if(localStorage.getItem('wr-console-theme')==='dark')document.documentElement.setAttribute('data-bs-theme','dark');}catch(e){}</script>
+<?php if ($wrConsoleSkin !== 'classic'): ?>
+<?php /* A skin is loaded after the console's own sheet and every rule in it sits behind
+         html[data-wrc-skin]; the attribute is set below, before the first paint. */ ?>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=<?= $wrConsoleSkin === 'nocturne' ? 'JetBrains+Mono:wght@400..700&amp;family=Tektur:wght@400..800' : 'Manrope:wght@200..800' ?>&amp;display=swap">
+<link rel="stylesheet" href="<?= rtrim(BASE_URL, '/') ?>/assets/css/war-room-console-<?= $wrConsoleSkin ?>.css?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/css/war-room-console-' . $wrConsoleSkin . '.css') ?>">
+<?php endif; ?>
+<script>document.body.classList.add('wr-console-view');<?php if ($wrConsoleSkin !== 'classic'): ?>document.documentElement.setAttribute('data-wrc-skin','<?= $wrConsoleSkin ?>');<?php endif; ?><?php if ($wrConsoleSkin === 'nocturne'): /* a dark skin: the light/dark choice does not apply, and is left as it was for the other looks */ ?>document.documentElement.setAttribute('data-bs-theme','dark');<?php else: ?>try{if(localStorage.getItem('wr-console-theme')==='dark')document.documentElement.setAttribute('data-bs-theme','dark');}catch(e){}<?php endif; ?></script>
 <div id="wrConsole" class="wrc" data-mission="<?= (int) $missionId ?>" data-live="<?= !empty($liveEnabled) ? '1' : '0' ?>">
     <div id="offlineQueueBanner" class="alert alert-warning py-1 px-2 small mb-2 d-none"></div>
     <div id="offlineQueueFailures"></div>
