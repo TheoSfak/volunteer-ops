@@ -2010,11 +2010,21 @@ foreach ($participants as $participant) {
 }
 
 require_once __DIR__ . '/includes/war-room-layout.php';
+// The admin console is for running the mission, not for being in it. The
+// "me" cards (my location and field-status buttons, my orders, sectors and
+// route, nearby teams, restricted-area distance) describe a field responder,
+// and for an admin who is not on the mission's roster every one of them is
+// empty - the location card literally says "you have no shift" - while the
+// first of them sat at the top of the sidebar. An admin who IS on the roster
+// (an approved participation, the same test as the report forms) keeps them,
+// and so does everyone outside the console view: a volunteer, and command
+// staff in the tabbed view, whose "me" tab would otherwise be empty.
+$showPersonalCards = !($canManageWarRoom && !$volunteerTabs) || $isApprovedParticipant;
 // Mirrors the #wrZoneMain/#wrZoneSidebar gate exactly — a saved drag layout is
 // only meaningful to the zone view, and $volunteerTabs now excludes it even
 // for command staff (they get the tabs instead, see the flags near the top).
 $warRoomLayout = ($canManageWarRoom && !$volunteerTabs)
-    ? getWarRoomLayoutForUser((int)$user['id'], $isApprovedParticipant, !empty($teams), !empty($mission['is_special_mission']), $isMissingPersonMission, $weatherCompassOn, $liveEnabled)
+    ? getWarRoomLayoutForUser((int)$user['id'], $isApprovedParticipant, !empty($teams), !empty($mission['is_special_mission']), $isMissingPersonMission, $weatherCompassOn, $liveEnabled, $showPersonalCards)
     : null;
 
 $pageTitle = 'Action Room — ' . $mission['title'];
@@ -2234,6 +2244,12 @@ include __DIR__ . '/includes/header.php';
        only ever saw one column at a time anyway) is unaffected. */
     .wr-zone { display: flex; flex-direction: column; gap: 1rem; }
     .wr-zone > .card { margin: 0; }
+    /* ...but the cards still carry the mb-4 / mt-3 / mt-4 they were written
+       with for a stacked column, and those are !important, so each one added
+       up to 1.5rem on top of the zone's own 1rem gap: 40px between sidebar
+       cards instead of 16, about 450px of nothing down a full sidebar. */
+    .wr-zone > .card.mb-4 { margin-bottom: 0 !important; }
+    .wr-zone > .card.mt-3, .wr-zone > .card.mt-4 { margin-top: 0 !important; }
     .wr-zone.wr-unlocked > .card > .card-header,
     .wr-zone.wr-unlocked > .card [data-card-drag-handle] { cursor: grab; }
     /* Half-width cards, left zone only. The zone is normally a plain column
@@ -4421,6 +4437,7 @@ include __DIR__ . '/includes/header.php';
         </div>
         <?php endif; ?>
 
+        <?php if ($showPersonalCards): ?>
         <div class="card shadow-sm mb-4 border-primary" data-card-id="myLocationCard">
             <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-geo-alt-fill me-1"></i><?= t('myping.panel_title') ?></h5></div>
             <div class="card-body">
@@ -4494,6 +4511,7 @@ include __DIR__ . '/includes/header.php';
                 <?php endif; ?>
             </div>
         </div>
+        <?php endif; ?>
     </div>
 </div>
 
@@ -5351,6 +5369,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
 
+        <?php if ($showPersonalCards): ?>
         <!-- This card carries no map of its own,
              so this is the only place a field volunteer sees where other teams
              are — a plain distance+direction list instead of pins on a map.
@@ -5389,6 +5408,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 <div id="myRoutesList"><p class="text-muted mb-0"><?= t('route.my_empty') ?></p></div>
             </div>
         </div>
+        <?php endif; ?>
 
         <?php if ($liveEnabled && $isApprovedParticipant): ?>
         <!-- Volunteer-facing live card. A persistent card rather than hanging
@@ -5439,6 +5459,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
         <?php endif; ?>
+        <?php if ($showPersonalCards): ?>
         <div class="card shadow-sm mb-4 border-primary" data-card-id="myTasksCard">
             <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-clipboard-check me-1"></i><?= t('mytasks.panel_title') ?></h5></div>
             <div class="card-body">
@@ -5456,6 +5477,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 <div id="mySectorsList"></div>
             </div>
         </div>
+        <?php endif; ?>
 
         <!-- Deliberately not rendered in the volunteer tabbed view. This is a
              static, server-rendered list of the mission shift times: a volunteer
@@ -16740,6 +16762,7 @@ function renderMyRoutes(allRoutes) {
     myRoutesRenderedSig = sig;
 
     const list = document.getElementById('myRoutesList');
+    if (!list) return;
     const myRoutes = (allRoutes || []).filter(r => r.is_route_member);
     if (!myRoutes.length) {
         list.innerHTML = '<p class="text-muted mb-0">' + t('route.my_empty') + '</p>';
@@ -21457,6 +21480,23 @@ function reloadForGpsChange(extend, reason) {
         if (Array.isArray(saved)) saved.forEach(id => collapsed.add(String(id)));
     } catch (e) {}
     const persist = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify([...collapsed])); } catch (e) {} };
+    // Cards an admin opens once per mission rather than once an hour: closing
+    // it, managing it, handing out visitor and briefing links. They start
+    // folded in the console view, once per browser; after that the browser
+    // keeps whatever the admin chose. Not folded: the order forms (dispatch,
+    // sectors, routes, restricted areas, requests, broadcast) - they are used
+    // again and again while a mission runs.
+    const FOLDED_BY_DEFAULT = ['endMissionCard', 'missionMgmtCard', 'missionVisitorsCard', 'briefingCard'];
+    const FOLDED_FLAG = 'wr_cards_folded_default';
+    if (document.getElementById('wrZoneMain')) {
+        try {
+            if (localStorage.getItem(FOLDED_FLAG) !== '1') {
+                FOLDED_BY_DEFAULT.forEach(id => collapsed.add(id));
+                localStorage.setItem(FOLDED_FLAG, '1');
+                persist();
+            }
+        } catch (e) {}
+    }
     const CONTROLS = 'button, a, input, select, textarea, label, .dropdown-menu, .btn-group, [data-no-collapse]';
     const desktop = window.matchMedia('(min-width: 992px)').matches;
 
@@ -21551,6 +21591,20 @@ function reloadForGpsChange(extend, reason) {
     }
 
     document.querySelectorAll('.card[data-card-id]').forEach(enhance);
+
+    // A folded card must not hide a request that is waiting for somebody: a
+    // visitor who has registered and is not classified yet cannot get in until
+    // an admin presses a tag, and the card they press it on starts folded.
+    window.wrRevealCard = function (id) {
+        const card = document.querySelector('.card[data-card-id="' + id + '"]');
+        const header = card && card.querySelector('.wr-collapsible-header[aria-controls]');
+        const target = header && document.getElementById(header.getAttribute('aria-controls'));
+        if (!target || target.classList.contains('show')) return;
+        bootstrap.Collapse.getOrCreateInstance(target, {toggle: false}).show();
+    };
+    if (document.querySelector('[data-live-fragment="missionVisitors"] [data-visitor-pending]')) {
+        window.wrRevealCard('missionVisitorsCard');
+    }
 })();
 
 function saveViewAndReload() {
@@ -25233,6 +25287,9 @@ function applyLiveFragments(fragments) {
         if (!el || el.dataset.sig === fragment.sig) return;
         el.innerHTML = fragment.html;
         el.dataset.sig = fragment.sig;
+        if (key === 'missionVisitors' && window.wrRevealCard && el.querySelector('[data-visitor-pending]')) {
+            window.wrRevealCard('missionVisitorsCard');
+        }
     });
 }
 // Returns a promise that always settles (never rejects), so the banner's

@@ -13,25 +13,58 @@ if (!defined('VOLUNTEEROPS')) {
 }
 
 /**
- * The 43 admin-desktop-view cards, in default reading order, split into the
+ * Bumped whenever the DEFAULT order changes in a way a layout saved earlier
+ * should pick up too. Stored in the saved row as 'v' (a row without it is
+ * version 1); see warRoomUpgradeSavedLayout() for what each step does.
+ */
+const WAR_ROOM_LAYOUT_VERSION = 2;
+
+/**
+ * The 44 admin-desktop-view cards, in default reading order, split into the
  * two drag zones (main/left column, sidebar/right column). This list IS the
  * server-side whitelist — api-war-room-layout.php rejects any card id not
  * present here.
+ *
+ * The sidebar leads with the two alert cards (SOS, field voice messages): they
+ * used to sit between the shift list and the broadcast form, two and a half
+ * screens down, and the end-of-mission card used to sit between the broadcast
+ * and dispatch forms although it is used once per mission. The six request
+ * cards (location, photo, video, live, general order, voice announcement) moved
+ * from the left column to sit with the other order forms: with the "me" cards
+ * gone and the rarely used cards folded, the left column was 800px longer than
+ * the sidebar, and they are the part of it that is a form rather than a view.
  */
 function warRoomDefaultLayout(): array {
     return [
         'main' => [
             'triageCard', 'mapCard', 'weatherCard', 'missingPersonCard', 'trailEventsCard', 'shortageFormCard', 'incidentFormCard',
             'shortageListCard', 'incidentsListCard', 'poiListCard', 'sectorsListCard', 'teamsCard',
-            'participantsCard', 'liveStreamsCard', 'requestLocationCard', 'requestPhotoCard',
-            'requestVideoCard', 'requestLiveCard', 'requestTaskCard', 'requestSpeakCard', 'activityCard', 'chatCard',
+            'participantsCard', 'liveStreamsCard', 'activityCard', 'chatCard',
         ],
         'sidebar' => [
+            'sosAlertsCard', 'voiceMessagesCard',
             'myLocationCard', 'myLiveCard', 'mediaCard', 'broadcastPhotoCard', 'nearbyTeamsCard', 'restrictedAreaProximityCard', 'myRouteCard',
-            'myTasksCard', 'mySectorsCard', 'shiftsCard', 'sosAlertsCard', 'broadcastCard',
-            'endMissionCard', 'dispatchCard', 'sectorsCard', 'restrictedAreasCard', 'routeOrderCard',
-            'teamRoutesAdminCard', 'briefingCard', 'missionVisitorsCard', 'missionMgmtCard',
+            'myTasksCard', 'mySectorsCard', 'shiftsCard', 'broadcastCard',
+            'dispatchCard', 'sectorsCard', 'restrictedAreasCard', 'routeOrderCard',
+            'teamRoutesAdminCard',
+            'requestLocationCard', 'requestPhotoCard', 'requestVideoCard', 'requestLiveCard', 'requestTaskCard', 'requestSpeakCard',
+            'briefingCard', 'missionVisitorsCard', 'missionMgmtCard', 'endMissionCard',
         ],
+    ];
+}
+
+/**
+ * The cards that describe the viewer as a FIELD RESPONDER: their own location
+ * and field-status buttons, their own orders, sectors and route, the teams and
+ * restricted areas near them. For an admin who is not on the mission's roster
+ * every one of them is empty (the location card says "you have no shift") and
+ * the first of them sat at the very top of the sidebar, so they are not
+ * rendered at all in that case — see $showPersonalCards in war-room.php.
+ */
+function warRoomPersonalCardIds(): array {
+    return [
+        'myLocationCard', 'myLiveCard', 'nearbyTeamsCard', 'restrictedAreaProximityCard',
+        'myRouteCard', 'myTasksCard', 'mySectorsCard',
     ];
 }
 
@@ -45,9 +78,12 @@ function warRoomAllCardIds(): array {
  * PHP conditionals already in war-room.php (report forms need an approved
  * participant, the two team-routing cards need at least one team to exist).
  */
-function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false, bool $isMissingPersonMission = false, bool $weatherEnabled = false, bool $liveEnabled = false): array {
+function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false, bool $isMissingPersonMission = false, bool $weatherEnabled = false, bool $liveEnabled = false, bool $showPersonalCards = true): array {
     $default = warRoomDefaultLayout();
     $excluded = [];
+    if (!$showPersonalCards) {
+        $excluded = array_merge($excluded, warRoomPersonalCardIds());
+    }
     if (!$isApprovedParticipant) {
         $excluded[] = 'shortageFormCard';
         $excluded[] = 'incidentFormCard';
@@ -93,8 +129,8 @@ function warRoomRenderedCardIds(bool $isApprovedParticipant, bool $hasTeams, boo
  *    no "append missing ids" step — an id absent from 'hidden' is visible
  *    by default, which is already what we want.
  */
-function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false, bool $isMissingPersonMission = false, bool $weatherEnabled = false, bool $liveEnabled = false): array {
-    $rendered = warRoomRenderedCardIds($isApprovedParticipant, $hasTeams, $isSpecialMission, $isMissingPersonMission, $weatherEnabled, $liveEnabled);
+function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool $hasTeams, bool $isSpecialMission = false, bool $isMissingPersonMission = false, bool $weatherEnabled = false, bool $liveEnabled = false, bool $showPersonalCards = true): array {
+    $rendered = warRoomRenderedCardIds($isApprovedParticipant, $hasTeams, $isSpecialMission, $isMissingPersonMission, $weatherEnabled, $liveEnabled, $showPersonalCards);
     $allRenderedIds = array_merge($rendered['main'], $rendered['sidebar']);
 
     $saved = [];
@@ -102,7 +138,7 @@ function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool 
     if ($row) {
         $decoded = json_decode($row['layout_json'], true);
         if (is_array($decoded)) {
-            $saved = $decoded;
+            $saved = warRoomUpgradeSavedLayout($decoded);
         }
     }
 
@@ -167,6 +203,51 @@ function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool 
 }
 
 /**
+ * Brings a layout saved under an older default up to the current one, once.
+ * A saved layout is the user's own arrangement and normally wins over any
+ * default, which is exactly why a default that moves something never reached
+ * anyone who had ever dragged a card: they kept the old order for good. Each
+ * step here is a deliberate exception, applied on read until the user next
+ * changes their layout (the save endpoint stamps WAR_ROOM_LAYOUT_VERSION, and
+ * from then on the arrangement is theirs again, untouched).
+ *
+ *  v2: the SOS alerts card and the field voice messages card lead the sidebar.
+ *      Only when SOS is in the sidebar: someone who moved it to the left
+ *      column did that on purpose. And the six request cards that are still
+ *      in the left column move to the sidebar, after the last order form that
+ *      is there (the end of the sidebar if none is); one that was already
+ *      dragged into the sidebar stays where it is.
+ */
+function warRoomUpgradeSavedLayout(array $saved): array {
+    if ((int)($saved['v'] ?? 1) >= WAR_ROOM_LAYOUT_VERSION) {
+        return $saved;
+    }
+    $sidebar = is_array($saved['sidebar'] ?? null) ? array_values($saved['sidebar']) : [];
+    if (in_array('sosAlertsCard', $sidebar, true)) {
+        $alerts = ['sosAlertsCard', 'voiceMessagesCard'];
+        $sidebar = array_merge($alerts, array_values(array_diff($sidebar, $alerts)));
+        $saved['sidebar'] = $sidebar;
+    }
+
+    $main = is_array($saved['main'] ?? null) ? array_values($saved['main']) : [];
+    $requests = ['requestLocationCard', 'requestPhotoCard', 'requestVideoCard', 'requestLiveCard', 'requestTaskCard', 'requestSpeakCard'];
+    $moving = array_values(array_intersect($main, $requests));
+    if ($moving) {
+        $orderForms = ['dispatchCard', 'sectorsCard', 'restrictedAreasCard', 'routeOrderCard', 'teamRoutesAdminCard', 'broadcastCard'];
+        $after = count($sidebar);
+        foreach ($sidebar as $i => $id) {
+            if (in_array($id, $orderForms, true)) {
+                $after = $i + 1;
+            }
+        }
+        array_splice($sidebar, $after, 0, $moving);
+        $saved['main'] = array_values(array_diff($main, $moving));
+        $saved['sidebar'] = $sidebar;
+    }
+    return $saved;
+}
+
+/**
  * Short plain-text label per card, for the show/hide checklist modal —
  * distinct from each card's own live header title (t()'d directly in
  * war-room.php) because a couple of those titles are unsuitable for a
@@ -210,6 +291,7 @@ function warRoomCardLabels(): array {
         'mySectorsCard' => t('sector.my_panel_title'),
         'shiftsCard' => t('shifts.panel_title'),
         'sosAlertsCard' => t('sos.panel_title'),
+        'voiceMessagesCard' => t('voice.staff_card_title'),
         'broadcastCard' => t('global_message.card_title'),
         'endMissionCard' => t('end_mission_broadcast.card_title'),
         'dispatchCard' => t('dispatch.card_title'),
@@ -229,6 +311,7 @@ function warRoomCardLabels(): array {
  * calling this) — this function just persists whatever it's given.
  */
 function saveWarRoomLayoutForUser(int $userId, array $layout): void {
+    $layout['v'] = WAR_ROOM_LAYOUT_VERSION;
     dbExecute(
         "INSERT INTO war_room_layouts (user_id, layout_json, updated_at) VALUES (?, ?, NOW())
          ON DUPLICATE KEY UPDATE layout_json = VALUES(layout_json), updated_at = NOW()",

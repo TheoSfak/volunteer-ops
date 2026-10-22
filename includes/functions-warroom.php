@@ -12088,7 +12088,7 @@ function loadMissionVisitorsForCard(int $missionId): array {
 function renderMissionVisitorLists(array $pendingVisitors, array $activeVisitors, array $visitorTags): string {
     ob_start();
     ?>
-                <h6 class="small fw-semibold text-uppercase text-muted"><?= t('visitor.pending_title') ?></h6>
+                <h6 class="small fw-semibold text-uppercase text-muted"<?= empty($pendingVisitors) ? '' : ' data-visitor-pending="' . count($pendingVisitors) . '"' ?>><?= t('visitor.pending_title') ?></h6>
                 <?php if (empty($pendingVisitors)): ?>
                 <p class="text-muted small mb-3"><?= t('visitor.pending_empty') ?></p>
                 <?php else: ?>
