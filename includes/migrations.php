@@ -7787,6 +7787,16 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 192,
+            'description' => "Add mission_search_areas.terrain (v3.402.0): the kind of ground a search area lies on ('rural' open country, 'mountain' rough or densely vegetated ground, 'urban' streets and buildings). The Verified Coverage percentage depends on it: how far a searcher can see, how much a vague GPS fix is worth and how far apart two fixes may be before the straight line between them is no longer believed all change with the ground. NULL = not chosen: a sector with registered buildings counts as urban, anything else as open country, which is exactly what every sector was measured as before. Sectors have no column of their own; they inherit their area's.",
+            'up' => function () {
+                if (!dbColumnExists('mission_search_areas', 'terrain')) {
+                    dbExecute("ALTER TABLE mission_search_areas ADD COLUMN terrain ENUM('rural','mountain','urban') NULL DEFAULT NULL AFTER ring_index");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

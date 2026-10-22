@@ -9123,7 +9123,11 @@ const SECTOR_STATUS_HEX = <?= json_encode(array_map(fn($c) => MISSION_TYPE_COLOR
 function sectorCoverageBadgeHtml(item) {
     const cov = sectorCoverageById[item.id];
     if (!cov) return '';
-    const groundBadge = `<span class="badge bg-light text-dark border" title="${escapeHtml(t('coverage.badge_tooltip'))}">🛰️ ${cov.percent}%</span>`;
+    // The tooltip says what the number was measured against: the same walk
+    // reads very differently over open country and over a street grid, so a
+    // bare percentage would pretend the ground did not matter.
+    const basis = cov.terrain ? ' — ' + t('coverage.basis', {terrain: t('coverage.terrain.' + cov.terrain), radius: cov.radius_m}) : '';
+    const groundBadge = `<span class="badge bg-light text-dark border" title="${escapeHtml(t('coverage.badge_tooltip') + basis)}">🛰️ ${cov.percent}%</span>`;
     // Sectors with buildings show BOTH numbers side by side — ground-sweep %
     // (same GPS signal as any other sector) plus a buildings % (checked
     // buildings / total). The ⚠️ stays tied to buildings only, never to the
@@ -9140,7 +9144,9 @@ function sectorCoverageBadgeHtml(item) {
             ? ` <span title="${escapeHtml(t('coverage.buildings_incomplete_warning'))}">⚠️</span>` : '';
         return ` ${groundBadge} ${buildingsBadge}${warn}`;
     }
-    const warn = (item.status === 'completed' && cov.percent < 60)
+    // The floor depends on the ground (a fully walked town cannot reach what a
+    // fully walked field does); 60 is what it always was.
+    const warn = (item.status === 'completed' && cov.percent < (cov.warn_below ?? 60))
         ? ` <span title="${escapeHtml(t('coverage.low_coverage_warning'))}">⚠️</span>` : '';
     return ` ${groundBadge}${warn}`;
 }
@@ -9152,6 +9158,32 @@ function ringCoverageBadgeHtml(ringIndex) {
     const cov = ringCoverageById[ringIndex];
     if (!coverageModeActive || !cov) return '';
     return ` <span class="badge bg-light text-dark border" title="${escapeHtml(t('coverage.badge_tooltip'))}">🛰️ ${cov.percent}%</span>`;
+}
+
+// The kind of ground a search area lies on, which is what its sectors' Verified
+// Coverage is measured against. Chosen per AREA, not per sector: one area is one
+// kind of ground, a village at the foot of a mountain is two areas, and the 120
+// cells of a generated grid must not each need a choice. '' = not chosen — the
+// server then calls a sector with buildings urban and anything else open country.
+function areaTerrainSelectHtml(area) {
+    const options = ['', 'rural', 'mountain', 'urban'].map(v =>
+        `<option value="${v}" ${v === (area.terrain || '') ? 'selected' : ''}>${escapeHtml(t('coverage.terrain.' + (v || 'auto')))}</option>`
+    ).join('');
+    return `<label class="small text-muted d-block mt-1" title="${escapeHtml(t('coverage.terrain_hint'))}">${escapeHtml(t('coverage.terrain_label'))}
+        <select class="form-select form-select-sm area-terrain-select" data-id="${area.id}">${options}</select></label>`;
+}
+function areaSetTerrain(id, terrain, selectEl) {
+    if (selectEl) selectEl.disabled = true;
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'set_area_terrain', id, terrain});
+    fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
+        if (result.ok) {
+            if (map) map.closePopup();
+            sectorRefreshAfter(result.sectors, result.areas);
+            // Every percentage is measured against the terrain, so a coverage
+            // view that is already open is out of date the moment it changes.
+            if (coverageModeActive) enterCoverageMode();
+        } else { alert(result.error || t('common.send_failed')); if (selectEl) selectEl.disabled = false; }
+    }).catch(e => actionRequestFailed(selectEl, e));
 }
 
 function sectorAdminSetStatus(id, status, selectEl) {
@@ -9880,6 +9912,7 @@ function renderAreaLayer(items) {
             : `<button type="button" class="btn btn-sm btn-outline-primary mt-1 area-divide-btn" data-id="${item.id}">${t('sector.divide_btn')}</button>`;
         const manageHtml = item.can_manage ? `
             <div class="mt-2">
+                ${areaTerrainSelectHtml(item)}
                 ${divideOrClearBtn}
                 <button type="button" class="btn btn-sm btn-outline-danger mt-1 area-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
             </div>` : '';
@@ -9907,6 +9940,8 @@ areaLayer?.on('popupopen', event => {
     if (clearSectorsBtn) clearSectorsBtn.addEventListener('click', () => clearAreaSectors(clearSectorsBtn.dataset.id));
     const delBtn = popupEl.querySelector('.area-delete-btn');
     if (delBtn) delBtn.addEventListener('click', () => areaDelete(delBtn.dataset.id));
+    const terrainSelect = popupEl.querySelector('.area-terrain-select');
+    if (terrainSelect) terrainSelect.addEventListener('change', () => areaSetTerrain(terrainSelect.dataset.id, terrainSelect.value, terrainSelect));
 });
 
 // Restricted (hazard/danger) areas — solid red border + red diagonal-hatch
@@ -10466,7 +10501,7 @@ function renderSectorsList(items) {
                 <div><i class="bi bi-bounding-box me-1"></i><strong>${escapeHtml(area.label)}</strong> <span class="small text-muted ms-1">${rollup}</span></div>
                 ${delBtn}
             </div>
-            <div class="ps-2">${rows}</div>
+            <div class="ps-2">${area.can_manage ? areaTerrainSelectHtml(area) : ''}${rows}</div>
         </div>`;
     }).join('');
 
@@ -10498,6 +10533,7 @@ function renderSectorsList(items) {
         }
     }));
     list.querySelectorAll('.area-delete-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); areaDelete(btn.dataset.id); }));
+    list.querySelectorAll('.area-terrain-select').forEach(sel => sel.addEventListener('change', () => areaSetTerrain(sel.dataset.id, sel.value, sel)));
 }
 
 // Freehand: mousedown starts a stroke, mousemove samples points at a

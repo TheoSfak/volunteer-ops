@@ -336,6 +336,32 @@ if ($action === 'create_area') {
     exit;
 }
 
+// The kind of ground a search area lies on. Verified Coverage measures every
+// sector of the area with that ground's sweep radius (COVERAGE_TERRAIN_PROFILES),
+// so this changes the percentages and nothing a team was told to do — no status
+// change and no notification. An empty value puts it back to "not chosen".
+if ($action === 'set_area_terrain') {
+    $areaId = (int) post('id');
+    $area = dbFetchOne("SELECT id, terrain FROM mission_search_areas WHERE id = ? AND mission_id = ?", [$areaId, $missionId]);
+    if (!$area) {
+        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
+        exit;
+    }
+    $terrainRaw = (string) post('terrain');
+    if ($terrainRaw !== '' && !isset(COVERAGE_TERRAIN_PROFILES[$terrainRaw])) {
+        echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
+        exit;
+    }
+    $terrain = $terrainRaw !== '' ? $terrainRaw : null;
+    dbExecute("UPDATE mission_search_areas SET terrain = ? WHERE id = ?", [$terrain, $areaId]);
+    logAudit('set_mission_search_area_terrain', 'mission_search_areas', $areaId, null, [
+        'mission_id' => $missionId, 'old_terrain' => $area['terrain'], 'new_terrain' => $terrain,
+    ]);
+
+    echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
+    exit;
+}
+
 if ($action === 'create') {
     $label = trim((string) post('label'));
     if ($label === '') {

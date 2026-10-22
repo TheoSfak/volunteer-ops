@@ -2455,6 +2455,11 @@ CREATE TABLE IF NOT EXISTS `mission_search_areas` (
 -- ring-origin area already removes its sectors.
 ALTER TABLE `mission_search_areas` ADD COLUMN `ring_index` TINYINT UNSIGNED NULL AFTER `label`;
 
+-- terrain: added post-launch (migration v192). The kind of ground the area lies
+-- on; Verified Coverage measures a sector with that ground's sweep radius.
+-- NULL = not chosen (a sector with buildings is urban, any other open country).
+ALTER TABLE `mission_search_areas` ADD COLUMN `terrain` ENUM('rural','mountain','urban') NULL DEFAULT NULL AFTER `ring_index`;
+
 -- =============================================
 -- MISSION SEARCH SECTORS (War Room search-area coverage tracking — polygon
 -- sub-divisions of a search area, assigned to a team, tracked not_started/
