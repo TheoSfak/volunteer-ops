@@ -4417,6 +4417,10 @@ include __DIR__ . '/includes/header.php';
                             <input class="form-check-input" type="checkbox" id="trailIncludeAuto">
                             <label class="form-check-label small" for="trailIncludeAuto"><?= t('trail.include_auto') ?></label>
                         </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="trailCollapseStops" checked>
+                            <label class="form-check-label small" for="trailCollapseStops"><?= t('trail.collapse_stops') ?></label>
+                        </div>
                     </div>
                     <div class="col-12 col-md-4">
                         <button type="button" class="btn btn-sm btn-primary w-100" id="trailApplyBtn"><i class="bi bi-funnel-fill me-1"></i><?= t('trail.apply_btn') ?></button>
@@ -6556,6 +6560,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg==" crossorigin="anonymous"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-utils.js?v=<?= APP_VERSION ?>"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/trail-display.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/triage.js?v=<?= APP_VERSION ?>"></script>
 <?php if ($consoleView): ?>
 <?php /* defer: it reads the page's own state (the poll's arrays, the render
@@ -13543,6 +13548,36 @@ let currentTrails = [];
 // Mission-wide event timeline paired with the trails above — always the
 // full mission regardless of the team filter (see mission-track.php).
 let currentTrailEvents = [];
+// The longest silence still drawn as one continuous line, from
+// mission-track.php (warRoomRecordingGapSeconds(): the app's own "this
+// position has gone quiet"). 0 until a trail has loaded = never cut the line.
+let currentTrailGapSeconds = 0;
+
+// A fix taken while the volunteer's heart rate was in alarm. The trail rings
+// such a fix in the alarm colour so a stretch of route where someone was in
+// trouble stands out, so it must stay a dot of its own and never vanish into a
+// folded stop.
+function trailAlarmPoint(point) {
+    return point.hr_zone === 'critical' || point.hr_zone === 'low';
+}
+function trailDurationLabel(seconds) {
+    const d = trailDurationParts(seconds);
+    return d.h ? t('trail.duration_hm', d) : t('trail.duration_m', d);
+}
+// A stop: one badge at the centre of the run of fixes it replaces, saying how
+// long the person stayed. A stop that is still going (it contains the newest
+// fix) puts its badge under the point, because the person's pin sits above it.
+function addTrailStop(trail, color, item, ongoing) {
+    const lasted = trailDurationLabel(item.endTs - item.startTs);
+    const icon = L.divIcon({
+        className: '',
+        html: trailStopBadgeHtml(color, lasted, ongoing),
+        iconSize: [0, 0],
+    });
+    L.marker([item.lat, item.lng], {icon, zIndexOffset: ongoing ? 0 : 200})
+        .bindPopup(`<strong>${escapeHtml(trail.name)}</strong><br><i class="bi bi-pause-circle-fill"></i> ${t('trail.stop_title')} · ${lasted}<br>${item.firstPoint.time} – ${item.lastPoint.time}<br><span class="small text-muted">${t('trail.stop_fixes', {count: item.stop.count})}</span>`)
+        .addTo(trailLayer);
+}
 
 // Shared by both the plain full-trail view and the replay scrubber: cutoffTs
 // = Infinity reproduces the original "show everything" behavior exactly
@@ -13559,12 +13594,27 @@ function renderTrailUpTo(trails, cutoffTs) {
         const color = trail.team_color || '#2563eb';
         const points = cutoffTs === Infinity ? trail.points : trail.points.filter(p => p.ts <= cutoffTs);
         if (!points.length) return;
-        const latlngs = points.map(p => [p.lat, p.lng]);
-        if (latlngs.length > 1) {
-            L.polyline(latlngs, {color, weight: 3, opacity: 0.8}).addTo(trailLayer);
-        }
-        points.forEach((point, i) => {
-            const isLast = i === points.length - 1;
+        // What to draw, worked out in assets/js/trail-display.js (shared with
+        // the archive): a run of fixes where the person stood still folded
+        // into one stop, and the line cut wherever the recording went silent
+        // so a stretch nobody saw is dashed instead of drawn as a walked line.
+        const model = trailDisplayModel(points, {
+            collapseStops: document.getElementById('trailCollapseStops')?.checked !== false,
+            gapSeconds: trailEffectiveGapSeconds(trail.points, currentTrailGapSeconds),
+            keep: trailAlarmPoint,
+        });
+        model.solid.forEach(run => L.polyline(run, {color, weight: 3, opacity: 0.8}).addTo(trailLayer));
+        model.gaps.forEach(gap => {
+            L.polyline([gap.from, gap.to], {color, weight: 3, opacity: 0.7, dashArray: '8 8'})
+                .bindTooltip(escapeHtml(t('trail.gap_tooltip', {
+                    duration: trailDurationLabel(gap.seconds), from: gap.fromPoint.time, to: gap.toPoint.time,
+                })), {sticky: true})
+                .addTo(trailLayer);
+        });
+        points.forEach(p => bounds.push([p.lat, p.lng]));
+        const addTrailPoint = i => {
+            const point = points[i];
+            const isLast = i === model.lastIndex;
             const isFirst = i === 0 && points.length > 1;
             // A point recorded while the volunteer was in tachycardia or
             // bradycardia is ringed in the alarm colour instead of white, so a
@@ -13606,7 +13656,17 @@ function renderTrailUpTo(trails, cutoffTs) {
             // hour later must not look like a different kind of information
             // from watching it live, because it is literally the same samples.
             marker.bindPopup(`<strong>${escapeHtml(trail.name)}</strong>${heartRateBlockHtml(point.bpm, point.hr_zone)}<br>${point.time}${sourceLabel}${accuracyLineHtml(point.acc)}<br>${t('trail.speed_label')}: ${speedLabel}`);
-            bounds.push([point.lat, point.lng]);
+        };
+        model.items.forEach(item => {
+            if (item.type === 'stop') {
+                const ongoing = item.stop.to === model.lastIndex;
+                addTrailStop(trail, color, item, ongoing);
+                // Where the person is NOW stays a pin, inside a stop that has
+                // not ended yet too: the stop says how long, the pin says where.
+                if (ongoing) addTrailPoint(item.stop.to);
+            } else {
+                addTrailPoint(item.index);
+            }
         });
     });
     if (bounds.length) {
@@ -13744,6 +13804,7 @@ function enterTrailMode() {
         if (includeAdmin && !mapOverlaysHidden.has('dispatch')) { if (!map.hasLayer(dispatchLayer)) dispatchLayer.addTo(map); }
         else if (map.hasLayer(dispatchLayer)) { map.removeLayer(dispatchLayer); }
         currentTrails = result.trails;
+        currentTrailGapSeconds = Number(result.gap_seconds) || 0;
         currentTrailEvents = result.events || [];
         document.getElementById('trailEventsCard')?.classList.remove('d-none');
         renderTrail(currentTrails);
@@ -13775,6 +13836,14 @@ if (trailModeToggleBtn) {
         }
     });
     document.getElementById('trailApplyBtn').addEventListener('click', enterTrailMode);
+    // Folding stops only changes how the loaded fixes are drawn, so it redraws
+    // them where the replay scrubber is rather than fetching the trail again.
+    document.getElementById('trailCollapseStops')?.addEventListener('change', () => {
+        if (!trailModeActive) return;
+        const replayBar = document.getElementById('trailReplayBar');
+        const replaying = replayBar && !replayBar.classList.contains('d-none');
+        renderTrailUpTo(currentTrails, replaying ? Number(document.getElementById('trailScrubber').value) : Infinity);
+    });
 }
 
 // Verified Coverage — same on-demand-fetch-and-toggle idiom as Team Trail

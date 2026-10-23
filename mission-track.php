@@ -46,6 +46,9 @@ $includeAuto = get('include_auto') === '1';
 echo json_encode([
     'ok'     => true,
     'trails' => loadMissionTrailForMission($missionId, $teamId, $includeAuto),
+    // The longest silence still drawn as one continuous line; the map cuts the
+    // trail and draws a dashed stretch past it (assets/js/trail-display.js).
+    'gap_seconds' => warRoomRecordingGapSeconds(),
     // true = include staff-only activity notes; $canManageWarRoom is already
     // enforced as a hard gate above, so only command staff ever reach here.
     'events' => loadMissionActivityEventsForReport($missionId, true),

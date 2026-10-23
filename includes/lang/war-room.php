@@ -1054,6 +1054,13 @@ return [
         'trail.load_failed' => 'Αποτυχία φόρτωσης πορείας.',
         'trail.exit_btn' => 'Ζωντανή Προβολή',
         'trail.events_title' => 'Χρονολόγιο Γεγονότων',
+        // Στάσεις και κενά στην πορεία (assets/js/trail-display.js)
+        'trail.collapse_stops' => 'Σύμπτυξη στάσεων',
+        'trail.stop_title' => 'Στάση',
+        'trail.stop_fixes' => '{count} στίγματα',
+        'trail.duration_m' => '{m} λ.',
+        'trail.duration_hm' => '{h} ω. {m} λ.',
+        'trail.gap_tooltip' => 'Χωρίς στίγματα για {duration} ({from} – {to})',
         // Verified Coverage — GPS ground-truth swept-area estimate vs. self-reported sector status
         'coverage.load_failed' => 'Αποτυχία φόρτωσης κάλυψης.',
         'coverage.exit_btn' => 'Απόκρυψη Κάλυψης',
@@ -3940,6 +3947,13 @@ return [
         'trail.load_failed' => 'Failed to load trail.',
         'trail.exit_btn' => 'Live View',
         'trail.events_title' => 'Event Timeline',
+        // Stops and gaps in the trail (assets/js/trail-display.js)
+        'trail.collapse_stops' => 'Collapse stops',
+        'trail.stop_title' => 'Stop',
+        'trail.stop_fixes' => '{count} fixes',
+        'trail.duration_m' => '{m} min',
+        'trail.duration_hm' => '{h} h {m} min',
+        'trail.gap_tooltip' => 'No fixes for {duration} ({from} – {to})',
         // Verified Coverage — GPS ground-truth swept-area estimate vs. self-reported sector status
         'coverage.load_failed' => 'Failed to load coverage.',
         'coverage.exit_btn' => 'Hide Coverage',

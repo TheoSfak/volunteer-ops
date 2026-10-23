@@ -183,6 +183,8 @@ $jsKeys = [
     'archive.auto_suffix', 'archive.route_popup', 'archive.waypoint_popup',
     'archive.view_street', 'archive.view_topo', 'archive.view_satellite', 'archive.view_hybrid',
     'archive.media_video_gone',
+    // Stops and gaps in the trail, the same words as the live Πορεία Ομάδων.
+    'trail.stop_title', 'trail.stop_fixes', 'trail.duration_m', 'trail.duration_hm', 'trail.gap_tooltip',
 ];
 $jsStrings = [];
 foreach ($jsKeys as $key) $jsStrings[$key] = t($key);
@@ -247,6 +249,10 @@ include __DIR__ . '/includes/header.php';
                     <div class="col-auto form-check ms-2">
                         <input class="form-check-input" type="checkbox" id="archiveAuto" checked>
                         <label class="form-check-label small" for="archiveAuto"><?= h(t('archive.filter_include_auto')) ?></label>
+                    </div>
+                    <div class="col-auto form-check ms-2">
+                        <input class="form-check-input" type="checkbox" id="archiveCollapse" checked>
+                        <label class="form-check-label small" for="archiveCollapse"><?= h(t('trail.collapse_stops')) ?></label>
                     </div>
                     <div class="col-auto">
                         <button type="button" id="archiveShow" class="btn btn-primary btn-sm"><?= h(t('archive.btn_show')) ?></button>
@@ -336,6 +342,7 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/trail-display.js?v=<?= APP_VERSION ?>"></script>
 <script>
 (function () {
     const ARCHIVE = <?= json_encode($archive, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
@@ -451,16 +458,39 @@ include __DIR__ . '/includes/header.php';
             '<div class="small py-1 border-bottom d-flex justify-content-between gap-2"><span>' + e.icon + ' ' + e.text + '</span><span class="text-muted text-nowrap">' + fmtTime(e.ts) + '</span></div>'
         ).join('');
     }
+    // The longest silence still drawn as one line (mission-track.php), 0 until a trail has loaded.
+    let gapSeconds = 0;
+    const durLabel = sec => {
+        const d = trailDurationParts(sec);
+        return (d.h ? STR['trail.duration_hm'] : STR['trail.duration_m']).replace('{h}', d.h).replace('{m}', d.m);
+    };
     function renderTrails(cutoff, fit) {
         trailLayer.clearLayers();
         const bounds = [];
+        const collapse = document.getElementById('archiveCollapse').checked;
         trails.forEach(trail => {
             const color = trail.team_color || '#2563eb';
             const pts = cutoff === Infinity ? trail.points : trail.points.filter(p => p.ts <= cutoff);
             if (!pts.length) return;
-            if (pts.length > 1) L.polyline(pts.map(p => [p.lat, p.lng]), {color, weight: 3, opacity: 0.8}).addTo(trailLayer);
-            pts.forEach((p, i) => {
-                const last = i === pts.length - 1;
+            // Stops folded, silences dashed: assets/js/trail-display.js, shared with the live Πορεία Ομάδων.
+            const model = trailDisplayModel(pts, {collapseStops: collapse, gapSeconds: trailEffectiveGapSeconds(trail.points, gapSeconds)});
+            model.solid.forEach(run => L.polyline(run, {color, weight: 3, opacity: 0.8}).addTo(trailLayer));
+            model.gaps.forEach(g => L.polyline([g.from, g.to], {color, weight: 3, opacity: 0.7, dashArray: '8 8'})
+                .bindTooltip(esc(STR['trail.gap_tooltip'].replace('{duration}', durLabel(g.seconds)).replace('{from}', g.fromPoint.time).replace('{to}', g.toPoint.time)), {sticky: true})
+                .addTo(trailLayer));
+            pts.forEach(p => bounds.push([p.lat, p.lng]));
+            const addStop = (item, ongoing) => {
+                const lasted = durLabel(item.endTs - item.startTs);
+                const icon = L.divIcon({className: '', html: trailStopBadgeHtml(color, lasted, ongoing), iconSize: [0, 0]});
+                L.marker([item.lat, item.lng], {icon, zIndexOffset: ongoing ? 0 : 200})
+                    .bindPopup('<strong>' + esc(trail.name) + '</strong><br><i class="bi bi-pause-circle-fill"></i> ' + esc(STR['trail.stop_title']) + ' · ' + esc(lasted)
+                        + '<br>' + esc(item.firstPoint.time) + ' – ' + esc(item.lastPoint.time)
+                        + '<br><span class="small text-muted">' + esc(STR['trail.stop_fixes'].replace('{count}', item.stop.count)) + '</span>')
+                    .addTo(trailLayer);
+            };
+            const addPoint = i => {
+                const p = pts[i];
+                const last = i === model.lastIndex;
                 const prev = pts[i - 1];
                 const kmh = (prev && p.ts > prev.ts) ? L.latLng(prev.lat, prev.lng).distanceTo(L.latLng(p.lat, p.lng)) / (p.ts - prev.ts) * 3.6 : null;
                 const popup = '<strong>' + esc(trail.name) + '</strong><br>' + esc(p.time) + (p.source === 'auto' ? esc(STR['archive.auto_suffix']) : '')
@@ -469,7 +499,16 @@ include __DIR__ . '/includes/header.php';
                     ? L.circleMarker([p.lat, p.lng], {radius: 9, color: '#fff', weight: 3, fillColor: color, fillOpacity: 1}).bindTooltip(esc(trail.name), {permanent: true, direction: 'top', offset: [0, -8]})
                     : L.circleMarker([p.lat, p.lng], {radius: 4, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 1});
                 m.bindPopup(popup).addTo(trailLayer);
-                bounds.push([p.lat, p.lng]);
+            };
+            model.items.forEach(item => {
+                if (item.type === 'stop') {
+                    const ongoing = item.stop.to === model.lastIndex;
+                    addStop(item, ongoing);
+                    // Where the person is NOW stays a pin, inside a stop that has not ended too.
+                    if (ongoing) addPoint(item.stop.to);
+                } else {
+                    addPoint(item.index);
+                }
             });
         });
         if (fit && bounds.length) { map.invalidateSize(); map.fitBounds(L.latLngBounds(bounds.concat(staticBounds)), {padding: [40, 40]}); }
@@ -509,6 +548,7 @@ include __DIR__ . '/includes/header.php';
         fetch('mission-track.php?' + params).then(r => r.json()).then(result => {
             if (!result.ok) { statusEl.textContent = result.error || STR['archive.load_failed']; return; }
             trails = result.trails || [];
+            gapSeconds = Number(result.gap_seconds) || 0;
             events = result.events || [];
             statusEl.textContent = trails.length ? '' : STR['archive.no_trails'];
             renderTrails(Infinity, true);
@@ -516,6 +556,10 @@ include __DIR__ . '/includes/header.php';
         }).catch(() => { statusEl.textContent = STR['archive.load_failed']; });
     }
     document.getElementById('archiveShow').addEventListener('click', loadTrails);
+    // Folding stops only changes how the loaded fixes are drawn: redraw them where the scrubber is.
+    document.getElementById('archiveCollapse').addEventListener('change', () => {
+        renderTrails(bar.classList.contains('d-none') ? Infinity : Number(scrubber.value), false);
+    });
     loadTrails();
 
     // ── Gallery viewer: one photo or one video at a time, read only ──────────

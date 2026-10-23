@@ -37,9 +37,10 @@ if (!canManageActionRoom($mission['responsible_user_id'] ? (int) $mission['respo
 $overview = loadMissionGpsQuality($missionId);
 
 // Gaps: a position counts as stale past three cadences (the app's own
-// definition), and nothing under a minute is worth a row.
+// definition), and nothing under a minute is worth a row. The trail map cuts
+// its line at the very same figure.
 $cadenceSeconds = max(1, (int) getSetting('war_room_auto_ping_seconds', '180'));
-$gapMinSeconds  = max(60, warRoomPingStaleThresholdSeconds());
+$gapMinSeconds  = warRoomRecordingGapSeconds();
 $allGaps        = get('gaps') === 'all';
 $gapReport      = loadMissionGpsGaps($missionId, $gapMinSeconds, $allGaps ? 500 : 25);
 

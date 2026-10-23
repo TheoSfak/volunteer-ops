@@ -5262,6 +5262,22 @@ function warRoomPingStaleThresholdSeconds(): int {
 }
 
 /**
+ * The longest silence between two fixes that still counts as one continuous
+ * recording: past it the stretch is a GAP (v3.404.0). It is the staleness line
+ * above with a one-minute floor - the app's own "this position has gone quiet"
+ * - so a trail, the GPS quality page's «Κενά στην καταγραφή» and the live pin
+ * agree on what a hole is. Nothing under a minute is a hole: a refused fix or
+ * a late tick is routine.
+ *
+ * Used by mission-gps-quality.php for the list of gaps and sent by
+ * mission-track.php to the trail map, which draws such a stretch dashed
+ * instead of as a line somebody walked.
+ */
+function warRoomRecordingGapSeconds(): int {
+    return max(60, warRoomPingStaleThresholdSeconds());
+}
+
+/**
  * How recently the Android app's native service must have delivered a fix for
  * it to count as THE source for this phone ("one phone, one stream"): two
  * cadences, so one late or refused fix does not hand the phone back to the
