@@ -181,7 +181,7 @@ $archive = [
 $jsKeys = [
     'archive.loading', 'archive.load_failed', 'archive.no_trails', 'archive.timeline_empty', 'archive.speed',
     'archive.auto_suffix', 'archive.route_popup', 'archive.waypoint_popup',
-    'archive.view_street', 'archive.view_topo', 'archive.view_satellite',
+    'archive.view_street', 'archive.view_topo', 'archive.view_satellite', 'archive.view_hybrid',
     'archive.media_video_gone',
 ];
 $jsStrings = [];
@@ -345,10 +345,19 @@ include __DIR__ . '/includes/header.php';
     const fmtTime = ts => new Date(ts * 1000).toLocaleString(LOCALE, {day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit'});
 
     const map = L.map('archiveMap', {maxZoom: 21});
+    // The aerial photo has no text on it; the hybrid view lays Esri's road-name
+    // and place-name layers over it so a hillside can be told from a village.
+    const satelliteTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {attribution: 'Tiles © Esri', maxNativeZoom: 19, maxZoom: 21});
+    const esriReference = 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/';
     const base = {
         [STR['archive.view_street']]: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap', maxNativeZoom: 19, maxZoom: 21}),
         [STR['archive.view_topo']]: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {attribution: '© OpenTopoMap (CC-BY-SA)', maxNativeZoom: 17, maxZoom: 21}),
-        [STR['archive.view_satellite']]: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {attribution: 'Tiles © Esri', maxNativeZoom: 19, maxZoom: 21}),
+        [STR['archive.view_satellite']]: satelliteTiles,
+        [STR['archive.view_hybrid']]: L.layerGroup([
+            satelliteTiles,
+            L.tileLayer(esriReference + 'World_Transportation/MapServer/tile/{z}/{y}/{x}', {maxNativeZoom: 19, maxZoom: 21, zIndex: 2}),
+            L.tileLayer(esriReference + 'World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {attribution: 'Labels © Esri', maxNativeZoom: 19, maxZoom: 21, zIndex: 3}),
+        ]),
     };
     base[STR['archive.view_street']].addTo(map);
     L.control.layers(base, null, {position: 'topright'}).addTo(map);

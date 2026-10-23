@@ -7421,7 +7421,7 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
 // "the map broke". The other two layers keep their own native depth. Its
 // tiles are CC-BY-SA and must carry that attribution, unlike Esri's.
 //
-// All three tile layers are created upfront so switching is instant
+// All the base layers are created upfront so switching is instant
 // add/remove, never a re-fetch; only one is ever attached to a given map at
 // a time. The preference (wr_map_base_layer) is intentionally ONE shared
 // localStorage key across every map, not per-map/per-mission — whichever
@@ -7437,7 +7437,7 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
 // satellite view was the one with the contour lines. A named list cannot be
 // read the wrong way round, and on a phone (no hover titles) it is the only
 // place the names appear at all.
-const MAP_BASE_LAYER_KEYS = ['street', 'topo', 'satellite'];
+const MAP_BASE_LAYER_KEYS = ['street', 'topo', 'satellite', 'hybrid'];
 // Every layer may be zoomed past the depth its tiles actually reach, with
 // Leaflet upscaling the deepest real tile — the trick OpenTopoMap has used
 // here since v3.186.0, now applied to all three.
@@ -7447,7 +7447,27 @@ const MAP_BASE_LAYER_KEYS = ['street', 'topo', 'satellite'];
 // reports it as 527 τ.μ. — which is how a house someone knows to be 230 came
 // back as 500. One extra pixel of blur beats a shape that cannot be traced.
 const MAP_MAX_ZOOM = 21;
+//
+// The aerial photo carries no text at all — no street, no village, no
+// address — so zoomed in on a hillside or a town it answered "what is
+// there" but never "where is this". The fourth view lays Esri's two free
+// reference layers (road names, then settlements and places) over the same
+// photo, which is what "Hybrid" is on every other map. It is a separate entry
+// and not the satellite's default because a label across a rooftop is in the
+// way when a building is being traced (see MAP_MAX_ZOOM).
+//
+// How much text it adds depends on where you are: in a town it names the
+// streets and prints house numbers (Ηράκλειο centre at zoom 18), in a small
+// village it names the village and little else — Ζαρός shows no street at
+// all. The street map is the fuller source there, house numbers included
+// where OpenStreetMap has them, which is why it stays a separate view.
 function addMapBaseLayers(targetMap, toggleBtnId) {
+    const satelliteTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles © Esri',
+        maxNativeZoom: 19,
+        maxZoom: MAP_MAX_ZOOM,
+    });
+    const esriReference = 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/';
     const layers = {
         street: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenStreetMap',
@@ -7459,16 +7479,27 @@ function addMapBaseLayers(targetMap, toggleBtnId) {
             maxNativeZoom: 17,
             maxZoom: MAP_MAX_ZOOM,
         }),
-        satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-            attribution: 'Tiles © Esri',
-            maxNativeZoom: 19,
-            maxZoom: MAP_MAX_ZOOM,
-        }),
+        satellite: satelliteTiles,
+        hybrid: L.layerGroup([
+            satelliteTiles,
+            L.tileLayer(esriReference + 'World_Transportation/MapServer/tile/{z}/{y}/{x}', {
+                maxNativeZoom: 19,
+                maxZoom: MAP_MAX_ZOOM,
+                zIndex: 2,
+            }),
+            L.tileLayer(esriReference + 'World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Labels © Esri',
+                maxNativeZoom: 19,
+                maxZoom: MAP_MAX_ZOOM,
+                zIndex: 3,
+            }),
+        ]),
     };
     const layerMeta = {
         street:    {icon: 'bi-map',            label: 'map.btn_street_view'},
         topo:      {icon: 'bi-triangle',       label: 'map.btn_topo_view'},
         satellite: {icon: 'bi-globe-americas', label: 'map.btn_satellite_view'},
+        hybrid:    {icon: 'bi-pin-map',        label: 'map.btn_hybrid_view'},
     };
 
     // A stored value this list no longer has (e.g. the removed 'cadastre')

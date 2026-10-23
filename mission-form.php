@@ -1001,10 +1001,22 @@ include __DIR__ . '/includes/header.php';
                 attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
                 maxNativeZoom: 19, maxZoom: 21
             }),
-            satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles &copy; Esri',
-                maxNativeZoom: 19, maxZoom: 21
-            })
+            // The aerial photo has no text on it, and this map is where an
+            // address gets turned into a point — so the satellite view carries
+            // Esri's road-name and place-name layers over the photo.
+            satellite: L.layerGroup([
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'Tiles &copy; Esri',
+                    maxNativeZoom: 19, maxZoom: 21
+                }),
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}', {
+                    maxNativeZoom: 19, maxZoom: 21, zIndex: 2
+                }),
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+                    attribution: 'Labels &copy; Esri',
+                    maxNativeZoom: 19, maxZoom: 21, zIndex: 3
+                })
+            ])
         };
         layerKey = savedLayer();
         layers[layerKey].addTo(map);
