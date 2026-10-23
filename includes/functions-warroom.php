@@ -12458,3 +12458,87 @@ function loadChatRoomSummary(int $missionId): array {
     }
     return $rooms;
 }
+
+/**
+ * The team rooms of a mission this person may read besides the general room: command staff every team, anyone
+ * else the team they are on right now (the first one, as $chatTeams in war-room.php and the room tabs pick it).
+ * mission-chat.php enforces the same rule on the room itself, so a room named here is always one it will serve.
+ *
+ * $teams is loadMissionTeamsForMission()'s list; each team carries 'id' and 'members' => [['user_id' => ...]].
+ */
+function chatRoomTeamIdsFor(array $teams, int $userId, bool $canManage): array {
+    $ids = [];
+    foreach ($teams as $team) {
+        if ($canManage) {
+            $ids[] = (int) $team['id'];
+            continue;
+        }
+        foreach ($team['members'] as $member) {
+            if ((int) $member['user_id'] === $userId) {
+                return [(int) $team['id']];
+            }
+        }
+    }
+    return $ids;
+}
+
+/**
+ * The war-room poll's chat_after parameter: the newest message id the phone has already counted in each room it
+ * is not looking at, as "general:120,141:300". Anything that does not look like that is dropped, and so is
+ * everything past 40 entries (a mission does not have more rooms than that), so a hand-made URL costs nothing.
+ *
+ * @return array<string,int> room key ('general' or a team id) => message id
+ */
+function parseChatCursors(?string $raw): array {
+    $cursors = [];
+    foreach (array_slice(explode(',', (string) $raw), 0, 40) as $part) {
+        if (preg_match('/^(general|\d{1,10}):(\d{1,12})$/', trim($part), $m)) {
+            $cursors[$m[1]] = (int) $m[2];
+        }
+    }
+    return $cursors;
+}
+
+/**
+ * Where each chat room a person can read stands, for the unread badges on their phone:
+ * ['general' => ['last' => 120, 'new' => 2], '141' => ['last' => 300], ...].
+ *
+ * 'last' is the id of the room's newest message. 'new' is how many messages are newer than the cursor the phone
+ * sent for that room, and is only there when there is at least one. A room with no message is absent.
+ *
+ * This replaces one mission-chat.php request per room every five seconds (each a full PHP request with its own
+ * headers and, on the live hosts, its own TLS connection - 3.8 KB on the air to be told "nothing") with one
+ * GROUP BY over the (mission_id, team_id, id) index inside the poll the phone makes anyway. An id and not a
+ * count, so a message deleted in a room cannot make the next one go unnoticed.
+ *
+ * @param int[] $teamIds        team rooms the person may read, see chatRoomTeamIdsFor()
+ * @param array<string,int> $cursors  see parseChatCursors(); rooms without one only get 'last'
+ */
+function loadChatRoomUnread(int $missionId, array $teamIds, array $cursors): array {
+    $teamIds = array_values(array_unique(array_map('intval', $teamIds)));
+    $where = 'mission_id = ? AND (team_id IS NULL';
+    $params = [$missionId];
+    if ($teamIds) {
+        $where .= ' OR team_id IN (' . implode(',', array_fill(0, count($teamIds), '?')) . ')';
+        array_push($params, ...$teamIds);
+    }
+    $where .= ')';
+
+    $rooms = [];
+    foreach (dbFetchAll("SELECT team_id, MAX(id) AS last_id FROM mission_chat_messages WHERE {$where} GROUP BY team_id", $params) as $row) {
+        $key = $row['team_id'] === null ? 'general' : (string) (int) $row['team_id'];
+        $room = ['last' => (int) $row['last_id']];
+        if (isset($cursors[$key]) && $room['last'] > $cursors[$key]) {
+            $room['new'] = (int) dbFetchValue(
+                $row['team_id'] === null
+                    ? "SELECT COUNT(*) FROM mission_chat_messages WHERE mission_id = ? AND team_id IS NULL AND id > ?"
+                    : "SELECT COUNT(*) FROM mission_chat_messages WHERE mission_id = ? AND team_id = ? AND id > ?",
+                $row['team_id'] === null
+                    ? [$missionId, $cursors[$key]]
+                    : [$missionId, (int) $row['team_id'], $cursors[$key]]
+            );
+        }
+        $rooms[$key] = $room;
+    }
+    return $rooms;
+}

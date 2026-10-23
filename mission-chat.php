@@ -137,11 +137,12 @@ if (!isPost()) {
     // and $canManageWarRoom) is already resolved above, and nothing below
     // writes to it.
     //
-    // This matters more here than anywhere else in the app because of how the
-    // unread badges poll: pollOtherRoomsForUnread() in war-room.php fires one
+    // This mattered more here than anywhere else in the app because of how the
+    // unread badges used to poll (since v3.405.0 they ride the war-room poll
+    // instead - loadChatRoomUnread()): war-room.php fired one
     // request to this file per OTHER visible chat room every 5 seconds, and an
     // ops screen sees the General room plus every team — 7 rooms on a six-team
-    // mission, so 8 requests land here at once from a single session. PHP's
+    // mission, so 8 requests landed here at once from a single session. PHP's
     // default session handler holds an exclusive lock on that session's file
     // for the whole request, so those requests serialized against each other,
     // and since the PDO connection opens in bootstrap.php BEFORE the session

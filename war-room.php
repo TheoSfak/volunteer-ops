@@ -1760,6 +1760,12 @@ if (get('ajax') === '1') {
         // How many messages each chat room holds, so the console's «Συνομιλία» tab can say how
         // many are new in ANY room without polling every room (see loadChatRoomSummary()).
         'chatRooms' => $canManageWarRoom ? loadChatRoomSummary($missionId) : null,
+        // The unread badges of the phone layout (room pills and the bottom bar), which used to cost one
+        // mission-chat.php request per room the person is NOT looking at, every 5 seconds. Only for a page
+        // that asks: the tab layout sends chat_after (possibly empty), the console and the desktop layout do not.
+        'chatUnread' => isset($_GET['chat_after'])
+            ? loadChatRoomUnread($missionId, chatRoomTeamIdsFor($teams, (int) $user['id'], $canManageWarRoom), parseChatCursors(get('chat_after')))
+            : null,
         // Shift list, visitors lists, briefing links and the open-items warning
         // on «Κλείσιμο αποστολής» - command cards that used to be drawn once at
         // page load.
@@ -2002,6 +2008,12 @@ foreach ($teams as $team) {
 $chatTeams = $canManageWarRoom
     ? array_values($teams)
     : array_values(array_filter($teams, fn($t) => $t['id'] === $myTeamId));
+// Where every room this person can read stands as the page is built: the phone layout's unread badges count
+// what arrives after this, so a room's backlog is never announced as new. It used to be fetched with a
+// request per room (the whole history of each) at load.
+$chatHeadsAtLoad = $volunteerTabs
+    ? loadChatRoomUnread($missionId, array_map(fn($t) => (int) $t['id'], $chatTeams), [])
+    : [];
 
 // ── Offline field snapshot: contacts ────────────────────────────────────────
 // A phone call is the one channel that usually still works when data does
@@ -2157,7 +2169,7 @@ include __DIR__ . '/includes/header.php';
     /* Per-room unread count on each chat room pill. Sibling of .wr-tab-badge
        above and deliberately the same red: the bottom bar says "there are new
        messages", these say WHICH room they are in. Only ever populated by
-       pollOtherRoomsForUnread(), which is gated on the volunteer's tabbed
+       applyChatUnread() (the answer of the main poll), which is gated on the volunteer's tabbed
        layout - on a desktop or an ops screen the span is rendered and simply
        stays empty. */
     .chat-tab-badge {
@@ -25570,7 +25582,10 @@ function pollWarRoomData() {
     // unusable reply, a render that threw) is not the connection's, and must
     // not make the banner say there is no connection.
     let answered = false;
-    return fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId + '&payload_hash=' + encodeURIComponent(lastPayloadHash), {signal: pollAbort.signal}).then(response => {
+    // The phone layout's unread chat badges ride this request (see cursorParam() in the chat code); null
+    // everywhere else, and then no parameter is sent and the server sends nothing back.
+    const chatCursors = window.wrChat ? window.wrChat.cursorParam() : null;
+    return fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId + '&payload_hash=' + encodeURIComponent(lastPayloadHash) + (chatCursors === null ? '' : '&chat_after=' + encodeURIComponent(chatCursors)), {signal: pollAbort.signal}).then(response => {
         // An old service worker's offline page is a failed connection
         // wearing a 200 — counted as one.
         if (isOfflineFallback(response)) throw new TypeError('offline fallback');
@@ -25730,6 +25745,11 @@ function pollWarRoomData() {
         if (data.restrictedAreaProximity) renderRestrictedAreaProximity(restrictedAreaProximity = data.restrictedAreaProximity);
         if (data.teamDistances) renderTeamDistances(teamDistances = data.teamDistances);
         if (data.liveFragments) applyLiveFragments(data.liveFragments);
+        // After `teams` above on purpose: a room that appeared with this roster is baselined by this same answer.
+        // Guarded like the console hook below - a badge must never stop the payload hash from being stored.
+        if (data.chatUnread !== undefined && data.chatUnread !== null && window.wrChat) {
+            try { window.wrChat.apply(data.chatUnread); } catch (e) { console.error('chat unread', e); }
+        }
         document.getElementById('mapRefresh').textContent = data.time || '';
         if (data.banners && data.banners.length) {
             data.banners.forEach(b => {
@@ -25876,9 +25896,9 @@ document.querySelectorAll('.team-form').forEach(form => {
     let activeTeamId = '';
     let lastIdByRoom = {};
     // Per-room unread counts, one per chat room pill. The data to build these
-    // already existed: pollOtherRoomsForUnread() has always known which room
-    // each new message arrived in, and threw that away to report a single
-    // combined number to the bottom tab bar. Nothing extra is fetched here.
+    // already existed: the unread check has always known which room each new
+    // message arrived in, and threw that away to report a single combined
+    // number to the bottom tab bar. Nothing extra is fetched here.
     let roomUnread = {};
 
     function renderRoomBadge(teamId) {
@@ -25953,17 +25973,18 @@ document.querySelectorAll('.team-form').forEach(form => {
             .catch(() => { chatMessagesEl.textContent = t('chat.load_error'); });
     }
 
+    // The key a room goes by in the poll's chatUnread and in its chat_after parameter: 'general' or the team id.
+    const roomKey = teamId => teamId === '' ? 'general' : String(teamId);
+    // Where each room stood as the page was built (see $chatHeadsAtLoad). A room that is not here has no message.
+    const CHAT_HEADS_AT_LOAD = <?= json_encode((object) $chatHeadsAtLoad) ?>;
+
     // Sets a room's unread cursor to "everything already said", without ever
     // rendering it. Used for every room this viewer can see but is not
-    // looking at: at load for the other tabs, and - since syncRoomTabs() -
-    // for a room that only appears mid-session.
-    function baselineRoom(teamId) {
-        fetch(`mission-chat.php?mission_id=${missionId}&team_id=${teamId}&after_id=0`)
-            .then(response => response.json())
-            .then(data => {
-                lastIdByRoom[teamId] = (data.ok && data.messages.length) ? data.messages[data.messages.length - 1].id : 0;
-            })
-            .catch(() => {});
+    // looking at: at load for the other tabs, and for a room that only
+    // appears mid-session (the first poll that names it sets it).
+    function baselineRoom(teamId, heads) {
+        const room = heads[roomKey(teamId)];
+        lastIdByRoom[teamId] = room ? room.last : 0;
     }
     // Overlap guard — see pollWarRoomData()'s own flag for why.
     let roomPollInFlight = false;
@@ -25985,37 +26006,61 @@ document.querySelectorAll('.team-form').forEach(form => {
             })
             .catch(() => {})
             .finally(() => { clearTimeout(roomKiller); roomPollInFlight = false; });
-        pollOtherRoomsForUnread();
     }
 
     // Volunteer tab-bar unread badge only (see the 'wr-chat-unread' listener
     // set up alongside bumpBadge further up) — #chatMessages only ever holds
     // whichever room is actually open, so a message arriving in the OTHER
-    // room this volunteer can see (general vs. their own team) needs its own
-    // poll to be noticed at all; same after_id-cursor idea as pollRoom()
-    // above, just never rendered. Skipped entirely for admins/desktop
-    // volunteers: no tab bar means nowhere to show a badge, and admins can
-    // have many team rooms, so blindly polling every one of them here every
-    // 5s for no visible benefit would just be wasted chat traffic.
-    function pollOtherRoomsForUnread() {
-        if (!document.body.classList.contains('wr-tabs-ready')) return;
+    // room this volunteer can see (general vs. their own team) has to be
+    // noticed some other way. It used to be a mission-chat.php request per
+    // such room every 5 seconds, each one a full PHP request answered with
+    // an empty list - on the live hosts ~3.8 KB over the air apiece, which
+    // was a quarter of everything a phone with the screen on exchanges. Now
+    // the main poll carries it: it sends the newest id it has counted in
+    // each room it is not looking at (cursorParam) and the answer says how
+    // many messages are newer (apply). The same cursors as before, so a
+    // message is counted once and the badges mean what they always meant.
+    // Only the tab layout takes part: it sends no cursors anywhere else, and
+    // the server then sends nothing back.
+    //
+    // chat_after is what the request carried, kept so apply() can tell an
+    // answer that was overtaken (the viewer opened that room, or its cursor
+    // moved) from one that still describes what is on screen.
+    let cursorsSent = {};
+    function cursorParam() {
+        if (!document.body.classList.contains('wr-tabs-ready')) return null;
+        cursorsSent = {};
+        const parts = [];
         document.querySelectorAll('.chat-room-tab').forEach(tab => {
-            const otherTeamId = tab.dataset.teamId;
-            if (otherTeamId === activeTeamId || !(otherTeamId in lastIdByRoom)) return;
-            fetch(`mission-chat.php?mission_id=${missionId}&team_id=${otherTeamId}&after_id=${lastIdByRoom[otherTeamId]}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (!data.ok || !data.messages.length) return;
-                    lastIdByRoom[otherTeamId] = data.messages[data.messages.length - 1].id;
-                    bumpRoomUnread(otherTeamId, data.messages.length);
-                    // Unchanged: the bottom tab bar still gets the combined
-                    // "there are new messages" signal. The pill badges say
-                    // which room, the bar badge survives them being off-screen.
-                    document.dispatchEvent(new CustomEvent('wr-chat-unread', {detail: {count: data.messages.length}}));
-                })
-                .catch(() => {});
+            const teamId = tab.dataset.teamId;
+            if (teamId === activeTeamId || !(teamId in lastIdByRoom)) return;
+            cursorsSent[teamId] = lastIdByRoom[teamId];
+            parts.push(roomKey(teamId) + ':' + lastIdByRoom[teamId]);
+        });
+        return parts.join(',');
+    }
+    function applyChatUnread(rooms) {
+        if (!rooms || Array.isArray(rooms)) rooms = {};   // PHP sends [] for "no room has a message"
+        document.querySelectorAll('.chat-room-tab').forEach(tab => {
+            const teamId = tab.dataset.teamId;
+            // The open room is read by pollRoom(), which also moves its cursor.
+            if (teamId === activeTeamId) return;
+            // A room the page has not seen yet (it appeared mid-session): this answer is its baseline.
+            if (!(teamId in lastIdByRoom)) { baselineRoom(teamId, rooms); return; }
+            const room = rooms[roomKey(teamId)];
+            if (!room || !(room.new > 0)) return;
+            // Overtaken: the cursor is not the one this answer was counted from.
+            if (cursorsSent[teamId] !== lastIdByRoom[teamId]) return;
+            lastIdByRoom[teamId] = room.last;
+            bumpRoomUnread(teamId, room.new);
+            // Unchanged: the bottom tab bar still gets the combined
+            // "there are new messages" signal. The pill badges say
+            // which room, the bar badge survives them being off-screen.
+            document.dispatchEvent(new CustomEvent('wr-chat-unread', {detail: {count: room.new}}));
         });
     }
+    // A hook rather than an event because the poll needs a value back; the same shape as window.wrConsole.
+    window.wrChat = {cursorParam, apply: applyChatUnread};
 
     function deleteMessage(id, el) {
         const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: missionId, message_id: id});
@@ -26103,10 +26148,11 @@ document.querySelectorAll('.team-form').forEach(form => {
             li.appendChild(btn);
             tabList.appendChild(li);
             wireRoomTab(btn);
-            // Same baseline the load-time block sets for every other room, so
-            // the unread badge counts what arrives from NOW rather than
-            // announcing the room's entire backlog the moment the tab appears.
-            if (document.body.classList.contains('wr-tabs-ready')) baselineRoom(teamId);
+            // No cursor is set here on purpose: a room without one is baselined
+            // by the answer of the poll that names it (applyChatUnread), which
+            // is the same poll that carried this roster, so the unread badge
+            // counts what arrives from NOW rather than announcing the room's
+            // entire backlog the moment the tab appears.
         });
 
         syncExportMenu(visible);
@@ -26155,12 +26201,14 @@ document.querySelectorAll('.team-form').forEach(form => {
     loadRoom('');
     // Baseline cursor for every OTHER room this volunteer can see (never
     // rendered here — #chatMessages only ever shows the one actually open),
-    // so pollOtherRoomsForUnread()'s first real tick counts genuinely NEW
-    // messages only, not that room's entire pre-existing history.
+    // so the first poll that reports unread counts genuinely NEW messages
+    // only, not that room's entire pre-existing history. Taken from what the
+    // server wrote into the page, so there is no request and no gap in which
+    // a message could slip in unnoticed.
     if (document.body.classList.contains('wr-tabs-ready')) {
         document.querySelectorAll('.chat-room-tab').forEach(tab => {
             if (tab.dataset.teamId === activeTeamId) return;
-            baselineRoom(tab.dataset.teamId);
+            baselineRoom(tab.dataset.teamId, CHAT_HEADS_AT_LOAD);
         });
     }
     setInterval(() => { if (!document.hidden) pollRoom(); }, 5000);
