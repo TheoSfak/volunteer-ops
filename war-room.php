@@ -7930,9 +7930,15 @@ function refreshMapOverlayUi() {
     // The map's card is overflow:hidden, so everything the menu had below the
     // card's bottom edge was cut off and could not be reached at all. While the
     // menu is open the card lets it hang out (CSS: .card.wr-menu-open).
+    //
+    // Listened to on the CARD, not on this button: Bootstrap's dropdown events
+    // bubble, and the geographic-export menu in the same header is just as
+    // tall as the map is short. It needed the same room and had none — in the
+    // Konsola skins the card and the header both hid it behind the map
+    // (assets/css/war-room-console.css, «the map's menus»).
     const menuCard = btn.closest('.card');
-    btn.addEventListener('show.bs.dropdown', () => menuCard?.classList.add('wr-menu-open'));
-    btn.addEventListener('hidden.bs.dropdown', () => menuCard?.classList.remove('wr-menu-open'));
+    menuCard?.addEventListener('show.bs.dropdown', () => menuCard.classList.add('wr-menu-open'));
+    menuCard?.addEventListener('hidden.bs.dropdown', () => menuCard.classList.remove('wr-menu-open'));
     const divider = document.createElement('li');
     divider.innerHTML = '<hr class="dropdown-divider">';
     const header = document.createElement('li');

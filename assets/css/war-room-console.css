@@ -187,6 +187,24 @@ body.wr-console-view #teamBoard { display: none !important; }
 .wrc-mapslot #mapCard .card-body { flex: 1 1 0; min-height: 0; }
 .wrc-mapslot #mapCard #warRoomMap { height: 100% !important; border-radius: 0 0 10px 10px; }
 .wrc-mapslot #mapCard.map-fullscreen-active { position: fixed; }
+/* the map's menus (map views, geographic export) hang out of the card's header
+   over the map while open — war-room.php puts .wr-menu-open on the card.
+   Nocturne and Aurora round the card with overflow:hidden (so the menu was cut
+   at the card's edge: the 554px layers menu on a 482px map) and blur the header
+   with backdrop-filter, which makes the header a stacking context of its own,
+   one the map's panes (z 400-1000) and Nocturne's scan lines (z 450) paint
+   over: the menu opened BEHIND the map. Both are undone only while a menu is
+   open, with a selector heavier than either skin's so the skin files need no
+   edit and a third skin gets it too. The header takes the card's rounded top
+   corners meanwhile, so its edge does not poke out past them. z-index 1100
+   is the number the layers menu itself already uses, above Leaflet's 1000.
+   The card is itself a stacking context (its fade-in leaves a transform on
+   it), so a menu hanging below it needs the card raised over the order form
+   under the map — Aurora's blurred composer painted over the bottom of the
+   layers menu. Not in fullscreen, where the card is already fixed at 1040. */
+body.wr-console-view .wrc-mapslot #mapCard.wr-menu-open { overflow: visible; }
+body.wr-console-view .wrc-mapslot #mapCard.wr-menu-open:not(.map-fullscreen-active) { z-index: 1100; }
+body.wr-console-view .wrc-mapslot #mapCard.wr-menu-open .card-header { position: relative; z-index: 1100; border-radius: inherit; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 
 .wrc-composer { flex: none; padding: 8px 10px; display: flex; flex-direction: column; gap: 7px; position: relative; }
 .wrc-cmp-row { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
