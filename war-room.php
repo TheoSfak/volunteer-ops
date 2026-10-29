@@ -2246,6 +2246,18 @@ include __DIR__ . '/includes/header.php';
         background: #212529; color: #fff; padding: 7px 14px; border-radius: 999px;
         font-size: .8125rem; box-shadow: 0 4px 14px rgba(0,0,0,.3);
     }
+    /* The voice-message button arms like the SOS one: the dark fill sweeps
+       across over exactly VOICE_ARM_MS (set from the JS as --voice-arm-ms, so
+       the bar filling and the microphone opening are the same instant) and
+       recording only starts once it is full. */
+    #voiceHoldBtn { position: relative; overflow: hidden; transition: transform .12s ease; }
+    #voiceHoldBtn::after {
+        content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+        background: rgba(0,0,0,.32); pointer-events: none;
+    }
+    #voiceHoldBtn.voice-arming { transform: scale(1.02); }
+    #voiceHoldBtn.voice-arming::after { animation: voiceArmFill var(--voice-arm-ms, 1000ms) linear forwards; }
+    @keyframes voiceArmFill { to { width: 100%; } }
     /* The gallery's card-body carries a hardcoded height:520px so it lines up
        with the 520px map card sitting next to it on a desktop. In the tabbed
        view there is no map beside it — the map has its own tab — so all that
@@ -19979,18 +19991,23 @@ function unlockWarRoomAudio() {
 
 // ── Push-to-talk emergency voice channel ────────────────────────────────────
 //
-// Hold the button, speak, let go, it sends. Deliberately the INVERSE of the SOS
-// tab-bar gesture directly above, which arms on press and fires after a delay:
-// here the press starts recording immediately and the release is the send, so
-// the time held is the message rather than a confirmation.
+// Hold the button, speak, let go, it sends. The first VOICE_ARM_MS of the hold
+// only ARMS it, exactly like the SOS tab-bar gesture above: a filling bar, no
+// microphone, and a press that ends before the bar is full does nothing but
+// show a hint. Without that a tap or a pocket brush recorded a clip and raised
+// the siren at command. Once armed, recording starts and the RELEASE is the
+// send, so the time held after that is the message. The same button, and so the
+// same rule, for every kind of user.
 //
 // Nothing here touches SOS. A denied microphone, a mic held by another app, or
 // an engine that cannot record at all costs the volunteer this channel and
 // nothing else — see mission-voice.php's docblock for why that separation is
 // the whole design rather than a convenience.
+const VOICE_ARM_MS = 1000; // same hold as the SOS tab-bar button (HOLD_MS)
 const VOICE_MIN_MS = 700;
 const VOICE_MAX_MS = 60000;
 
+let voiceArmTimer = null, voiceHeld = false, voiceStarting = false;
 let voiceRecorder = null, voiceChunks = [], voiceStream = null;
 let voiceStartedAt = 0, voiceTickTimer = null, voiceWaveTimer = null, voiceStopReason = '';
 
@@ -20048,6 +20065,16 @@ async function voiceStartRecording() {
     } catch (err) {
         const denied = /NotAllowed|Permission|SecurityError/i.test(String(err && (err.name || err.message)));
         voiceSetStatus(denied ? t('voice.mic_denied') : t('voice.mic_unavailable'), 'text-danger');
+        return;
+    }
+
+    // Let go while the microphone was still opening (the permission prompt, a
+    // slow engine): the release already came and found nothing to stop, so
+    // starting now would record until VOICE_MAX_MS with nobody holding.
+    if (!voiceHeld) {
+        voiceStream.getTracks().forEach(tr => tr.stop());
+        voiceStream = null;
+        voiceSetStatus(t('voice.too_short'), 'text-warning');
         return;
     }
 
@@ -20164,11 +20191,40 @@ function voiceSendClip(blob, ext, heldMs) {
 (function wireVoiceHoldButton() {
     const btn = document.getElementById('voiceHoldBtn');
     if (!btn) return;
-    btn.addEventListener('pointerdown', e => { e.preventDefault(); voiceStartRecording(); });
-    // pointerleave and pointercancel included on purpose: a finger sliding off
-    // the button mid-sentence must still send what was said, not discard it.
+    btn.style.setProperty('--voice-arm-ms', VOICE_ARM_MS + 'ms');
+    function disarm() {
+        if (voiceArmTimer) { clearTimeout(voiceArmTimer); voiceArmTimer = null; }
+        btn.classList.remove('voice-arming');
+    }
+    btn.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        if (voiceArmTimer || voiceRecorder || voiceStarting) return;
+        btn.classList.add('voice-arming');
+        voiceSetStatus(t('voice.arming'), 'text-muted');
+        voiceArmTimer = setTimeout(() => {
+            voiceArmTimer = null;
+            btn.classList.remove('voice-arming');
+            voiceHeld = true;
+            if (navigator.vibrate) navigator.vibrate(40);
+            voiceStarting = true;
+            voiceStartRecording().finally(() => { voiceStarting = false; });
+        }, VOICE_ARM_MS);
+    });
+    // pointerleave and pointercancel included on purpose. Before the bar is
+    // full they cancel the arming (a tap alone must never record, same as
+    // SOS); after it, a finger sliding off the button mid-sentence must still
+    // send what was said, not discard it.
     ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev =>
-        btn.addEventListener(ev, e => { e.preventDefault(); voiceStopRecording(); }));
+        btn.addEventListener(ev, e => {
+            e.preventDefault();
+            if (voiceArmTimer) {
+                disarm();
+                voiceSetStatus(t('voice.arm_hint'), 'text-warning');
+                return;
+            }
+            voiceHeld = false;
+            voiceStopRecording();
+        }));
     btn.addEventListener('contextmenu', e => e.preventDefault());
 })();
 

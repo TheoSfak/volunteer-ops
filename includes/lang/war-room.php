@@ -735,7 +735,9 @@ return [
         // Push-to-talk emergency voice channel (volunteer -> command)
         'voice.card_title' => 'Φωνητικό Μήνυμα',
         'voice.hold_btn' => 'Φωνητικό',
-        'voice.hold_hint' => 'Κράτα πατημένο για να μιλήσεις. Αφήνεις = στέλνεται.',
+        'voice.hold_hint' => 'Κράτα πατημένο 1 δευτερόλεπτο, μίλα και άφησε για αποστολή. Ένα απλό άγγιγμα δεν στέλνει τίποτα.',
+        'voice.arming' => 'Κράτα πατημένο… η ηχογράφηση ξεκινά σε λίγο',
+        'voice.arm_hint' => 'Κράτα πατημένο για να ξεκινήσει η ηχογράφηση — ένα άγγιγμα δεν αρκεί.',
         'voice.recording' => 'Ηχογράφηση… άφησε για αποστολή',
         'voice.too_short' => 'Πολύ σύντομο — κράτα το κουμπί πατημένο όσο μιλάς.',
         'voice.sending' => 'Αποστολή…',
@@ -3745,7 +3747,9 @@ return [
 
         'voice.card_title' => 'Voice Message',
         'voice.hold_btn' => 'Voice',
-        'voice.hold_hint' => 'Hold to speak. Let go and it sends.',
+        'voice.hold_hint' => 'Hold for a second, speak, then let go to send. A tap alone sends nothing.',
+        'voice.arming' => 'Keep holding… recording starts in a moment',
+        'voice.arm_hint' => 'Keep holding to start recording — a tap is not enough.',
         'voice.recording' => 'Recording… let go to send',
         'voice.too_short' => 'Too short — hold the button down while you speak.',
         'voice.sending' => 'Sending…',
