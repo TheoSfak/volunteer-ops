@@ -2605,7 +2605,7 @@ CREATE TABLE IF NOT EXISTS `mission_incidents` (
     `acknowledged_by` INT UNSIGNED NULL,
     `resolved_at` TIMESTAMP NULL,
     `resolved_by` INT UNSIGNED NULL,
-    `outcome` ENUM('stayed_on_site','transported','declined','deceased') NULL,
+    `outcome` ENUM('stayed_on_site','transported','declined','deceased','walked_away') NULL,
     `outcome_location` VARCHAR(255) NULL COMMENT 'Where transported to, only meaningful when outcome=transported',
     `outcome_note` TEXT NULL COMMENT 'Optional comment command writes when closing the incident (migration v193); the reporter is told it',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

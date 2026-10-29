@@ -17378,6 +17378,7 @@ const INCIDENT_OUTCOME_OPTIONS = [
     ['stayed_on_site', 'incident.outcome.stayed_on_site'],
     ['transported', 'incident.outcome.transported'],
     ['declined', 'incident.outcome.declined'],
+    ['walked_away', 'incident.outcome.walked_away'],
     ['deceased', 'incident.outcome.deceased'],
 ];
 

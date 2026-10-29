@@ -7807,6 +7807,14 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 194,
+            'description' => "Widen mission_incidents.outcome with 'walked_away' (v3.409.1): «Αποχώρησε περιπατητικός», a casualty who was seen to and then left on foot. Appended last so no stored value is renumbered.",
+            'up' => function () {
+                dbExecute("ALTER TABLE mission_incidents MODIFY COLUMN outcome ENUM('stayed_on_site','transported','declined','deceased','walked_away') NULL");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

@@ -11,8 +11,8 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.409.0');
-define('DB_SCHEMA_VERSION', 193);
+define('APP_VERSION', '3.409.1');
+define('DB_SCHEMA_VERSION', 194);
 
 // Android APK versionName, matching mobile-app/android/app/build.gradle.
 // The download filename embeds this on purpose: the APK used to live at a
@@ -471,6 +471,7 @@ define('INCIDENT_OUTCOME_LABELS', [
     'transported'     => 'Διακομίστηκε',
     'declined'        => 'Αρνήθηκε βοήθεια',
     'deceased'        => 'Θανατηφόρο',
+    'walked_away'     => 'Αποχώρησε περιπατητικός',
 ]);
 
 define('INCIDENT_GENDER_LABELS', [
