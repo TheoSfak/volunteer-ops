@@ -31,7 +31,7 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
                 <div class="row align-items-center">
                     <div class="col-md-6 text-center text-md-start">
                         <span class="text-muted fs-6">
-                            &copy; <?= date('Y') ?> VolunteerOps. Με επιφύλαξη παντός δικαιώματος.
+                            &copy; <?= date('Y') ?> VolunteerOps. <?= h(t('gui.rights_reserved')) ?>
                         </span>
                     </div>
                     <div class="col-md-6 text-center text-md-end">
@@ -245,8 +245,8 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
         toast.id = 'vo-update-toast';
         toast.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:99998;background:#1e3c72;color:#fff;padding:12px 20px;border-radius:12px;box-shadow:0 8px 25px rgba(0,0,0,.3);display:flex;align-items:center;gap:12px;font-size:14px;font-weight:500;animation:voSlideUp .4s ease;max-width:90vw;';
         toast.innerHTML = '<i class="bi bi-arrow-repeat" style="font-size:18px;"></i>' +
-            '<span>Νέα έκδοση διαθέσιμη!</span>' +
-            '<button onclick="location.reload()" style="background:#667eea;color:#fff;border:none;padding:6px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;">Ανανέωση</button>' +
+            '<span><?= h(t('gui.new_version')) ?></span>' +
+            '<button onclick="location.reload()" style="background:#667eea;color:#fff;border:none;padding:6px 14px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;"><?= h(t('gui.refresh')) ?></button>' +
             '<button onclick="this.parentElement.remove()" style="background:none;border:none;color:rgba(255,255,255,.6);cursor:pointer;font-size:18px;padding:0 4px;">✕</button>';
         document.body.appendChild(toast);
     }
@@ -272,11 +272,11 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
         banner.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:99997;background:linear-gradient(135deg,#1e3c72,#2a5298);color:#fff;padding:16px 20px;border-radius:16px;box-shadow:0 12px 35px rgba(0,0,0,.3);max-width:340px;animation:voSlideUp .5s ease;';
         banner.innerHTML = '<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px;">' +
             '<img src="<?= rtrim(BASE_URL, '/') ?>/assets/icons/icon-72.png" style="width:40px;height:40px;border-radius:8px;" alt="">' +
-            '<div><strong style="font-size:14px;">Εγκατάσταση Εφαρμογής</strong><br><span style="font-size:12px;color:rgba(255,255,255,.7);">Προσθήκη στην αρχική οθόνη</span></div>' +
+            '<div><strong style="font-size:14px;"><?= h(t('gui.install_app')) ?></strong><br><span style="font-size:12px;color:rgba(255,255,255,.7);"><?= h(t('gui.add_to_home')) ?></span></div>' +
             '</div>' +
             '<div style="display:flex;gap:8px;">' +
-            '<button id="vo-install-btn" style="flex:1;background:#667eea;color:#fff;border:none;padding:8px;border-radius:10px;font-weight:600;cursor:pointer;font-size:13px;">Εγκατάσταση</button>' +
-            '<button id="vo-install-dismiss" style="background:rgba(255,255,255,.1);color:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.2);padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px;">Όχι τώρα</button>' +
+            '<button id="vo-install-btn" style="flex:1;background:#667eea;color:#fff;border:none;padding:8px;border-radius:10px;font-weight:600;cursor:pointer;font-size:13px;"><?= h(t('gui.install')) ?></button>' +
+            '<button id="vo-install-dismiss" style="background:rgba(255,255,255,.1);color:rgba(255,255,255,.7);border:1px solid rgba(255,255,255,.2);padding:8px 14px;border-radius:10px;cursor:pointer;font-size:13px;"><?= h(t('gui.not_now')) ?></button>' +
             '</div>';
         document.body.appendChild(banner);
 
@@ -311,17 +311,17 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
             'style="position:absolute;top:12px;right:14px;background:none;border:none;color:rgba(255,255,255,.6);font-size:22px;cursor:pointer;line-height:1;">✕</button>' +
             '<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">' +
             '<img src="<?= rtrim(BASE_URL, '/') ?>/assets/icons/icon-72.png" style="width:44px;height:44px;border-radius:10px;" alt="">' +
-            '<div><strong style="font-size:15px;">Εγκατάσταση Εφαρμογής</strong><br><span style="font-size:12px;color:rgba(255,255,255,.75);">Προσθήκη στην αρχική οθόνη</span></div>' +
+            '<div><strong style="font-size:15px;"><?= h(t('gui.install_app')) ?></strong><br><span style="font-size:12px;color:rgba(255,255,255,.75);"><?= h(t('gui.add_to_home')) ?></span></div>' +
             '</div>' +
             '<div style="font-size:13px;line-height:1.7;color:rgba(255,255,255,.9);">' +
             '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">' +
             '<span style="background:rgba(255,255,255,.15);border-radius:8px;padding:2px 8px;font-weight:700;">1</span>' +
-            'Πατήστε το κουμπί <strong>Κοινοποίηση</strong> ' +
+            '<?= h(t('gui.ios_press')) ?> <strong><?= h(t('gui.ios_share')) ?></strong> ' +
             '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16" style="vertical-align:middle;"><path d="M11 2.5a2.5 2.5 0 1 1 .603 1.628l-6.718 3.12a2.499 2.499 0 0 1 0 1.504l6.718 3.12a2.5 2.5 0 1 1-.488.876l-6.718-3.12a2.5 2.5 0 1 1 0-3.256l6.718-3.12A2.5 2.5 0 0 1 11 2.5z"/></svg>' +
-            ' στο κάτω μέρος της οθόνης</div>' +
+            ' <?= h(t('gui.ios_bottom')) ?></div>' +
             '<div style="display:flex;align-items:center;gap:8px;">' +
             '<span style="background:rgba(255,255,255,.15);border-radius:8px;padding:2px 8px;font-weight:700;">2</span>' +
-            'Επιλέξτε <strong>«Προσθήκη στην Αρχική Οθόνη»</strong> <span style="font-size:16px;">＋</span></div>' +
+            '<?= h(t('gui.ios_choose')) ?> <strong><?= h(t('gui.ios_add_home')) ?></strong> <span style="font-size:16px;">＋</span></div>' +
             '</div>';
         document.body.appendChild(tip);
     }
@@ -337,7 +337,7 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
 <?php endif; ?>
 <!-- Online/Offline Indicator -->
 <div id="vo-offline-bar" style="display:none;position:fixed;top:var(--app-clock-h, 0px);left:0;right:0;z-index:99999;background:#dc3545;color:#fff;text-align:center;padding:8px 12px;font-size:13px;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.2);transition:transform .3s ease;">
-    <i class="bi bi-wifi-off"></i> <span id="vo-offline-bar-text">Εκτός σύνδεσης — Μπορείτε μόνο να βλέπετε σελίδες που έχουν ήδη φορτωθεί</span>
+    <i class="bi bi-wifi-off"></i> <span id="vo-offline-bar-text"><?= h(t('gui.offline_bar')) ?></span>
 </div>
 <script>
 (function() {
@@ -352,7 +352,7 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
     // exactly as before.
     var isWarRoom = /\/war-room\.php/.test(window.location.pathname);
     if (isWarRoom && barText) {
-        barText.textContent = 'Εκτός σύνδεσης — Πορεία και κατάσταση πεδίου (και το SOS) αποθηκεύονται και θα σταλούν αυτόματα μόλις επανέλθει το δίκτυο. Φωτογραφίες και μηνύματα όχι.';
+        barText.textContent = <?= json_encode(t('gui.offline_bar_warroom'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
     }
     function update() {
         var offline = !navigator.onLine;

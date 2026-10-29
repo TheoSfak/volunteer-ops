@@ -253,7 +253,7 @@ include __DIR__ . '/includes/header.php';
             <div class="col-md-2">
                 <select class="form-select form-select-sm" name="status">
                     <option value=""><?= t('missions_page.all_statuses') ?></option>
-                    <?php foreach ($GLOBALS['STATUS_LABELS'] as $key => $label): ?>
+                    <?php foreach ($GLOBALS['STATUS_LABELS'] as $key => $label): $label = localizedLabel('gui.status.' . $key, $label); ?>
                         <option value="<?= $key ?>" <?= $status === $key ? 'selected' : '' ?>>
                             <?= h($label) ?>
                         </option>

@@ -1483,7 +1483,7 @@ if (isLoggedIn()) {
             <div style="flex: 1;">
                 <div style="font-size: 1.4rem; font-weight: 700;"><?= h($appName) ?></div>
                 <?php if (!empty($appDescription)): ?>
-                    <div style="font-size: 0.75rem; font-weight: 400; opacity: 0.85; margin-top: 0.25rem; line-height: 1.3;"><?= h($appDescription) ?></div>
+                    <div style="font-size: 0.75rem; font-weight: 400; opacity: 0.85; margin-top: 0.25rem; line-height: 1.3;"><?= h($appDescription === 'Σύστημα Διαχείρισης Εθελοντών' ? localizedLabel('gui.app_description', $appDescription) : $appDescription) ?></div>
                 <?php endif; ?>
             </div>
         </a>
@@ -2052,7 +2052,7 @@ if (isLoggedIn()) {
                 <!-- Notification Bell -->
                 <div class="dropdown me-3">
                     <a class="btn btn-link text-dark position-relative p-1" href="notifications.php" id="notifBell"
-                       data-bs-toggle="dropdown" aria-expanded="false" title="Ειδοποιήσεις">
+                       data-bs-toggle="dropdown" aria-expanded="false" title="<?= h(t('gui.notifications')) ?>">
                         <i class="bi bi-bell fs-5"></i>
                         <?php if ($unreadNotifCount > 0): ?>
                             <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger notif-badge" style="font-size:0.65rem;">
@@ -2062,15 +2062,15 @@ if (isLoggedIn()) {
                     </a>
                     <div class="dropdown-menu dropdown-menu-end shadow-lg" style="width:min(360px, 95vw); max-height:420px; overflow-y:auto; right:0; left:auto;">
                         <div class="d-flex justify-content-between align-items-center px-3 py-2 border-bottom">
-                            <h6 class="mb-0"><i class="bi bi-bell me-1"></i>Ειδοποιήσεις</h6>
+                            <h6 class="mb-0"><i class="bi bi-bell me-1"></i><?= h(t('gui.notifications')) ?></h6>
                             <?php if ($unreadNotifCount > 0): ?>
-                                <a href="notifications.php?action=mark_all_read" class="text-decoration-none small">Ανάγνωση όλων</a>
+                                <a href="notifications.php?action=mark_all_read" class="text-decoration-none small"><?= h(t('gui.mark_all_read')) ?></a>
                             <?php endif; ?>
                         </div>
                         <?php if (empty($latestNotifications)): ?>
                             <div class="text-center text-muted py-4">
                                 <i class="bi bi-bell-slash fs-3 d-block mb-2"></i>
-                                Δεν υπάρχουν ειδοποιήσεις
+                                <?= h(t('gui.no_notifications')) ?>
                             </div>
                         <?php else: ?>
                             <?php foreach ($latestNotifications as $notif): ?>
@@ -2100,7 +2100,7 @@ if (isLoggedIn()) {
                                 </a>
                             <?php endforeach; ?>
                             <div class="text-center py-2">
-                                <a href="notifications.php" class="text-decoration-none small">Προβολή όλων</a>
+                                <a href="notifications.php" class="text-decoration-none small"><?= h(t('gui.view_all')) ?></a>
                             </div>
                         <?php endif; ?>
                     </div>
@@ -2119,28 +2119,28 @@ if (isLoggedIn()) {
                     <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="userDropdown" style="right: 0; left: auto;">
                         <?php if (!isMissionVisitor($currentUser)): ?>
                         <li><a class="dropdown-item" href="profile.php"><i class="bi bi-person me-2"></i><?= t('nav.my_profile') ?></a></li>
-                        <li><a class="dropdown-item" href="mobile-app-setup.php"><i class="bi bi-android2 me-2"></i>Εφαρμογή Android</a></li>
+                        <li><a class="dropdown-item" href="mobile-app-setup.php"><i class="bi bi-android2 me-2"></i><?= h(t('gui.android_app')) ?></a></li>
                         <?php endif; ?>
                         <?php if (!isExternalGuest()): ?>
-                        <li><a class="dropdown-item" href="my-participations.php"><i class="bi bi-list-check me-2"></i>Οι Αιτήσεις μου</a></li>
+                        <li><a class="dropdown-item" href="my-participations.php"><i class="bi bi-list-check me-2"></i><?= h(t('gui.my_applications')) ?></a></li>
                         <?php if (!empty($currentUser['custom_role_id'])): ?>
-                        <li><a class="dropdown-item" href="my-permissions.php"><i class="bi bi-shield-check me-2"></i>Τα Δικαιώματά μου</a></li>
+                        <li><a class="dropdown-item" href="my-permissions.php"><i class="bi bi-shield-check me-2"></i><?= h(t('gui.my_permissions')) ?></a></li>
                         <?php endif; ?>
                         <?php if (getSetting('points_enabled', '1') === '1'): ?>
-                        <li><a class="dropdown-item" href="my-points.php"><i class="bi bi-star me-2"></i>Οι Πόντοι μου</a></li>
+                        <li><a class="dropdown-item" href="my-points.php"><i class="bi bi-star me-2"></i><?= h(t('gui.my_points')) ?></a></li>
                         <?php endif; ?>
-                        <li><a class="dropdown-item" href="notification-preferences.php"><i class="bi bi-bell me-2"></i>Ρυθμίσεις Ειδοποιήσεων</a></li>
-                        <li><a class="dropdown-item" href="complaint-form.php"><i class="bi bi-exclamation-triangle me-2"></i>Αναφορά Παραπόνου</a></li>
-                        <li><a class="dropdown-item" href="my-complaints.php"><i class="bi bi-chat-left-dots me-2"></i>Τα Παράπονά μου</a></li>
-                        <li><a class="dropdown-item" href="bug-report.php"><i class="bi bi-bug me-2"></i>Αποστολή Bug</a></li>
-                        <li><a class="dropdown-item" href="my-bug-reports.php"><i class="bi bi-list-ul me-2"></i>Τα Bug μου</a></li>
+                        <li><a class="dropdown-item" href="notification-preferences.php"><i class="bi bi-bell me-2"></i><?= h(t('gui.notification_settings')) ?></a></li>
+                        <li><a class="dropdown-item" href="complaint-form.php"><i class="bi bi-exclamation-triangle me-2"></i><?= h(t('gui.file_complaint')) ?></a></li>
+                        <li><a class="dropdown-item" href="my-complaints.php"><i class="bi bi-chat-left-dots me-2"></i><?= h(t('gui.my_complaints')) ?></a></li>
+                        <li><a class="dropdown-item" href="bug-report.php"><i class="bi bi-bug me-2"></i><?= h(t('gui.report_bug')) ?></a></li>
+                        <li><a class="dropdown-item" href="my-bug-reports.php"><i class="bi bi-list-ul me-2"></i><?= h(t('gui.my_bugs')) ?></a></li>
                         <?php endif; ?>
                         <li><hr class="dropdown-divider"></li>
                         <li>
                             <form action="logout.php" method="post" class="d-inline">
                                 <?= csrfField() ?>
                                 <button type="submit" class="dropdown-item text-danger">
-                                    <i class="bi bi-box-arrow-right me-2"></i>Αποσύνδεση
+                                    <i class="bi bi-box-arrow-right me-2"></i><?= h(t('gui.logout')) ?>
                                 </button>
                             </form>
                         </li>

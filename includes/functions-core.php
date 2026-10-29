@@ -138,6 +138,26 @@ function h($string) {
 }
 
 /**
+ * The language the signed-in person reads the interface in; 'el' when nobody is
+ * signed in (a cron job, an email). Greek is the source language: every helper
+ * below hands back the Greek text untouched for 'el'.
+ */
+function uiLang(): string {
+    $user = function_exists('getCurrentUser') ? getCurrentUser() : null;
+    return (string) ($user['language'] ?? 'el');
+}
+
+/** The text for $key in the person's language, or $greek when that is Greek or nothing is translated. */
+function localizedLabel(string $key, string $greek): string {
+    $lang = uiLang();
+    if ($lang === 'el' || !function_exists('t')) {
+        return $greek;
+    }
+    $text = t($key, [], $lang);
+    return $text === $key ? $greek : $text;
+}
+
+/**
  * Format date in Greek
  */
 function formatDate($date, $format = 'd/m/Y') {
@@ -151,6 +171,7 @@ function formatDate($date, $format = 'd/m/Y') {
  */
 function formatDayShort($date) {
     if (empty($date)) return '';
+    if (uiLang() !== 'el') return (is_string($date) ? new DateTime($date) : $date)->format('l');
     $dt = is_string($date) ? new DateTime($date) : $date;
     $days = ['Κυριακή', 'Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο'];
     return $days[(int)$dt->format('w')];
@@ -170,6 +191,7 @@ function formatDateTime($date, $format = 'd/m/Y H:i') {
  */
 function formatDateGreek($date) {
     if (empty($date)) return '-';
+    if (uiLang() !== 'el') return (is_string($date) ? new DateTime($date) : $date)->format('l, j F Y');
     $dt = is_string($date) ? new DateTime($date) : $date;
     
     $days = ['Κυριακή', 'Δευτέρα', 'Τρίτη', 'Τετάρτη', 'Πέμπτη', 'Παρασκευή', 'Σάββατο'];
@@ -219,6 +241,7 @@ function statusBadge($status, $type = 'status') {
 
     $color = $colors[$status] ?? 'secondary';
     $label = $labels[$status] ?? $status;
+    $label = localizedLabel(($type === 'participation' ? 'gui.part.' : 'gui.status.') . $status, $label);
 
     return '<span class="badge bg-' . $color . '" style="white-space:nowrap">' . h($label) . '</span>';
 }
@@ -236,6 +259,7 @@ function roleBadge($role) {
 
     $color = $colors[$role] ?? 'secondary';
     $label = ROLE_LABELS[$role] ?? $role;
+    $label = localizedLabel('gui.role.' . $role, $label);
 
     return '<span class="badge bg-' . $color . '">' . h($label) . '</span>';
 }
@@ -250,6 +274,7 @@ function volunteerTypeBadge($type) {
     $color = VOLUNTEER_TYPE_COLORS[$type] ?? 'secondary';
     $icon = VOLUNTEER_TYPE_ICONS[$type] ?? '';
     $label = VOLUNTEER_TYPE_LABELS[$type] ?? $type;
+    $label = localizedLabel('gui.vtype.' . $type, $label);
     
     return ' <span class="badge bg-' . $color . '">' . $icon . ' ' . h($label) . '</span>';
 }

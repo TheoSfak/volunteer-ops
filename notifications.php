@@ -6,7 +6,7 @@
 require_once __DIR__ . '/bootstrap.php';
 requireLogin();
 
-$pageTitle = 'Ειδοποιήσεις';
+$pageTitle = t('gui.notifications');
 $userId = getCurrentUserId();
 
 // Mark the notification as read, then follow its safe internal deep link.
@@ -45,7 +45,7 @@ if (get('action') === 'mark_all_read') {
         "UPDATE notifications SET read_at = NOW() WHERE user_id = ? AND read_at IS NULL",
         [$userId]
     );
-    setFlash('success', 'Όλες οι ειδοποιήσεις σημειώθηκαν ως αναγνωσμένες.');
+    setFlash('success', t('gui.nf_all_marked'));
     redirect('notifications.php');
 }
 
@@ -74,13 +74,13 @@ if (isPost()) {
             "DELETE FROM notifications WHERE id = ? AND user_id = ?",
             [$nId, $userId]
         );
-        setFlash('success', 'Η ειδοποίηση διαγράφηκε.');
+        setFlash('success', t('gui.nf_deleted'));
     } elseif ($action === 'delete_all_read') {
         $deleted = dbExecute(
             "DELETE FROM notifications WHERE user_id = ? AND read_at IS NOT NULL",
             [$userId]
         );
-        setFlash('success', 'Διαγράφηκαν ' . $deleted . ' αναγνωσμένες ειδοποιήσεις.');
+        setFlash('success', t('gui.nf_deleted_n', ['n' => $deleted]));
     }
 
     redirect('notifications.php' . ($filter ? '?filter=' . $filter : ''));
@@ -116,19 +116,19 @@ include __DIR__ . '/includes/header.php';
 ?>
 
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
-    <h2><i class="bi bi-bell me-2"></i>Ειδοποιήσεις</h2>
+    <h2><i class="bi bi-bell me-2"></i><?= h(t('gui.notifications')) ?></h2>
     <div class="d-flex gap-2 flex-wrap">
         <?php if ($unreadCount > 0): ?>
             <a href="notifications.php?action=mark_all_read" class="btn btn-outline-primary btn-sm">
-                <i class="bi bi-check-all me-1"></i>Ανάγνωση Όλων (<?= $unreadCount ?>)
+                <i class="bi bi-check-all me-1"></i><?= h(t('gui.nf_mark_all')) ?> (<?= $unreadCount ?>)
             </a>
         <?php endif; ?>
         <?php if ($readCount > 0): ?>
-            <form method="post" class="d-inline" onsubmit="return confirm('Διαγραφή όλων των αναγνωσμένων ειδοποιήσεων;');">
+            <form method="post" class="d-inline" onsubmit="return confirm('<?= h(addslashes(t('gui.nf_confirm_delete_read'))) ?>');">
                 <?= csrfField() ?>
                 <input type="hidden" name="action" value="delete_all_read">
                 <button type="submit" class="btn btn-outline-danger btn-sm">
-                    <i class="bi bi-trash me-1"></i>Διαγραφή Αναγνωσμένων (<?= $readCount ?>)
+                    <i class="bi bi-trash me-1"></i><?= h(t('gui.nf_delete_read')) ?> (<?= $readCount ?>)
                 </button>
             </form>
         <?php endif; ?>
@@ -139,17 +139,17 @@ include __DIR__ . '/includes/header.php';
 <ul class="nav nav-tabs mb-3">
     <li class="nav-item">
         <a class="nav-link <?= $filter === 'all' ? 'active' : '' ?>" href="notifications.php?filter=all">
-            Όλες <span class="badge bg-secondary"><?= $total ?></span>
+            <?= h(t('gui.nf_all')) ?> <span class="badge bg-secondary"><?= $total ?></span>
         </a>
     </li>
     <li class="nav-item">
         <a class="nav-link <?= $filter === 'unread' ? 'active' : '' ?>" href="notifications.php?filter=unread">
-            Μη Αναγνωσμένες <span class="badge bg-primary"><?= $unreadCount ?></span>
+            <?= h(t('gui.nf_unread')) ?> <span class="badge bg-primary"><?= $unreadCount ?></span>
         </a>
     </li>
     <li class="nav-item">
         <a class="nav-link <?= $filter === 'read' ? 'active' : '' ?>" href="notifications.php?filter=read">
-            Αναγνωσμένες <span class="badge bg-success"><?= $readCount ?></span>
+            <?= h(t('gui.nf_read')) ?> <span class="badge bg-success"><?= $readCount ?></span>
         </a>
     </li>
 </ul>
@@ -157,7 +157,7 @@ include __DIR__ . '/includes/header.php';
 <?php if (empty($notifications)): ?>
     <div class="text-center text-muted py-5">
         <i class="bi bi-bell-slash display-4 d-block mb-3"></i>
-        <p class="fs-5">Δεν υπάρχουν ειδοποιήσεις<?= $filter !== 'all' ? ' σε αυτή την κατηγορία' : '' ?>.</p>
+        <p class="fs-5"><?= h(t($filter !== 'all' ? 'gui.nf_none_filtered' : 'gui.nf_none')) ?></p>
     </div>
 <?php else: ?>
     <div class="list-group">
@@ -192,8 +192,8 @@ include __DIR__ . '/includes/header.php';
                         <p class="mb-1 <?= empty($n['read_at']) ? '' : 'text-muted' ?>"><?= h($n['message']) ?></p>
                         <div class="d-flex gap-1 mt-1">
                             <?php if ($targetUrl !== null): ?>
-                                <a href="notifications.php?open=<?= (int)$n['id'] ?>" class="btn btn-primary btn-sm py-0 px-2" title="Άνοιγμα σχετικής σελίδας">
-                                    <i class="bi bi-arrow-right"></i> Προβολή
+                                <a href="notifications.php?open=<?= (int)$n['id'] ?>" class="btn btn-primary btn-sm py-0 px-2" title="<?= h(t('gui.nf_open_title')) ?>">
+                                    <i class="bi bi-arrow-right"></i> <?= h(t('gui.nf_open')) ?>
                                 </a>
                             <?php endif; ?>
                             <?php if (empty($n['read_at'])): ?>
@@ -201,7 +201,7 @@ include __DIR__ . '/includes/header.php';
                                     <?= csrfField() ?>
                                     <input type="hidden" name="action" value="mark_read">
                                     <input type="hidden" name="notification_id" value="<?= $n['id'] ?>">
-                                    <button type="submit" class="btn btn-outline-primary btn-sm py-0 px-2" title="Σημείωση ως αναγνωσμένο">
+                                    <button type="submit" class="btn btn-outline-primary btn-sm py-0 px-2" title="<?= h(t('gui.nf_mark_read_title')) ?>">
                                         <i class="bi bi-check2"></i>
                                     </button>
                                 </form>
@@ -210,7 +210,7 @@ include __DIR__ . '/includes/header.php';
                                     <?= csrfField() ?>
                                     <input type="hidden" name="action" value="mark_unread">
                                     <input type="hidden" name="notification_id" value="<?= $n['id'] ?>">
-                                    <button type="submit" class="btn btn-outline-secondary btn-sm py-0 px-2" title="Σημείωση ως μη αναγνωσμένο">
+                                    <button type="submit" class="btn btn-outline-secondary btn-sm py-0 px-2" title="<?= h(t('gui.nf_mark_unread_title')) ?>">
                                         <i class="bi bi-circle"></i>
                                     </button>
                                 </form>
@@ -219,8 +219,8 @@ include __DIR__ . '/includes/header.php';
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="delete">
                                 <input type="hidden" name="notification_id" value="<?= $n['id'] ?>">
-                                <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-2" title="Διαγραφή"
-                                        onclick="return confirm('Διαγραφή ειδοποίησης;');">
+                                <button type="submit" class="btn btn-outline-danger btn-sm py-0 px-2" title="<?= h(t('gui.nf_delete_title')) ?>"
+                                        onclick="return confirm('<?= h(addslashes(t('gui.nf_confirm_delete'))) ?>');">
                                     <i class="bi bi-trash"></i>
                                 </button>
                             </form>
