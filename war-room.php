@@ -2258,6 +2258,19 @@ include __DIR__ . '/includes/header.php';
     #voiceHoldBtn.voice-arming { transform: scale(1.02); }
     #voiceHoldBtn.voice-arming::after { animation: voiceArmFill var(--voice-arm-ms, 1000ms) linear forwards; }
     @keyframes voiceArmFill { to { width: 100%; } }
+    /* The report a team writes when it presses «Ολοκληρώθηκε». Its own overlay
+       rather than a Bootstrap modal: the order popup sits at z-index 1905,
+       above every modal, so a modal opened from it would appear behind it. */
+    .wr-report-dialog {
+        position: fixed; inset: 0; top: var(--app-clock-h, 0px); z-index: 2150;
+        background: rgba(15, 23, 42, .55);
+        display: flex; align-items: center; justify-content: center; padding: 16px;
+    }
+    .wr-report-box {
+        width: min(460px, 100%); max-height: 100%; overflow-y: auto;
+        background: var(--bs-body-bg, #fff); color: var(--bs-body-color, #212529);
+        border-radius: 12px; padding: 16px; box-shadow: 0 10px 40px rgba(0,0,0,.4);
+    }
     /* The gallery's card-body carries a hardcoded height:520px so it lines up
        with the 520px map card sitting next to it on a desktop. In the tabbed
        view there is no map beside it — the map has its own tab — so all that
@@ -8944,7 +8957,8 @@ function renderDispatches(items) {
                     p.arrived ? t('dispatch.progress_arrived', {time: p.arrived}) : '',
                     p.completed ? t('dispatch.progress_completed', {time: p.completed}) : '',
                 ].filter(Boolean);
-                return `${p.completed ? '✅' : (p.arrived ? '📍' : '🚶')} <strong>${escapeHtml(p.label)}</strong>: ${escapeHtml(steps.join(' · '))}`;
+                return `${p.completed ? '✅' : (p.arrived ? '📍' : '🚶')} <strong>${escapeHtml(p.label)}</strong>: ${escapeHtml(steps.join(' · '))}`
+                    + (p.note ? `<div class="fst-italic ms-3" style="white-space:pre-wrap">💬 «${escapeHtml(p.note)}»</div>` : '');
             }).join('<br>') + '</div>'
             : '';
         // «Δεν μπορώ»: every team that said so, for whoever is deciding what
@@ -9075,17 +9089,59 @@ function dispatchNavPoint(item) {
 // re-rendered — same "the server is the source of truth, re-render from its
 // response" shape postRouteAction() already uses.
 function postDispatchAction(action, id, btnEl) {
-    // Completing a point sent from the map's imported points asks for a note
-    // (optional: OK with nothing written completes it without one). From every
-    // place that offers the button, since they all come through here.
-    let note = null;
+    // Completing an order sent to an incident, or one made from the map's
+    // imported points, asks for a report first (optional: «Ολοκλήρωση» with
+    // nothing written completes it without one, «Ακύρωση» leaves it open). From
+    // every place that offers the button, since they all come through here.
     if (action === 'complete') {
         const sent = (dispatches || []).find(d => String(d.id) === String(id));
-        if (sent && sent.map_point_id) {
-            note = window.prompt(t('mp.complete_note_prompt', {name: sent.label || ''}), '');
-            if (note === null) return Promise.resolve({ok: false});
+        if (sent && (sent.incident || sent.map_point_id)) {
+            const subject = sent.incident
+                ? [sent.incident.type_label, sent.incident.is_unknown_patient ? '' : sent.incident.patient_name].filter(Boolean).join(' — ')
+                : (sent.label || '');
+            return askCompletionReport(subject, sent.incident ? 'dispatch.report_incident_hint' : 'dispatch.report_point_hint')
+                .then(note => note === null ? {ok: false} : sendDispatchAction(action, id, btnEl, note));
         }
     }
+    return sendDispatchAction(action, id, btnEl, null);
+}
+// The report dialog: resolves with the text ('' for nothing written) or null
+// for «Ακύρωση». Appended to <body>, outside every fragment the poll rebuilds,
+// so what is being typed survives the 5 s tick. A tap beside the box does NOT
+// close it — losing a half-written report to a stray touch is worse than one
+// extra tap on «Ακύρωση».
+function askCompletionReport(subject, hintKey) {
+    if (document.querySelector('.wr-report-dialog')) return Promise.resolve(null);
+    return new Promise(resolve => {
+        const wrap = document.createElement('div');
+        wrap.className = 'wr-report-dialog';
+        wrap.setAttribute('role', 'dialog');
+        wrap.setAttribute('aria-modal', 'true');
+        wrap.innerHTML = `<div class="wr-report-box">
+            <div class="fw-semibold"><i class="bi bi-flag-fill text-success me-1"></i>${escapeHtml(t('dispatch.report_title'))}</div>
+            ${subject ? `<div class="small text-muted mb-2">${escapeHtml(subject)}</div>` : ''}
+            <textarea class="form-control" rows="4" maxlength="500" placeholder="${escapeHtml(t('dispatch.report_placeholder'))}"></textarea>
+            <div class="small text-muted mt-1 mb-3">${escapeHtml(t(hintKey))}</div>
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-outline-secondary flex-fill" data-report="cancel">${escapeHtml(t('common.cancel'))}</button>
+                <button type="button" class="btn btn-success flex-fill" data-report="ok"><i class="bi bi-flag-fill me-1"></i>${escapeHtml(t('dispatch.report_submit'))}</button>
+            </div>
+        </div>`;
+        const textarea = wrap.querySelector('textarea');
+        const finish = value => {
+            document.removeEventListener('keydown', onKey, true);
+            wrap.remove();
+            resolve(value);
+        };
+        const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); finish(null); } };
+        wrap.querySelector('[data-report="cancel"]').addEventListener('click', () => finish(null));
+        wrap.querySelector('[data-report="ok"]').addEventListener('click', () => finish(textarea.value.trim()));
+        document.addEventListener('keydown', onKey, true);
+        document.body.appendChild(wrap);
+        textarea.focus();
+    });
+}
+function sendDispatchAction(action, id, btnEl, note) {
     if (btnEl) btnEl.disabled = true;
     const data = new URLSearchParams({csrf_token: csrfToken, action: action, mission_id: '<?= $missionId ?>', id: String(id)});
     if (note) data.set('note', note);
@@ -17347,7 +17403,9 @@ function incidentRespondersHtml(r) {
         ].filter(Boolean);
         const icon = l.completed ? '✅' : (l.arrived ? '📍' : (l.departed ? '🚶' : '📨'));
         return `${icon} <strong>${escapeHtml(l.label)}</strong>: ${escapeHtml(steps.join(' · '))}`
-            + (l.completed && canManageIncidents ? ` <span class="text-success fw-semibold">— ${escapeHtml(t('incident.record_outcome_hint'))}</span>` : '');
+            + (l.completed && canManageIncidents ? ` <span class="text-success fw-semibold">— ${escapeHtml(t('incident.record_outcome_hint'))}</span>` : '')
+            // What the team wrote on completing — the reason command opens this card.
+            + (l.note ? `<div class="fst-italic ms-3" style="white-space:pre-wrap">💬 «${escapeHtml(l.note)}»</div>` : '');
     }).join('<br>') + '</div>';
 }
 

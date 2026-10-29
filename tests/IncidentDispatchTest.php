@@ -315,4 +315,66 @@ final class IncidentDispatchTest extends TestCase
         $this->assertSame(teamLabel('ΑΛΦΑ', 1), $rows[0]['responders'][0]['label']);
         $this->assertEqualsWithDelta(12, $rows[0]['responders'][0]['arrive_minutes'], 1);
     }
+
+    private function complete(int $dispatchId, int $userId, ?string $note): void
+    {
+        $this->assertNull(advanceMissionDispatch($this->mission(), $dispatchId, $userId, $this->user($userId)['name'], 'complete', null, $note));
+    }
+
+    public function testTheReportATeamWritesOnCompletingIsOnCommandsIncidentCard(): void
+    {
+        $incidentId = $this->reportIncident();
+        $dispatchId = $this->sendTeam($this->teamId, $incidentId);
+        $this->complete($dispatchId, $this->member, 'Ο ασθενής μεταφέρθηκε στο ΠΑΓΝΗ');
+
+        [$line] = $this->incidentSeenBy($this->adminId, $incidentId, true)['responders'];
+        $this->assertNotNull($line['completed']);
+        $this->assertSame('Ο ασθενής μεταφέρθηκε στο ΠΑΓΝΗ', $line['note']);
+        $this->assertSame([], $this->incidentSeenBy($this->member, $incidentId)['responders'], 'The progress lines, report included, are command\'s.');
+    }
+
+    public function testCompletingWithoutAReportLeavesNoNote(): void
+    {
+        $incidentId = $this->reportIncident();
+        $dispatchId = $this->sendTeam($this->teamId, $incidentId);
+        $this->complete($dispatchId, $this->member, '');
+
+        [$line] = $this->incidentSeenBy($this->adminId, $incidentId, true)['responders'];
+        $this->assertNull($line['note']);
+    }
+
+    public function testOnlyCommandAndTheTeamItselfReadTheReportOnTheDispatch(): void
+    {
+        $incidentId = $this->reportIncident();
+        $dispatchId = $this->sendTeam(null, $incidentId);
+        $this->complete($dispatchId, $this->member, 'Βρέθηκε ο ασθενής');
+
+        $own = $this->dispatchSeenBy($this->member, $dispatchId)['progress'];
+        $this->assertSame('Βρέθηκε ο ασθενής', $own[0]['note'], 'The team that wrote it sees it.');
+
+        $other = $this->dispatchSeenBy($this->stranger, $dispatchId)['progress'];
+        $this->assertSame(teamLabel('ΑΛΦΑ', 1), $other[0]['label'], 'Another team sees the steps...');
+        $this->assertNotNull($other[0]['completed']);
+        $this->assertNull($other[0]['note'], '...but not what was written.');
+
+        $command = null;
+        foreach (loadMissionDispatchesForUser($this->missionId, $this->adminId, true, true) as $d) {
+            if ($d['id'] === $dispatchId) {
+                $command = $d;
+            }
+        }
+        $this->assertSame('Βρέθηκε ο ασθενής', $command['progress'][0]['note']);
+    }
+
+    public function testTheArchiveShowsTheReportToStaffButTheMaskedReviewDoesNot(): void
+    {
+        $incidentId = $this->reportIncident();
+        $dispatchId = $this->sendTeam($this->teamId, $incidentId);
+        $this->complete($dispatchId, $this->member, 'Επιβεβαιώθηκε ο τραυματισμός');
+
+        $staff = loadMissionReviewData($this->missionId, true)['incidents'];
+        $masked = loadMissionReviewData($this->missionId, false)['incidents'];
+        $this->assertSame('Επιβεβαιώθηκε ο τραυματισμός', $staff[0]['responders'][0]['note']);
+        $this->assertNull($masked[0]['responders'][0]['note'], 'The PDF and the debrief page withhold what staff wrote, like the incident notes.');
+    }
 }

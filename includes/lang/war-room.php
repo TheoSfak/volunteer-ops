@@ -1002,6 +1002,12 @@ return [
         // Ξεκινάω → Έφτασα → Ολοκληρώθηκε: team steps, see recordDispatchProgress()
         'dispatch.depart_btn' => 'Ξεκινάω',
         'dispatch.complete_btn' => 'Ολοκληρώθηκε',
+        // The report a team writes when it completes an order sent to an incident or a map point.
+        'dispatch.report_title' => 'Ολοκλήρωση — αναφορά ομάδας',
+        'dispatch.report_placeholder' => 'Γράψτε εδώ την αναφορά σας…',
+        'dispatch.report_incident_hint' => 'Τι βρήκατε και τι κάνατε στο περιστατικό; Το διαβάζει το συντονιστικό. Προαιρετικό.',
+        'dispatch.report_point_hint' => 'Τι βρήκατε ή τι έγινε στο σημείο; Το διαβάζει το συντονιστικό. Προαιρετικό.',
+        'dispatch.report_submit' => 'Ολοκλήρωση',
         'dispatch.departed_at_prefix' => '🚶 Ξεκινήσατε στις {time}',
         'dispatch.completed_at_prefix' => '✓ Ολοκληρώθηκε στις {time}',
         'dispatch.progress_departed' => 'ξεκίνησε {time}',
@@ -2736,7 +2742,6 @@ return [
         'mp.visit_completed' => 'Ολοκληρώθηκε {time}',
         'mp.visit_withdraw' => 'Ανάκληση',
         'mp.withdraw_confirm' => 'Να ανακληθεί το σημείο από την ομάδα {team};',
-        'mp.complete_note_prompt' => 'Σημείωση για το σημείο «{name}» (προαιρετική — ΟΚ για να ολοκληρωθεί, Άκυρο για να μην ολοκληρωθεί):',
         'popup.type.command_post' => 'Συντονιστικό',
         'popup.btn.show_command_post' => 'Δες το στον χάρτη',
         // Συντονιστικό που ακολουθεί συσκευή (v3.347.0).
@@ -4002,6 +4007,11 @@ return [
         'dispatch.arrived_at_prefix' => '✓ Arrived at {time}',
         'dispatch.depart_btn' => 'On my way',
         'dispatch.complete_btn' => 'Completed',
+        'dispatch.report_title' => 'Complete — team report',
+        'dispatch.report_placeholder' => 'Write your report here…',
+        'dispatch.report_incident_hint' => 'What did you find and what did you do at the incident? Command reads it. Optional.',
+        'dispatch.report_point_hint' => 'What did you find, or what happened, at the point? Command reads it. Optional.',
+        'dispatch.report_submit' => 'Complete',
         'dispatch.departed_at_prefix' => '🚶 Set off at {time}',
         'dispatch.completed_at_prefix' => '✓ Completed at {time}',
         'dispatch.progress_departed' => 'set off {time}',
@@ -5690,7 +5700,6 @@ return [
         'mp.visit_completed' => 'Completed {time}',
         'mp.visit_withdraw' => 'Withdraw',
         'mp.withdraw_confirm' => 'Withdraw this point from team {team}?',
-        'mp.complete_note_prompt' => 'Note for the point «{name}» (optional — OK to complete it, Cancel to leave it open):',
         'popup.type.command_post' => 'Command post',
         'popup.btn.show_command_post' => 'See it on the map',
         // Command post following a device (v3.347.0).

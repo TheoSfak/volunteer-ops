@@ -1279,9 +1279,13 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             'my_declined'  => $declines['dispatch:' . $dispatchId][$myScopeKey] ?? null,
             'can_decline'  => $isApprovedParticipant && $eligible && !$mine['completed'],
             // Every team's progress, for the coordinator's view of the pin.
-            'progress'     => array_values(array_map(fn($p) => [
+            // The note a team left on completing (v3.409.0) goes only to
+            // command and to that team itself: on a dispatch to every team the
+            // other teams see each other's steps, not what was written.
+            'progress'     => array_values(array_map(fn($p, $scope) => [
                 'label' => $p['label'], 'departed' => $p['departed'], 'arrived' => $p['arrived'], 'completed' => $p['completed'],
-            ], $progress)),
+                'note'  => ($canManageWarRoom || $scope === $myScopeKey) ? ($p['note'] ?? null) : null,
+            ], $progress, array_keys($progress))),
             // And every team that said it cannot, with why.
             'declines'     => array_values($declines['dispatch:' . $dispatchId] ?? []),
         ];
@@ -7065,6 +7069,8 @@ function loadIncidentResponders(int $missionId, array $incidentIds): array {
             'arrived'      => $p['arrived'] ?? null,
             'arrived_raw'  => $p['arrived_raw'] ?? null,
             'completed'    => $p['completed'] ?? null,
+            // What the team wrote on completing (v3.409.0), for command's card.
+            'note'         => $p['note'] ?? null,
             'declined'     => $isDeclined,
         ];
         $lines = [];
@@ -7455,6 +7461,8 @@ function loadMissionReviewData(int $missionId, bool $unmasked, string $lang = 'e
                 'sent'           => $r['sent'],
                 'arrived'        => $r['arrived'],
                 'completed'      => $r['completed'],
+                // The team's own words: staff-only, like the incident's notes.
+                'note'           => $unmasked ? $r['note'] : null,
                 'declined'       => $r['declined'],
                 'arrive_minutes' => $r['arrived_raw'] ? max(0, (int) round((strtotime($r['arrived_raw']) - $reportedTs) / 60)) : null,
             ], $responders[(int) $row['id']] ?? []),

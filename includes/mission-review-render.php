@@ -76,6 +76,9 @@ function renderMissionReviewCards(array $data, string $lang = 'el'): array {
                         . ($r['arrive_minutes'] !== null ? ' (' . h($tr('review.responder_after', ['n' => (int) $r['arrive_minutes']])) . ')' : '') : '')
                     . ($r['completed'] ? ' · ' . h($tr('review.responder_completed', ['time' => $r['completed']])) : '');
             $out .= '<div class="small text-muted"><i class="bi bi-truck me-1"></i><strong>' . h($r['label']) . '</strong>: ' . $line . '</div>';
+            if (!empty($r['note'])) {
+                $out .= '<div class="small ms-4 fst-italic">💬 «' . nl2br(h($r['note'])) . '»</div>';
+            }
         }
         $out .= '</div>';
     }

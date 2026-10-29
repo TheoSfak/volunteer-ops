@@ -205,7 +205,7 @@ foreach ($arrivedRows as $row) {
 // Arrival is not repeated from here: it is still written to
 // mission_dispatch_acks for whoever pressed it, and listed just above.
 $progressRows = dbFetchAll(
-    "SELECT p.departed_at, p.completed_at, p.team_id, mt.codename, mt.team_number,
+    "SELECT p.departed_at, p.completed_at, p.completed_note, p.team_id, mt.codename, mt.team_number,
             du.name AS departed_name, cu.name AS completed_name, d.label AS dispatch_label
      FROM mission_dispatch_progress p
      JOIN mission_dispatch_points d ON d.id = p.dispatch_id
@@ -224,11 +224,16 @@ foreach ($progressRows as $row) {
             continue;
         }
         $actor = h((string) $row[$step . '_name']);
+        $text = $teamLabel
+            ? t('history.dispatch_' . $step . '_team', ['team' => h($teamLabel), 'label_suffix' => $labelSuffix, 'actor' => $actor], $viewerLang)
+            : t('history.dispatch_' . $step . '_solo', ['actor' => $actor, 'label_suffix' => $labelSuffix], $viewerLang);
+        // What the team wrote on completing (v3.409.0).
+        if ($step === 'completed' && trim((string) $row['completed_note']) !== '') {
+            $text .= ' — «' . h($row['completed_note']) . '»';
+        }
         $events[] = [
             'icon' => $icon,
-            'text' => $teamLabel
-                ? t('history.dispatch_' . $step . '_team', ['team' => h($teamLabel), 'label_suffix' => $labelSuffix, 'actor' => $actor], $viewerLang)
-                : t('history.dispatch_' . $step . '_solo', ['actor' => $actor, 'label_suffix' => $labelSuffix], $viewerLang),
+            'text' => $text,
             'time' => date('d/m H:i', strtotime($row[$step . '_at'])),
             'ts'   => strtotime($row[$step . '_at']),
         ];
