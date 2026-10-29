@@ -10,6 +10,9 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.print.PrintAttributes;
+import android.print.PrintDocumentAdapter;
+import android.print.PrintManager;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.webkit.CookieManager;
@@ -288,9 +291,9 @@ public class MainActivity extends BridgeActivity {
      *
      * addJavascriptInterface exposes this to every page the WebView loads,
      * which is safe here only because the WebView is pinned to our own origin
-     * by capacitor.config.json's server.url. Keep the surface to exactly this
-     * one parameterless method — anything that takes input from the page would
-     * deserve a much harder look.
+     * by capacitor.config.json's server.url. Keep the surface to parameterless
+     * methods (openAppSettings, printPage) — anything that takes input from the
+     * page would deserve a much harder look.
      */
     @SuppressLint("JavascriptInterface")
     private void installNativeBridge() {
@@ -315,7 +318,53 @@ public class MainActivity extends BridgeActivity {
                 }
             });
         }
+
+        /**
+         * Android's own print dialog for the page on screen; it also offers
+         * "Save as PDF", which is what the certificate and report buttons are for.
+         * The WebView renders it with the page's print stylesheet.
+         */
+        @JavascriptInterface
+        public void printPage() {
+            runOnUiThread(() -> {
+                try {
+                    final WebView webView = getBridge().getWebView();
+                    PrintManager printManager = (PrintManager) getSystemService(Context.PRINT_SERVICE);
+                    if (webView == null || printManager == null) {
+                        return;
+                    }
+                    String title = webView.getTitle();
+                    String jobName = TextUtils.isEmpty(title) ? "VolunteerOps" : title;
+                    PrintDocumentAdapter adapter = webView.createPrintDocumentAdapter(jobName);
+                    printManager.print(
+                        jobName,
+                        adapter,
+                        new PrintAttributes.Builder().setMediaSize(PrintAttributes.MediaSize.ISO_A4).build()
+                    );
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "Η εκτύπωση δεν ξεκίνησε.", Toast.LENGTH_LONG).show();
+                }
+            });
+        }
     }
+
+    /**
+     * window.print() does nothing in an Android WebView, so every Print / PDF
+     * button on the site was dead inside the app while working in the phone's
+     * browser. This swaps it, on every page, for the native print dialog above.
+     *
+     * Ignored unless the call comes from a tap: the print pages also call
+     * window.print() by themselves a moment after loading (meant for a
+     * computer), and a print dialog opening unasked over a document on a phone
+     * would be wrong. Re-run at every page hook, like the Capacitor bridge, and
+     * flagged so it only ever installs once per page.
+     */
+    private static final String PRINT_PATCH =
+        "(function(){if(window.__vopsPrintPatched||!window.VopsNative||!window.VopsNative.printPage)return;"
+        + "window.__vopsPrintPatched=true;"
+        + "window.print=function(){"
+        + "if(navigator.userActivation&&!navigator.userActivation.isActive)return;"
+        + "window.VopsNative.printPage();};})();";
 
     /**
      * An Android WebView does nothing at all with a download — no error, no
@@ -396,6 +445,7 @@ public class MainActivity extends BridgeActivity {
      * so the check is load-bearing, not an optimisation.
      */
     private void ensureBridgeInjected(final WebView webView) {
+        webView.evaluateJavascript(PRINT_PATCH, null);
         final String script = getBridge().getVopsBridgeScript();
         if (script == null) {
             return;

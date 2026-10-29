@@ -188,7 +188,7 @@ $section = $debrief['payload']['debrief'];
 <div class="screen-notice">
     <span><?= h($x('preview')) ?> &mdash; <?= h($x('title')) ?></span>
     <button onclick="window.print()"><?= h($x('print')) ?></button>
-    <button onclick="window.close()"><?= h($x('close')) ?></button>
+    <button onclick="vopsClosePage()"><?= h($x('close')) ?></button>
 </div>
 
 <div class="td-hero">
@@ -265,5 +265,6 @@ $section = $debrief['payload']['debrief'];
     <?= h($orgName) ?> &middot; <?= h($printDate) ?>
 </div>
 
+<?php require __DIR__ . '/includes/print-close-script.php'; ?>
 </body>
 </html>

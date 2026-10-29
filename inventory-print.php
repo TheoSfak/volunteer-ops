@@ -197,7 +197,7 @@ $printDate = date('d/m/Y H:i');
 <div class="screen-notice">
     <span>Προεπισκόπηση Εκτύπωσης &mdash; <?= $total ?> εγγραφές</span>
     <button onclick="window.print()">&#128438; Εκτύπωση</button>
-    <button onclick="window.close()">&#10005; Κλείσιμο</button>
+    <button onclick="vopsClosePage()">&#10005; Κλείσιμο</button>
 </div>
 
 <!-- Print header -->
@@ -280,6 +280,7 @@ $printDate = date('d/m/Y H:i');
         setTimeout(function () { window.print(); }, 400);
     });
 </script>
+<?php require __DIR__ . '/includes/print-close-script.php'; ?>
 <?php require __DIR__ . '/includes/inactivity-timeout.php'; ?>
 </body>
 </html>

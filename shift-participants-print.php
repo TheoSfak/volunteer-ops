@@ -144,7 +144,7 @@ logAudit('print', 'shift_participants', $shiftId, $includePending ? 'incl. pendi
     <?php else: ?>
         <a href="shift-participants-print.php?id=<?= $shiftId ?>&amp;status=all">Και εκκρεμείς</a>
     <?php endif; ?>
-    <button onclick="window.close()">Κλείσιμο</button>
+    <button onclick="vopsClosePage()">Κλείσιμο</button>
 </div>
 
 <div class="head">
@@ -215,5 +215,6 @@ logAudit('print', 'shift_participants', $shiftId, $includePending ? 'incl. pendi
     <span>Σύνολο: <?= count($rows) ?></span>
 </div>
 
+<?php require __DIR__ . '/includes/print-close-script.php'; ?>
 </body>
 </html>

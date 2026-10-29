@@ -214,6 +214,7 @@ $printDate = date('d/m/Y');
             body { padding: 10px; }
             /* Scrolls away with the page instead of covering the top of the certificate. */
             .screen-notice { position: static; margin: -10px -10px 10px; padding: 8px 12px; font-size: 10pt; }
+            .screen-notice button { padding: 11px 18px; font-size: 14px; touch-action: manipulation; }
             .cert-page { margin-top: 0 !important; padding: 10px; }
             .cert-border-outer { padding: 5px; }
             .cert-border-inner { padding: 22px 18px 20px; min-height: 0; }
@@ -262,7 +263,7 @@ $printDate = date('d/m/Y');
 <div class="screen-notice">
     <span><?= h($copy['notice']) ?></span>
     <button onclick="window.print()"><?= h($copy['print_btn']) ?></button>
-    <button onclick="window.close()"><?= h($copy['close_btn']) ?></button>
+    <button onclick="vopsClosePage()"><?= h($copy['close_btn']) ?></button>
 </div>
 
 <div class="cert-page" style="margin-top:48px;">
@@ -335,6 +336,10 @@ if (window.matchMedia('(min-width: 769px)').matches) {
     setTimeout(function () { window.print(); }, 400);
 }
 </script>
+<?php
+$printBackUrl = $isRecipient ? 'profile.php' : 'mission-certificates.php?mission_id=' . (int) $cert['mission_id'];
+require __DIR__ . '/includes/print-close-script.php';
+?>
 <?php require __DIR__ . '/includes/inactivity-timeout.php'; ?>
 </body>
 </html>

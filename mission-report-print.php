@@ -529,7 +529,7 @@ if ($trActive) {
 <div class="screen-notice">
     <span>Προεπισκόπηση Εκτύπωσης &mdash; Αναφορά Αποστολής</span>
     <button onclick="window.print()">&#128438; Εκτύπωση / PDF</button>
-    <button onclick="window.close()">&#10005; Κλείσιμο</button>
+    <button onclick="vopsClosePage()">&#10005; Κλείσιμο</button>
     <?php if ($trAvailable): ?>
     <?php // Navigates rather than posting: the translated page IS the
           // deliverable, so the URL has to be the thing you can bookmark,
@@ -1285,6 +1285,7 @@ window.addEventListener('beforeprint', function () {
     if (window.__printMap) window.__printMap.invalidateSize();
 });
 </script>
+<?php require __DIR__ . '/includes/print-close-script.php'; ?>
 <?php require __DIR__ . '/includes/inactivity-timeout.php'; ?>
 </body>
 </html>
