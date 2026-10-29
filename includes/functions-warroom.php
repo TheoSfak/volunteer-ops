@@ -814,6 +814,30 @@ function missionVisitorMissionIsOpen(int $missionId): bool {
 }
 
 /**
+ * Records a volunteer's attendance from the shift's QR code (checkin.php):
+ * present, the shift's own hours, confirmed now by the volunteer themselves.
+ * It only ever fills an EMPTY confirmation — the WHERE clause, not a read made
+ * beforehand, is what makes a second scan, or a scan racing the shift leader's
+ * own attendance check, change nothing instead of overwriting an absence an
+ * administrator marked. True when this call recorded it.
+ */
+function recordQrCheckin(int $participationId, int $userId): bool {
+    return dbExecute(
+        "UPDATE participation_requests pr
+         JOIN shifts s ON s.id = pr.shift_id
+         SET pr.attended = 1,
+             pr.actual_hours = COALESCE(pr.actual_hours, ROUND(TIMESTAMPDIFF(MINUTE, s.start_time, s.end_time) / 60, 2)),
+             pr.actual_start_time = COALESCE(pr.actual_start_time, TIME(s.start_time)),
+             pr.actual_end_time = COALESCE(pr.actual_end_time, TIME(s.end_time)),
+             pr.attendance_confirmed_at = NOW(),
+             pr.attendance_confirmed_by = ?,
+             pr.updated_at = NOW()
+         WHERE pr.id = ? AND pr.attendance_confirmed_at IS NULL",
+        [$userId, $participationId]
+    ) > 0;
+}
+
+/**
  * The shift a QR visitor is approved on when they register: the one running
  * now, else the next to start, else the one that started last. visitor-join.php
  * used to take the latest-starting shift unconditionally, which on a mission

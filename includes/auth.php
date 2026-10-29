@@ -151,6 +151,10 @@ define('WAR_ROOM_GUEST_PAGES', [
     // logged in, so a guest who is a team leader and opens the link on the
     // phone they are signed in on was thrown back to the map.
     'briefing-view.php',
+    // The page the shift's attendance QR opens. Off the list, a guest who
+    // scanned it was thrown into the Action Room by bootstrap.php before the
+    // page ran: nothing said their attendance was (or was not) recorded.
+    'checkin.php',
 ]);
 
 // Pages only a partner-org guest gets (a mission visitor's list is narrower by
