@@ -49,19 +49,14 @@ if (!$canManageWarRoom) {
 }
 
 // Notify whoever the report actually concerns when the admin acts on it —
-// the reporter's team if they had one at submit time, or just the reporter
-// themselves if they didn't (there's no wider "team" to loop in). Excludes
-// the acting admin in case they happen to be a member of that same team.
+// the reporter AND the team they had at submit time (reportAnswerRecipientIds():
+// the reporter alone used to be skipped once they had left that team, so the
+// one person who asked never heard the answer). Excludes the acting admin in
+// case they happen to be a member of that same team.
 function notifyShortageAffectedUsers(array $report, string $titleKey, string $messageKey, string $notifCode, int $actingUserId, string $note = ''): void {
-    if ($report['team_id']) {
-        $recipientIds = array_map('intval', array_column(
-            dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [(int) $report['team_id']]),
-            'user_id'
-        ));
-    } else {
-        $recipientIds = [(int) $report['reporter_id']];
-    }
-    $recipientIds = array_values(array_unique(array_diff($recipientIds, [$actingUserId])));
+    $recipientIds = reportAnswerRecipientIds(
+        $report['team_id'] ? (int) $report['team_id'] : null, (int) $report['reporter_id'], $actingUserId
+    );
     if (!$recipientIds) {
         return;
     }

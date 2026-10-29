@@ -98,6 +98,22 @@ function incidentOutcomeLabel(string $outcome, ?string $lang = null): string {
     return $translated !== $key ? $translated : (INCIDENT_OUTCOME_LABELS[$outcome] ?? $outcome);
 }
 
+/**
+ * An incident's outcome as one phrase, «Μεταφέρθηκε (ΠΑΓΝΗ)»: the outcome label
+ * and, for a transport, the place command wrote. $incident needs 'outcome' and
+ * 'outcome_location'; '—' when it has not been closed yet.
+ */
+function incidentOutcomeText(array $incident, ?string $lang = null): string {
+    if (empty($incident['outcome'])) {
+        return '—';
+    }
+    $text = incidentOutcomeLabel($incident['outcome'], $lang);
+    if ($incident['outcome'] === 'transported' && trim((string) ($incident['outcome_location'] ?? '')) !== '') {
+        $text .= ' (' . trim((string) $incident['outcome_location']) . ')';
+    }
+    return $text;
+}
+
 function incidentGenderLabel(string $gender, ?string $lang = null): string {
     $key = 'incident.gender.' . $gender;
     $translated = t($key, [], $lang);

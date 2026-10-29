@@ -6888,7 +6888,7 @@ function reportMissionIncident(array $mission, array $user, array $in, bool $byC
 function loadIncidentForAction(int $incidentId, ?int $missionId = null): ?array {
     $row = dbFetchOne(
         "SELECT i.id, i.mission_id, i.reporter_id, i.team_id, i.incident_type, i.severity, i.acknowledged_at, i.resolved_at,
-                i.outcome, i.outcome_location,
+                i.outcome, i.outcome_location, i.outcome_note,
                 m.title AS mission_title, m.responsible_user_id, mt.codename, mt.team_number
          FROM mission_incidents i
          JOIN missions m ON m.id = i.mission_id
@@ -6903,22 +6903,39 @@ function loadIncidentForAction(int $incidentId, ?int $missionId = null): ?array 
 }
 
 /**
- * Whoever the report concerns, when command acts on it: the reporter's team,
- * or the reporter alone without one — same recipient resolution as
+ * Who hears command's answer to a shortage or incident report: the reporter's
+ * team as it was when they filed, AND the reporter. The reporter used to be
+ * counted only when the report had no team, so a reporter who had since been
+ * moved to another team or taken out of theirs - which happens all the time in
+ * a live Action Room - was the one person NOT told that their own report was
+ * answered, while their old teammates were. Excludes whoever is acting (they
+ * know) and anyone in $alreadyTold (they got a message about this already).
+ */
+function reportAnswerRecipientIds(?int $teamId, int $reporterId, int $actingUserId, array $alreadyTold = []): array {
+    $recipientIds = [$reporterId];
+    if ($teamId) {
+        $recipientIds = array_merge($recipientIds, array_map('intval', array_column(
+            dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [$teamId]),
+            'user_id'
+        )));
+    }
+    return array_values(array_unique(array_diff($recipientIds, [$actingUserId], array_map('intval', $alreadyTold))));
+}
+
+/**
+ * Whoever the report concerns, when command acts on it: the reporter and their
+ * team (reportAnswerRecipientIds()) — same recipient resolution as
  * mission-shortage.php's notifyShortageAffectedUsers(). Moved here from
  * mission-incident.php (v3.344.0) so that sending a team to an incident can
  * mark it seen the same way «Είδα» does.
+ *
+ * Closing it also tells the outcome and command's comment, in each person's own
+ * language: $incident carries 'outcome', 'outcome_location' and 'outcome_note'.
  */
 function notifyIncidentAffectedUsers(array $incident, string $titleKey, string $messageKey, string $notifCode, int $actingUserId, array $alreadyTold = []): void {
-    if ($incident['team_id']) {
-        $recipientIds = array_map('intval', array_column(
-            dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [(int) $incident['team_id']]),
-            'user_id'
-        ));
-    } else {
-        $recipientIds = [(int) $incident['reporter_id']];
-    }
-    $recipientIds = array_values(array_unique(array_diff($recipientIds, [$actingUserId], array_map('intval', $alreadyTold))));
+    $recipientIds = reportAnswerRecipientIds(
+        $incident['team_id'] ? (int) $incident['team_id'] : null, (int) $incident['reporter_id'], $actingUserId, $alreadyTold
+    );
     if (!$recipientIds) {
         return;
     }
@@ -6926,10 +6943,20 @@ function notifyIncidentAffectedUsers(array $incident, string $titleKey, string $
     $teamLabel = $incident['team_id'] ? teamLabel($incident['codename'], $incident['team_number']) : t('history.no_team_capitalized');
     $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $incident['mission_id'];
     $langs = getUserLanguages($recipientIds);
+    $note = trim((string) ($incident['outcome_note'] ?? ''));
     foreach ($recipientIds as $recipientId) {
         $lang = $langs[$recipientId] ?? DEFAULT_LANGUAGE;
         $notifTitle = t($titleKey, ['mission' => $incident['mission_title']], $lang);
         $notifMessage = t($messageKey, ['type' => incidentTypeLabel($incident['incident_type'], $lang), 'team' => $teamLabel], $lang);
+        if ($notifCode === 'mission_incident_resolved') {
+            if (!empty($incident['outcome'])) {
+                $notifMessage .= ' ' . t('incident.outcome_suffix', ['outcome' => incidentOutcomeText($incident, $lang)], $lang);
+            }
+            // Free-form command note: shown exactly as typed, never translated.
+            if ($note !== '') {
+                $notifMessage .= ' ' . t('shortage.note_suffix', ['note' => $note], $lang);
+            }
+        }
         sendNotification($recipientId, $notifTitle, $notifMessage, 'success', $notifCode, [
             'url' => $warRoomUrl,
             'tag' => $notifCode . '-' . $incident['id'],
@@ -6979,10 +7006,7 @@ function notifyIncidentClosedToResponders(array $incident, int $actingUserId): a
     $langs = getUserLanguages($recipientIds);
     foreach ($recipientIds as $recipientId) {
         $lang = $langs[$recipientId] ?? DEFAULT_LANGUAGE;
-        $outcome = $incident['outcome'] ? incidentOutcomeLabel($incident['outcome'], $lang) : '—';
-        if ($incident['outcome'] === 'transported' && trim((string) $incident['outcome_location']) !== '') {
-            $outcome .= ' (' . trim((string) $incident['outcome_location']) . ')';
-        }
+        $outcome = incidentOutcomeText($incident, $lang);
         sendNotification((int) $recipientId,
             t('incident.closed_for_team_title', ['mission' => $incident['mission_title']], $lang),
             t('incident.closed_for_team_message', ['type' => incidentTypeLabel($incident['incident_type'], $lang), 'outcome' => $outcome], $lang),
@@ -12191,6 +12215,117 @@ function warRoomLiveFragment(string $key, string $html, string $class = ''): str
 
 function warRoomLiveFragmentPayload(string $html): array {
     return ['sig' => md5($html), 'html' => $html];
+}
+
+/**
+ * «Οι αναφορές μου» (v3.408.0): the shortage and incident reports this person
+ * filed in the mission, with how command answered each one. Until now a
+ * reporter's only trace of the answer was a notification - a ticker line that
+ * the «Κρυφά» ticker mode hides, a bell entry, a push a guest may never have
+ * subscribed to - so a guest whose report was answered and resolved could
+ * truthfully say nobody had told them. This list stays: it is drawn from the
+ * reports themselves, for the page load and again for every 5 s poll, in the
+ * same live-fragment markup the command cards use. Both kinds, newest first.
+ *
+ * Keyed by kind, 'shortage' and 'incident'; each row is already display-ready.
+ * Only this person's own reports: another reporter's, and a patient's details,
+ * are not theirs to see here.
+ */
+const MY_REPORTS_FRAGMENT_KEYS = ['shortage' => 'myShortageReports', 'incident' => 'myIncidentReports'];
+
+function reportAnswerState(?string $acknowledgedAt, ?string $resolvedAt, ?string $notResolvedAt): array {
+    if ($notResolvedAt) {
+        return ['not_resolved', $notResolvedAt];
+    }
+    if ($resolvedAt) {
+        return ['resolved', $resolvedAt];
+    }
+    if ($acknowledgedAt) {
+        return ['seen', $acknowledgedAt];
+    }
+    return ['sent', null];
+}
+
+function loadMyReportsForMission(int $missionId, int $userId, int $limit = 15): array {
+    $limit = max(1, $limit);
+    $out = ['shortage' => [], 'incident' => []];
+    foreach (dbFetchAll(
+        "SELECT id, title, shortage_type, severity, created_at, acknowledged_at, resolved_at, not_resolved_at, outcome_note
+         FROM mission_shortage_reports WHERE mission_id = ? AND reporter_id = ?
+         ORDER BY created_at DESC, id DESC LIMIT $limit",
+        [$missionId, $userId]
+    ) as $row) {
+        [$state, $answeredAt] = reportAnswerState($row['acknowledged_at'], $row['resolved_at'], $row['not_resolved_at']);
+        $out['shortage'][] = [
+            'id' => (int) $row['id'], 'title' => $row['title'],
+            'sub' => shortageTypeLabel($row['shortage_type']) . ' · ' . shortageSeverityLabel($row['severity']),
+            'created_at' => $row['created_at'], 'state' => $state, 'answered_at' => $answeredAt,
+            'outcome' => null, 'note' => trim((string) $row['outcome_note']),
+        ];
+    }
+    foreach (dbFetchAll(
+        "SELECT id, incident_type, severity, created_at, acknowledged_at, resolved_at, outcome, outcome_location, outcome_note
+         FROM mission_incidents WHERE mission_id = ? AND reporter_id = ?
+         ORDER BY created_at DESC, id DESC LIMIT $limit",
+        [$missionId, $userId]
+    ) as $row) {
+        [$state, $answeredAt] = reportAnswerState($row['acknowledged_at'], $row['resolved_at'], null);
+        $out['incident'][] = [
+            'id' => (int) $row['id'], 'title' => incidentTypeLabel($row['incident_type']),
+            'sub' => incidentSeverityLabel($row['severity']),
+            'created_at' => $row['created_at'], 'state' => $state, 'answered_at' => $answeredAt,
+            'outcome' => $row['outcome'] ? incidentOutcomeText($row) : null, 'note' => trim((string) $row['outcome_note']),
+        ];
+    }
+    return $out;
+}
+
+/** The list for one kind, as the markup that sits under that kind's report form. */
+function renderMyReports(array $rows, string $kind): string {
+    $html = '<div class="wr-my-reports border-top mt-3 pt-2"><div class="small fw-bold mb-1"><i class="bi bi-clock-history me-1"></i>'
+        . h(t('myreports.title')) . ($rows ? ' <span class="badge bg-secondary">' . count($rows) . '</span>' : '') . '</div>';
+    if (!$rows) {
+        return $html . '<div class="small text-muted">' . h(t($kind === 'incident' ? 'myreports.empty_incident' : 'myreports.empty_shortage')) . '</div></div>';
+    }
+    $badge = ['sent' => 'bg-secondary', 'seen' => 'bg-info text-dark', 'resolved' => 'bg-success', 'not_resolved' => 'bg-danger'];
+    $label = [
+        'sent' => t('myreports.sent'), 'seen' => t('myreports.seen'),
+        'resolved' => t($kind === 'incident' ? 'myreports.closed' : 'myreports.resolved'), 'not_resolved' => t('myreports.not_resolved'),
+    ];
+    foreach ($rows as $r) {
+        $html .= '<div class="border rounded p-2 mb-1 small" data-my-report="' . h($kind) . '-' . (int) $r['id'] . '">'
+            . '<div class="d-flex justify-content-between align-items-start gap-2"><div><strong>' . h($r['title']) . '</strong>'
+            . ($r['sub'] !== '' ? ' <span class="text-muted">· ' . h($r['sub']) . '</span>' : '') . '</div>'
+            . '<span class="badge ' . $badge[$r['state']] . ' flex-shrink-0">' . h($label[$r['state']]) . '</span></div>'
+            . '<div class="text-muted" style="font-size:.75rem;">' . h(t('myreports.sent_at', ['time' => date('d/m H:i', strtotime($r['created_at']))]))
+            . ($r['answered_at'] ? ' · ' . h($label[$r['state']]) . ' ' . h(date('d/m H:i', strtotime($r['answered_at']))) : '') . '</div>';
+        if ($r['outcome'] !== null) {
+            $html .= '<div class="mt-1"><span class="text-muted">' . h(t('myreports.outcome')) . '</span> ' . h($r['outcome']) . '</div>';
+        }
+        if ($r['note'] !== '') {
+            // Free text, shown exactly as command typed it.
+            $html .= '<div class="mt-1 p-1 rounded bg-light border-start border-3 border-' . ($r['state'] === 'not_resolved' ? 'danger' : 'success') . '"><span class="text-muted">'
+                . h(t('myreports.comment')) . '</span> ' . nl2br(h($r['note'])) . '</div>';
+        }
+        $html .= '</div>';
+    }
+    return $html . '</div>';
+}
+
+/** The page's copy of one list, wrapped so the poll can swap it (applyLiveFragments()). */
+function renderMyReportsFragment(int $missionId, int $userId, string $kind): string {
+    $mine = loadMyReportsForMission($missionId, $userId);
+    return warRoomLiveFragment(MY_REPORTS_FRAGMENT_KEYS[$kind], renderMyReports($mine[$kind], $kind));
+}
+
+/** The poll's copy of both lists: {fragmentKey: {sig, html}}. */
+function buildMyReportsFragments(int $missionId, int $userId): array {
+    $mine = loadMyReportsForMission($missionId, $userId);
+    $out = [];
+    foreach (MY_REPORTS_FRAGMENT_KEYS as $kind => $key) {
+        $out[$key] = warRoomLiveFragmentPayload(renderMyReports($mine[$kind], $kind));
+    }
+    return $out;
 }
 
 /**

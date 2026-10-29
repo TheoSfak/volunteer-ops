@@ -2607,6 +2607,7 @@ CREATE TABLE IF NOT EXISTS `mission_incidents` (
     `resolved_by` INT UNSIGNED NULL,
     `outcome` ENUM('stayed_on_site','transported','declined','deceased') NULL,
     `outcome_location` VARCHAR(255) NULL COMMENT 'Where transported to, only meaningful when outcome=transported',
+    `outcome_note` TEXT NULL COMMENT 'Optional comment command writes when closing the incident (migration v193); the reporter is told it',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`reporter_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,

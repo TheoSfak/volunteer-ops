@@ -7797,6 +7797,16 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 193,
+            'description' => "Add mission_incidents.outcome_note (v3.408.0): an optional free-text comment command writes when it closes an incident, the twin of mission_shortage_reports.outcome_note. The reporter is told it with the outcome and keeps it in their list of reports in the Action Room.",
+            'up' => function () {
+                if (!dbColumnExists('mission_incidents', 'outcome_note')) {
+                    dbExecute("ALTER TABLE mission_incidents ADD COLUMN outcome_note TEXT NULL AFTER outcome_location");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

@@ -654,7 +654,7 @@ foreach ($pingRows as $row) {
 // never acknowledged_by/resolved_by (almost always the admin), which would
 // silently break the reporter's own visibility into their report's outcome.
 $shortageRows = dbFetchAll(
-    "SELECT r.shortage_type, r.title, r.created_at, r.acknowledged_at, r.resolved_at, u.name AS actor_name
+    "SELECT r.shortage_type, r.title, r.created_at, r.acknowledged_at, r.resolved_at, r.not_resolved_at, r.outcome_note, u.name AS actor_name
      FROM mission_shortage_reports r
      JOIN users u ON u.id = r.reporter_id
      WHERE r.mission_id = ? AND $shortageScopeSql
@@ -677,12 +677,26 @@ foreach ($shortageRows as $row) {
             'ts'   => strtotime($row['acknowledged_at']),
         ];
     }
+    // Command's comment travels with the verdict, exactly as typed. The
+    // verdict itself was never "not resolved" here: a report command could not
+    // fix just stayed at «seen» in this timeline, with nothing to say it was
+    // answered.
+    $noteSuffix = trim((string) $row['outcome_note']) !== ''
+        ? t('history.label_suffix_dash', ['label' => h($row['outcome_note'])], $viewerLang) : '';
     if ($row['resolved_at']) {
         $events[] = [
             'icon' => '✅',
-            'text' => t('history.shortage_resolved', ['title' => h($row['title'])], $viewerLang),
+            'text' => t('history.shortage_resolved', ['title' => h($row['title'])], $viewerLang) . $noteSuffix,
             'time' => date('d/m H:i', strtotime($row['resolved_at'])),
             'ts'   => strtotime($row['resolved_at']),
+        ];
+    }
+    if ($row['not_resolved_at']) {
+        $events[] = [
+            'icon' => '🚫',
+            'text' => t('history.shortage_not_resolved', ['title' => h($row['title'])], $viewerLang) . $noteSuffix,
+            'time' => date('d/m H:i', strtotime($row['not_resolved_at'])),
+            'ts'   => strtotime($row['not_resolved_at']),
         ];
     }
 }
@@ -696,7 +710,8 @@ foreach ($shortageRows as $row) {
 // on the live panel for non-command-staff) — same restraint
 // loadMissionActivityEventsForReport() already applies for the PDF/Excel export.
 $incidentRows = dbFetchAll(
-    "SELECT i.incident_type, i.severity, i.created_at, i.acknowledged_at, i.resolved_at, u.name AS actor_name
+    "SELECT i.incident_type, i.severity, i.created_at, i.acknowledged_at, i.resolved_at, i.reporter_id,
+            i.outcome, i.outcome_location, i.outcome_note, u.name AS actor_name
      FROM mission_incidents i
      JOIN users u ON u.id = i.reporter_id
      WHERE i.mission_id = ?
@@ -720,9 +735,21 @@ foreach ($incidentRows as $row) {
         ];
     }
     if ($row['resolved_at']) {
+        // How it ended, and command's comment, are about a patient: this
+        // timeline is every participant's, so only command and the person who
+        // reported it read them here.
+        $detail = '';
+        if ($canManageWarRoom || (int) $row['reporter_id'] === (int) $userId) {
+            if ($row['outcome']) {
+                $detail .= t('history.label_suffix_dash', ['label' => h(incidentOutcomeText($row, $viewerLang))], $viewerLang);
+            }
+            if (trim((string) $row['outcome_note']) !== '') {
+                $detail .= t('history.label_suffix_dash', ['label' => h($row['outcome_note'])], $viewerLang);
+            }
+        }
         $events[] = [
             'icon' => '✅',
-            'text' => t('history.incident_resolved', ['type' => h($label)], $viewerLang),
+            'text' => t('history.incident_resolved', ['type' => h($label)], $viewerLang) . $detail,
             'time' => date('d/m H:i', strtotime($row['resolved_at'])),
             'ts'   => strtotime($row['resolved_at']),
         ];

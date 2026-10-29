@@ -80,19 +80,24 @@ if ($action === 'resolve') {
             exit;
         }
         $outcomeLocation = $outcome === 'transported' ? mb_substr(trim((string) post('outcome_location')), 0, 255) : null;
+        // Optional, like the shortage report's: what command wants the
+        // reporter to know about how it ended.
+        $outcomeNote = mb_substr(trim((string) post('note')), 0, 2000);
         dbExecute(
             "UPDATE mission_incidents
              SET acknowledged_at = COALESCE(acknowledged_at, NOW()), acknowledged_by = COALESCE(acknowledged_by, ?),
-                 resolved_at = NOW(), resolved_by = ?, outcome = ?, outcome_location = ?
+                 resolved_at = NOW(), resolved_by = ?, outcome = ?, outcome_location = ?, outcome_note = ?
              WHERE id = ?",
-            [$userId, $userId, $outcome, $outcomeLocation ?: null, $incidentId]
+            [$userId, $userId, $outcome, $outcomeLocation ?: null, $outcomeNote ?: null, $incidentId]
         );
         logAudit('resolve_mission_incident', 'mission_incidents', $incidentId, null, ['mission_id' => $incident['mission_id'], 'outcome' => $outcome]);
-        // The teams still on their way to it hear the outcome; the reporter's
-        // team hears that it closed — once each, the first message winning
-        // for anyone who is both.
-        $told = notifyIncidentClosedToResponders(['outcome' => $outcome, 'outcome_location' => $outcomeLocation] + $incident, (int) $userId);
-        notifyIncidentAffectedUsers($incident, 'incident.resolved_notify_title', 'incident.resolved_notify_message', 'mission_incident_resolved', $userId, $told);
+        // The teams still on their way to it hear the outcome; the reporter
+        // and their team hear that it closed, with the outcome and command's
+        // comment — once each, the first message winning for anyone who is
+        // both.
+        $closed = ['outcome' => $outcome, 'outcome_location' => $outcomeLocation, 'outcome_note' => $outcomeNote] + $incident;
+        $told = notifyIncidentClosedToResponders($closed, (int) $userId);
+        notifyIncidentAffectedUsers($closed, 'incident.resolved_notify_title', 'incident.resolved_notify_message', 'mission_incident_resolved', $userId, $told);
     }
     echo json_encode(['ok' => true]);
     exit;

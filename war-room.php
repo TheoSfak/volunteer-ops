@@ -1775,6 +1775,10 @@ if (get('ajax') === '1') {
         'liveFragments' => $canManageWarRoom
             ? buildCommandLiveFragments($missionId, !empty($mission['visitor_join_token']), $incidents, $shortageReports, $sosAlerts, $briefingCardOn ? $teams : null)
             : null,
+        // «Οι αναφορές μου» under the two report forms: the person's own
+        // shortage and incident reports with command's answer and comment.
+        // Same live-fragment markup, so the answer appears without a reload.
+        'myReports' => $isApprovedParticipant ? buildMyReportsFragments($missionId, (int) $user['id']) : null,
         // See $gpsParticipationSig.
         'gpsSig' => $gpsParticipationSig,
         // See $rosterSig. Null for everybody but command staff.
@@ -4620,6 +4624,7 @@ include __DIR__ . '/includes/header.php';
                     <textarea name="description" class="form-control mb-2" rows="3" maxlength="2000" placeholder="<?= t('shortage.desc_placeholder') ?>" required></textarea>
                     <button type="submit" class="btn btn-warning w-100 fw-semibold"><i class="bi bi-send-fill me-1"></i><?= t('shortage.submit_btn') ?></button>
                 </form>
+                <?= renderMyReportsFragment($missionId, (int) $user['id'], 'shortage') ?>
             </div>
         </div>
     </div>
@@ -4667,6 +4672,7 @@ include __DIR__ . '/includes/header.php';
                     <div class="small text-muted mb-2"><?= t('incident.staff_only_hint') ?></div>
                     <button type="submit" class="btn btn-danger w-100 fw-semibold"><i class="bi bi-send-fill me-1"></i><?= t('incident.submit_btn') ?></button>
                 </form>
+                <?= renderMyReportsFragment($missionId, (int) $user['id'], 'incident') ?>
             </div>
         </div>
     </div>
@@ -17339,6 +17345,7 @@ function renderMissionIncidents(items) {
                 ? `<button type="button" class="btn btn-sm btn-danger w-100 mt-1 incident-dispatch-btn" data-incident-id="${r.id}"><i class="bi bi-send-fill me-1"></i>${escapeHtml(t((r.responders || []).length ? 'incident.dispatch_another_btn' : 'incident.dispatch_btn'))}</button>`
                 : ''}
             ${navigationBtnHtml(r.lat, r.lng, {block: true})}
+            ${canManageIncidents && r.acknowledged_at ? `<textarea class="form-control form-control-sm mt-1 incident-note-input" data-incident-id="${r.id}" rows="1" maxlength="2000" placeholder="${t('incident.note_placeholder')}"></textarea>` : ''}
             ${canManageIncidents ? `<div class="mt-1 d-flex gap-1">${r.acknowledged_at
                 ? `<select class="form-select form-select-sm incident-outcome-select" data-incident-id="${r.id}"><option value="">${t('incident.outcome_label')}…</option>${outcomeOptions}</select>
                    <input type="text" class="form-control form-control-sm incident-outcome-location-input d-none" data-incident-id="${r.id}" maxlength="255" placeholder="${t('incident.outcome_location_placeholder')}">
@@ -17373,8 +17380,9 @@ function renderMissionIncidents(items) {
         const outcome = sel ? sel.value : '';
         if (!outcome) { alert(t('incident.pick_outcome_first')); return; }
         const locInput = list.querySelector(`.incident-outcome-location-input[data-incident-id="${btn.dataset.incidentId}"]`);
+        const noteInput = list.querySelector(`.incident-note-input[data-incident-id="${btn.dataset.incidentId}"]`);
         btn.disabled = true;
-        const data = new URLSearchParams({csrf_token: csrfToken, action: 'resolve', incident_id: btn.dataset.incidentId, outcome, outcome_location: locInput ? locInput.value : ''});
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'resolve', incident_id: btn.dataset.incidentId, outcome, outcome_location: locInput ? locInput.value : '', note: noteInput ? noteInput.value : ''});
         fetch('mission-incident.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
             if (result.ok) {
                 missionIncidents = missionIncidents.filter(x => String(x.id) !== btn.dataset.incidentId);
@@ -25745,6 +25753,7 @@ function pollWarRoomData() {
         if (data.restrictedAreaProximity) renderRestrictedAreaProximity(restrictedAreaProximity = data.restrictedAreaProximity);
         if (data.teamDistances) renderTeamDistances(teamDistances = data.teamDistances);
         if (data.liveFragments) applyLiveFragments(data.liveFragments);
+        if (data.myReports) applyLiveFragments(data.myReports);
         // After `teams` above on purpose: a room that appeared with this roster is baselined by this same answer.
         // Guarded like the console hook below - a badge must never stop the payload hash from being stored.
         if (data.chatUnread !== undefined && data.chatUnread !== null && window.wrChat) {
