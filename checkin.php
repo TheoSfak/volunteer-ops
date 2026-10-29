@@ -177,6 +177,10 @@ include __DIR__ . '/includes/header.php';
                 <?php endif; ?>
 
                 <?php if ($roomOpen): ?>
+                    <?php /* Read before the button is pressed: a phone whose screen turns off stops showing the room and, in a browser, stops sending its position. */ ?>
+                    <div class="border border-danger border-2 rounded-3 p-3 mt-3 text-center text-danger fw-bold" role="alert" style="font-size:1.05rem; line-height:1.4;">
+                        <i class="bi bi-exclamation-triangle-fill me-1"></i><?= h(t('checkin.screen_reminder')) ?>
+                    </div>
                     <a href="war-room.php?id=<?= (int) $shift['mission_id'] ?>" class="btn btn-primary btn-lg w-100 mt-3">
                         <i class="bi bi-broadcast me-2"></i><?= h(t('checkin.enter_room')) ?>
                     </a>
