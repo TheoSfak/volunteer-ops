@@ -4397,16 +4397,15 @@ include __DIR__ . '/includes/header.php';
                         <i class="bi bi-bullseye"></i>
                     </button>
                     <?php endif; ?>
-                    <?php if ($canManageWarRoom): ?>
-                    <!-- The layers menu (map view, which shapes to show, pin
-                         labels, OpenStreetMap data) is a command tool: only
-                         admin accounts get the button. Everything that reads
-                         it looks the button up with a guard, so a page served
-                         without it simply never builds the menu. -->
+                    <!-- The map-view menu (street, topographic, satellite,
+                         satellite with names) is for everybody, guests and
+                         mission visitors included (v3.408.1). Only command
+                         gets the rest of the menu - which shapes to show, pin
+                         labels, OpenStreetMap data - because those builders
+                         stop at MAP_LAYER_TOOLS_ENABLED. -->
                     <button type="button" id="mapSatelliteToggle" class="btn btn-sm btn-outline-secondary" title="<?= t('map.base_layer_menu') ?>">
                         <i class="bi bi-layers"></i>
                     </button>
-                    <?php endif; ?>
                     <button type="button" id="mapFullscreenToggle" class="btn btn-sm btn-outline-secondary" title="<?= t('map.btn_fullscreen') ?>">
                         <i class="bi bi-arrows-fullscreen"></i>
                     </button>
@@ -7762,7 +7761,15 @@ function mapPickGroups() {
 // bindPopup()'s own click handler is taken off: it opened the popup and
 // stopped the map click, and mapPickClick does both itself, deciding first
 // whether a list is needed.
+//
+// Command only (v3.408.1): choosing among the layers under a point is a command
+// tool, so for everybody else - guests and mission visitors included - a shape
+// keeps the plain popup bindPopup() gave it and no list ever opens. The same
+// flag keeps the rest of the layers menu (which shapes to show, pin labels,
+// OpenStreetMap data) to command; everybody still gets the map-view choice.
+const MAP_LAYER_TOOLS_ENABLED = <?= json_encode($canManageWarRoom) ?>;
 function markMapPickable(layer, info) {
+    if (!MAP_LAYER_TOOLS_ENABLED) return layer;
     layer._wrPick = info;
     layer.off('click', layer._openPopup, layer);
     layer.on('click', mapPickClick);
@@ -7947,9 +7954,6 @@ function refreshMapOverlayUi() {
     const btn = document.getElementById('mapSatelliteToggle');
     const menu = btn?.parentNode.querySelector('.dropdown-menu');
     if (!menu) return;
-    // Ticking a box must not close the menu. Picking a map view still does,
-    // as it always has (the listener at the bottom).
-    btn.setAttribute('data-bs-auto-close', 'outside');
     // The map's card is overflow:hidden, so everything the menu had below the
     // card's bottom edge was cut off and could not be reached at all. While the
     // menu is open the card lets it hang out (CSS: .card.wr-menu-open).
@@ -7962,6 +7966,20 @@ function refreshMapOverlayUi() {
     const menuCard = btn.closest('.card');
     menuCard?.addEventListener('show.bs.dropdown', () => menuCard.classList.add('wr-menu-open'));
     menuCard?.addEventListener('hidden.bs.dropdown', () => menuCard.classList.remove('wr-menu-open'));
+    // The map's card can be narrower than the longest view name, and the menu
+    // opens towards the card's left edge: on a laptop the part that stuck out of
+    // the card slid under the side menu. So the menu never grows past the card,
+    // and a long name wraps instead.
+    menu.querySelectorAll('.dropdown-item').forEach(item => { item.style.whiteSpace = 'normal'; });
+    btn.addEventListener('show.bs.dropdown', () => {
+        menu.style.maxWidth = Math.max(220, (menuCard || btn.parentNode).clientWidth - 16) + 'px';
+    });
+    // Everybody has the map views and the room above; only command gets the
+    // shape switches below.
+    if (!MAP_LAYER_TOOLS_ENABLED) return;
+    // Ticking a box must not close the menu. Picking a map view still does,
+    // as it always has (the listener at the bottom).
+    btn.setAttribute('data-bs-auto-close', 'outside');
     const divider = document.createElement('li');
     divider.innerHTML = '<hr class="dropdown-divider">';
     const header = document.createElement('li');
@@ -7983,7 +8001,9 @@ function refreshMapOverlayUi() {
     });
 })();
 try {
-    JSON.parse(sessionStorage.getItem(MAP_OVERLAYS_KEY) || '[]').forEach(key => setMapOverlayShown(key, false));
+    // Only command can hide a kind of shape, so only command gets a hidden
+    // state back; a volunteer's tab never carries one it could not undo.
+    if (MAP_LAYER_TOOLS_ENABLED) JSON.parse(sessionStorage.getItem(MAP_OVERLAYS_KEY) || '[]').forEach(key => setMapOverlayShown(key, false));
 } catch (e) {}
 // The search-rings button: flips the same «Ζώνες αναζήτησης» switch the layers
 // menu has. Hidden stays hidden across the 5s poll (the rings are redrawn into
@@ -8000,6 +8020,7 @@ document.getElementById('mapRingsToggle')?.addEventListener('click', () => {
 // not a hazard nobody sees. The label itself is built in buildPinMarker().
 const PIN_TEAM_LABELS_KEY = 'wr_pin_team_labels';
 (function addPinTeamLabelToggle() {
+    if (!MAP_LAYER_TOOLS_ENABLED) return;
     const mapEl = document.getElementById('warRoomMap');
     const btn = document.getElementById('mapSatelliteToggle');
     const menu = btn?.parentNode.querySelector('.dropdown-menu');
@@ -8454,7 +8475,7 @@ function osmScheduleLoad() {
 }
 
 (function addOsmLayer() {
-    if (!OSM_LAYER_ENABLED || !osmCluster) return;
+    if (!MAP_LAYER_TOOLS_ENABLED || !OSM_LAYER_ENABLED || !osmCluster) return;
     const btn = document.getElementById('mapSatelliteToggle');
     const menu = btn?.parentNode.querySelector('.dropdown-menu');
     if (!menu) return;
