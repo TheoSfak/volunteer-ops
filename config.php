@@ -11,7 +11,7 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.412.0');
+define('APP_VERSION', '3.413.0');
 define('DB_SCHEMA_VERSION', 194);
 
 // Android APK versionName, matching mobile-app/android/app/build.gradle.
@@ -174,6 +174,17 @@ define('STATUS_CANCELED', 'CANCELED');
 // shortage-seen / shortage-resolved gap counts as "forgotten"/off-shift
 // rather than merely slow (see computeMissionScore() in functions.php).
 define('MISSION_SCORE_FORGOTTEN_MINUTES', 240);
+
+// War Room team leaderboard — how much a SMALL record is trusted (see
+// missionScoreEvidenceAdjust() in functions-warroom.php). Before its own
+// record says otherwise a team is assumed to sit at BASELINE (65 = the bottom
+// of «Καλή Επίδοση»), with PRIOR_N "virtual observations" behind that
+// assumption; every real order / report / waypoint / sector replaces some of
+// it. MIN_COMPARE_N is the fewest observations a team needs in ONE dimension
+// before the narrative may call it the best or the worst at that dimension.
+define('MISSION_SCORE_EVIDENCE_BASELINE', 65.0);
+define('MISSION_SCORE_EVIDENCE_PRIOR_N', 3);
+define('MISSION_SCORE_MIN_COMPARE_N', 3);
 
 // War Room battery-alert button (war-room.php's pin popup): the fixed bar
 // for actually sending a "charge your phone" order, deliberately stricter

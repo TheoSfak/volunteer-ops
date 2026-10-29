@@ -79,8 +79,14 @@ $shortageSummary = $report['shortageSummary'];
 $shortageDetail = $report['shortageDetail'];
 
 $totalOrders = count($detail);
-$fulfillCount = count(array_filter($detail, fn($d) => $d['fulfill_minutes'] !== null));
-$fulfillRate = $totalOrders ? round($fulfillCount / $totalOrders * 100) : 0;
+// The completion tile counts only orders that CAN be completed: a broadcast
+// message or a voice announcement has no «done» (MISSION_ORDER_TYPES_ACK_ONLY),
+// so counting it made the tile read lower than the crew's real follow-through
+// and disagree with the «Ολοκλήρωση Εντολών» score right beside it.
+$completableDetail = array_filter($detail, fn($d) => missionOrderCanBeCompleted($d['order_type'] ?? null));
+$completableOrders = count($completableDetail);
+$fulfillCount = count(array_filter($completableDetail, fn($d) => $d['fulfill_minutes'] !== null));
+$fulfillRate = $completableOrders ? round($fulfillCount / $completableOrders * 100) : 0;
 
 $totalShortage = count($shortageDetail);
 $resolvedShortage = count(array_filter($shortageDetail, fn($d) => $d['resolved_at'] !== null));
@@ -175,6 +181,7 @@ $scoreTierHex = ['good' => '#0ca30c', 'warning' => '#a56600', 'critical' => '#d0
 // measurement trail, so switching the feature off loses nothing.
 require_once __DIR__ . '/includes/ai-observer-render.php';
 require_once __DIR__ . '/includes/ai-translate.php';
+require_once __DIR__ . '/includes/mission-score-explain.php';
 $aiConfigured  = aiIsConfigured();
 $aiCanGenerate = $aiConfigured && ($canManageMissions || $isResponsible);
 $aiAssessment  = loadMissionAiAssessment($missionId);
@@ -366,6 +373,9 @@ include __DIR__ . '/includes/header.php';
     .observer-note h6 { font-weight: 700; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; color: #4a3aa7; }
     .observer-note p { margin: 0; line-height: 1.65; color: #33322d; }
 
+    /* Team-score explanation, shared with mission-report-print.php. */
+<?= missionScoreExplainStyles(false) ?>
+
     .hero-metrics-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
     .hero-metric-tile { background: #fff; border-radius: 14px; padding: 22px 18px; text-align: center; box-shadow: 0 2px 10px rgba(0,0,0,.06); border-top: 4px solid var(--hmt-color, #2a78d6); }
     .hero-metric-tile .hmt-icon { font-size: 1.4rem; color: var(--hmt-color, #2a78d6); margin-bottom: 6px; }
@@ -460,6 +470,7 @@ include __DIR__ . '/includes/header.php';
 
     <?php if (!empty($score['teams'])): ?>
     <h3 class="mt-3 mb-2"><i class="bi bi-trophy-fill text-warning"></i> Κατάταξη Ομάδων</h3>
+    <?php $rankedCount = count(array_filter($score['teams'], fn($t) => !empty($t['ranked']))); ?>
     <?php foreach ($score['teams'] as $t): ?>
         <div class="score-leaderboard-row" style="border-left-color:<?= h($t['color']) ?>;">
             <div class="score-leaderboard-rank"><?= $t['rank'] === null ? '—' : ($t['rank'] === 1 ? '🥇' : ($t['rank'] === 2 ? '🥈' : ($t['rank'] === 3 ? '🥉' : $t['rank']))) ?></div>
@@ -484,8 +495,11 @@ include __DIR__ . '/includes/header.php';
                 <?php endforeach; ?>
             </div>
             <?php endif; ?>
+            <?= renderMissionTeamExplain($t, $rankedCount, false) ?>
         </div>
     <?php endforeach; ?>
+    <?= renderMissionRankingShift($score['teams']) ?>
+    <?= renderMissionScoreGuide($score['teams'], false) ?>
     <?php endif; ?>
     <?php endif; ?>
 
@@ -722,7 +736,7 @@ include __DIR__ . '/includes/header.php';
     <div class="col">
         <div class="stat-tile headline">
             <div class="stat-icon"><i class="bi bi-check2-circle"></i></div>
-            <?php if ($totalOrders): ?>
+            <?php if ($completableOrders): ?>
             <div class="stat-value" data-count="<?= $fulfillRate ?>">0</div>
             <div class="stat-label">Ποσοστό Ολοκλήρωσης (%)</div>
             <?php else: ?>

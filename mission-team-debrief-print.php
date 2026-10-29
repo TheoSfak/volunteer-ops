@@ -26,6 +26,7 @@
 
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/ai-observer-render.php';
+require_once __DIR__ . '/includes/mission-score-explain.php';
 
 requireLogin();
 
@@ -109,6 +110,28 @@ $L = [
     'score'        => ['el' => 'Βαθμολογία',                    'en' => 'Score'],
     'assessment'   => ['el' => 'Αξιολόγηση',                    'en' => 'Assessment'],
     'small_sample' => ['el' => 'Περιορισμένο δείγμα μετρήσεων — η βαθμολογία είναι ενδεικτική.', 'en' => 'Limited measurement sample — the score is indicative only.'],
+    'how_built'    => ['el' => 'Πώς προκύπτει η βαθμολογία', 'en' => 'How this score is built'],
+    'how_intro'    => [
+        'el' => 'Κάθε τομέας βαθμολογείται από όσα έκανε πραγματικά η ομάδα και μετά σταθμίζεται με το πόσες παρατηρήσεις (εντολές, αναφορές, σημεία πορείας, τομείς) τον στηρίζουν. Μια τέλεια επίδοση σε μία μόνο εντολή αποδεικνύει λιγότερα από μια σταθερά καλή επίδοση σε εννέα· γι\' αυτό ένα σύντομο ιστορικό πλησιάζει το ουδέτερο επίπεδο ' . (int) MISSION_SCORE_EVIDENCE_BASELINE . ', ενώ ένα μακρύ μένει σχεδόν ανέγγιχτο. Οι τομείς χωρίς δεδομένα δεν μετρούν — ούτε υπέρ ούτε εναντίον.',
+        'en' => 'Each area is scored from what the team actually did, then weighted by how many observations (orders, reports, route stops, sectors) stand behind it. A perfect result on a single order proves less than a steady result on nine, so a short record is pulled toward a neutral ' . (int) MISSION_SCORE_EVIDENCE_BASELINE . ' while a long record is left almost untouched. Areas with no data are simply not counted — they never help or hurt.',
+    ],
+    'area'         => ['el' => 'Τομέας', 'en' => 'Area'],
+    'raw'          => ['el' => 'Ακατέργαστος', 'en' => 'Raw'],
+    'obs'          => ['el' => 'Παρατηρήσεις', 'en' => 'Observations'],
+    'weighted'     => ['el' => 'Μετά τη στάθμιση', 'en' => 'Weighted'],
+    'weight'       => ['el' => 'Βάρος', 'en' => 'Weight'],
+    'total'        => ['el' => 'Σύνολο', 'en' => 'Total'],
+    'evidence'     => ['el' => 'Βεβαιότητα', 'en' => 'Confidence'],
+    'ev_low'       => ['el' => 'Χαμηλή', 'en' => 'Low'],
+    'ev_medium'    => ['el' => 'Μέτρια', 'en' => 'Medium'],
+    'ev_high'      => ['el' => 'Υψηλή', 'en' => 'High'],
+    'adj_down'     => ['el' => 'Ακατέργαστος βαθμός {raw}, μετά τη στάθμιση {score}: η επίδοση είναι ισχυρή αλλά το ιστορικό σύντομο, οπότε βαραίνει λιγότερο μέχρι να μεγαλώσει.', 'en' => 'Raw score {raw}, weighted {score}: the record is strong but short, so it counts for less until it grows.'],
+    'adj_up'       => ['el' => 'Ακατέργαστος βαθμός {raw}, μετά τη στάθμιση {score}: το ιστορικό είναι σύντομο, οπότε λίγες αποτυχίες δεν θεωρούνται το τελικό συμπέρασμα για την ομάδα.', 'en' => 'Raw score {raw}, weighted {score}: the record is short, so a few misses are not treated as the final word on the team.'],
+    'adj_same'     => ['el' => 'Το ιστορικό είναι αρκετά μακρύ ώστε η στάθμιση να αλλάξει τον βαθμό κατά λιγότερο από 0,1.', 'en' => 'The record is long enough that weighting changed the score by less than 0.1.'],
+    'p_response'   => ['el' => 'Ταχύτητα Απόκρισης', 'en' => 'Response speed'],
+    'p_completion' => ['el' => 'Ολοκλήρωση Εντολών', 'en' => 'Order completion'],
+    'p_shortage'   => ['el' => 'Διαχείριση Ελλείψεων', 'en' => 'Shortage handling'],
+    'p_discipline' => ['el' => 'Πειθαρχία Πεδίου', 'en' => 'Field discipline'],
     'not_scored'   => ['el' => 'Δεν υπολογίστηκε', 'en' => 'Not measured'],
     'print'        => ['el' => 'Εκτύπωση / PDF',                'en' => 'Print / PDF'],
     'close'        => ['el' => 'Κλείσιμο',                      'en' => 'Close'],
@@ -168,6 +191,13 @@ $section = $debrief['payload']['debrief'];
         .td-score .n { font-size: 26pt; font-weight: 800; line-height: 1; }
         .td-score .t { font-size: 10pt; font-weight: 700; }
         .td-note { font-size: 8pt; color: #6b665c; margin-top: 4px; }
+
+        .td-p { font-size: 8.6pt; line-height: 1.6; color: #33322d; margin-bottom: 10px; }
+        .td-table { width: 100%; border-collapse: collapse; font-size: 8.4pt; margin-bottom: 8px; }
+        .td-table th { text-align: left; font-weight: 700; color: #6b665c; border-bottom: 1px solid #d9d5cc; padding: 4px 6px; }
+        .td-table td { border-bottom: 1px solid #eeece6; padding: 4px 6px; }
+        .td-table th.n, .td-table td.n { text-align: right; white-space: nowrap; }
+        .td-table tfoot td { border-top: 2px solid #d9d5cc; border-bottom: 0; background: #f6f5f1; font-weight: 700; }
 
         .td-foot { font-size: 7.5pt; color: #7a746a; text-align: center; margin-top: 10px; line-height: 1.6; }
 
@@ -254,6 +284,53 @@ $section = $debrief['payload']['debrief'];
         </div>
     </div>
 </div>
+
+<?php if ($teamScore !== null):
+    // Same rows the leaderboard page prints, minus the Greek-only "what was
+    // measured" prose. Only THIS team's numbers appear: this sheet never
+    // carries a comparison with any other crew.
+    $sxRows = array_values(array_filter(missionTeamScoreRows($teamScore), fn($r) => $r['available']));
+    $adjDiff = (float) ($teamScore['adjustment'] ?? 0);
+    $evKey = ['low' => 'ev_low', 'medium' => 'ev_medium', 'high' => 'ev_high'][$teamScore['evidence_level'] ?? 'medium'] ?? 'ev_medium';
+    $adjKey = abs($adjDiff) < 0.05 ? 'adj_same' : ($adjDiff < 0 ? 'adj_down' : 'adj_up');
+    $adjText = str_replace(
+        ['{raw}', '{score}'],
+        [number_format((float) ($teamScore['raw_score'] ?? $teamScore['score']), 1), number_format((float) $teamScore['score'], 1)],
+        $x($adjKey)
+    );
+?>
+<div class="td-card">
+    <h2><?= h($x('how_built')) ?></h2>
+    <p class="td-p"><?= h($x('how_intro')) ?></p>
+    <?php if ($sxRows): ?>
+    <table class="td-table">
+        <thead><tr>
+            <th><?= h($x('area')) ?></th><th class="n"><?= h($x('raw')) ?></th><th class="n"><?= h($x('obs')) ?></th>
+            <th class="n"><?= h($x('weighted')) ?></th><th class="n"><?= h($x('weight')) ?></th>
+        </tr></thead>
+        <tbody>
+        <?php foreach ($sxRows as $r): ?>
+            <tr>
+                <td><?= h($x('p_' . $r['key'])) ?></td>
+                <td class="n"><?= number_format($r['raw'], 1) ?></td>
+                <td class="n"><?= (int) $r['n'] ?></td>
+                <td class="n"><?= number_format($r['adjusted'], 1) ?></td>
+                <td class="n"><?= (int) round($r['share'] * 100) ?>%</td>
+            </tr>
+        <?php endforeach; ?>
+        </tbody>
+        <tfoot><tr>
+            <td><?= h($x('total')) ?></td>
+            <td class="n"><?= number_format((float) ($teamScore['raw_score'] ?? $teamScore['score']), 1) ?></td>
+            <td class="n"><?= (int) ($teamScore['evidence_n'] ?? 0) ?></td>
+            <td class="n"><?= number_format((float) $teamScore['score'], 1) ?></td>
+            <td class="n">100%</td>
+        </tr></tfoot>
+    </table>
+    <?php endif; ?>
+    <div class="td-note"><strong><?= h($x('evidence')) ?>: <?= h($x($evKey)) ?></strong> — <?= h($adjText) ?></div>
+</div>
+<?php endif; ?>
 
 <div class="td-card">
     <?= renderAiObserverSection($section, $x('assessment'), $lang) ?>

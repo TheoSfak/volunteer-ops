@@ -120,6 +120,7 @@ $commandNarrative = generateCommandNarrative($score['command']);
 // worthless as a record.
 require_once __DIR__ . '/includes/ai-observer-render.php';
 require_once __DIR__ . '/includes/ai-translate.php';
+require_once __DIR__ . '/includes/mission-score-explain.php';
 $aiAssessment  = loadMissionAiAssessment($missionId);
 $aiTeamsHtml   = $aiAssessment ? renderAiObserverSection($aiAssessment['payload']['teams'], 'Αξιολόγηση Πεδίου & Αποστολής') : '';
 $aiCommandHtml = $aiAssessment ? renderAiObserverSection($aiAssessment['payload']['command'], 'Αξιολόγηση Συντονιστικού') : '';
@@ -166,12 +167,16 @@ $reviewData = loadMissionReviewData($missionId, false, 'el');
 $triageReport = loadTriageReportForMission($missionId);
 
 $totalOrders = count($report['detail']);
-$fulfillCount = count(array_filter($report['detail'], fn($d) => $d['fulfill_minutes'] !== null));
+// Completion is counted over orders that CAN be completed only — see
+// MISSION_ORDER_TYPES_ACK_ONLY (same rule as the «Ολοκλήρωση Εντολών» score).
+$completableDetail = array_filter($report['detail'], fn($d) => missionOrderCanBeCompleted($d['order_type'] ?? null));
+$completableOrders = count($completableDetail);
+$fulfillCount = count(array_filter($completableDetail, fn($d) => $d['fulfill_minutes'] !== null));
 // Headline KPI tile reuses the score's own forgotten-aware mission-wide
 // average rather than a second, separate plain-mean computation — avoids
 // this page ever showing two disagreeing "average response time" numbers.
 $avgAckMinutes = $score['metrics']['avg_ack'];
-$fulfillRate = $totalOrders ? round($fulfillCount / $totalOrders * 100) : 0;
+$fulfillRate = $completableOrders ? round($fulfillCount / $completableOrders * 100) : 0;
 
 $totalShortage = count($report['shortageDetail']);
 $resolvedShortage = count(array_filter($report['shortageDetail'], fn($d) => $d['resolved_at'] !== null));
@@ -446,6 +451,10 @@ if ($trActive) {
         .observer-note h6 { font-weight: 700; margin-bottom: 6px; font-size: 9pt; display: flex; align-items: center; gap: 6px; color: #4a3aa7; }
         .observer-note p { margin: 0; line-height: 1.6; font-size: 9pt; }
 
+        /* Team-score explanation, shared with mission-stats.php. */
+<?= missionScoreExplainStyles(true) ?>
+        .sx-guide-card { page-break-inside: auto; }
+
         .hero-metrics-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
         .hero-metric-tile { background: #fff; border: 1px solid #eee; border-radius: 12px; padding: 14px 10px; text-align: center; border-top: 4px solid var(--hmt-color, #2a78d6); page-break-inside: avoid; }
         .hero-metric-tile .hmt-value { font-size: 1.7rem; font-weight: 800; color: #0b0b0b; line-height: 1; }
@@ -625,14 +634,22 @@ if ($trActive) {
 <?php if (!empty($score['teams'])): ?>
 <div class="pr-card">
     <h2>🏆 Κατάταξη Ομάδων</h2>
+    <?php $rankedCount = count(array_filter($score['teams'], fn($t) => !empty($t['ranked']))); ?>
     <?php foreach ($score['teams'] as $t): ?>
         <div class="lb-row" style="border-left-color:<?= h($t['color']) ?>;">
             <div class="lb-rank"><?= $t['rank'] === null ? '—' : ($t['rank'] === 1 ? '🥇' : ($t['rank'] === 2 ? '🥈' : ($t['rank'] === 3 ? '🥉' : $t['rank']))) ?></div>
             <span class="lb-team-badge" style="background:<?= h($t['color']) ?>;"><?= h(teamLabel($t['codename'], $t['team_number'])) ?></span>
             <div class="lb-tier"><?= h($t['tier'][1]) ?></div>
             <div class="lb-score" style="color:<?= $scoreTierHex[$t['tier'][0]] ?>;"><?= number_format($t['score'], 1) ?></div>
+            <?= renderMissionTeamExplain($t, $rankedCount, true) ?>
         </div>
     <?php endforeach; ?>
+    <?= renderMissionRankingShift($score['teams']) ?>
+</div>
+
+<div class="pr-card sx-guide-card">
+    <h2>📖 Πώς διαβάζεται η κατάταξη</h2>
+    <?= renderMissionScoreGuide($score['teams'], true) ?>
 </div>
 <?php endif; ?>
 
@@ -731,7 +748,7 @@ if ($trActive) {
     <div class="pr-tile"><div class="v"><?= $approvedCount ?></div><div class="l">Εγκεκριμένοι Εθελοντές</div></div>
     <div class="pr-tile"><div class="v"><?= $teamCount ?></div><div class="l">Ομάδες</div></div>
     <div class="pr-tile"><div class="v"><?= $avgAckMinutes !== null ? number_format($avgAckMinutes, 1) : '—' ?></div><div class="l">Μ.Ο. Απόκρισης (λεπ.)</div></div>
-    <div class="pr-tile"><div class="v"><?= $totalOrders ? $fulfillRate . '%' : '—' ?></div><div class="l">Ολοκλήρωση Εντολών</div></div>
+    <div class="pr-tile"><div class="v"><?= $completableOrders ? $fulfillRate . '%' : '—' ?></div><div class="l">Ολοκλήρωση Εντολών</div></div>
     <div class="pr-tile"><div class="v"><?= $totalShortage ?></div><div class="l">Αναφορές Έλλειψης</div></div>
     <div class="pr-tile"><div class="v"><?= count($photos) + count($videos) ?></div><div class="l">Φωτό / Βίντεο</div></div>
     <div class="pr-tile"><div class="v"><?= $pingCount ?></div><div class="l">GPS Στίγματα</div></div>

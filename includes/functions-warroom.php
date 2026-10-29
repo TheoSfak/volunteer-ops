@@ -9317,9 +9317,12 @@ function computeMissionResponseReport(int $missionId, ?string $lang = null): arr
     foreach ($detail as $row) {
         $label = $row['team_label'];
         if (!isset($byTeam[$label])) {
-            $byTeam[$label] = ['count' => 0, 'ack_count' => 0, 'fulfill_count' => 0, 'ack_sum' => 0.0, 'fulfill_sum' => 0.0];
+            $byTeam[$label] = ['count' => 0, 'completable' => 0, 'ack_count' => 0, 'fulfill_count' => 0, 'ack_sum' => 0.0, 'fulfill_sum' => 0.0];
         }
         $byTeam[$label]['count']++;
+        // The completion rate is over orders that CAN be completed — see
+        // MISSION_ORDER_TYPES_ACK_ONLY (a broadcast message has no «done»).
+        if (missionOrderCanBeCompleted($row['order_type'] ?? null)) $byTeam[$label]['completable']++;
         if ($row['ack_minutes'] !== null) {
             $byTeam[$label]['ack_count']++;
             $byTeam[$label]['ack_sum'] += $row['ack_minutes'];
@@ -9335,7 +9338,7 @@ function computeMissionResponseReport(int $missionId, ?string $lang = null): arr
             'team_label'          => $label,
             'order_count'         => $s['count'],
             'ack_rate'            => $s['count'] ? round($s['ack_count'] / $s['count'] * 100) : 0,
-            'fulfill_rate'        => $s['count'] ? round($s['fulfill_count'] / $s['count'] * 100) : 0,
+            'fulfill_rate'        => $s['completable'] ? round($s['fulfill_count'] / $s['completable'] * 100) : 0,
             'avg_ack_minutes'     => $s['ack_count'] ? round($s['ack_sum'] / $s['ack_count'], 1) : null,
             'avg_fulfill_minutes' => $s['fulfill_count'] ? round($s['fulfill_sum'] / $s['fulfill_count'], 1) : null,
         ];
@@ -9428,6 +9431,87 @@ function missionScoreTierMeta(float $score): array {
     if ($score >= 85) return ['good', 'Άριστη Επίδοση'];
     if ($score >= 65) return ['warning', 'Καλή Επίδοση'];
     return ['critical', 'Χρειάζεται Βελτίωση'];
+}
+
+/**
+ * War Room: order types that NOTHING in the app ever completes — acknowledging
+ * them IS the whole of the task (a broadcast message, the end-of-mission
+ * «επιστροφή στη βάση», a voice announcement, a charge-your-phone nudge). They
+ * never stamp mission_order_recipients.fulfilled_at, by design: see
+ * ACK_TRACKER_FULFIL_TYPES below and the "no fulfilment event of their own"
+ * note on loadMyTaskOrdersForUser().
+ *
+ * The «Ολοκλήρωση Εντολών» score used to divide fulfilled by ALL orders, which
+ * made every one of these an order that could not be completed no matter what
+ * the crew did: a team sent four tasks and four messages topped out at 50%,
+ * while a team sent the same four tasks and no messages scored 100%. Their
+ * promptness is still graded — by the response-speed pillar, which counts the
+ * acknowledgment — so leaving them out of completion does not let anybody off;
+ * it stops one failure being charged twice and, here, charged for nothing.
+ */
+const MISSION_ORDER_TYPES_ACK_ONLY = ['message', 'return_to_base', 'speak', 'charge_phone'];
+
+/** True when an order of this type has a completion event the crew can fail to deliver. */
+function missionOrderCanBeCompleted(?string $orderType): bool {
+    return !in_array((string) $orderType, MISSION_ORDER_TYPES_ACK_ONLY, true);
+}
+
+/** The ack-only types as a ready-made SQL list: 'message','return_to_base',… (constants only — never user input). */
+function missionAckOnlyTypesSql(): string {
+    return "'" . implode("','", MISSION_ORDER_TYPES_ACK_ONLY) . "'";
+}
+
+/**
+ * War Room: how much of a team's score may be its OWN record, given how many
+ * observations that record rests on. n / (n + PRIOR_N): 1 observation -> 25%,
+ * 3 -> 50%, 9 -> 75%, 30 -> 91%. Never reaches 100%, never goes negative.
+ *
+ * This exists because a percentage on its own cannot tell 1/1 from 8/9. A team
+ * that was handed a single order and did it holds a perfect 100%; a team that
+ * was handed nine and did eight holds 89% — and the plain mean ranks the first
+ * above the second, which rewards a team for having been trusted with less. A
+ * single success proves almost nothing (it may have been the easy order); eight
+ * out of nine is a record. Same shape as the Bayesian average rating sites use
+ * so that one five-star review does not outrank four hundred 4.7s.
+ */
+function missionScoreEvidenceWeight(int $n): float {
+    $n = max(0, $n);
+    return $n / ($n + MISSION_SCORE_EVIDENCE_PRIOR_N);
+}
+
+/**
+ * War Room: pulls a 0-100 pillar score toward the neutral BASELINE in
+ * proportion to how thin the record behind it is:
+ *
+ *     adjusted = BASELINE + weight(n) * (raw - BASELINE)
+ *
+ * Symmetric by construction: one failed order does not sink a team any more
+ * than one clean order crowns it. Both are "not enough yet" and both land near
+ * the baseline; only a longer record moves a team far from it, in either
+ * direction. A team with no observations at all would sit exactly on the
+ * baseline — callers do not score such a pillar (it is unavailable) instead.
+ *
+ * Returns ['adjusted' => float, 'credibility' => float 0-1].
+ */
+function missionScoreEvidenceAdjust(float $raw, int $n): array {
+    $w = missionScoreEvidenceWeight($n);
+    return [
+        'adjusted'    => MISSION_SCORE_EVIDENCE_BASELINE + $w * ($raw - MISSION_SCORE_EVIDENCE_BASELINE),
+        'credibility' => $w,
+    ];
+}
+
+/**
+ * War Room: a team's evidence level as a ['low'|'medium'|'high', label] pair,
+ * from its overall credibility (the pillar-weighted mean of
+ * missionScoreEvidenceWeight()). The cut-offs fall at one and at seven
+ * observations on a single pillar group, so «Χαμηλή» means "essentially one
+ * data point" and «Υψηλή» means the record outweighs the benefit of the doubt.
+ */
+function missionScoreEvidenceLevel(float $credibility): array {
+    if ($credibility < 0.40) return ['low', 'Χαμηλή'];
+    if ($credibility < 0.70) return ['medium', 'Μέτρια'];
+    return ['high', 'Υψηλή'];
 }
 
 /**
@@ -9924,7 +10008,6 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
     usort($forgottenShortages, fn($a, $b) => $b['minutes'] <=> $a['minutes']);
 
     // ── mission-wide pillars ─────────────────────────────────────────────────
-    $totalOrders = count($scoredDetail);
     $pillars = [];
 
     $ackMinutesForScoring = array_column($scoredDetail, 'ack_minutes');
@@ -9969,10 +10052,14 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
         'total_acknowledged' => $totalAcknowledged,
     ];
 
-    $fulfilledRows = array_filter($scoredDetail, fn($d) => $d['fulfill_minutes'] !== null);
-    $fulfilled = count($fulfilledRows);
-    if ($totalOrders > 0) {
-        $pillars['completion'] = ['label' => 'Ολοκλήρωση Εντολών', 'weight' => 20, 'available' => true, 'score' => $fulfilled / $totalOrders * 100, 'raw' => ['fulfilled' => $fulfilled, 'total' => $totalOrders]];
+    // Only orders that CAN be completed (see MISSION_ORDER_TYPES_ACK_ONLY): a
+    // broadcast message has no completion event, so counting it here capped a
+    // crew's score for something it had no way to do.
+    $completableRows = array_values(array_filter($scoredDetail, fn($d) => missionOrderCanBeCompleted($d['order_type'] ?? null)));
+    $completableTotal = count($completableRows);
+    $fulfilled = count(array_filter($completableRows, fn($d) => $d['fulfill_minutes'] !== null));
+    if ($completableTotal > 0) {
+        $pillars['completion'] = ['label' => 'Ολοκλήρωση Εντολών', 'weight' => 20, 'available' => true, 'score' => $fulfilled / $completableTotal * 100, 'raw' => ['fulfilled' => $fulfilled, 'total' => $completableTotal]];
     } else {
         $pillars['completion'] = ['label' => 'Ολοκλήρωση Εντολών', 'weight' => 20, 'available' => false, 'score' => null, 'raw' => []];
     }
@@ -10098,7 +10185,8 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
              FROM mission_order_recipients r
              JOIN mission_orders o ON o.id = r.order_id
              JOIN missions m ON m.id = o.mission_id
-             WHERE m.mission_type_id = ? AND m.id != ? AND m.deleted_at IS NULL",
+             WHERE m.mission_type_id = ? AND m.id != ? AND m.deleted_at IS NULL
+               AND o.order_type NOT IN (" . missionAckOnlyTypesSql() . ")",
             [$missionTypeId, $missionId]
         );
         $histFulfill = dbFetchOne(
@@ -10175,14 +10263,20 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
         $tid = $row['team_id'];
         if ($tid === null) continue;
         if (!isset($byTeamOrders[$tid])) {
-            $byTeamOrders[$tid] = ['count' => 0, 'ack_minutes' => [], 'fulfill_count' => 0, 'timeline' => [], 'worst' => null, 'unanswered_example' => null];
+            $byTeamOrders[$tid] = ['count' => 0, 'completable' => 0, 'ack_minutes' => [], 'fulfill_count' => 0, 'timeline' => [], 'worst' => null, 'unanswered_example' => null];
         }
         $byTeamOrders[$tid]['count']++;
+        // Completion is judged over the orders that CAN be completed only; an
+        // acknowledge-only order still counts in 'count' (and so in the
+        // response-speed pillar, which grades the acknowledgment).
+        if (missionOrderCanBeCompleted($row['order_type'] ?? null)) {
+            $byTeamOrders[$tid]['completable']++;
+        }
         // Nulls are pushed too, unlike before — the speed helper is now told
         // to count them as "never acknowledged" rather than silently dropping
         // them, so it needs to actually see them.
         $byTeamOrders[$tid]['ack_minutes'][] = $row['ack_minutes'];
-        if ($row['fulfill_minutes'] !== null) {
+        if ($row['fulfill_minutes'] !== null && missionOrderCanBeCompleted($row['order_type'] ?? null)) {
             $byTeamOrders[$tid]['fulfill_count']++;
         }
         // Kept for the narrative only (trajectory + named worst-order
@@ -10252,14 +10346,14 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
         } else {
             $teamPillars['response'] = ['weight' => 45, 'available' => false, 'score' => null, 'raw' => []];
         }
-        if ($orders && $orders['count'] > 0) {
-            $teamPillars['completion'] = ['weight' => 35, 'available' => true, 'score' => $orders['fulfill_count'] / $orders['count'] * 100, 'raw' => ['fulfilled' => $orders['fulfill_count'], 'total' => $orders['count']]];
+        if ($orders && $orders['completable'] > 0) {
+            $teamPillars['completion'] = ['weight' => 35, 'available' => true, 'score' => $orders['fulfill_count'] / $orders['completable'] * 100, 'raw' => ['fulfilled' => $orders['fulfill_count'], 'total' => $orders['completable']]];
         } else {
             $teamPillars['completion'] = ['weight' => 35, 'available' => false, 'score' => null, 'raw' => []];
         }
         if ($shortages && $shortages['count'] > 0) {
             $rate = $shortages['resolved'] / $shortages['count'] * 100;
-            $teamPillars['shortage'] = ['weight' => 20, 'available' => true, 'score' => max(0, min(100, $rate - $shortages['unresolvedCritical'] * 15)), 'raw' => ['resolved' => $shortages['resolved'], 'total' => $shortages['count']]];
+            $teamPillars['shortage'] = ['weight' => 20, 'available' => true, 'score' => max(0, min(100, $rate - $shortages['unresolvedCritical'] * 15)), 'raw' => ['resolved' => $shortages['resolved'], 'total' => $shortages['count'], 'unresolved_critical' => $shortages['unresolvedCritical']]];
         } else {
             // Unavailable, NOT a neutral 100. The mission-wide pillar can
             // afford "nothing reported = nothing went wrong" because it is one
@@ -10295,16 +10389,60 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
         $teamConsistency = missionTeamConsistency($orders['ack_minutes'] ?? [], $forgottenThresholdMinutes);
         $teamPillars['consistency'] = ['weight' => 0, 'available' => $teamConsistency['available'], 'score' => $teamConsistency['score'], 'raw' => ['median' => $teamConsistency['median'], 'p90' => $teamConsistency['p90'], 'spread' => $teamConsistency['spread'], 'sample' => $teamConsistency['sample']]];
 
+        // How many observations stand behind each pillar. Response and
+        // completion are two readings of the same orders (completion skips the
+        // acknowledge-only ones, which have nothing to complete); discipline
+        // counts every waypoint and sector the team was given.
+        $orderN = (int) ($orders['count'] ?? 0);
+        $pillarN = [
+            'response'    => $orderN,
+            // Only orders that can be completed stand behind a completion rate.
+            'completion'  => (int) ($orders['completable'] ?? 0),
+            'shortage'    => (int) ($shortages['count'] ?? 0),
+            'discipline'  => (int) $fw['waypoints_total'] + (int) $fw['sectors_assigned'],
+            'consistency' => (int) $teamConsistency['sample'],
+        ];
+        // Each pillar keeps its RAW score (what happened) and gains an
+        // 'adjusted' one (what that is worth given how little or how much it
+        // rests on). The weighted score that ranks the team uses the adjusted
+        // one: see missionScoreEvidenceWeight() for why a 1/1 must not outrank
+        // an 8/9. Consistency has weight 0 and is described, never scored, so
+        // it is carried over unadjusted.
+        foreach ($teamPillars as $key => &$tp) {
+            $tp['n'] = $pillarN[$key] ?? 0;
+            if (!$tp['available']) {
+                $tp['adjusted'] = null;
+                $tp['credibility'] = null;
+            } elseif ($key === 'consistency') {
+                $tp['adjusted'] = $tp['score'];
+                $tp['credibility'] = 1.0;
+            } else {
+                $adj = missionScoreEvidenceAdjust((float) $tp['score'], $tp['n']);
+                $tp['adjusted'] = $adj['adjusted'];
+                $tp['credibility'] = $adj['credibility'];
+            }
+        }
+        unset($tp);
+
         $tWeightSum = 0;
         $tWeightedScore = 0.0;
+        $tRawWeightedScore = 0.0;
+        $tCredibilitySum = 0.0;
         foreach ($teamPillars as $p) {
             if ($p['available']) {
                 $tWeightSum += $p['weight'];
-                $tWeightedScore += $p['weight'] * $p['score'];
+                $tWeightedScore += $p['weight'] * $p['adjusted'];
+                $tRawWeightedScore += $p['weight'] * $p['score'];
+                $tCredibilitySum += $p['weight'] * $p['credibility'];
             }
         }
         if ($tWeightSum === 0) continue;
         $tScore = round($tWeightedScore / $tWeightSum, 2);
+        $tRawScore = round($tRawWeightedScore / $tWeightSum, 2);
+        // Pillar-weighted, so a team measured mostly on one thin pillar reads
+        // as thin even when a small pillar is well supported.
+        $tCredibility = $tCredibilitySum / $tWeightSum;
+        $tEvidenceLevel = missionScoreEvidenceLevel($tCredibility);
 
         // Scores computed over different pillar sets are not comparable, and
         // the renormalise-on-unavailable rule means a team measured on one
@@ -10330,11 +10468,22 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
             'codename'    => $team['codename'],
             'team_number' => $team['team_number'],
             'color'       => $team['color'] ?: '#898781',
+            // 'score' is the EVIDENCE-ADJUSTED score — the one that ranks the
+            // team, sets its tier and is quoted by every narrative. 'raw_score'
+            // is the same weighted mean over the unadjusted pillar scores,
+            // kept so a report can say honestly what the adjustment did.
             'score'       => $tScore,
+            'raw_score'   => $tRawScore,
+            'adjustment'  => round($tScore - $tRawScore, 2),
             'tier'        => missionScoreTierMeta($tScore),
             'ranked'      => $isRanked,
             'pillar_count' => count($scoringPillars),
             'order_count' => $orders['count'] ?? 0,
+            // Every observation behind the score, of any kind.
+            'evidence_n'  => $orderN + (int) ($shortages['count'] ?? 0) + (int) $fw['waypoints_total'] + (int) $fw['sectors_assigned'],
+            'credibility' => round($tCredibility, 4),
+            'evidence_level' => $tEvidenceLevel[0],
+            'evidence_label' => $tEvidenceLevel[1],
             'pillars'     => $teamPillars,
             // ── narrative-only enrichment below. None of it feeds $tScore;
             //    it exists so generateTeamComparisonNarrative() can say WHY a
@@ -10353,15 +10502,28 @@ function computeMissionScore(int $missionId, ?array $report = null): array {
     // Ranked teams first and numbered; unranked ones keep their score, sort
     // among themselves, and carry rank null so every renderer has to decide
     // what to show rather than silently printing a placing it did not earn.
+    // A dead heat goes to the team with more behind its score.
     usort($teamScores, fn($a, $b) =>
         ($b['ranked'] <=> $a['ranked'])
         ?: ($b['score'] <=> $a['score'])
+        ?: ($b['evidence_n'] <=> $a['evidence_n'])
         ?: ($b['order_count'] <=> $a['order_count']));
     $place = 0;
     foreach ($teamScores as &$t) {
         $t['rank'] = $t['ranked'] ? ++$place : null;
+        $t['raw_rank'] = null;
     }
     unset($t);
+    // Where the UNADJUSTED score would have put each ranked team. Only here so
+    // a report can say "without the weighting, X would have been first" when
+    // that is true — it never decides a placing.
+    $rawOrder = array_keys(array_filter($teamScores, fn($t) => $t['ranked']));
+    usort($rawOrder, fn($i, $j) =>
+        ($teamScores[$j]['raw_score'] <=> $teamScores[$i]['raw_score'])
+        ?: ($teamScores[$j]['evidence_n'] <=> $teamScores[$i]['evidence_n']));
+    foreach ($rawOrder as $pos => $i) {
+        $teamScores[$i]['raw_rank'] = $pos + 1;
+    }
 
     return [
         'overall'            => $overall,
@@ -10435,9 +10597,10 @@ function computeMissionTeamSpeedBreakdown(array $detail, int $thresholdMinutes):
     foreach ($detail as $row) {
         $label = $row['team_label'];
         if (!isset($byTeam[$label])) {
-            $byTeam[$label] = ['count' => 0, 'ack_count' => 0, 'fulfill_count' => 0, 'ack_minutes' => [], 'fulfill_minutes' => []];
+            $byTeam[$label] = ['count' => 0, 'completable' => 0, 'ack_count' => 0, 'fulfill_count' => 0, 'ack_minutes' => [], 'fulfill_minutes' => []];
         }
         $byTeam[$label]['count']++;
+        if (missionOrderCanBeCompleted($row['order_type'] ?? null)) $byTeam[$label]['completable']++;
         if ($row['ack_minutes'] !== null) { $byTeam[$label]['ack_count']++; $byTeam[$label]['ack_minutes'][] = $row['ack_minutes']; }
         if ($row['fulfill_minutes'] !== null) { $byTeam[$label]['fulfill_count']++; $byTeam[$label]['fulfill_minutes'][] = $row['fulfill_minutes']; }
     }
@@ -10449,7 +10612,7 @@ function computeMissionTeamSpeedBreakdown(array $detail, int $thresholdMinutes):
             'team_label'              => $label,
             'order_count'             => $s['count'],
             'ack_rate'                => $s['count'] ? round($s['ack_count'] / $s['count'] * 100) : 0,
-            'fulfill_rate'            => $s['count'] ? round($s['fulfill_count'] / $s['count'] * 100) : 0,
+            'fulfill_rate'            => $s['completable'] ? round($s['fulfill_count'] / $s['completable'] * 100) : 0,
             'avg_ack_minutes'         => $ackStats['avg_minutes'],
             'forgotten_ack_count'     => $ackStats['forgotten_count'],
             'avg_fulfill_minutes'     => $fulfillStats['avg_minutes'],
@@ -10729,6 +10892,15 @@ function generateCommandNarrative(array $command): string {
  * comparative claim here.) Takes $score['teams'] (already ranked, each with
  * its own $pillars sub-array carrying the same 'raw' shape as the
  * mission-wide pillars).
+ *
+ * Sample size: every team's 'score' is already evidence-adjusted (see
+ * missionScoreEvidenceAdjust()), so the ranking, the gap and the contenders
+ * clause are safe to quote. The per-dimension "best vs worst" sentences quote
+ * raw rates, so they only admit teams with MISSION_SCORE_MIN_COMPARE_N
+ * observations in that dimension — otherwise a team with one order and one
+ * success is held up as the best completion rate over a team that fulfilled
+ * eight of nine. When the weighting changed the order of the leaderboard the
+ * narrative says so explicitly, so nobody mistakes it for a bug.
  */
 function generateTeamComparisonNarrative(array $teams, array $alreadyCited = []): string {
     if (count($teams) < 2) {
@@ -10736,6 +10908,20 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
     }
     $label = fn($t) => teamLabel($t['codename'], $t['team_number']);
     $fmt = fn($n) => rtrim(rtrim(number_format((float) $n, 1, '.', ''), '0'), '.');
+    // A team is called the best or the worst at ONE dimension only when it has
+    // at least this many observations in that dimension. Naming the "best"
+    // completion rate is exactly where 1/1 (100%) used to beat 8/9 (89%) — a
+    // single success is not a record. Teams below the line are still scored
+    // (weighted down, see missionScoreEvidenceAdjust()); they are just not
+    // held up as the example in a sentence.
+    $minN = MISSION_SCORE_MIN_COMPARE_N;
+    $obsWord = fn($n) => (int) $n === 1 ? 'μία μόνο παρατήρηση' : ((int) $n . ' παρατηρήσεις');
+    // Two rates differ for real only when they still differ after each is
+    // weighed by the record behind it: 100% over 5 orders against 89% over 9 is
+    // a difference in the sample, not in the teams, and a sentence that says
+    // otherwise is the 1/1-beats-8/9 mistake in prose.
+    $adjRate = fn($rate, $n) => missionScoreEvidenceAdjust((float) $rate, (int) $n)['adjusted'];
+    $gapIsReal = fn($bestRate, $bestN, $worstRate, $worstN) => $adjRate($bestRate, $bestN) - $adjRate($worstRate, $worstN) >= 5.0;
 
     // Every candidate observation lands here as ['salience' => 0-100, 'text']
     // and only the strongest few survive — see this function's docblock for
@@ -10808,6 +10994,38 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
         }
     }
 
+    // ── the placing was weighted by how much each score rests on ─────────
+    //    Said out loud whenever it actually changed an order: a team whose
+    //    percentage looks better but rests on a sliver of data sits BELOW a
+    //    team with a long record, and a reader who is not told why will
+    //    reasonably suspect the ranking is broken.
+    $dropped = null;
+    foreach ($rankedTeams as $t) {
+        if (!isset($t['rank'], $t['raw_rank'], $t['raw_score'], $t['evidence_n'])) continue;
+        $slid = $t['rank'] - $t['raw_rank'];
+        if ($slid > 0 && ($dropped === null || $slid > ($dropped['rank'] - $dropped['raw_rank']))) $dropped = $t;
+    }
+    if ($dropped !== null) {
+        $over = null;
+        foreach ($rankedTeams as $t) {
+            if (!isset($t['rank'], $t['raw_score'], $t['evidence_n'])) continue;
+            // A genuine overtake: ahead of it now, behind it on the raw score.
+            if ($t['rank'] < $dropped['rank'] && $t['raw_score'] < $dropped['raw_score'] - 1.0
+                && $t['evidence_n'] > $dropped['evidence_n']
+                && ($over === null || $t['evidence_n'] > $over['evidence_n'])) {
+                $over = $t;
+            }
+        }
+        if ($over !== null) {
+            // 100: it explains the leaderboard itself, so it leads the paragraph.
+            $add(100, 'Η κατάταξη ζυγίζει και πόσα στοιχεία στηρίζουν τον βαθμό κάθε ομάδας. Αν μετρούσε μόνο το ποσοστό, η ομάδα ' . $label($dropped)
+                . ' θα ήταν στην ' . $dropped['raw_rank'] . 'η θέση (ακατέργαστος βαθμός ' . number_format($dropped['raw_score'], 1) . '), όμως αυτός στηρίζεται σε '
+                . $obsWord($dropped['evidence_n']) . ' και προσαρμόστηκε στο ' . number_format($dropped['score'], 1)
+                . '. Η ομάδα ' . $label($over) . ', με ακατέργαστο ' . number_format($over['raw_score'], 1) . ' σε ' . $obsWord($over['evidence_n'])
+                . ', διατήρησε ' . number_format($over['score'], 1) . ' και κατατάσσεται πάνω της: μια πολύ καλή επίδοση σε ελάχιστες εντολές δεν αποδεικνύει όσα μια σταθερά καλή επίδοση σε πολλές.');
+        }
+    }
+
     // ── orders left with no acknowledgment at all ────────────────────────
     $unanswered = array_values(array_filter($teams, fn($t) => ($t['unanswered_count'] ?? 0) > 0));
     if (!empty($unanswered)) {
@@ -10835,7 +11053,7 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
     }
 
     // ── response speed (order acknowledgment) ───────────────────────────
-    $withResponse = array_values(array_filter($teams, fn($t) => $t['pillars']['response']['available'] && $t['pillars']['response']['raw']['avg_minutes'] !== null));
+    $withResponse = array_values(array_filter($teams, fn($t) => $t['pillars']['response']['available'] && $t['pillars']['response']['raw']['avg_minutes'] !== null && $t['order_count'] >= $minN));
     if (count($withResponse) >= 2) {
         usort($withResponse, fn($a, $b) => $a['pillars']['response']['raw']['avg_minutes'] <=> $b['pillars']['response']['raw']['avg_minutes']);
         $fastest = $withResponse[0];
@@ -10850,7 +11068,7 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
             // differ by the same handful of minutes.
             $ratio = $sMin / max(0.5, $fMin);
             $extra = $ratio >= 2 ? ' — διαφορά ' . $fmt($ratio) . ' φορές.' : '.';
-            $add(min(100.0, ($ratio - 1) * 45), 'Ως προς την ταχύτητα αποδοχής εντολών, η ομάδα ' . $label($fastest) . ' ξεχώρισε με μέσο χρόνο ' . $fmt($fMin) . ' λεπτών, έναντι ' . $fmt($sMin) . ' λεπτών της ' . $label($slowest) . $extra);
+            $add(min(100.0, ($ratio - 1) * 45), 'Ως προς την ταχύτητα αποδοχής εντολών, η ομάδα ' . $label($fastest) . ' ξεχώρισε με μέσο χρόνο ' . $fmt($fMin) . ' λεπτών (' . (int) $fastest['order_count'] . ' εντολές), έναντι ' . $fmt($sMin) . ' λεπτών (' . (int) $slowest['order_count'] . ' εντολές) της ' . $label($slowest) . $extra);
         }
     }
 
@@ -10886,7 +11104,7 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
     }
 
     // ── completion rate ─────────────────────────────────────────────────
-    $withCompletion = array_values(array_filter($teams, fn($t) => $t['pillars']['completion']['available']));
+    $withCompletion = array_values(array_filter($teams, fn($t) => $t['pillars']['completion']['available'] && ($t['pillars']['completion']['raw']['total'] ?? 0) >= $minN));
     if (count($withCompletion) >= 2) {
         $rates = array_map(function ($t) use ($label) {
             $raw = $t['pillars']['completion']['raw'];
@@ -10897,6 +11115,8 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
         $worst = $rates[count($rates) - 1];
         if ($best['label'] === $worst['label'] || abs($best['rate'] - $worst['rate']) < 10) {
             $addFiller('Στο ποσοστό ολοκλήρωσης εντολών, οι ομάδες κινήθηκαν σε παρόμοια επίπεδα.');
+        } elseif (!$gapIsReal($best['rate'], $best['raw']['total'], $worst['rate'], $worst['raw']['total'])) {
+            $add(18, "Στο ποσοστό ολοκλήρωσης εντολών, η διαφορά ανάμεσα στη {$best['label']} ({$best['rate']}%, {$best['raw']['fulfilled']}/{$best['raw']['total']}) και στη {$worst['label']} ({$worst['rate']}%, {$worst['raw']['fulfilled']}/{$worst['raw']['total']}) δεν αποτελεί ασφαλές συμπέρασμα, γιατί οι δύο ομάδες δεν στηρίζονται σε συγκρίσιμο όγκο εντολών.");
         } else {
             $add(min(100.0, (float) ($best['rate'] - $worst['rate'])), "Στο ποσοστό ολοκλήρωσης εντολών, η {$best['label']} πέτυχε {$best['rate']}% ({$best['raw']['fulfilled']}/{$best['raw']['total']}), έναντι {$worst['rate']}% ({$worst['raw']['fulfilled']}/{$worst['raw']['total']}) της {$worst['label']}.");
         }
@@ -10905,7 +11125,7 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
     // ── shortage handling — only teams that actually reported >=1, so a team
     //    with zero reports is never compared against a team that genuinely
     //    resolved real reports ─────────────────────────────────────────────
-    $withShortage = array_values(array_filter($teams, fn($t) => $t['pillars']['shortage']['raw']['total'] > 0));
+    $withShortage = array_values(array_filter($teams, fn($t) => $t['pillars']['shortage']['raw']['total'] >= $minN));
     if (count($withShortage) >= 2) {
         $rates = array_map(function ($t) use ($label) {
             $raw = $t['pillars']['shortage']['raw'];
@@ -10914,7 +11134,8 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
         usort($rates, fn($a, $b) => $b['rate'] <=> $a['rate']);
         $best = $rates[0];
         $worst = $rates[count($rates) - 1];
-        if ($best['label'] !== $worst['label'] && $best['rate'] !== $worst['rate']) {
+        if ($best['label'] !== $worst['label'] && $best['rate'] !== $worst['rate']
+            && $gapIsReal($best['rate'], $best['raw']['total'], $worst['rate'], $worst['raw']['total'])) {
             $add(min(100.0, (float) ($best['rate'] - $worst['rate'])), "Στη διαχείριση αναφορών έλλειψης, η {$best['label']} έλυσε {$best['raw']['resolved']}/{$best['raw']['total']} αναφορές, ενώ η {$worst['label']} μόλις {$worst['raw']['resolved']}/{$worst['raw']['total']}.");
         }
     }
@@ -10957,7 +11178,7 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
     }
 
     // Route stops: untouched is the real failure, a reported skip is not.
-    $withRoute = array_values(array_filter($teams, fn($t) => ($fwOf($t)['waypoints_total'] ?? 0) > 0));
+    $withRoute = array_values(array_filter($teams, fn($t) => ($fwOf($t)['waypoints_total'] ?? 0) >= $minN));
     if (count($withRoute) >= 2) {
         $rates = array_map(function ($t) use ($label) {
             $f = $t['fieldwork'];
@@ -10966,7 +11187,8 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
         usort($rates, fn($a, $b) => $b['rate'] <=> $a['rate']);
         $best = $rates[0];
         $worst = $rates[count($rates) - 1];
-        if ($best['label'] !== $worst['label'] && $best['rate'] - $worst['rate'] >= 15) {
+        if ($best['label'] !== $worst['label'] && $best['rate'] - $worst['rate'] >= 15
+            && $gapIsReal($best['rate'], $best['f']['waypoints_total'], $worst['rate'], $worst['f']['waypoints_total'])) {
             $add(min(100.0, (float) ($best['rate'] - $worst['rate'])),
                 "Στα σημεία πορείας, η {$best['label']} έκλεισε {$best['f']['waypoints_completed']}/{$best['f']['waypoints_total']} ({$best['rate']}%), έναντι {$worst['f']['waypoints_completed']}/{$worst['f']['waypoints_total']} ({$worst['rate']}%) της {$worst['label']}.");
         }
@@ -11001,7 +11223,7 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
     }
 
     // Assigned search sectors.
-    $withSectors = array_values(array_filter($teams, fn($t) => ($fwOf($t)['sectors_assigned'] ?? 0) > 0));
+    $withSectors = array_values(array_filter($teams, fn($t) => ($fwOf($t)['sectors_assigned'] ?? 0) >= $minN));
     if (count($withSectors) >= 2) {
         $rates = array_map(function ($t) use ($label) {
             $f = $t['fieldwork'];
@@ -11010,7 +11232,8 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
         usort($rates, fn($a, $b) => $b['rate'] <=> $a['rate']);
         $best = $rates[0];
         $worst = $rates[count($rates) - 1];
-        if ($best['label'] !== $worst['label'] && $best['rate'] !== $worst['rate']) {
+        if ($best['label'] !== $worst['label'] && $best['rate'] !== $worst['rate']
+            && $gapIsReal($best['rate'], $best['f']['sectors_assigned'], $worst['rate'], $worst['f']['sectors_assigned'])) {
             $add(min(100.0, (float) ($best['rate'] - $worst['rate'])),
                 "Στην κάλυψη ανατεθειμένων τομέων, η {$best['label']} ολοκλήρωσε {$best['f']['sectors_completed']}/{$best['f']['sectors_assigned']}, ενώ η {$worst['label']} {$worst['f']['sectors_completed']}/{$worst['f']['sectors_assigned']}. Η δυσκολία ενός τομέα δεν είναι σταθερή, οπότε το νούμερο διαβάζεται μαζί με το μέγεθος και το έδαφος που ανατέθηκε στην κάθε ομάδα.");
         }
@@ -11089,14 +11312,21 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
     // A team judged on fieldwork instead of radio traffic is not a thin
     // sample — it was measured on a different axis, and saying "evaluated on
     // very few orders" about a team that walked a full route is simply wrong.
-    $thin = array_values(array_filter($teams, fn($t) =>
-        $t['order_count'] < 3
-        && ($t['shortage_count'] ?? 0) === 0
-        && empty($t['pillars']['discipline']['available'])));
+    //    "Thin" is now the evidence level the score itself was weighted by, not
+    //    a separate order-count rule, so this caveat and the number it
+    //    qualifies can never disagree. A team array built without the field
+    //    falls back to the old rule.
+    $thin = array_values(array_filter($teams, fn($t) => isset($t['evidence_level'])
+        ? $t['evidence_level'] === 'low'
+        : ($t['order_count'] < 3
+            && ($t['shortage_count'] ?? 0) === 0
+            && empty($t['pillars']['discipline']['available']))));
     if (!empty($thin)) {
         $names = array_map($label, $thin);
-        $sentences[] = (count($thin) === 1 ? 'Η ομάδα ' . $names[0] . ' αξιολογήθηκε' : implode(', ', $names) . ' αξιολογήθηκαν')
-            . ' σε ελάχιστες εντολές, οπότε η θέση ' . (count($thin) === 1 ? 'της' : 'τους') . ' στην κατάταξη είναι ενδεικτική και όχι ασφαλής σύγκριση.';
+        $one = count($thin) === 1;
+        $sentences[] = ($one ? 'Η ομάδα ' . $names[0] . ' αξιολογήθηκε' : implode(', ', $names) . ' αξιολογήθηκαν')
+            . ' σε ελάχιστα στοιχεία, οπότε ο βαθμός ' . ($one ? 'της' : 'τους') . ' έχει προσαρμοστεί έντονα προς το μέσο επίπεδο και η θέση ' . ($one ? 'της' : 'τους')
+            . ' στην κατάταξη είναι ενδεικτική και όχι ασφαλής σύγκριση.';
     }
 
     return implode(' ', $sentences);
@@ -11197,12 +11427,13 @@ function computeWarRoomTypeAggregates(string $startDate, string $endDate, ?int $
     }
     unset($r);
 
-    // ── completion: pooled fulfilled/total over mission_order_recipients ──
+    // ── completion: pooled fulfilled/total over mission_order_recipients,
+    //    acknowledge-only types left out exactly as computeMissionScore() does ──
     $completionRows = dbFetchAll(
         "SELECT COALESCE(m.mission_type_id,0) AS tid, COUNT(*) AS total,
                 SUM(CASE WHEN r.fulfilled_at IS NOT NULL THEN 1 ELSE 0 END) AS fulfilled
          FROM mission_order_recipients r JOIN mission_orders o ON o.id = r.order_id JOIN missions m ON m.id = o.mission_id
-         WHERE $where GROUP BY tid",
+         WHERE $where AND o.order_type NOT IN (" . missionAckOnlyTypesSql() . ") GROUP BY tid",
         $params
     );
     foreach ($completionRows as $row) {
