@@ -21824,6 +21824,10 @@ const GPS_PARTICIPATION_SIG = <?= json_encode($gpsParticipationSig) ?>;
 // The roster counterpart (command staff only, null for everybody else): who is
 // approved on this mission, as this page was built. See $rosterSig.
 const ROSTER_SIG = <?= json_encode($rosterSig) ?>;
+// And who they are, for the console's preparation checklist («Μπήκαν όλοι σε
+// ομάδα;»): every approved person, once, in a team or not. Command staff only;
+// the roster moving reloads the page, so this never goes stale.
+const ROSTER_PERSON_IDS = <?= json_encode($canManageWarRoom ? array_values(array_map('intval', array_keys($distinctApprovedById))) : []) ?>;
 const GPS_RELOAD_VIEW_KEY = 'wr-gps-reload-view-<?= $missionId ?>';
 const GPS_RELOAD_GRACE_MS = 3000;
 let gpsReloadDeadline = 0;

@@ -13,7 +13,7 @@ const {
     wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel,
     wrcOrderProgress, wrcContactTone, wrcContactOf, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts, wrcNextSectorLabel, wrcPickArea,
     wrcUnreadKeys, wrcChatUnread,
-    wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcClosingItems,
+    wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcTeamGaps, wrcClosingItems,
 } = require('../../assets/js/war-room-console.js');
 
 const teams = [
@@ -174,14 +174,71 @@ test('wrcPhasePreset never opens a plan section by itself: Σχέδιο starts f
     ['prep', 'live', 'close', 'anything'].forEach(phase => assert.deepEqual(wrcPhasePreset(phase).sections, []));
 });
 
-const readyFacts = {teams: 3, people: 12, noGps: 0, gpsPeople: 12, sectors: 4, sectorsFree: 0, stale: 0};
+const readyFacts = {
+    teams: 3, people: 12, noGps: 0, gpsPeople: 12, sectors: 4, sectorsFree: 0, stale: 0,
+    roster: 12, unteamed: 0, teamsNoGps: 0, teamsNoGpsNames: [],
+};
 
 test('wrcReadiness: a mission with everything in place is ready', () => {
     const r = wrcReadiness(readyFacts);
     assert.equal(r.ready, true);
     assert.equal(r.open, 0);
-    assert.deepEqual(r.rows.map(x => x.key), ['teams', 'gps', 'sectors', 'assigned', 'contact']);
+    assert.deepEqual(r.rows.map(x => x.key), ['teams', 'unteamed', 'teamgps', 'gps', 'sectors', 'assigned', 'contact']);
     assert.ok(r.rows.every(x => x.tone === 'ok'));
+});
+
+test('wrcReadiness: people who are in no team are a warning, out of the whole roster', () => {
+    const r = wrcReadiness({...readyFacts, roster: 12, unteamed: 3});
+    const row = r.rows.find(x => x.key === 'unteamed');
+    assert.deepEqual([row.tone, row.n, row.of, row.card], ['warn', 3, 12, 'teamsCard']);
+    assert.equal(r.ready, false);
+    assert.equal(r.open, 1);
+});
+
+test('wrcReadiness: a team with nobody on GPS is bad, and the row names the teams', () => {
+    const r = wrcReadiness({...readyFacts, teamsNoGps: 2, teamsNoGpsNames: ['Alpha 1', 'Charlie 3']});
+    const row = r.rows.find(x => x.key === 'teamgps');
+    assert.deepEqual([row.tone, row.n, row.of, row.names, row.card], ['bad', 2, 3, 'Alpha 1, Charlie 3', 'participantsCard']);
+    assert.equal(r.ready, false);
+    assert.equal(r.open, 1);
+});
+
+test('wrcReadiness: with nobody on the roster or no teams the two team rows have nothing to say', () => {
+    assert.equal(wrcReadiness({...readyFacts, roster: 0, unteamed: 0}).rows.find(x => x.key === 'unteamed'), undefined);
+    const none = wrcReadiness({...readyFacts, teams: 0, teamsNoGps: 0});
+    assert.equal(none.rows.find(x => x.key === 'teamgps'), undefined, 'no teams: the first row already says so');
+    assert.equal(none.rows.find(x => x.key === 'teams').tone, 'bad');
+});
+
+// ── wrcTeamGaps: who is in no team, which team has no phone ──────────────────
+
+const gapTeams = [
+    {label: 'Alpha 1', members: [{user_id: 11, takes_part: true}, {user_id: 12, takes_part: false}]},
+    {label: 'Bravo 2', members: [{user_id: 21, takes_part: false}, {user_id: 22, takes_part: false}]},
+    {label: 'Charlie 3', members: []},
+];
+
+test('wrcTeamGaps: the roster minus everyone in a team is who still has no team', () => {
+    // 11, 12, 21 and 22 are in teams; 31 and 32 are approved and in none.
+    const g = wrcTeamGaps(gapTeams, [11, 12, 21, 22, 31, 32]);
+    assert.deepEqual([g.roster, g.unteamed], [6, 2]);
+    assert.deepEqual(wrcTeamGaps(gapTeams, [11, 12, 21, 22]).unteamed, 0);
+});
+
+test('wrcTeamGaps: a person counted once however many shifts they are approved for', () => {
+    assert.deepEqual(wrcTeamGaps(gapTeams, [31, 31, '31', 11]).roster, 2);
+    assert.equal(wrcTeamGaps(gapTeams, [31, 31, '31']).unteamed, 1);
+});
+
+test('wrcTeamGaps: a team is dark when none of its people is on GPS, empty teams included', () => {
+    const g = wrcTeamGaps(gapTeams, []);
+    assert.deepEqual([g.teamsNoGps, g.teamsNoGpsNames], [2, ['Bravo 2', 'Charlie 3']]);
+    // one phone on is enough for a team of any size
+    assert.equal(wrcTeamGaps([gapTeams[0]], []).teamsNoGps, 0);
+});
+
+test('wrcTeamGaps: nothing known yet is no findings, not an error', () => {
+    assert.deepEqual(wrcTeamGaps(undefined, undefined), {roster: 0, unteamed: 0, teamsNoGps: 0, teamsNoGpsNames: []});
 });
 
 test('wrcReadiness: no teams is bad, the rest are warnings, and each says what it is about', () => {
@@ -196,7 +253,7 @@ test('wrcReadiness: no teams is bad, the rest are warnings, and each says what i
 
 test('wrcReadiness: unassigned sectors, silent people and people outside GPS each count', () => {
     const r = wrcReadiness({teams: 2, people: 10, noGps: 3, gpsPeople: 7, sectors: 5, sectorsFree: 2, stale: 4});
-    assert.deepEqual(r.rows.map(x => [x.key, x.tone]), [['teams', 'ok'], ['gps', 'warn'], ['sectors', 'ok'], ['assigned', 'warn'], ['contact', 'warn']]);
+    assert.deepEqual(r.rows.map(x => [x.key, x.tone]), [['teams', 'ok'], ['teamgps', 'ok'], ['gps', 'warn'], ['sectors', 'ok'], ['assigned', 'warn'], ['contact', 'warn']]);
     assert.equal(r.open, 3);
     const assigned = r.rows.find(x => x.key === 'assigned');
     assert.deepEqual([assigned.n, assigned.of], [3, 5], 'three of five sectors have a team');

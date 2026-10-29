@@ -290,15 +290,40 @@ function wrcPhasePreset(phase) {
 }
 
 /**
+ * Two things the preparation checklist asks about the teams themselves (v3.410.0):
+ * has everybody on the roster been put in a team, and does every team have at least
+ * one person whose GPS is on. A team nobody carries a phone for cannot be tracked or
+ * sent an order, however many people are in it.
+ *   teams       [{label, members: [{user_id, takes_part}]}], as the poll sends them
+ *   rosterIds   every person approved on the mission, in a team or not
+ * -> {roster, unteamed, teamsNoGps, teamsNoGpsNames}
+ */
+function wrcTeamGaps(teams, rosterIds) {
+    const list = teams || [];
+    const roster = Array.from(new Set((rosterIds || []).map(Number)));
+    const inTeam = new Set(list.flatMap(tm => (tm.members || []).map(m => Number(m.user_id))));
+    const dark = list.filter(tm => !(tm.members || []).some(m => m.takes_part));
+    return {
+        roster: roster.length,
+        unteamed: roster.filter(id => !inTeam.has(id)).length,
+        teamsNoGps: dark.length,
+        teamsNoGpsNames: dark.map(tm => tm.label),
+    };
+}
+
+/**
  * «Είμαστε έτοιμοι;» - what has to be true before the mission goes live.
- * facts: {teams, people, noGps, gpsPeople, sectors, sectorsFree, stale}
+ * facts: {teams, people, noGps, gpsPeople, sectors, sectorsFree, stale, roster, unteamed, teamsNoGps, teamsNoGpsNames}
  *   gpsPeople  how many of `people` have their GPS on; `stale` is out of THEM, never out of everybody
+ *   roster/unteamed/teamsNoGps/teamsNoGpsNames  see wrcTeamGaps()
  * -> rows {key, tone, n, of} in the order they should be fixed in; tone is
  * ok / warn / bad, and `ready` is true only when nothing is wrong.
  */
 function wrcReadiness(f) {
     const rows = [
         {key: 'teams', tone: f.teams > 0 ? 'ok' : 'bad', n: f.teams, of: 0, card: 'teamsCard'},
+        {key: 'unteamed', tone: f.unteamed > 0 ? 'warn' : 'ok', n: f.unteamed || 0, of: f.roster || 0, card: 'teamsCard'},
+        {key: 'teamgps', tone: f.teamsNoGps > 0 ? 'bad' : 'ok', n: f.teamsNoGps || 0, of: f.teams, names: (f.teamsNoGpsNames || []).join(', '), card: 'participantsCard'},
         {key: 'gps', tone: f.noGps > 0 ? 'warn' : 'ok', n: f.noGps, of: f.people, card: 'participantsCard'},
         {key: 'sectors', tone: f.sectors > 0 ? 'ok' : 'warn', n: f.sectors, of: 0, card: 'sectorsCard'},
         {key: 'assigned', tone: f.sectorsFree > 0 ? 'warn' : 'ok', n: f.sectors - f.sectorsFree, of: f.sectors, card: 'sectorsListCard'},
@@ -307,7 +332,10 @@ function wrcReadiness(f) {
     // Sectors that are not there cannot be assigned, and with nobody on GPS there is
     // nobody whose contact could be measured (the GPS row above already says so): those
     // rows have nothing to say.
-    const shown = rows.filter(r => !(r.key === 'assigned' && f.sectors === 0) && !(r.key === 'contact' && !(f.gpsPeople > 0)));
+    // Nobody on the roster means nobody to put in a team, and with no teams the first
+    // row already says so: neither of the two new rows has anything to add then.
+    const shown = rows.filter(r => !(r.key === 'assigned' && f.sectors === 0) && !(r.key === 'contact' && !(f.gpsPeople > 0))
+        && !(r.key === 'unteamed' && !(f.roster > 0)) && !(r.key === 'teamgps' && !(f.teams > 0)));
     return {rows: shown, ready: shown.every(r => r.tone === 'ok'), open: shown.filter(r => r.tone !== 'ok').length};
 }
 
@@ -333,7 +361,7 @@ if (typeof module !== 'undefined' && module.exports) {
         wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel, wrcNextSectorLabel, wrcPickArea,
         wrcOrderProgress, wrcContactTone, wrcContactOf, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts,
         wrcUnreadKeys, wrcChatUnread,
-        wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcClosingItems,
+        wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcTeamGaps, wrcClosingItems,
     };
 }
 
@@ -582,6 +610,8 @@ if (typeof module !== 'undefined' && module.exports) {
 
     const CHECK_TEXT = {
         teams: ['console.chk_teams_ok', 'console.chk_teams_bad'],
+        unteamed: ['console.chk_unteamed_ok', 'console.chk_unteamed_warn'],
+        teamgps: ['console.chk_teamgps_ok', 'console.chk_teamgps_bad'],
         gps: ['console.chk_gps_ok', 'console.chk_gps_warn'],
         sectors: ['console.chk_sectors_ok', 'console.chk_sectors_warn'],
         assigned: ['console.chk_assigned_ok', 'console.chk_assigned_warn'],
@@ -602,13 +632,16 @@ if (typeof module !== 'undefined' && module.exports) {
         const secs = page.sectors();
         // Contact is judged among the people whose GPS is on, never among everybody.
         const contact = wrcContactOf(members, isStale);
-        return {
+        // Who is on the roster comes from the page (it reloads itself when the roster
+        // changes); who is in a team and on GPS comes from the poll, so it stays live.
+        const gaps = wrcTeamGaps(state.teams, (typeof ROSTER_PERSON_IDS !== 'undefined' && Array.isArray(ROSTER_PERSON_IDS)) ? ROSTER_PERSON_IDS : []);
+        return Object.assign({}, gaps, {
             teams: state.teams.length, people: members.length,
             noGps: members.filter(m => !m.takes_part).length,
             gpsPeople: contact.total,
             sectors: secs.length, sectorsFree: secs.filter(sec => !sec.team_id).length,
             stale: contact.silent,
-        };
+        });
     }
     function closingFacts() {
         const board = (typeof teamBoardItems === 'function') ? teamBoardItems : () => [];
@@ -644,11 +677,11 @@ if (typeof module !== 'undefined' && module.exports) {
         let sig, html;
         if (state.phase === 'prep') {
             const r = wrcReadiness(readinessFacts());
-            sig = JSON.stringify(['prep', r.rows.map(x => [x.key, x.tone, x.n, x.of])]);
+            sig = JSON.stringify(['prep', r.rows.map(x => [x.key, x.tone, x.n, x.of, x.names || ''])]);
             if (sig === phaseSig) return;
             html = `<header class="wrc-sec-h"><i class="bi bi-clipboard-check"></i><span class="wrc-h">${esc(t('console.panel_prep'))}</span>
                     <span class="wrc-cnt ${r.ready ? 'ok' : 'bad'}">${r.rows.length - r.open}/${r.rows.length}</span></header>
-                <div class="wrc-checks">${r.rows.map(x => checkRow(x.tone, t(CHECK_TEXT[x.key][x.tone === 'ok' ? 0 : 1], {n: x.n, of: x.of}), {card: x.card})).join('')}</div>
+                <div class="wrc-checks">${r.rows.map(x => checkRow(x.tone, t(CHECK_TEXT[x.key][x.tone === 'ok' ? 0 : 1], {n: x.n, of: x.of, names: x.names || ''}), {card: x.card})).join('')}</div>
                 <div class="wrc-phase-cta"><button type="button" class="wrc-go" data-phase-go="live"><i class="bi bi-broadcast"></i>${esc(t('console.cta_live'))}</button></div>`;
         } else {
             sig = JSON.stringify(['close', closing.map(x => [x.key, x.n]), !!cardNode('endMissionCard')]);
