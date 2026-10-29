@@ -47,6 +47,7 @@ body.wr-console-view .war-room-hero h1 { font-size: 1.05rem; margin: 0 !importan
 .wrc-kpi-warn:hover { background: #efae2c; }
 /* The red LIVE button (v3.411.0): a record dot. On air it takes the red look of SOS (the
    skins already style that), and flashes for as long as a stream has not been looked at. */
+.wrc-kpi-i { margin-right: 4px; font-size: 1.1em; vertical-align: -.1em; }
 .wrc-rec { display: inline-block; width: 1em; height: 1em; margin-right: 4px; border-radius: 50%; background: #e02424; vertical-align: -.13em; }
 .wrc-kpi-live:not(.on) .wrc-rec { opacity: .6; }
 .wrc-kpi-live.on .wrc-rec { background: #ff2d2d; box-shadow: 0 0 0 1.5px #fff, 0 0 8px 2px rgba(255, 45, 45, .9); }

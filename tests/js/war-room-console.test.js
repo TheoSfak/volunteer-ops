@@ -12,7 +12,7 @@ const {
     wrcStampKey, wrcSevRank, wrcOrderQueue, wrcSummarizeSelection,
     wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel,
     wrcOrderProgress, wrcContactTone, wrcContactOf, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts, wrcNextSectorLabel, wrcPickArea,
-    wrcUnreadKeys, wrcChatUnread,
+    wrcUnreadKeys, wrcChatUnread, wrcChatTarget,
     wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcTeamGaps, wrcLiveSignal, wrcClosingItems,
 } = require('../../assets/js/war-room-console.js');
 
@@ -419,6 +419,28 @@ test('wrcChatUnread: a room that appears later is new in full, and a deleted mes
 test('wrcChatUnread copes with no rooms at all', () => {
     assert.deepEqual(wrcChatUnread({}, {general: 2}, null), {seen: {}, byRoom: {}, total: 0});
     assert.deepEqual(wrcChatUnread(null, null, null), {seen: {}, byRoom: {}, total: 0});
+});
+
+// ── the unread-messages counter in the bar (v3.412.0) ────────────────────────
+
+test('wrcChatTarget opens the first room, in tab order, that has new messages', () => {
+    const rooms = ['general', '137', '138'];
+    assert.equal(wrcChatTarget({138: 2, 137: 5}, rooms, 'general'), '137', 'tab order, not message count');
+    assert.equal(wrcChatTarget({138: 2}, rooms, 'general'), '138');
+});
+
+test('wrcChatTarget stays on the room already open when it is the one with new messages', () => {
+    assert.equal(wrcChatTarget({general: 1, 137: 3}, ['general', '137'], '137'), '137');
+});
+
+test('wrcChatTarget has nowhere to go when nothing is unread', () => {
+    assert.equal(wrcChatTarget({}, ['general', '137'], 'general'), null);
+    assert.equal(wrcChatTarget({general: 0}, ['general'], 'general'), null);
+    assert.equal(wrcChatTarget(null, null, 'general'), null);
+});
+
+test('wrcChatTarget ignores unread counts of a room that has no tab', () => {
+    assert.equal(wrcChatTarget({999: 4}, ['general', '137'], 'general'), null);
 });
 
 // ── the red LIVE button (v3.411.0) ───────────────────────────────────────────

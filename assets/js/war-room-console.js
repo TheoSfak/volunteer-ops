@@ -244,6 +244,21 @@ function wrcChatUnread(rooms, seen, viewed) {
 }
 
 /**
+ * Which chat room the «unread messages» counter in the bar should open (v3.412.0): the
+ * room already on screen if it has new messages, otherwise the first room, in the order
+ * of the room tabs, that has some. null when nothing is unread (the button then only
+ * brings the chat up).
+ *   byRoom    {room: new}, from wrcChatUnread()
+ *   roomKeys  the rooms in tab order
+ */
+function wrcChatTarget(byRoom, roomKeys, activeKey) {
+    const has = key => (Number((byRoom || {})[key]) || 0) > 0;
+    if (has(activeKey)) return activeKey;
+    const first = (roomKeys || []).find(has);
+    return first === undefined ? null : first;
+}
+
+/**
  * Orders sent a moment ago that nobody has acknowledged yet - the ones the assistant
  * does not raise until they have waited out its grace period, and which therefore
  * leave the queue saying «all under control» while 0 of 48 have answered.
@@ -383,7 +398,7 @@ if (typeof module !== 'undefined' && module.exports) {
         wrcStampKey, wrcSevRank, wrcOrderQueue, wrcSummarizeSelection,
         wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel, wrcNextSectorLabel, wrcPickArea,
         wrcOrderProgress, wrcContactTone, wrcContactOf, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts,
-        wrcUnreadKeys, wrcChatUnread,
+        wrcUnreadKeys, wrcChatUnread, wrcChatTarget,
         wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcTeamGaps, wrcLiveSignal, wrcClosingItems,
     };
 }
@@ -557,7 +572,14 @@ if (typeof module !== 'undefined' && module.exports) {
         const title = sig.onAir
             ? t('console.kpi_live_on', {n: sig.onAir}) + (waiting ? ' · ' + waiting : '')
             : (waiting || t('console.kpi_live_none'));
-        return [{k: 'live', label: 'LIVE', n: sig.onAir, tone: 'bad', card: 'liveStreamsCard', live: true, flash: sig.flash, waiting: sig.waiting, title}];
+        return [{k: 'live', label: 'LIVE', n: sig.onAir, tone: 'bad', card: 'liveStreamsCard', live: true, glyph: '<i class="wrc-rec" aria-hidden="true"></i>', flash: sig.flash, waiting: sig.waiting, title}];
+    }
+    // The chat's new messages as renderBadges() last counted them (it runs just before the counters).
+    let lastChat = {total: 0, byRoom: {}};
+    function chatKpi() {
+        const n = lastChat.total;
+        return [{k: 'chat', label: t('console.kpi_chat'), n, tone: 'warn', glyph: '<i class="bi bi-chat-dots-fill wrc-kpi-i" aria-hidden="true"></i>',
+            title: n ? t('console.kpi_chat_on', {n}) : t('console.kpi_chat_none')}];
     }
     function kpiData() {
         const a = page.assistant();
@@ -568,6 +590,7 @@ if (typeof module !== 'undefined' && module.exports) {
             {k: 'teams', label: t('console.kpi_teams'), n: state.teams.length},
             {k: 'sos', label: 'SOS', n: page.sos().length, tone: 'bad', go: 'queue'},
             ...liveKpi(),
+            ...chatKpi(),
             {k: 'ack', label: t('console.kpi_ack'), n: (a && a.counts && a.counts.overdue) || 0, tone: 'warn', go: 'queue'},
             {k: 'silent', label: t('console.kpi_silent'), n: silent, tone: 'warn', go: 'queue'},
             {k: 'incident', label: t('console.kpi_incidents'), n: page.incidents().length, filter: 'incident'},
@@ -582,7 +605,7 @@ if (typeof module !== 'undefined' && module.exports) {
         if (sig === kpiSig) return;
         kpiSig = sig;
         kpiBox.innerHTML = data.map(d => `<button type="button" class="wrc-kpi${d.n && d.tone ? ' wrc-kpi-' + d.tone : ''}${d.live ? ' wrc-kpi-live' + (d.n ? ' on' : '') + (d.flash ? ' flash' : '') : ''}" data-kpi="${esc(d.k)}"${d.go ? ` data-go="${esc(d.go)}"` : ''}${d.filter ? ` data-filter-to="${esc(d.filter)}"` : ''}${d.card ? ` data-card="${esc(d.card)}"` : ''}${d.title ? ` title="${esc(d.title)}" aria-label="${esc(d.label + ': ' + d.title)}"` : ''}>
-            <span class="wrc-kpi-l">${d.live ? '<i class="wrc-rec" aria-hidden="true"></i>' : ''}${esc(d.label)}</span><b class="num">${d.n}</b></button>`).join('');
+            <span class="wrc-kpi-l">${d.glyph || ''}${esc(d.label)}</span><b class="num">${d.n}</b></button>`).join('');
     }
     /** The red LIVE button: whatever is on air now counts as looked at, and the live screen comes up. */
     function watchLive() {
@@ -614,7 +637,8 @@ if (typeof module !== 'undefined' && module.exports) {
         const b = e.target.closest('.wrc-kpi');
         if (!b) return;
         if (b.dataset.kpi === 'live') watchLive();
-        jump(b.dataset);
+        if (b.dataset.kpi === 'chat') openUnreadChat();
+        else jump(b.dataset);
     });
 
     // ── the phases: one console, composed for what the mission is doing ──────
@@ -1701,9 +1725,19 @@ if (typeof module !== 'undefined' && module.exports) {
         return keys.length - next.size;
     }
 
+    function roomKeyOf(tab) { return tab && tab.dataset.teamId ? String(tab.dataset.teamId) : 'general'; }
     function activeRoomKey() {
-        const tab = $('.chat-room-tab.active', root);
-        return tab && tab.dataset.teamId ? String(tab.dataset.teamId) : 'general';
+        return roomKeyOf($('.chat-room-tab.active', root));
+    }
+    /** The «messages» counter in the bar: bring the chat up on the room that has the new messages. */
+    function openUnreadChat() {
+        // Decided before the chat is shown: showing a room is what makes its messages seen.
+        const tabs = $$('.chat-room-tab', root);
+        const key = wrcChatTarget(lastChat.byRoom, tabs.map(roomKeyOf), activeRoomKey());
+        setTab('chat');
+        const tab = key === null ? null : tabs.find(tb => roomKeyOf(tb) === key);
+        if (tab && !tab.classList.contains('active')) tab.click();
+        renderBadges();
     }
     function chatUnread() {
         if (!state.chatRooms) return {total: 0, byRoom: {}};
@@ -1727,8 +1761,12 @@ if (typeof module !== 'undefined' && module.exports) {
         setCount('wrcMediaCnt', unreadOf('media', page.media().map(m => 'media:' + m.id)));
         const chat = chatUnread();
         setCount('wrcChatCnt', chat.total);
+        // The counter in the bar says the same as the dock's tab, and clears with it.
+        const chatChanged = chat.total !== lastChat.total;
+        lastChat = chat;
+        if (chatChanged) renderKpis();
         $$('.chat-room-tab', root).forEach(tab => {
-            const n = chat.byRoom[tab.dataset.teamId ? String(tab.dataset.teamId) : 'general'] || 0;
+            const n = chat.byRoom[roomKeyOf(tab)] || 0;
             let pill = $('.wrc-room-new', tab);
             if (!n) { if (pill) pill.remove(); return; }
             if (!pill) { pill = document.createElement('span'); pill.className = 'wrc-room-new'; tab.appendChild(pill); }
