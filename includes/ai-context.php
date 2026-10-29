@@ -889,7 +889,10 @@ function buildTeamAiDigest(int $missionId, array $mission, array $score, array $
         'βεβαιοτητα'        => ['low' => 'χαμηλη', 'medium' => 'μετρια', 'high' => 'υψηλη'][$team['evidence_level']] ?? null,
         'επιπεδο'           => $team['tier'][1] ?? null,
         'μετρησιμοι_τομεις' => $team['pillar_count'],
-        'επαρκες_δειγμα'    => $team['ranked'],
+        // Ranked AND not thin: a team with two observations is ranked (it was
+        // measured on two pillars) but its sample is not adequate, and saying
+        // so here is what stops the assessment praising it for a percentage.
+        'επαρκες_δειγμα'    => $team['ranked'] && $team['evidence_level'] !== 'low',
         // No rank key, deliberately: a placing is a statement about the teams
         // it beat.
     ];

@@ -492,6 +492,8 @@ final class MissionTeamScoreFairnessTest extends TestCase
         $src = (string) file_get_contents(__DIR__ . '/../includes/ai-context.php');
         $this->assertStringContainsString("'βαθμος_χωρις_σταθμιση'", $src);
         $this->assertStringContainsString('ενα 1/1 δεν ειναι καλυτερο απο ενα 8/9', $src);
+        // "Sample adequate" must not be true for a team the report itself calls low-confidence.
+        $this->assertStringContainsString("'επαρκες_δειγμα'    => \$team['ranked'] && \$team['evidence_level'] !== 'low'", $src);
     }
 
     public function testTeamsWithARealRecordAreStillComparedOnEachDimension(): void
