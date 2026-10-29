@@ -206,6 +206,43 @@ $printDate = date('d/m/Y');
         .screen-notice button { background: #fff; color: #17375e; border: none; padding: 4px 14px; border-radius: 4px; cursor: pointer; font-size: 9pt; font-weight: bold; }
         .screen-notice button:hover { background: #e0e8f5; }
 
+        /* Phones and small tablets, on screen only: the print rules below are untouched, so the
+           A4 landscape page is exactly what it was. The certificate keeps its frame, gold corners
+           and centred layout but reflows into the width of the screen: the 56px side padding,
+           the point-sized type and the QR pinned over the text are what overflowed it. */
+        @media screen and (max-width: 768px) {
+            body { padding: 10px; }
+            /* Scrolls away with the page instead of covering the top of the certificate. */
+            .screen-notice { position: static; margin: -10px -10px 10px; padding: 8px 12px; font-size: 10pt; }
+            .cert-page { margin-top: 0 !important; padding: 10px; }
+            .cert-border-outer { padding: 5px; }
+            .cert-border-inner { padding: 22px 18px 20px; min-height: 0; }
+            .cert-corner { width: 22px; height: 22px; }
+            .cert-org-row img { height: 64px; }
+            .cert-watermark img { max-height: 240px; max-width: 80%; }
+            .cert-title { font-size: 27px; line-height: 1.2; margin-top: 12px; }
+            .cert-title-rule { width: 90px; margin: 12px 0 18px; }
+            .cert-presented-to { font-size: 15px; }
+            .cert-recipient-name { display: block; width: 100%; min-width: 0; font-size: 25px; line-height: 1.25; overflow-wrap: anywhere; }
+            .cert-guest-org { font-size: 14px; }
+            .cert-body { font-size: 16px; line-height: 1.65; overflow-wrap: break-word; }
+            .cert-citation { font-size: 15px; padding: 0 22px; margin-top: 18px; }
+            .cert-signatures { flex-direction: column; align-items: center; gap: 22px; padding-top: 26px; }
+            .cert-sig { width: 80%; }
+            /* The signature size setting is meant for the printed page; on a phone it would be ~9px. */
+            .cert-sig-name { font-size: 15px; }
+            .cert-sig-line { font-size: 12px; }
+            .cert-footer-meta { font-size: 12px; text-align: center; margin-top: 18px; }
+            .cert-qr { position: static; margin: 16px auto 0; }
+            .cert-qr .cert-qr-caption { max-width: none; font-size: 11px; margin-top: 4px; }
+        }
+        @media screen and (max-width: 420px) {
+            .cert-border-inner { padding: 20px 14px 18px; }
+            .cert-title { font-size: 24px; }
+            .cert-recipient-name { font-size: 22px; }
+            .cert-body { font-size: 15px; }
+        }
+
         @media print {
             .screen-notice { display: none !important; }
             body { padding: 0; background: #fff; }
@@ -292,7 +329,11 @@ $printDate = date('d/m/Y');
 </div>
 
 <script>
-setTimeout(function () { window.print(); }, 400);
+// The print dialog pops up by itself on a computer. On a phone it would cover the certificate
+// the moment it opens, so there the person reads it first and uses the Print / PDF button.
+if (window.matchMedia('(min-width: 769px)').matches) {
+    setTimeout(function () { window.print(); }, 400);
+}
 </script>
 <?php require __DIR__ . '/includes/inactivity-timeout.php'; ?>
 </body>
