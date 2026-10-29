@@ -13,7 +13,7 @@ const {
     wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel,
     wrcOrderProgress, wrcContactTone, wrcContactOf, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts, wrcNextSectorLabel, wrcPickArea,
     wrcUnreadKeys, wrcChatUnread,
-    wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcTeamGaps, wrcClosingItems,
+    wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcTeamGaps, wrcLiveSignal, wrcClosingItems,
 } = require('../../assets/js/war-room-console.js');
 
 const teams = [
@@ -419,6 +419,50 @@ test('wrcChatUnread: a room that appears later is new in full, and a deleted mes
 test('wrcChatUnread copes with no rooms at all', () => {
     assert.deepEqual(wrcChatUnread({}, {general: 2}, null), {seen: {}, byRoom: {}, total: 0});
     assert.deepEqual(wrcChatUnread(null, null, null), {seen: {}, byRoom: {}, total: 0});
+});
+
+// ── the red LIVE button (v3.411.0) ───────────────────────────────────────────
+
+test('wrcLiveSignal: nothing asked and nothing on air is quiet', () => {
+    assert.deepEqual(wrcLiveSignal([], []), {onAir: 0, waiting: 0, fresh: 0, flash: false});
+    assert.deepEqual(wrcLiveSignal(null, null), {onAir: 0, waiting: 0, fresh: 0, flash: false});
+});
+
+test('wrcLiveSignal: a stream that was only asked for does not flash, it is counted as waiting', () => {
+    const r = wrcLiveSignal([{id: 5, status: 'requested'}, {id: 6, status: 'requested'}], []);
+    assert.equal(r.onAir, 0);
+    assert.equal(r.waiting, 2);
+    assert.equal(r.flash, false, 'it flashes when they START transmitting, not when command asks');
+});
+
+test('wrcLiveSignal: the moment a volunteer starts transmitting, the button flashes', () => {
+    const asked = [{id: 5, status: 'requested'}];
+    assert.equal(wrcLiveSignal(asked, []).flash, false);
+    const started = wrcLiveSignal([{id: 5, status: 'live'}], []);
+    assert.deepEqual(started, {onAir: 1, waiting: 0, fresh: 1, flash: true});
+});
+
+test('wrcLiveSignal: opening the live screen calms it, and the next stream flashes it again', () => {
+    const seen = ['5'];
+    const one = wrcLiveSignal([{id: 5, status: 'live'}], seen);
+    assert.equal(one.onAir, 1);
+    assert.equal(one.flash, false, 'looked at: still on air, no longer flashing');
+    const two = wrcLiveSignal([{id: 5, status: 'live'}, {id: 8, status: 'live'}], seen);
+    assert.equal(two.onAir, 2);
+    assert.equal(two.fresh, 1);
+    assert.equal(two.flash, true, 'a second volunteer started after command looked');
+});
+
+test('wrcLiveSignal: ids match whatever their type (the card gives strings, a poll gives numbers)', () => {
+    assert.equal(wrcLiveSignal([{id: '5', status: 'live'}], [5]).flash, false);
+    assert.equal(wrcLiveSignal([{id: 5, status: 'live'}], ['5']).flash, false);
+});
+
+test('wrcLiveSignal: a finished stream counts for nothing', () => {
+    const r = wrcLiveSignal([{id: 5, status: 'ended'}, {id: 6, status: 'live'}], []);
+    assert.equal(r.onAir, 1);
+    assert.equal(r.fresh, 1);
+    assert.equal(wrcLiveSignal([{id: 5, status: 'ended'}], []).flash, false);
 });
 
 // ── a sector drawn from the console ──────────────────────────────────────────

@@ -312,6 +312,29 @@ function wrcTeamGaps(teams, rosterIds) {
 }
 
 /**
+ * The red «LIVE» counter in the bar (v3.411.0): how many streams are on air, and
+ * whether the button should flash. It flashes for as long as a stream is on air that
+ * command has not yet gone to look at; opening the live screen calms it to a slow
+ * pulse, and the next stream to go on air flashes it again.
+ *   streams  [{id, status}] as the Live card lists them: 'requested' = asked and not
+ *            yet accepted, 'live' = transmitting, anything else is finished
+ *   seenIds  ids of the streams command has already opened the live screen for
+ * -> {onAir, waiting, fresh, flash}
+ */
+function wrcLiveSignal(streams, seenIds) {
+    const list = streams || [];
+    const seen = new Set((seenIds || []).map(String));
+    const onAir = list.filter(s => s.status === 'live');
+    const fresh = onAir.filter(s => !seen.has(String(s.id))).length;
+    return {
+        onAir: onAir.length,
+        waiting: list.filter(s => s.status === 'requested').length,
+        fresh,
+        flash: fresh > 0,
+    };
+}
+
+/**
  * «Είμαστε έτοιμοι;» - what has to be true before the mission goes live.
  * facts: {teams, people, noGps, gpsPeople, sectors, sectorsFree, stale, roster, unteamed, teamsNoGps, teamsNoGpsNames}
  *   gpsPeople  how many of `people` have their GPS on; `stale` is out of THEM, never out of everybody
@@ -361,7 +384,7 @@ if (typeof module !== 'undefined' && module.exports) {
         wrcDispatchPlan, wrcRouteSeedFor, wrcRecipientLabel, wrcNextSectorLabel, wrcPickArea,
         wrcOrderProgress, wrcContactTone, wrcContactOf, wrcTeamBadge, wrcDeclineLine, wrcWaitingReceipts,
         wrcUnreadKeys, wrcChatUnread,
-        wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcTeamGaps, wrcClosingItems,
+        wrcNormalizePhase, wrcPhasePreset, wrcReadiness, wrcTeamGaps, wrcLiveSignal, wrcClosingItems,
     };
 }
 
@@ -520,6 +543,22 @@ if (typeof module !== 'undefined' && module.exports) {
     kpiBox.className = 'wrc-kpis';
     kpiBox.id = 'wrcKpis';
 
+    // Streams command has already opened the live screen for (this page load only).
+    const seenLive = new Set();
+    /** The Live card's rows, read from the card itself: the poll keeps it current. */
+    function liveStreamRows() {
+        return $$('#liveStreamsBody .live-stream-item[data-stream-id]').map(el => ({id: el.dataset.streamId, status: el.dataset.status}));
+    }
+    function liveKpi() {
+        // The card is on the page only where LiveKit is set up: elsewhere there is no button either.
+        if (!cardNode('liveStreamsCard')) return [];
+        const sig = wrcLiveSignal(liveStreamRows(), Array.from(seenLive));
+        const waiting = sig.waiting ? t('console.kpi_live_wait', {n: sig.waiting}) : '';
+        const title = sig.onAir
+            ? t('console.kpi_live_on', {n: sig.onAir}) + (waiting ? ' · ' + waiting : '')
+            : (waiting || t('console.kpi_live_none'));
+        return [{k: 'live', label: 'LIVE', n: sig.onAir, tone: 'bad', card: 'liveStreamsCard', live: true, flash: sig.flash, waiting: sig.waiting, title}];
+    }
     function kpiData() {
         const a = page.assistant();
         const rows = (a && a.pending) || [];
@@ -528,6 +567,7 @@ if (typeof module !== 'undefined' && module.exports) {
         return [
             {k: 'teams', label: t('console.kpi_teams'), n: state.teams.length},
             {k: 'sos', label: 'SOS', n: page.sos().length, tone: 'bad', go: 'queue'},
+            ...liveKpi(),
             {k: 'ack', label: t('console.kpi_ack'), n: (a && a.counts && a.counts.overdue) || 0, tone: 'warn', go: 'queue'},
             {k: 'silent', label: t('console.kpi_silent'), n: silent, tone: 'warn', go: 'queue'},
             {k: 'incident', label: t('console.kpi_incidents'), n: page.incidents().length, filter: 'incident'},
@@ -538,11 +578,24 @@ if (typeof module !== 'undefined' && module.exports) {
     let kpiSig = '';
     function renderKpis() {
         const data = kpiData();
-        const sig = JSON.stringify(data.map(d => [d.k, d.n]));
+        const sig = JSON.stringify(data.map(d => [d.k, d.n, d.flash ? 1 : 0, d.waiting || 0]));
         if (sig === kpiSig) return;
         kpiSig = sig;
-        kpiBox.innerHTML = data.map(d => `<button type="button" class="wrc-kpi${d.n && d.tone ? ' wrc-kpi-' + d.tone : ''}" data-kpi="${esc(d.k)}"${d.go ? ` data-go="${esc(d.go)}"` : ''}${d.filter ? ` data-filter-to="${esc(d.filter)}"` : ''}${d.card ? ` data-card="${esc(d.card)}"` : ''}>
-            <span class="wrc-kpi-l">${esc(d.label)}</span><b class="num">${d.n}</b></button>`).join('');
+        kpiBox.innerHTML = data.map(d => `<button type="button" class="wrc-kpi${d.n && d.tone ? ' wrc-kpi-' + d.tone : ''}${d.live ? ' wrc-kpi-live' + (d.n ? ' on' : '') + (d.flash ? ' flash' : '') : ''}" data-kpi="${esc(d.k)}"${d.go ? ` data-go="${esc(d.go)}"` : ''}${d.filter ? ` data-filter-to="${esc(d.filter)}"` : ''}${d.card ? ` data-card="${esc(d.card)}"` : ''}${d.title ? ` title="${esc(d.title)}" aria-label="${esc(d.label + ': ' + d.title)}"` : ''}>
+            <span class="wrc-kpi-l">${d.live ? '<i class="wrc-rec" aria-hidden="true"></i>' : ''}${esc(d.label)}</span><b class="num">${d.n}</b></button>`).join('');
+    }
+    /** The red LIVE button: whatever is on air now counts as looked at, and the live screen comes up. */
+    function watchLive() {
+        liveStreamRows().filter(r => r.status === 'live').forEach(r => seenLive.add(String(r.id)));
+        kpiSig = '';
+        renderKpis();
+        // A tile attached while its pane was hidden may never have started: a browser that will
+        // not play what it cannot see (WebKit) gave up asking long ago, so ask again.
+        setTimeout(() => $$('video[data-live-video]').forEach(v => {
+            if (!v.srcObject || !v.paused) return;
+            const p = v.play();
+            if (p && p.catch) p.catch(() => { /* the page's own retry loop reports it */ });
+        }), 150);
     }
     /** Where a counter or a checklist row leads: a flash on a region, a feed filter, or a card. */
     function jump(ds) {
@@ -559,7 +612,9 @@ if (typeof module !== 'undefined' && module.exports) {
     }
     kpiBox.addEventListener('click', e => {
         const b = e.target.closest('.wrc-kpi');
-        if (b) jump(b.dataset);
+        if (!b) return;
+        if (b.dataset.kpi === 'live') watchLive();
+        jump(b.dataset);
     });
 
     // ── the phases: one console, composed for what the mission is doing ──────

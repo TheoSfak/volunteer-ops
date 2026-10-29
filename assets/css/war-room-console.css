@@ -45,6 +45,24 @@ body.wr-console-view .war-room-hero h1 { font-size: 1.05rem; margin: 0 !importan
 .wrc-kpi-warn { background: #f6b73c; border-color: #e0a800; color: #3d2600; }
 .wrc-kpi-warn .wrc-kpi-l { color: #5c3c00; }
 .wrc-kpi-warn:hover { background: #efae2c; }
+/* The red LIVE button (v3.411.0): a record dot. On air it takes the red look of SOS (the
+   skins already style that), and flashes for as long as a stream has not been looked at. */
+.wrc-rec { display: inline-block; width: 1em; height: 1em; margin-right: 4px; border-radius: 50%; background: #e02424; vertical-align: -.13em; }
+.wrc-kpi-live:not(.on) .wrc-rec { opacity: .6; }
+.wrc-kpi-live.on .wrc-rec { background: #ff2d2d; box-shadow: 0 0 0 1.5px #fff, 0 0 8px 2px rgba(255, 45, 45, .9); }
+.wrc-kpi-live.on:not(.flash) .wrc-rec { animation: wrcRecPulse 1.6s ease-in-out infinite; }
+.wrc-kpi-live.flash { animation: wrcLiveFlash .7s ease-in-out infinite; }
+@keyframes wrcRecPulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+/* The border and halo are animated too, not just the fade: an animation beats every skin's own
+   rule for the SOS look, so the flash is equally loud on each of them. */
+@keyframes wrcLiveFlash {
+    0%, 100% { opacity: 1; border-color: #ff5a5a; box-shadow: 0 0 0 0 rgba(255, 45, 45, .95), 0 0 14px 3px rgba(255, 45, 45, .8); }
+    50% { opacity: .4; border-color: rgba(255, 90, 90, .35); box-shadow: 0 0 0 8px rgba(255, 45, 45, 0), 0 0 0 0 rgba(255, 45, 45, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .wrc-kpi-live.flash, .wrc-kpi-live.on .wrc-rec { animation: none; }
+    .wrc-kpi-live.flash { outline: 3px solid #ffd54a; outline-offset: 1px; }
+}
 .wrc-flash { animation: wrcFlash 1.2s ease-out 1; }
 @keyframes wrcFlash { 0% { box-shadow: 0 0 0 4px rgba(29, 78, 216, .65); } 100% { box-shadow: 0 0 0 0 rgba(29, 78, 216, 0); } }
 @media (prefers-reduced-motion: reduce) { .wrc-flash { animation: none; } }
