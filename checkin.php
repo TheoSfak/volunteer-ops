@@ -88,8 +88,13 @@ $roomOpen = $shift && ($pr || $otherShift)
 include __DIR__ . '/includes/header.php';
 ?>
 
+<style>
+    /* The mission's name is what the person came to see: as large as the screen allows. */
+    .checkin-mission-title { font-size: clamp(2.1rem, 8vw, 3rem); font-weight: 800; line-height: 1.15; letter-spacing: -.01em; overflow-wrap: anywhere; }
+</style>
+
 <div class="row justify-content-center mt-<?= $notice ? '5' : '4' ?>">
-    <div class="col-md-7 col-lg-5">
+    <div class="col-md-8 col-lg-6">
 
 <?php if ($notice): ?>
         <div class="card text-center shadow-sm<?= $notice['tone'] === 'muted' ? '' : ' border-' . $notice['tone'] ?>">
@@ -115,9 +120,13 @@ include __DIR__ . '/includes/header.php';
                 <?php if ($pr && !empty($pr['attendance_confirmed_at']) && !empty($pr['attended'])): ?>
                     <!-- Checked in: now, or by an earlier scan -->
                     <div class="text-center py-2">
-                        <div class="text-success mb-3" style="font-size:4rem;"><i class="bi bi-check-circle-fill"></i></div>
-                        <h4 class="text-success fw-bold"><?= h(t($justRecorded ? 'checkin.done_title' : 'checkin.already_title')) ?></h4>
-                        <p class="mb-3"><?= h(t('checkin.declared', ['name' => $user['name'], 'mission' => $shift['mission_title']])) ?></p>
+                        <div class="text-success mb-2" style="font-size:3.5rem;"><i class="bi bi-check-circle-fill"></i></div>
+                        <h3 class="fw-bold mb-1"><?= h(t('checkin.welcome', ['name' => $user['name']])) ?></h3>
+                        <p class="text-success fw-semibold mb-3"><?= h(t($justRecorded ? 'checkin.done_title' : 'checkin.already_title')) ?></p>
+                        <div class="text-muted small text-uppercase mb-2" style="letter-spacing:.04em;"><?= h(t('checkin.declared')) ?></div>
+                        <div class="bg-primary-subtle border border-primary-subtle rounded-4 px-3 py-3 mb-3">
+                            <div class="checkin-mission-title"><?= h($shift['mission_title']) ?></div>
+                        </div>
                     </div>
                     <ul class="list-group list-group-flush text-start mb-3">
                         <li class="list-group-item d-flex justify-content-between gap-3">
@@ -139,9 +148,10 @@ include __DIR__ . '/includes/header.php';
                         </li>
                         <?php endif; ?>
                     </ul>
+                    <p class="text-center text-muted mb-0"><?= h(t('checkin.welcome_note')) ?></p>
 
                 <?php else: ?>
-                    <h5 class="fw-bold mb-1"><?= h($shift['mission_title']) ?></h5>
+                    <div class="checkin-mission-title mb-2"><?= h($shift['mission_title']) ?></div>
                     <div class="text-muted small mb-3">
                         <i class="bi bi-clock me-1"></i><?= formatDateTime($shift['start_time']) ?> – <?= date('H:i', strtotime($shift['end_time'])) ?>
                         <?php if ($shift['location']): ?>
