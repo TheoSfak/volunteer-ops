@@ -891,9 +891,23 @@ include __DIR__ . '/includes/header.php';
                         PARTICIPATION_CANCELED_BY_ADMIN => 'Ακυρωμένοι από διαχειριστή',
                         PARTICIPATION_CANCELED_BY_USER => 'Ακυρωμένοι από τον εθελοντή',
                     ];
+                    // Check-in: "yes" = present (attended, or the volunteer's own QR scan); "no" = approved
+                    // but neither. Pending / rejected / cancelled sign-ups are in neither list.
+                    $participantCheckin = function (array $row): string {
+                        if (!empty($row['attended'])
+                            || (!empty($row['attendance_confirmed_at']) && (int) ($row['attendance_confirmed_by'] ?? 0) === (int) $row['volunteer_id'])) {
+                            return 'yes';
+                        }
+                        return $row['status'] === PARTICIPATION_APPROVED ? 'no' : '';
+                    };
+                    $checkinCounts = ['yes' => 0, 'no' => 0];
+                    foreach ($participants as $fp) {
+                        $fc = $participantCheckin($fp);
+                        if ($fc !== '') $checkinCounts[$fc]++;
+                    }
                     ?>
                     <div class="row g-2 mb-3" id="participantFilters">
-                        <div class="col-12 col-md-4">
+                        <div class="col-12 col-sm-6 col-lg-3">
                             <select class="form-select form-select-sm" id="filterTeam" aria-label="Εθελοντική ομάδα">
                                 <option value="">Όλες οι ομάδες</option>
                                 <?php foreach (array_keys($filterTeams) as $ft): ?>
@@ -901,7 +915,7 @@ include __DIR__ . '/includes/header.php';
                                 <?php endforeach; ?>
                             </select>
                         </div>
-                        <div class="col-12 col-md-4">
+                        <div class="col-12 col-sm-6 col-lg-3">
                             <select class="form-select form-select-sm" id="filterType" aria-label="Κατηγορία">
                                 <option value="">Όλες οι κατηγορίες</option>
                                 <?php foreach ($filterTypes as $ftKey => $ftLabel): ?>
@@ -909,12 +923,19 @@ include __DIR__ . '/includes/header.php';
                                 <?php endforeach; ?>
                             </select>
                         </div>
-                        <div class="col-12 col-md-4">
+                        <div class="col-12 col-sm-6 col-lg-3">
                             <select class="form-select form-select-sm" id="filterStatus" aria-label="Κατάσταση">
                                 <option value="">Όλες οι καταστάσεις</option>
                                 <?php foreach ($filterStatuses as $fsKey => $fsLabel): ?>
                                 <option value="<?= h($fsKey) ?>"><?= h($fsLabel) ?></option>
                                 <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-12 col-sm-6 col-lg-3">
+                            <select class="form-select form-select-sm" id="filterCheckin" aria-label="Check-in" title="Έκαναν check-in: παρόντες ή με QR check-in. Δεν έκαναν: εγκεκριμένοι χωρίς check-in.">
+                                <option value="">Όλοι (check-in)</option>
+                                <option value="yes">Έκαναν check-in (<?= (int) $checkinCounts['yes'] ?>)</option>
+                                <option value="no">Δεν έκαναν check-in (<?= (int) $checkinCounts['no'] ?>)</option>
                             </select>
                         </div>
                         <div class="col-12 small text-muted" id="filterCount"></div>
@@ -961,7 +982,7 @@ include __DIR__ . '/includes/header.php';
                         <?php foreach ($participants as $p):
                             $accentColor = $statusBorderMap[$p['status']] ?? '#6c757d';
                         ?>
-                        <div class="col part-col" data-team="<?= h(trim((string) ($p['home_team_name'] ?? ''))) ?>" data-type="<?= h($p['volunteer_type'] ?? VTYPE_RESCUER) ?>" data-status="<?= h($p['status']) ?>">
+                        <div class="col part-col" data-team="<?= h(trim((string) ($p['home_team_name'] ?? ''))) ?>" data-type="<?= h($p['volunteer_type'] ?? VTYPE_RESCUER) ?>" data-status="<?= h($p['status']) ?>" data-checkin="<?= $participantCheckin($p) ?>">
                             <div class="card h-100 shadow-sm" style="border-left:4px solid <?= $accentColor ?>;border-radius:.6rem;">
                                 <div class="card-body pb-2">
                                     <!-- Name row -->
@@ -1687,6 +1708,7 @@ $activeParticipants = array_filter($participants, function($p) {
     var fTeam = document.getElementById('filterTeam');
     var fType = document.getElementById('filterType');
     var fStatus = document.getElementById('filterStatus');
+    var fCheckin = document.getElementById('filterCheckin');
     var countEl = document.getElementById('filterCount');
     var bulkCount = document.getElementById('bulkCount');
     var selectAll = document.getElementById('bulkSelectAll');
@@ -1705,11 +1727,12 @@ $activeParticipants = array_filter($participants, function($p) {
         if (selectAll) selectAll.checked = vis.length > 0 && vis.every(function(cb) { return cb.checked; });
     }
     function applyFilters() {
-        var team = fTeam.value, type = fType.value, status = fStatus.value, shown = 0;
+        var team = fTeam.value, type = fType.value, status = fStatus.value, checkin = fCheckin.value, shown = 0;
         cols.forEach(function(col) {
             var ok = (!team || col.dataset.team === team)
                 && (!type || col.dataset.type === type)
-                && (!status || col.dataset.status === status);
+                && (!status || col.dataset.status === status)
+                && (!checkin || col.dataset.checkin === checkin);
             col.classList.toggle('d-none', !ok);
             if (ok) {
                 shown++;
@@ -1719,10 +1742,10 @@ $activeParticipants = array_filter($participants, function($p) {
                 if (cb) cb.checked = false;
             }
         });
-        countEl.textContent = (team || type || status) ? ('Εμφανίζονται ' + shown + ' από ' + cols.length) : '';
+        countEl.textContent = (team || type || status || checkin) ? ('Εμφανίζονται ' + shown + ' από ' + cols.length) : '';
         updateBulk();
     }
-    [fTeam, fType, fStatus].forEach(function(el) { el.addEventListener('change', applyFilters); });
+    [fTeam, fType, fStatus, fCheckin].forEach(function(el) { el.addEventListener('change', applyFilters); });
     document.querySelectorAll('.part-check').forEach(function(cb) { cb.addEventListener('change', updateBulk); });
     if (selectAll) {
         selectAll.addEventListener('change', function() {
