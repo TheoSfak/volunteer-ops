@@ -147,24 +147,21 @@ $alreadyCertifiedIds = array_column($issuedCertificates, 'recipient_user_id');
 
 // Combined recipient picker — every active user, this mission's own approved
 // participants (guests included, same participation_requests path as
-// everyone else) sorted first.
-$pickableUsers = dbFetchAll(
-    "SELECT u.id, u.name, u.email, u.is_external, u.guest_org_name, u.guest_country_code,
-            COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color,
-            (mp.volunteer_id IS NOT NULL) AS is_participant
-     FROM users u
-     LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
-     LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
-     LEFT JOIN (
-         SELECT DISTINCT pr.volunteer_id
-         FROM participation_requests pr
-         JOIN shifts s ON s.id = pr.shift_id
-         WHERE s.mission_id = ? AND pr.status = ?
-     ) mp ON mp.volunteer_id = u.id
-     WHERE u.is_active = 1
-     ORDER BY is_participant DESC, u.name",
-    [$missionId, PARTICIPATION_APPROVED]
-);
+// everyone else) sorted first, those with a recorded check-in before the
+// merely approved. Whoever has a recorded presence and no certificate yet is
+// ticked from the start; the approved who never checked in are not.
+$pickableUsers = missionCertificatePickList($missionId);
+$alreadyCertifiedSet = array_flip(array_map('intval', $alreadyCertifiedIds));
+$checkedInCount = 0;
+$preselectedCount = 0;
+foreach ($pickableUsers as $u) {
+    if ($u['has_checked_in']) {
+        $checkedInCount++;
+        if (!isset($alreadyCertifiedSet[(int) $u['id']])) {
+            $preselectedCount++;
+        }
+    }
+}
 
 $pageTitle = 'Βεβαιώσεις — ' . $mission['title'];
 $clockMission = $mission; // the clock strip names its prefecture (includes/clock-place.php)
@@ -196,28 +193,54 @@ include __DIR__ . '/includes/header.php';
             <?= csrfField() ?>
             <input type="hidden" name="action" value="issue">
 
+            <?php if ($checkedInCount > 0): ?>
+                <div class="alert alert-info py-2 small">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Έχουν προεπιλεγεί όσοι έχουν καταγεγραμμένη παρουσία (check-in), χωρίς ήδη εκδοθείσα βεβαίωση: <strong><?= $preselectedCount ?></strong>.
+                    Όσοι είναι εγκεκριμένοι αλλά χωρίς check-in δεν έχουν επιλεγεί· μπορείτε να τους προσθέσετε χειροκίνητα.
+                </div>
+            <?php else: ?>
+                <div class="alert alert-warning py-2 small">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    Δεν έχει καταγραφεί παρουσία για καμία βάρδια αυτής της αποστολής, γι' αυτό δεν έχει γίνει προεπιλογή.
+                    Σημειώστε τις παρουσίες από τη <a href="attendance.php?mission_id=<?= $missionId ?>">Διαχείριση Παρουσιών</a>.
+                </div>
+            <?php endif; ?>
             <div class="mb-3">
                 <input type="text" class="form-control" id="certRecipientSearch" placeholder="Αναζήτηση με όνομα ή email...">
             </div>
-            <div class="mb-3 d-flex justify-content-between align-items-center">
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" id="certSelectAll">
-                    <label class="form-check-label fw-bold" for="certSelectAll">Επιλογή Όλων</label>
+            <div class="mb-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                <div class="d-flex align-items-center gap-3 flex-wrap">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="certSelectAll">
+                        <label class="form-check-label fw-bold" for="certSelectAll">Επιλογή Όλων</label>
+                    </div>
+                    <?php if ($checkedInCount > 0): ?>
+                        <button type="button" class="btn btn-sm btn-outline-success" id="certSelectCheckedIn">
+                            <i class="bi bi-check2-circle me-1"></i>Μόνο όσοι έκαναν check-in
+                        </button>
+                    <?php endif; ?>
                 </div>
                 <span class="badge bg-primary" id="certSelectedCount">0 επιλεγμένοι</span>
             </div>
             <div class="list-group mb-3" style="max-height: 320px; overflow-y: auto;" id="certRecipientList">
-                <?php foreach ($pickableUsers as $u): ?>
+                <?php foreach ($pickableUsers as $u):
+                    $hasCert = isset($alreadyCertifiedSet[(int) $u['id']]);
+                ?>
                     <label class="list-group-item d-flex gap-2 align-items-center cert-recipient-item">
-                        <input class="form-check-input flex-shrink-0 cert-recipient-checkbox" type="checkbox" name="recipient_ids[]" value="<?= $u['id'] ?>">
+                        <input class="form-check-input flex-shrink-0 cert-recipient-checkbox" type="checkbox" name="recipient_ids[]" value="<?= $u['id'] ?>"
+                               data-checked-in="<?= $u['has_checked_in'] && !$hasCert ? '1' : '0' ?>"
+                               <?= $u['has_checked_in'] && !$hasCert ? 'checked' : '' ?>>
                         <span class="flex-grow-1">
                             <span class="cert-recipient-name fw-bold"><?= guestNameHtml($u['name'], (bool) $u['is_external'], $u['home_team_name'], $u['home_team_color'], $u['guest_country_code']) ?><?= k9BadgeHtml((int) $u['id']) ?><?= captainBadgeHtml((int) $u['id']) ?></span>
                             <small class="text-muted cert-recipient-email d-block"><?= h($u['email']) ?></small>
                         </span>
-                        <?php if ($u['is_participant']): ?>
-                            <span class="badge bg-success-subtle text-success-emphasis">Συμμετείχε</span>
+                        <?php if ($u['has_checked_in']): ?>
+                            <span class="badge bg-success-subtle text-success-emphasis" title="Έχει καταγραφεί παρουσία (QR check-in ή έλεγχος παρουσιών)"><i class="bi bi-check2-circle me-1"></i>Check-in ✓</span>
+                        <?php elseif ($u['is_participant']): ?>
+                            <span class="badge bg-secondary-subtle text-secondary-emphasis" title="Εγκεκριμένος σε βάρδια της αποστολής, αλλά δεν έχει καταγραφεί παρουσία">Χωρίς check-in</span>
                         <?php endif; ?>
-                        <?php if (in_array((int) $u['id'], array_map('intval', $alreadyCertifiedIds), true)): ?>
+                        <?php if ($hasCert): ?>
                             <span class="badge bg-warning-subtle text-warning-emphasis" title="Έχει ήδη βεβαίωση για αυτή την αποστολή">Έχει ήδη βεβαίωση</span>
                         <?php endif; ?>
                     </label>
@@ -331,6 +354,16 @@ document.addEventListener('DOMContentLoaded', function () {
         updateSelectAllState();
     }));
 
+    // Back to exactly the people with a recorded check-in (and no certificate yet).
+    const checkedInBtn = document.getElementById('certSelectCheckedIn');
+    if (checkedInBtn) {
+        checkedInBtn.addEventListener('click', function () {
+            checkboxes.forEach(cb => { cb.checked = cb.dataset.checkedIn === '1'; });
+            updateCount();
+            updateSelectAllState();
+        });
+    }
+
     function updateCount() {
         const count = document.querySelectorAll('.cert-recipient-checkbox:checked').length;
         countBadge.textContent = count + (count === 1 ? ' επιλεγμένος' : ' επιλεγμένοι');
@@ -354,6 +387,10 @@ document.addEventListener('DOMContentLoaded', function () {
             selectAllCheckbox.indeterminate = false;
         }
     }
+
+    // The check-in people arrive ticked, so the counter and the button start from that.
+    updateCount();
+    updateSelectAllState();
 });
 </script>
 

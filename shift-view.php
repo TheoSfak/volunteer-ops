@@ -258,16 +258,27 @@ if (isPost()) {
             if ($canManage) {
                 $actualHours = (float) post('actual_hours');
 
+                // Only an approved sign-up of THIS shift, and only once: a repeated
+                // POST used to award the points a second time.
+                $pr = dbFetchOne(
+                    "SELECT * FROM participation_requests WHERE id = ? AND shift_id = ? AND status = ?",
+                    [(int) $prId, $id, PARTICIPATION_APPROVED]
+                );
+                if (!$pr) {
+                    setFlash('error', 'Δεν βρέθηκε εγκεκριμένη συμμετοχή σε αυτή τη βάρδια.');
+                    break;
+                }
+                if (!empty($pr['attended'])) {
+                    setFlash('warning', 'Η παρουσία έχει ήδη καταγραφεί.');
+                    break;
+                }
+
                 db()->beginTransaction();
                 try {
-                    dbExecute(
-                        "UPDATE participation_requests SET attended = 1, actual_hours = ?, updated_at = NOW() WHERE id = ?",
-                        [$actualHours, $prId]
-                    );
+                    recordManualAttendance((int) $prId, (int) $id, (int) $user['id'], $actualHours);
 
                     // Award points
-                    $pr = dbFetchOne("SELECT * FROM participation_requests WHERE id = ?", [$prId]);
-                    if ($pr && getSetting('points_enabled', '1') === '1') {
+                    if (getSetting('points_enabled', '1') === '1') {
                         $hours = $actualHours ?: calculateShiftHours($shift);
                         $points = calculatePoints($shift, $hours);
 
@@ -1527,7 +1538,7 @@ include __DIR__ . '/includes/header.php';
                     <p>Καταγραφή παρουσίας για <strong id="attendVolunteerName"></strong></p>
                     <div class="mb-3">
                         <label class="form-label">Πραγματικές Ώρες</label>
-                        <input type="number" step="0.5" class="form-control" name="actual_hours" id="attendHours">
+                        <input type="number" step="0.01" min="0" class="form-control" name="actual_hours" id="attendHours">
                         <small class="text-muted">Προγραμματισμένες: <span id="attendScheduledHours"></span> ώρες</small>
                     </div>
                 </div>

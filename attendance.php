@@ -565,7 +565,7 @@ include __DIR__ . '/includes/header.php';
                         <div class="col-md-4">
                             <label class="form-label">Πραγματικές Ώρες</label>
                             <input type="number" class="form-control" name="actual_hours" id="editActualHours" 
-                                   step="0.5" min="0" max="24">
+                                   step="0.01" min="0" max="24">
                         </div>
                         <div class="col-md-4">
                             <label class="form-label">Ώρα Άφιξης</label>

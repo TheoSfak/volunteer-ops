@@ -25,14 +25,10 @@ if (isPost()) {
              WHERE pr.id = ? AND pr.status = ?",
             [$prId, PARTICIPATION_APPROVED]
         );
-        if ($pr) {
-            $actualHours = round(
-                (strtotime($pr['end_time']) - strtotime($pr['start_time'])) / 3600, 2
-            );
-            dbExecute(
-                "UPDATE participation_requests SET attended = 1, actual_hours = ?, updated_at = NOW() WHERE id = ?",
-                [$actualHours, $prId]
-            );
+        // Already present (a QR scan, or an attendance check): leave that entry as it is.
+        if ($pr && empty($pr['attended'])) {
+            // No hours given: the shift's own, which the helper works out itself.
+            recordManualAttendance($prId, (int) $pr['shift_id'], (int) $currentUser['id']);
             logAudit('mark_attended', 'participation_requests', $prId);
         }
 

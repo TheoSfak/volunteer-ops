@@ -838,6 +838,62 @@ function recordQrCheckin(int $participationId, int $userId): bool {
 }
 
 /**
+ * Records an attendance an administrator marks by hand ("Παρουσία" on the shift
+ * page, the operations dashboard's quick mark): present, the hours given or else
+ * the shift's own, confirmed now by the administrator. It stamps the confirmation
+ * the same way the attendance page and the QR scan do. Without that stamp the
+ * dashboard went on counting the volunteer as "χωρίς επιβεβαίωση", the shift page
+ * showed no «Έλεγχος παρουσίας» time, and a later QR scan overwrote the entry as
+ * if the volunteer had checked in themselves. The shift id is part of the lookup,
+ * so a forged participation id from another shift changes nothing, and only an
+ * APPROVED sign-up can be marked. True when this call changed a row.
+ */
+function recordManualAttendance(int $participationId, int $shiftId, int $adminId, ?float $hours = null): bool {
+    return dbExecute(
+        "UPDATE participation_requests pr
+         JOIN shifts s ON s.id = pr.shift_id
+         SET pr.attended = 1,
+             pr.actual_hours = COALESCE(?, ROUND(TIMESTAMPDIFF(MINUTE, s.start_time, s.end_time) / 60, 2)),
+             pr.attendance_confirmed_at = NOW(),
+             pr.attendance_confirmed_by = ?,
+             pr.updated_at = NOW()
+         WHERE pr.id = ? AND pr.shift_id = ? AND pr.status = ?",
+        [$hours, $adminId, $participationId, $shiftId, PARTICIPATION_APPROVED]
+    ) > 0;
+}
+
+/**
+ * The people a mission's participation certificates can go to: every active
+ * user, the mission's own approved participants first, and among those the ones
+ * whose attendance is recorded (attended = 1: the QR scan or an administrator's
+ * attendance check) before the ones who were only approved. `is_participant` is
+ * the approved sign-up; `has_checked_in` is the recorded presence. The page used
+ * to show one «Συμμετείχε» badge for the first, so somebody approved who never
+ * turned up looked the same as somebody who did.
+ */
+function missionCertificatePickList(int $missionId): array {
+    return dbFetchAll(
+        "SELECT u.id, u.name, u.email, u.is_external, u.guest_org_name, u.guest_country_code,
+                COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color,
+                (mp.volunteer_id IS NOT NULL) AS is_participant,
+                COALESCE(mp.checked_in, 0) AS has_checked_in
+         FROM users u
+         LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+         LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
+         LEFT JOIN (
+             SELECT pr.volunteer_id, MAX(pr.attended = 1) AS checked_in
+             FROM participation_requests pr
+             JOIN shifts s ON s.id = pr.shift_id
+             WHERE s.mission_id = ? AND pr.status = ?
+             GROUP BY pr.volunteer_id
+         ) mp ON mp.volunteer_id = u.id
+         WHERE u.is_active = 1
+         ORDER BY has_checked_in DESC, is_participant DESC, u.name",
+        [$missionId, PARTICIPATION_APPROVED]
+    );
+}
+
+/**
  * The shift a QR visitor is approved on when they register: the one running
  * now, else the next to start, else the one that started last. visitor-join.php
  * used to take the latest-starting shift unconditionally, which on a mission
