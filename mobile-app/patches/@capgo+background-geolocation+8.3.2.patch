@@ -1,5 +1,5 @@
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/AndroidManifest.xml b/node_modules/@capgo/background-geolocation/android/src/main/AndroidManifest.xml
-index d389cd7..8ad4b4c 100644
+index d389cd7..7c87ec8 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/AndroidManifest.xml
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/AndroidManifest.xml
 @@ -11,6 +11,14 @@
@@ -32,7 +32,7 @@ index d389cd7..8ad4b4c 100644
  </manifest>
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertActionReceiver.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertActionReceiver.java
 new file mode 100644
-index 0000000..b0b19e5
+index 0000000..0b02922
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertActionReceiver.java
 @@ -0,0 +1,44 @@
@@ -82,10 +82,10 @@ index 0000000..b0b19e5
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
 new file mode 100644
-index 0000000..5f46d02
+index 0000000..3c50298
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertPoller.java
-@@ -0,0 +1,627 @@
+@@ -0,0 +1,647 @@
 +package com.capgo.capacitor_background_geolocation;
 +
 +import android.app.Notification;
@@ -284,6 +284,7 @@ index 0000000..5f46d02
 +            }
 +            consecutiveUnauthorized = 0;
 +            if (code != 200) {
++                logPollProblem(context, "http " + code);
 +                return;
 +            }
 +
@@ -329,11 +330,30 @@ index 0000000..5f46d02
 +            // Never surface: a failed alert check must not disturb the
 +            // location tracking this service exists for.
 +            Logger.debug("AlertPoller failed: " + e.getMessage());
++            logPollProblem(context, e.getClass().getSimpleName() + ": " + e.getMessage());
 +        } finally {
 +            if (connection != null) {
 +                connection.disconnect();
 +            }
 +        }
++    }
++
++    // VolunteerOps (v3.413.3): a failing alert poll used to be invisible - a
++    // phone whose polls all came back 500 (or never connected) simply raised no
++    // order alerts, and nothing anywhere said so. Reported to the server's
++    // debug log, once per distinct problem per ten minutes so an outage is one
++    // line and not one every 30 seconds. Only touched on the executor thread.
++    private static String lastPollProblem = "";
++    private static long lastPollProblemAt = 0L;
++
++    private static void logPollProblem(Context context, String problem) {
++        long now = System.currentTimeMillis();
++        if (problem.equals(lastPollProblem) && now - lastPollProblemAt < 10 * 60 * 1000L) {
++            return;
++        }
++        lastPollProblem = problem;
++        lastPollProblemAt = now;
++        DebugLog.log(context, "alert_poll_failed", problem);
 +    }
 +
 +    private static SharedPreferences prefs(Context context) {
@@ -715,7 +735,7 @@ index 0000000..5f46d02
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertSpeaker.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertSpeaker.java
 new file mode 100644
-index 0000000..5ea0375
+index 0000000..feddfe5
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertSpeaker.java
 @@ -0,0 +1,229 @@
@@ -949,7 +969,7 @@ index 0000000..5ea0375
 +    }
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java
-index 00b9e10..a0af340 100644
+index 00b9e10..623dc27 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocation.java
 @@ -1,6 +1,7 @@
@@ -1200,7 +1220,7 @@ index 00b9e10..a0af340 100644
          }
  
          // Everything is OK, continuing to adding a watcher
-@@ -111,13 +308,39 @@ public class BackgroundGeolocation extends Plugin {
+@@ -111,13 +308,40 @@ public class BackgroundGeolocation extends Plugin {
          if (call.getBoolean("stale", false)) {
              fetchLastLocation(call);
          }
@@ -1215,7 +1235,8 @@ index 00b9e10..a0af340 100644
 +        // longer started, and only a started service may run in the
 +        // foreground. getServiceConnection() only starts it for a new binding.
 +        if (serviceConnectionFuture != null) {
-+            Intent serviceIntent = new Intent(getContext(), BackgroundGeolocationService.class);
++            Intent serviceIntent = new Intent(getContext(), BackgroundGeolocationService.class)
++                .putExtra(BackgroundGeolocationService.EXTRA_VOPS_START, true);
 +            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 +                getContext().startForegroundService(serviceIntent);
 +            } else {
@@ -1241,8 +1262,20 @@ index 00b9e10..a0af340 100644
              );
          });
      }
+@@ -716,7 +940,10 @@ public class BackgroundGeolocation extends Plugin {
+ 
+         serviceConnectionFuture = new CompletableFuture<>();
+ 
+-        Intent serviceIntent = new Intent(this.getContext(), BackgroundGeolocationService.class);
++        // VolunteerOps (v3.413.3): marked, so the service answers this first
++        // start (made before the configuration is saved) with START_STICKY.
++        Intent serviceIntent = new Intent(this.getContext(), BackgroundGeolocationService.class)
++            .putExtra(BackgroundGeolocationService.EXTRA_VOPS_START, true);
+         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+             this.getContext().startForegroundService(serviceIntent);
+         } else {
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
-index 85f2a02..066a1ca 100644
+index 85f2a02..8952c03 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
 @@ -12,6 +12,7 @@ import android.graphics.Color;
@@ -1275,13 +1308,17 @@ index 85f2a02..066a1ca 100644
  import org.json.JSONObject;
  
  // A bound and started service that is promoted to a foreground service
-@@ -31,6 +45,13 @@ import org.json.JSONObject;
+@@ -31,6 +45,17 @@ import org.json.JSONObject;
  public class BackgroundGeolocationService extends Service {
  
      static final String ACTION_BROADCAST = (BackgroundGeolocationService.class.getPackage().getName() + ".broadcast");
 +    // VolunteerOps patch (v3.330.0): the «Διακοπή GPS» button on this
 +    // service's own notification. See onStartCommand().
 +    static final String ACTION_VOPS_STOP_BY_USER = (BackgroundGeolocationService.class.getPackage().getName() + ".vopsStopByUser");
++    // VolunteerOps patch (v3.413.3): set by the plugin on every start it makes,
++    // so onStartCommand() can tell "the plugin is starting me and will save the
++    // configuration a moment later" from "the system restarted me for nothing".
++    static final String EXTRA_VOPS_START = "vopsStart";
 +    // The running instance, so AlertPoller (a static helper on its own
 +    // thread) can hand it the server's track/pause/stop instruction. Only
 +    // ever touched on the main thread.
@@ -1289,7 +1326,7 @@ index 85f2a02..066a1ca 100644
      private final IBinder binder = new LocalBinder();
  
      private static final double EARTH_RADIUS_M = 6371000;
-@@ -40,8 +61,19 @@ public class BackgroundGeolocationService extends Service {
+@@ -40,8 +65,19 @@ public class BackgroundGeolocationService extends Service {
  
      private String callbackId;
  
@@ -1311,7 +1348,7 @@ index 85f2a02..066a1ca 100644
      private MediaPlayer mediaPlayer;
      private double[][] route;
      private double distanceThreshold;
-@@ -50,20 +82,122 @@ public class BackgroundGeolocationService extends Service {
+@@ -50,20 +86,122 @@ public class BackgroundGeolocationService extends Service {
      private Handler watchdogHandler = new Handler(Looper.getMainLooper());
      private Runnable watchdogRunnable;
      private Runnable restartRunnable;
@@ -1436,7 +1473,7 @@ index 85f2a02..066a1ca 100644
      // Some devices allow a foreground service to outlive the application's main
      // activity, leading to nasty crashes as reported in issue #59. If we learn
      // that the application has been killed, all watchers are stopped and the
-@@ -77,9 +211,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -77,9 +215,7 @@ public class BackgroundGeolocationService extends Service {
          if (LocationStore.isEnabled(getApplicationContext())) {
              return false;
          }
@@ -1447,7 +1484,19 @@ index 85f2a02..066a1ca 100644
          releaseMediaPlayer();
          releaseWakeLock();
          stopWatchdog();
-@@ -104,37 +236,68 @@ public class BackgroundGeolocationService extends Service {
+@@ -92,6 +228,11 @@ public class BackgroundGeolocationService extends Service {
+     @Override
+     public void onTaskRemoved(Intent rootIntent) {
+         if (LocationStore.isEnabled(getApplicationContext())) {
++            // VolunteerOps (v3.413.3): on stock Android this leaves the service
++            // running; several makers' phones (Xiaomi, Huawei, Oppo...) kill the
++            // whole process on a swipe from the recents list, in which case this
++            // is the last thing that runs.
++            DebugLog.log(getApplicationContext(), "task_removed", "app swiped from recents, service kept");
+             return;
+         }
+         super.onTaskRemoved(rootIntent);
+@@ -104,37 +245,96 @@ public class BackgroundGeolocationService extends Service {
      @Override
      public int onStartCommand(Intent intent, int flags, int startId) {
          Context context = getApplicationContext();
@@ -1471,10 +1520,38 @@ index 85f2a02..066a1ca 100644
 +            return START_NOT_STICKY;
 +        }
          if (!LocationStore.isEnabled(context)) {
++            // VolunteerOps (v3.413.3): the plugin starts this service BEFORE its
++            // binder has saved the configuration (binder.start() runs once the
++            // bind completes), so on a FIRST start isEnabled() is always false
++            // here. Returning START_NOT_STICKY for that start made Android record
++            // the service as stopIfKilled=true - verified with
++            // `dumpsys activity services` - so the moment the system or a phone
++            // maker's cleaner killed the process (screen off, a swipe, low
++            // memory) the service was NOT restarted: no more fixes, no more order
++            // alerts, and the Action Room kept the last position the page itself
++            // had sent, labelled as a browser tab. A start the plugin makes is
++            // sticky from the first call.
++            if (intent != null && intent.getBooleanExtra(EXTRA_VOPS_START, false)) {
++                return START_STICKY;
++            }
++            // Restarted by the system with nothing configured (stopped for good
++            // in the meantime): nothing to do, and nothing to come back for.
++            if (intent == null) {
++                stopSelf();
++            }
              // Not in native delivery mode: preserve the original behavior where the
              // service does not outlive the app, so it is not sticky-restarted.
              return START_NOT_STICKY;
          }
++        if (intent == null) {
++            // Only the system starts a service with no intent: it was killed and
++            // is being brought back (see above). Said to the server, because
++            // from the phone's own side this is invisible: a log entry here is
++            // the proof that the process died, and for how long it was silent.
++            long lastAlive = LocationStore.getLastAlive(context);
++            long silentSeconds = lastAlive > 0 ? (System.currentTimeMillis() - lastAlive) / 1000L : -1L;
++            DebugLog.log(context, "service_restarted_by_system", "silent for " + silentSeconds + "s, sdk=" + Build.VERSION.SDK_INT);
++        }
          nativePostUrl = LocationStore.getUrl(context);
 -        promoteToForeground(LocationStore.getTitle(context), LocationStore.getMessage(context));
 +        // A service paused by the server stays paused through a restart.
@@ -1527,7 +1604,7 @@ index 85f2a02..066a1ca 100644
      }
  
      private void releaseMediaPlayer() {
-@@ -183,10 +346,18 @@ public class BackgroundGeolocationService extends Service {
+@@ -183,10 +383,18 @@ public class BackgroundGeolocationService extends Service {
  
      private void restartLocationUpdates() {
          Logger.debug("Location watchdog timed out, restarting updates");
@@ -1547,7 +1624,7 @@ index 85f2a02..066a1ca 100644
          if (restartRunnable != null) {
              watchdogHandler.removeCallbacks(restartRunnable);
          }
-@@ -194,11 +365,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -194,11 +402,7 @@ public class BackgroundGeolocationService extends Service {
              if (client == null || locationCallback == null) {
                  return;
              }
@@ -1560,7 +1637,7 @@ index 85f2a02..066a1ca 100644
              startWatchdog();
          };
          watchdogHandler.postDelayed(restartRunnable, 10000);
-@@ -209,7 +376,17 @@ public class BackgroundGeolocationService extends Service {
+@@ -209,7 +413,17 @@ public class BackgroundGeolocationService extends Service {
          if (watchdogRunnable == null) {
              watchdogRunnable = this::restartLocationUpdates;
          }
@@ -1579,7 +1656,7 @@ index 85f2a02..066a1ca 100644
      }
  
      private void stopWatchdog() {
-@@ -221,8 +398,127 @@ public class BackgroundGeolocationService extends Service {
+@@ -221,8 +435,131 @@ public class BackgroundGeolocationService extends Service {
          }
      }
  
@@ -1596,6 +1673,10 @@ index 85f2a02..066a1ca 100644
 +            alertPollRunnable = new Runnable() {
 +                @Override
 +                public void run() {
++                    // VolunteerOps (v3.413.3): "the service was alive at this
++                    // moment". After a kill the next start compares it with the
++                    // clock and tells the server how long the phone was silent.
++                    LocationStore.touchAlive(getApplicationContext());
 +                    AlertPoller.poll(getApplicationContext());
 +                    // VolunteerOps: also the steady retry for fixes kept through
 +                    // an outage, so a backlog goes up within 30s of signal
@@ -1708,7 +1789,7 @@ index 85f2a02..066a1ca 100644
          if (nativePostUrl != null) {
              postLocationNatively(location);
          }
-@@ -242,22 +538,26 @@ public class BackgroundGeolocationService extends Service {
+@@ -242,22 +579,26 @@ public class BackgroundGeolocationService extends Service {
  
      // Delivers a location to the configured URL from native code, so it works
      // even when the WebView/JavaScript layer no longer exists.
@@ -1747,7 +1828,7 @@ index 85f2a02..066a1ca 100644
          JSONObject obj = new JSONObject();
          try {
              obj.put("latitude", location.getLatitude());
-@@ -276,38 +576,111 @@ public class BackgroundGeolocationService extends Service {
+@@ -276,38 +617,111 @@ public class BackgroundGeolocationService extends Service {
              // Lets the server distinguish native-delivered updates from those
              // forwarded by the JavaScript callback.
              obj.put("source", "native");
@@ -1873,7 +1954,24 @@ index 85f2a02..066a1ca 100644
          }
      }
  
-@@ -344,37 +717,45 @@ public class BackgroundGeolocationService extends Service {
+@@ -333,6 +747,16 @@ public class BackgroundGeolocationService extends Service {
+             }
+         } catch (Exception exception) {
+             Logger.error("Failed to foreground service", exception);
++            // VolunteerOps (v3.413.3): this used to go to logcat only. A service
++            // that could not become a foreground service (a restart from the
++            // background that Android refused, location permission taken away)
++            // is ended by the system within seconds - silently, with the
++            // notification gone and nothing on the server to say why.
++            DebugLog.log(
++                getApplicationContext(),
++                "foreground_failed",
++                exception.getClass().getSimpleName() + ": " + exception.getMessage() + " (sdk " + Build.VERSION.SDK_INT + ")"
++            );
+         }
+     }
+ 
+@@ -344,37 +768,45 @@ public class BackgroundGeolocationService extends Service {
              final String notificationTitle,
              final String notificationMessage,
              float distanceFilter,
@@ -1932,7 +2030,7 @@ index 85f2a02..066a1ca 100644
          }
  
          void setPlannedRoute(String filePath, double[][] routeCoordinates, float distance) {
-@@ -453,6 +834,32 @@ public class BackgroundGeolocationService extends Service {
+@@ -453,6 +885,32 @@ public class BackgroundGeolocationService extends Service {
              );
          }
  
@@ -1965,7 +2063,7 @@ index 85f2a02..066a1ca 100644
          // Set the Channel ID for Android O.
          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
              builder.setChannelId(BackgroundGeolocationService.class.getPackage().getName());
-@@ -462,7 +869,9 @@ public class BackgroundGeolocationService extends Service {
+@@ -462,7 +920,9 @@ public class BackgroundGeolocationService extends Service {
      }
  
      // Gets the identifier of the app's resource by name, returning 0 if not found.
@@ -1978,7 +2076,7 @@ index 85f2a02..066a1ca 100644
  
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/DebugLog.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/DebugLog.java
 new file mode 100644
-index 0000000..9c0c750
+index 0000000..ee599ff
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/DebugLog.java
 @@ -0,0 +1,74 @@
@@ -2057,7 +2155,7 @@ index 0000000..9c0c750
 +    }
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java
-index 2e19afe..41e84ed 100644
+index 2e19afe..99dafb6 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/LocationStore.java
 @@ -22,6 +22,27 @@ final class LocationStore {
@@ -2133,7 +2231,7 @@ index 2e19afe..41e84ed 100644
      static boolean isEnabled(Context context) {
          SharedPreferences prefs = prefs(context);
          return prefs.getBoolean(KEY_ENABLED, false) && prefs.getString(KEY_URL, null) != null;
-@@ -70,25 +111,122 @@ final class LocationStore {
+@@ -70,25 +111,136 @@ final class LocationStore {
          return prefs(context).getFloat(KEY_DISTANCE_FILTER, 0f);
      }
  
@@ -2143,6 +2241,20 @@ index 2e19afe..41e84ed 100644
 +
 +    static String getAuthToken(Context context) {
 +        return prefs(context).getString(KEY_AUTH_TOKEN, "");
++    }
++
++    // VolunteerOps (v3.413.3): when the service last proved it was alive (every
++    // alert poll, 30 s). Wall clock, because the next start may be a new
++    // process after the system killed this one - read by onStartCommand() to
++    // say how long the phone was silent.
++    private static final String KEY_LAST_ALIVE = "vopsLastAlive";
++
++    static void touchAlive(Context context) {
++        prefs(context).edit().putLong(KEY_LAST_ALIVE, System.currentTimeMillis()).apply();
++    }
++
++    static long getLastAlive(Context context) {
++        return prefs(context).getLong(KEY_LAST_ALIVE, 0L);
 +    }
 +
 +    // VolunteerOps patch — see KEY_PAUSED.
@@ -2260,7 +2372,7 @@ index 2e19afe..41e84ed 100644
              try (OutputStream outputStream = connection.getOutputStream()) {
                  outputStream.write(body);
              }
-@@ -97,6 +235,15 @@ final class LocationStore {
+@@ -97,6 +249,15 @@ final class LocationStore {
              if (responseCode < HttpURLConnection.HTTP_OK || responseCode >= HttpURLConnection.HTTP_MULT_CHOICE) {
                  throw new IOException("Location POST failed with response code: " + responseCode);
              }
@@ -2278,7 +2390,7 @@ index 2e19afe..41e84ed 100644
                  connection.disconnect();
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixBuffer.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixBuffer.java
 new file mode 100644
-index 0000000..0e8760e
+index 0000000..fc959df
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixBuffer.java
 @@ -0,0 +1,227 @@
@@ -2511,7 +2623,7 @@ index 0000000..0e8760e
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixPicker.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixPicker.java
 new file mode 100644
-index 0000000..c5eb810
+index 0000000..853b48d
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixPicker.java
 @@ -0,0 +1,42 @@
@@ -2559,7 +2671,7 @@ index 0000000..c5eb810
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGnssMonitor.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGnssMonitor.java
 new file mode 100644
-index 0000000..79ad098
+index 0000000..47cd021
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGnssMonitor.java
 @@ -0,0 +1,195 @@
@@ -2760,7 +2872,7 @@ index 0000000..79ad098
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGpsHealth.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGpsHealth.java
 new file mode 100644
-index 0000000..1f8d1cb
+index 0000000..f979bf0
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGpsHealth.java
 @@ -0,0 +1,217 @@
@@ -2983,7 +3095,7 @@ index 0000000..1f8d1cb
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/test/java/com/capgo/capacitor_background_geolocation/VopsFixPickerTest.java b/node_modules/@capgo/background-geolocation/android/src/test/java/com/capgo/capacitor_background_geolocation/VopsFixPickerTest.java
 new file mode 100644
-index 0000000..159069a
+index 0000000..eff7772
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/test/java/com/capgo/capacitor_background_geolocation/VopsFixPickerTest.java
 @@ -0,0 +1,66 @@
