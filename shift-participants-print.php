@@ -3,8 +3,11 @@
  * VolunteerOps — printable participant list for ONE shift of ONE mission.
  *
  * The sheet that goes on a clipboard at the meeting point: who is down for this
- * shift, how to reach them, which Action Room team they are in, and an empty
- * box + signature line for the roll call. Approved volunteers only by default;
+ * shift, how to reach them, which volunteer team they belong to (the default
+ * team first, then the others alphabetically, names alphabetical inside each),
+ * which Action Room team they are in, and an empty box + signature line for the
+ * roll call - or "QR check-in" with the time for whoever already scanned in
+ * themselves. Approved volunteers only by default;
  * ?status=all adds the pending applications (labelled) for a planning printout.
  * Cancelled and rejected applications never print.
  *
@@ -55,15 +58,26 @@ $in = implode(',', array_fill(0, count($statuses), '?'));
 // One team per user per mission (uniq_mission_user), so the LEFT JOIN cannot
 // duplicate a row.
 $rows = dbFetchAll(
-    "SELECT pr.status, pr.attended, pr.actual_hours,
+    // home_team_name is the volunteer's own team (Επίδρασις, ΕΟΔ, a partner
+    // organisation...): the same COALESCE(volunteer_teams, mission_visitor_tags)
+    // the shift view reads. Sorted default team first, teams without one last.
+    "SELECT pr.status, pr.attended, pr.actual_hours, pr.volunteer_id,
+            pr.attendance_confirmed_at, pr.attendance_confirmed_by,
             u.name, u.phone, u.volunteer_type, u.is_external, u.guest_org_name,
+            COALESCE(vt.name, mvt.label) AS home_team_name,
             mt.codename, mt.team_number
      FROM participation_requests pr
      JOIN users u ON u.id = pr.volunteer_id
+     LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+     LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
      LEFT JOIN mission_team_members mtm ON mtm.user_id = u.id AND mtm.mission_id = ?
      LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
      WHERE pr.shift_id = ? AND pr.status IN ($in)
-     ORDER BY pr.status ASC, u.name ASC",
+     ORDER BY pr.status ASC,
+              COALESCE(vt.name, mvt.label) IS NULL ASC,
+              COALESCE(vt.is_default, 0) DESC,
+              COALESCE(vt.name, mvt.label) ASC,
+              u.name ASC",
     array_merge([(int) $shift['mission_id'], $shiftId], $statuses)
 );
 
@@ -113,7 +127,9 @@ logAudit('print', 'shift_participants', $shiftId, $includePending ? 'incl. pendi
         th, td { border: 1px solid #bbb; padding: 6px 8px; text-align: left; vertical-align: middle; }
         th { background: #eef0f6; font-size: 8.5pt; text-transform: uppercase; letter-spacing: .04em; color: #172554; }
         td.n { width: 8mm; text-align: center; color: #666; }
-        td.box { width: 18mm; text-align: center; }
+        td.box { width: 24mm; text-align: center; }
+        .qr { display: block; font-size: 7.5pt; font-weight: 700; color: #0a6c80; line-height: 1.25; }
+        .qrt { display: block; font-size: 7.5pt; color: #333; line-height: 1.25; }
         td.sig { width: 42mm; }
         td.phone { white-space: nowrap; }
         tr { page-break-inside: avoid; }
@@ -169,6 +185,7 @@ logAudit('print', 'shift_participants', $shiftId, $includePending ? 'incl. pendi
         <tr>
             <th>#</th>
             <th>Ονοματεπώνυμο</th>
+            <th>Εθελοντική ομάδα</th>
             <th>Τηλέφωνο</th>
             <?php if ($hasTeams): ?><th>Ομάδα</th><?php endif; ?>
             <th>Παρών</th>
@@ -177,7 +194,7 @@ logAudit('print', 'shift_participants', $shiftId, $includePending ? 'incl. pendi
     </thead>
     <tbody>
     <?php if (!$rows): ?>
-        <tr><td colspan="<?= $hasTeams ? 6 : 5 ?>" class="empty">Δεν υπάρχουν εγκεκριμένοι συμμετέχοντες σε αυτή τη βάρδια.</td></tr>
+        <tr><td colspan="<?= $hasTeams ? 7 : 6 ?>" class="empty">Δεν υπάρχουν εγκεκριμένοι συμμετέχοντες σε αυτή τη βάρδια.</td></tr>
     <?php endif; ?>
     <?php foreach ($rows as $i => $r):
         $isPending = $r['status'] === PARTICIPATION_PENDING;
@@ -193,12 +210,21 @@ logAudit('print', 'shift_participants', $shiftId, $includePending ? 'incl. pendi
                     <span class="tag"><?= h(trim($typeLabel . ($isPending ? ($typeLabel !== '' ? ' · ' : '') . 'Εκκρεμεί έγκριση' : ''))) ?></span>
                 <?php endif; ?>
             </td>
+            <td><?= trim((string) $r['home_team_name']) !== '' ? h($r['home_team_name']) : '—' ?></td>
             <td class="phone"><?= $r['phone'] ? h($r['phone']) : '—' ?></td>
             <?php if ($hasTeams): ?>
                 <td><?= h(teamLabel($r['codename'], $r['team_number'])) ?: '—' ?></td>
             <?php endif; ?>
+            <?php
+            // Their own scan (QR page, or the leader's "Είμαι Παρών") leaves the
+            // volunteer as the confirming user; an admin's roll call does not.
+            $qrAt = (!empty($r['attendance_confirmed_at']) && (int) ($r['attendance_confirmed_by'] ?? 0) === (int) $r['volunteer_id'])
+                ? strtotime((string) $r['attendance_confirmed_at']) : false;
+            ?>
             <td class="box">
-                <?php if (!empty($r['attended'])): ?>
+                <?php if ($qrAt): ?>
+                    <span class="qr">QR check-in</span><span class="qrt"><?= h(date('d/m H:i', $qrAt)) ?></span>
+                <?php elseif (!empty($r['attended'])): ?>
                     <span class="tick on">&#10003;</span>
                 <?php else: ?>
                     <span class="tick"></span>
