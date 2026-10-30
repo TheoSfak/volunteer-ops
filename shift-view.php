@@ -43,18 +43,17 @@ $canManage = isAdmin() && !$missionCompleted;
 
 // Get participants
 $participants = dbFetchAll(
-    // The Action Room team of the mission, if the volunteer is on one. One team
-    // per user per mission (uniq_mission_user), so the LEFT JOINs cannot
-    // duplicate a row.
-    "SELECT pr.*, u.name, u.email, u.phone, u.volunteer_type,
-            mt.codename AS team_codename, mt.team_number AS team_number, mt.color AS team_color
+    // The volunteer's own team (Επίδρασις, ΕΟΔ, a partner organisation...), the
+    // same COALESCE(volunteer_teams, mission_visitor_tags) the volunteers list reads.
+    "SELECT pr.*, u.name, u.email, u.phone, u.volunteer_type, u.is_external, u.guest_country_code,
+            COALESCE(vt.name, mvt.label) AS home_team_name, COALESCE(vt.color, mvt.color) AS home_team_color
      FROM participation_requests pr
      JOIN users u ON pr.volunteer_id = u.id
-     LEFT JOIN mission_team_members mtm ON mtm.user_id = pr.volunteer_id AND mtm.mission_id = ?
-     LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
+     LEFT JOIN volunteer_teams vt ON vt.id = u.volunteer_team_id
+     LEFT JOIN mission_visitor_tags mvt ON mvt.id = u.mission_visitor_tag_id
      WHERE pr.shift_id = ?
      ORDER BY pr.status ASC, pr.created_at ASC",
-    [(int) $shift['mission_id'], $id]
+    [$id]
 );
 
 // QR check-in feature flag
@@ -800,12 +799,8 @@ include __DIR__ . '/includes/header.php';
                                     <!-- Name row -->
                                     <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
                                         <div style="min-width:0;">
-                                            <div class="fw-bold fs-6"><?= h($p['name']) ?></div>
+                                            <div class="fw-bold fs-6"><?= guestNameHtml($p['name'], (bool) $p['is_external'], $p['home_team_name'], $p['home_team_color'] ?? '#6c757d', $p['guest_country_code']) ?></div>
                                             <div><?= volunteerTypeBadge($p['volunteer_type'] ?? VTYPE_RESCUER) ?></div>
-                                            <?php $pTeam = teamLabel($p['team_codename'] ?? null, $p['team_number'] ?? null); ?>
-                                            <?php if ($pTeam !== ''): ?>
-                                            <div class="mt-1"><span class="badge text-white" style="background:<?= h(preg_match('/^#[0-9a-fA-F]{6}$/', (string) ($p['team_color'] ?? '')) ? $p['team_color'] : '#6c757d') ?>;" title="Ομάδα στο Επιχειρησιακό"><i class="bi bi-people-fill me-1"></i><?= h($pTeam) ?></span></div>
-                                            <?php endif; ?>
                                         </div>
                                         <div class="d-flex flex-column align-items-end gap-1" style="flex-shrink:0;min-width:max-content;">
                                             <?= statusBadge($p['status'], 'participation') ?>
