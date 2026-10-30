@@ -2707,7 +2707,7 @@ include __DIR__ . '/includes/header.php';
     .wr-team-chip { display: inline-block; transform: translate(-50%, calc(-100% - 10px)); background: #fff; border-left: 4px solid #374151; border-radius: 4px; padding: 0 5px; font: 700 11px/18px system-ui, sans-serif; color: #111827; white-space: nowrap; box-shadow: 0 1px 4px #0005; }
     .wr-nearest-num { display: inline-block; width: 18px; height: 18px; border-radius: 50%; background: #1f2937; color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
     .wr-anno-arrowhead { width: 0; height: 0; border-left: 8px solid transparent; border-right: 8px solid transparent; border-bottom: 16px solid; filter: drop-shadow(0 1px 2px #0008); }
-    .wr-anno-text-label { display: inline-block; padding: 2px 8px; border-radius: 4px; color: #fff; font-weight: 600; font-size: .78rem; white-space: nowrap; box-shadow: 0 1px 3px #0006; }
+    .wr-anno-text-label { display: inline-block; padding: 2px 8px; border-radius: 4px; color: #fff; font-weight: 800; font-size: .85rem; white-space: nowrap; box-shadow: 0 1px 3px #0006; }
     .wr-weather-ctl { background: #fff; padding: .5rem .6rem .45rem; }
     .wr-weather-ctl-label { font-size: .6rem; letter-spacing: .05em; text-transform: uppercase; color: #6c757d; text-align: center; margin-bottom: .25rem; }
     .wr-weather-ctl-reading { display: flex; align-items: baseline; justify-content: center; gap: .25rem; margin-top: .25rem; }
@@ -8578,7 +8578,7 @@ function osmScheduleLoad() {
     osmScheduleLoad();
 })();
 
-const ANNOTATION_COLOR = '#1f2937';
+const ANNOTATION_COLOR = '#e60000';
 // Battle-map annotation tool state — a plain toggle over the same live map
 // instance (not a second map, unlike the dispatch-composition modal), since
 // the whole point is sketching directly on what everyone's already looking
@@ -9180,10 +9180,10 @@ function renderAnnotations(items) {
     items.forEach(item => {
         let layer = null;
         if (item.type === 'freehand') {
-            layer = L.polyline(item.geo, {color: ANNOTATION_COLOR, weight: 4, pane: 'annotationPane'}).addTo(annotationLayer);
+            layer = L.polyline(item.geo, {color: ANNOTATION_COLOR, weight: 6, pane: 'annotationPane'}).addTo(annotationLayer);
         } else if (item.type === 'arrow') {
             const [p1, p2] = item.geo;
-            L.polyline(item.geo, {color: ANNOTATION_COLOR, weight: 3, pane: 'annotationPane'}).addTo(annotationLayer);
+            L.polyline(item.geo, {color: ANNOTATION_COLOR, weight: 5, pane: 'annotationPane'}).addTo(annotationLayer);
             const brng = bearing(L.latLng(p1[0], p1[1]), L.latLng(p2[0], p2[1]));
             const headIcon = L.divIcon({className:'', html:`<div class="wr-anno-arrowhead" style="transform:rotate(${brng}deg);border-bottom-color:${ANNOTATION_COLOR}"></div>`, iconSize:[16,16], iconAnchor:[8,8]});
             layer = L.marker(p2, {icon: headIcon, pane: 'annotationPane'}).addTo(annotationLayer);
@@ -10700,7 +10700,7 @@ function touchToLatLng(touch) {
 }
 function startFreehand(latlng, containerPoint) {
     freehandPoints = [[latlng.lat, latlng.lng]];
-    freehandPreviewLayer = L.polyline(freehandPoints, {color: ANNOTATION_COLOR, weight: 4, pane: 'annotationPane'}).addTo(annotationDrawLayer);
+    freehandPreviewLayer = L.polyline(freehandPoints, {color: ANNOTATION_COLOR, weight: 6, pane: 'annotationPane'}).addTo(annotationDrawLayer);
     return containerPoint;
 }
 function appendFreehandPoint(latlng, lastPx, currentPx) {
@@ -28308,10 +28308,10 @@ function renderRouteComposerAnnotations(items) {
     routeComposerAnnotationLayer.clearLayers();
     items.forEach(item => {
         if (item.type === 'freehand') {
-            L.polyline(item.geo, {color: ANNOTATION_COLOR, weight: 4}).addTo(routeComposerAnnotationLayer);
+            L.polyline(item.geo, {color: ANNOTATION_COLOR, weight: 6}).addTo(routeComposerAnnotationLayer);
         } else if (item.type === 'arrow') {
             const [p1, p2] = item.geo;
-            L.polyline(item.geo, {color: ANNOTATION_COLOR, weight: 3}).addTo(routeComposerAnnotationLayer);
+            L.polyline(item.geo, {color: ANNOTATION_COLOR, weight: 5}).addTo(routeComposerAnnotationLayer);
             const brng = bearing(L.latLng(p1[0], p1[1]), L.latLng(p2[0], p2[1]));
             const headIcon = L.divIcon({className:'', html:`<div class="wr-anno-arrowhead" style="transform:rotate(${brng}deg);border-bottom-color:${ANNOTATION_COLOR}"></div>`, iconSize:[16,16], iconAnchor:[8,8]});
             L.marker(p2, {icon: headIcon}).addTo(routeComposerAnnotationLayer);
