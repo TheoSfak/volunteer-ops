@@ -571,9 +571,9 @@ if (isPost()) {
                 $ids = post('participation_ids');
                 $ids = is_array($ids) ? array_values(array_unique(array_filter(array_map('intval', $ids)))) : [];
                 $bulk = post('bulk_action');
-                $notify = post('notify') === '1';
+                $notify = post('notify') === '1' && $bulk !== 'delete';
 
-                if (!$ids || !in_array($bulk, ['cancel', 'activate'], true)) {
+                if (!$ids || !in_array($bulk, ['cancel', 'activate', 'delete'], true)) {
                     setFlash('error', 'Δεν επιλέξατε συμμετοχές.');
                 } else {
                     $changed = 0;
@@ -585,7 +585,11 @@ if (isPost()) {
                         );
                         if (!$pr || $pr['attended']) { $skipped++; continue; }
 
-                        if ($bulk === 'cancel') {
+                        if ($bulk === 'delete') {
+                            // Same as the single silent delete: no email, no
+                            // notification, whatever the "notify" box says.
+                            dbExecute("DELETE FROM participation_requests WHERE id = ? AND shift_id = ?", [$bulkId, $id]);
+                        } elseif ($bulk === 'cancel') {
                             if (!in_array($pr['status'], [PARTICIPATION_PENDING, PARTICIPATION_APPROVED], true)) { $skipped++; continue; }
                             dbExecute(
                                 "UPDATE participation_requests SET status = ?, decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
@@ -623,7 +627,7 @@ if (isPost()) {
                     logAudit('bulk_participation', 'participation_requests', null, "Shift $id, $bulk, $changed changed, $skipped skipped, notify=" . ($notify ? 'yes' : 'no'));
                     setFlash(
                         $changed > 0 ? 'success' : 'error',
-                        ($bulk === 'cancel' ? 'Ακυρώθηκαν ' : 'Ενεργοποιήθηκαν ') . $changed . ' συμμετοχές'
+                        ['cancel' => 'Ακυρώθηκαν ', 'activate' => 'Ενεργοποιήθηκαν ', 'delete' => 'Διαγράφηκαν '][$bulk] . $changed . ' συμμετοχές'
                             . ($skipped ? " ($skipped παραλείφθηκαν: ήδη στην κατάσταση αυτή ή με καταγεγραμμένη παρουσία)" : '')
                             . ($notify ? ' και ειδοποιήθηκαν οι εθελοντές.' : ' χωρίς ειδοποίηση.')
                     );
@@ -936,6 +940,9 @@ include __DIR__ . '/includes/header.php';
                             </button>
                             <button type="submit" name="bulk_action" value="cancel" class="btn btn-sm btn-outline-danger" data-bulk-label="ακύρωση">
                                 <i class="bi bi-x-circle me-1"></i>Ακύρωση επιλεγμένων
+                            </button>
+                            <button type="submit" name="bulk_action" value="delete" class="btn btn-sm btn-outline-dark" data-bulk-label="διαγραφή (χωρίς ειδοποίηση, οριστική)" data-bulk-silent="1">
+                                <i class="bi bi-trash me-1"></i>Διαγραφή επιλεγμένων
                             </button>
                         </div>
                     </form>
@@ -1732,7 +1739,8 @@ $activeParticipants = array_filter($participants, function($p) {
                 alert('Δεν έχετε επιλέξει κανέναν εθελοντή.');
                 return;
             }
-            var notify = document.getElementById('bulkNotify').checked ? 'Οι εθελοντές θα ειδοποιηθούν.' : 'Οι εθελοντές ΔΕΝ θα ειδοποιηθούν.';
+            var silent = e.submitter && e.submitter.dataset.bulkSilent;
+            var notify = (!silent && document.getElementById('bulkNotify').checked) ? 'Οι εθελοντές θα ειδοποιηθούν.' : 'Οι εθελοντές ΔΕΝ θα ειδοποιηθούν.';
             if (!confirm('Μαζική ' + label + ' για ' + n + ' εθελοντές;\n' + notify)) e.preventDefault();
         });
     }
