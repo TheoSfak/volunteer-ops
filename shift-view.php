@@ -43,12 +43,18 @@ $canManage = isAdmin() && !$missionCompleted;
 
 // Get participants
 $participants = dbFetchAll(
-    "SELECT pr.*, u.name, u.email, u.phone, u.volunteer_type
+    // The Action Room team of the mission, if the volunteer is on one. One team
+    // per user per mission (uniq_mission_user), so the LEFT JOINs cannot
+    // duplicate a row.
+    "SELECT pr.*, u.name, u.email, u.phone, u.volunteer_type,
+            mt.codename AS team_codename, mt.team_number AS team_number, mt.color AS team_color
      FROM participation_requests pr
      JOIN users u ON pr.volunteer_id = u.id
+     LEFT JOIN mission_team_members mtm ON mtm.user_id = pr.volunteer_id AND mtm.mission_id = ?
+     LEFT JOIN mission_teams mt ON mt.id = mtm.team_id
      WHERE pr.shift_id = ?
      ORDER BY pr.status ASC, pr.created_at ASC",
-    [$id]
+    [(int) $shift['mission_id'], $id]
 );
 
 // QR check-in feature flag
@@ -796,6 +802,10 @@ include __DIR__ . '/includes/header.php';
                                         <div style="min-width:0;">
                                             <div class="fw-bold fs-6"><?= h($p['name']) ?></div>
                                             <div><?= volunteerTypeBadge($p['volunteer_type'] ?? VTYPE_RESCUER) ?></div>
+                                            <?php $pTeam = teamLabel($p['team_codename'] ?? null, $p['team_number'] ?? null); ?>
+                                            <?php if ($pTeam !== ''): ?>
+                                            <div class="mt-1"><span class="badge text-white" style="background:<?= h(preg_match('/^#[0-9a-fA-F]{6}$/', (string) ($p['team_color'] ?? '')) ? $p['team_color'] : '#6c757d') ?>;" title="Ομάδα στο Επιχειρησιακό"><i class="bi bi-people-fill me-1"></i><?= h($pTeam) ?></span></div>
+                                            <?php endif; ?>
                                         </div>
                                         <div class="d-flex flex-column align-items-end gap-1" style="flex-shrink:0;min-width:max-content;">
                                             <?= statusBadge($p['status'], 'participation') ?>
