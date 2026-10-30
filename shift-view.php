@@ -75,7 +75,7 @@ if (isPost()) {
     $prId = post('participation_id');
 
     // Block all management actions when mission is COMPLETED
-    $adminActions = ['approve', 'reject', 'reactivate', 'mark_attended', 'delete', 'add_volunteer', 'update_notes', 'approve_swap', 'reject_swap'];
+    $adminActions = ['approve', 'reject', 'reactivate', 'mark_attended', 'delete', 'add_volunteer', 'update_notes', 'approve_swap', 'reject_swap', 'delete_participation', 'bulk_participation'];
     if ($missionCompleted && in_array($action, $adminActions)) {
         setFlash('error', 'Η αποστολή είναι ολοκληρωμένη. Αλλάξτε πρώτα την κατάσταση σε «Κλειστή» για να κάνετε αλλαγές.');
         redirect('shift-view.php?id=' . $id);
@@ -539,6 +539,98 @@ if (isPost()) {
             }
             break;
             
+        case 'delete_participation':
+            // A sign-up that should never have existed (somebody was added by
+            // mistake): the row is removed and the volunteer is told nothing -
+            // no email, no notification. Refused once attendance is recorded,
+            // because hours and points hang on it.
+            if ($canManage) {
+                $pr = dbFetchOne(
+                    "SELECT pr.id, pr.volunteer_id, pr.attended, u.name
+                     FROM participation_requests pr JOIN users u ON u.id = pr.volunteer_id
+                     WHERE pr.id = ? AND pr.shift_id = ?",
+                    [(int) $prId, $id]
+                );
+                if (!$pr) {
+                    setFlash('error', 'Δεν βρέθηκε η συμμετοχή.');
+                } elseif ($pr['attended']) {
+                    setFlash('error', 'Έχει καταγραφεί παρουσία για τη συμμετοχή αυτή και δεν μπορεί να διαγραφεί.');
+                } else {
+                    dbExecute("DELETE FROM participation_requests WHERE id = ? AND shift_id = ?", [(int) $prId, $id]);
+                    logAudit('delete_participation_silent', 'participation_requests', (int) $prId, "Shift $id, Volunteer {$pr['volunteer_id']} ({$pr['name']}), no notification");
+                    setFlash('success', 'Η συμμετοχή του/της ' . $pr['name'] . ' διαγράφηκε χωρίς ειδοποίηση.');
+                }
+            }
+            break;
+
+        case 'bulk_participation':
+            // Cancel or (re)activate the ticked sign-ups in one go. The shift id
+            // is part of every lookup, so a forged id from another shift is
+            // skipped; anybody already marked present is left alone.
+            if ($canManage) {
+                $ids = post('participation_ids');
+                $ids = is_array($ids) ? array_values(array_unique(array_filter(array_map('intval', $ids)))) : [];
+                $bulk = post('bulk_action');
+                $notify = post('notify') === '1';
+
+                if (!$ids || !in_array($bulk, ['cancel', 'activate'], true)) {
+                    setFlash('error', 'Δεν επιλέξατε συμμετοχές.');
+                } else {
+                    $changed = 0;
+                    $skipped = 0;
+                    foreach ($ids as $bulkId) {
+                        $pr = dbFetchOne(
+                            "SELECT id, volunteer_id, status, attended FROM participation_requests WHERE id = ? AND shift_id = ?",
+                            [$bulkId, $id]
+                        );
+                        if (!$pr || $pr['attended']) { $skipped++; continue; }
+
+                        if ($bulk === 'cancel') {
+                            if (!in_array($pr['status'], [PARTICIPATION_PENDING, PARTICIPATION_APPROVED], true)) { $skipped++; continue; }
+                            dbExecute(
+                                "UPDATE participation_requests SET status = ?, decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
+                                [PARTICIPATION_CANCELED_BY_ADMIN, $user['id'], $bulkId]
+                            );
+                            if ($notify) {
+                                sendNotification(
+                                    (int) $pr['volunteer_id'],
+                                    'Ακύρωση Συμμετοχής',
+                                    'Η συμμετοχή σας στη βάρδια "' . $shift['mission_title'] . '" (' . formatDateTime($shift['start_time']) . ') ακυρώθηκε από τον διαχειριστή.',
+                                    'warning',
+                                    '',
+                                    ['url' => 'shift-view.php?id=' . $id]
+                                );
+                            }
+                        } else {
+                            if ($pr['status'] === PARTICIPATION_APPROVED) { $skipped++; continue; }
+                            dbExecute(
+                                "UPDATE participation_requests SET status = ?, rejection_reason = NULL, decided_by = ?, decided_at = NOW(), updated_at = NOW() WHERE id = ?",
+                                [PARTICIPATION_APPROVED, $user['id'], $bulkId]
+                            );
+                            if ($notify) {
+                                sendNotification(
+                                    (int) $pr['volunteer_id'],
+                                    'Ενεργοποίηση Συμμετοχής',
+                                    'Η συμμετοχή σας στη βάρδια "' . $shift['mission_title'] . '" (' . formatDateTime($shift['start_time']) . ') είναι πλέον εγκεκριμένη.',
+                                    'success',
+                                    '',
+                                    ['url' => 'shift-view.php?id=' . $id]
+                                );
+                            }
+                        }
+                        $changed++;
+                    }
+                    logAudit('bulk_participation', 'participation_requests', null, "Shift $id, $bulk, $changed changed, $skipped skipped, notify=" . ($notify ? 'yes' : 'no'));
+                    setFlash(
+                        $changed > 0 ? 'success' : 'error',
+                        ($bulk === 'cancel' ? 'Ακυρώθηκαν ' : 'Ενεργοποιήθηκαν ') . $changed . ' συμμετοχές'
+                            . ($skipped ? " ($skipped παραλείφθηκαν: ήδη στην κατάσταση αυτή ή με καταγεγραμμένη παρουσία)" : '')
+                            . ($notify ? ' και ειδοποιήθηκαν οι εθελοντές.' : ' χωρίς ειδοποίηση.')
+                    );
+                }
+            }
+            break;
+
         case 'update_notes':
             if ($canManage) {
                 $newNotes = post('admin_notes');
@@ -780,6 +872,75 @@ include __DIR__ . '/includes/header.php';
                     <p class="text-muted">Δεν υπάρχουν αιτήσεις.</p>
                 <?php else: ?>
                     <?php
+                    // Filters: the volunteer teams and categories actually present on this shift.
+                    $filterTeams = [];
+                    foreach ($participants as $fp) {
+                        $ft = trim((string) ($fp['home_team_name'] ?? ''));
+                        if ($ft !== '') $filterTeams[$ft] = true;
+                    }
+                    ksort($filterTeams, SORT_NATURAL | SORT_FLAG_CASE);
+                    $filterTypes = [VTYPE_RESCUER => VOLUNTEER_TYPE_LABELS[VTYPE_RESCUER], VTYPE_TRAINEE => VOLUNTEER_TYPE_LABELS[VTYPE_TRAINEE]];
+                    $filterStatuses = [
+                        PARTICIPATION_APPROVED => 'Εγκεκριμένοι',
+                        PARTICIPATION_PENDING => 'Εκκρεμείς',
+                        PARTICIPATION_REJECTED => 'Απορριφθέντες',
+                        PARTICIPATION_CANCELED_BY_ADMIN => 'Ακυρωμένοι από διαχειριστή',
+                        PARTICIPATION_CANCELED_BY_USER => 'Ακυρωμένοι από τον εθελοντή',
+                    ];
+                    ?>
+                    <div class="row g-2 mb-3" id="participantFilters">
+                        <div class="col-12 col-md-4">
+                            <select class="form-select form-select-sm" id="filterTeam" aria-label="Εθελοντική ομάδα">
+                                <option value="">Όλες οι ομάδες</option>
+                                <?php foreach (array_keys($filterTeams) as $ft): ?>
+                                <option value="<?= h($ft) ?>"><?= h($ft) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-4">
+                            <select class="form-select form-select-sm" id="filterType" aria-label="Κατηγορία">
+                                <option value="">Όλες οι κατηγορίες</option>
+                                <?php foreach ($filterTypes as $ftKey => $ftLabel): ?>
+                                <option value="<?= h($ftKey) ?>"><?= h($ftLabel) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-4">
+                            <select class="form-select form-select-sm" id="filterStatus" aria-label="Κατάσταση">
+                                <option value="">Όλες οι καταστάσεις</option>
+                                <?php foreach ($filterStatuses as $fsKey => $fsLabel): ?>
+                                <option value="<?= h($fsKey) ?>"><?= h($fsLabel) ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-12 small text-muted" id="filterCount"></div>
+                    </div>
+
+                    <?php if ($canManage): ?>
+                    <!-- Bulk actions: the cards' checkboxes belong to this form through form="bulkForm" -->
+                    <form method="post" id="bulkForm" class="border rounded p-2 mb-3 bg-light d-flex flex-wrap align-items-center gap-2">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="bulk_participation">
+                        <div class="form-check mb-0">
+                            <input class="form-check-input" type="checkbox" id="bulkSelectAll">
+                            <label class="form-check-label small" for="bulkSelectAll">Επιλογή όλων (όσων φαίνονται)</label>
+                        </div>
+                        <span class="badge bg-secondary" id="bulkCount">0 επιλεγμένοι</span>
+                        <div class="form-check mb-0 ms-md-2">
+                            <input class="form-check-input" type="checkbox" id="bulkNotify" name="notify" value="1" checked>
+                            <label class="form-check-label small" for="bulkNotify">Ειδοποίηση εθελοντών</label>
+                        </div>
+                        <div class="ms-auto d-flex gap-2 flex-wrap">
+                            <button type="submit" name="bulk_action" value="activate" class="btn btn-sm btn-success" data-bulk-label="ενεργοποίηση">
+                                <i class="bi bi-check-all me-1"></i>Ενεργοποίηση επιλεγμένων
+                            </button>
+                            <button type="submit" name="bulk_action" value="cancel" class="btn btn-sm btn-outline-danger" data-bulk-label="ακύρωση">
+                                <i class="bi bi-x-circle me-1"></i>Ακύρωση επιλεγμένων
+                            </button>
+                        </div>
+                    </form>
+                    <?php endif; ?>
+                    <?php
                     // Determine border accent colour per participation status
                     $statusBorderMap = [
                         PARTICIPATION_APPROVED           => '#198754',  // green
@@ -793,13 +954,13 @@ include __DIR__ . '/includes/header.php';
                         <?php foreach ($participants as $p):
                             $accentColor = $statusBorderMap[$p['status']] ?? '#6c757d';
                         ?>
-                        <div class="col">
+                        <div class="col part-col" data-team="<?= h(trim((string) ($p['home_team_name'] ?? ''))) ?>" data-type="<?= h($p['volunteer_type'] ?? VTYPE_RESCUER) ?>" data-status="<?= h($p['status']) ?>">
                             <div class="card h-100 shadow-sm" style="border-left:4px solid <?= $accentColor ?>;border-radius:.6rem;">
                                 <div class="card-body pb-2">
                                     <!-- Name row -->
                                     <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
                                         <div style="min-width:0;">
-                                            <div class="fw-bold fs-6"><?= guestNameHtml($p['name'], (bool) $p['is_external'], $p['home_team_name'], $p['home_team_color'] ?? '#6c757d', $p['guest_country_code']) ?></div>
+                                            <div class="fw-bold fs-6"><?php if ($canManage): ?><input class="form-check-input part-check me-1" type="checkbox" name="participation_ids[]" value="<?= (int) $p['id'] ?>" form="bulkForm" aria-label="Επιλογή <?= h($p['name']) ?>"><?php endif; ?><?= guestNameHtml($p['name'], (bool) $p['is_external'], $p['home_team_name'], $p['home_team_color'] ?? '#6c757d', $p['guest_country_code']) ?></div>
                                             <div><?= volunteerTypeBadge($p['volunteer_type'] ?? VTYPE_RESCUER) ?></div>
                                         </div>
                                         <div class="d-flex flex-column align-items-end gap-1" style="flex-shrink:0;min-width:max-content;">
@@ -875,6 +1036,18 @@ include __DIR__ . '/includes/header.php';
                                             title="Σχόλιο διαχειριστή">
                                         <i class="bi bi-chat-left-text <?= $p['admin_notes'] ? 'text-info' : '' ?>"></i>
                                     </button>
+                                    <?php if (!$p['attended']): ?>
+                                    <!-- Silent delete: removes the sign-up, tells the volunteer nothing -->
+                                    <form method="post" class="d-inline">
+                                        <?= csrfField() ?>
+                                        <input type="hidden" name="action" value="delete_participation">
+                                        <input type="hidden" name="participation_id" value="<?= (int) $p['id'] ?>">
+                                        <button type="submit" class="btn btn-sm btn-outline-dark" title="Διαγραφή συμμετοχής χωρίς ειδοποίηση"
+                                                onclick="return confirm('Οριστική διαγραφή της συμμετοχής του/της <?= h(addslashes($p['name'])) ?>; Ο εθελοντής ΔΕΝ θα ειδοποιηθεί.');">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                    <?php endif; ?>
 
                                     <?php if ($p['status'] === PARTICIPATION_PENDING): ?>
                                         <form method="post" class="d-inline">
@@ -1498,6 +1671,74 @@ $activeParticipants = array_filter($participants, function($p) {
 <?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
+
+<script>
+// Participant filters (team / category / status) and bulk selection.
+(function() {
+    var cols = document.querySelectorAll('.part-col');
+    if (!cols.length) return;
+    var fTeam = document.getElementById('filterTeam');
+    var fType = document.getElementById('filterType');
+    var fStatus = document.getElementById('filterStatus');
+    var countEl = document.getElementById('filterCount');
+    var bulkCount = document.getElementById('bulkCount');
+    var selectAll = document.getElementById('bulkSelectAll');
+    var bulkForm = document.getElementById('bulkForm');
+
+    function visibleChecks() {
+        return Array.prototype.filter.call(document.querySelectorAll('.part-check'), function(cb) {
+            return !cb.closest('.part-col').classList.contains('d-none');
+        });
+    }
+    function updateBulk() {
+        if (!bulkCount) return;
+        var checked = document.querySelectorAll('.part-check:checked').length;
+        bulkCount.textContent = checked + (checked === 1 ? ' επιλεγμένος' : ' επιλεγμένοι');
+        var vis = visibleChecks();
+        if (selectAll) selectAll.checked = vis.length > 0 && vis.every(function(cb) { return cb.checked; });
+    }
+    function applyFilters() {
+        var team = fTeam.value, type = fType.value, status = fStatus.value, shown = 0;
+        cols.forEach(function(col) {
+            var ok = (!team || col.dataset.team === team)
+                && (!type || col.dataset.type === type)
+                && (!status || col.dataset.status === status);
+            col.classList.toggle('d-none', !ok);
+            if (ok) {
+                shown++;
+            } else {
+                // A card that is hidden must never be acted on by the bulk buttons.
+                var cb = col.querySelector('.part-check');
+                if (cb) cb.checked = false;
+            }
+        });
+        countEl.textContent = (team || type || status) ? ('Εμφανίζονται ' + shown + ' από ' + cols.length) : '';
+        updateBulk();
+    }
+    [fTeam, fType, fStatus].forEach(function(el) { el.addEventListener('change', applyFilters); });
+    document.querySelectorAll('.part-check').forEach(function(cb) { cb.addEventListener('change', updateBulk); });
+    if (selectAll) {
+        selectAll.addEventListener('change', function() {
+            visibleChecks().forEach(function(cb) { cb.checked = selectAll.checked; });
+            updateBulk();
+        });
+    }
+    if (bulkForm) {
+        bulkForm.addEventListener('submit', function(e) {
+            var n = document.querySelectorAll('.part-check:checked').length;
+            var label = (e.submitter && e.submitter.dataset.bulkLabel) || 'ενέργεια';
+            if (!n) {
+                e.preventDefault();
+                alert('Δεν έχετε επιλέξει κανέναν εθελοντή.');
+                return;
+            }
+            var notify = document.getElementById('bulkNotify').checked ? 'Οι εθελοντές θα ειδοποιηθούν.' : 'Οι εθελοντές ΔΕΝ θα ειδοποιηθούν.';
+            if (!confirm('Μαζική ' + label + ' για ' + n + ' εθελοντές;\n' + notify)) e.preventDefault();
+        });
+    }
+    updateBulk();
+})();
+</script>
 
 <?php if ($canManage): ?>
 <script>
