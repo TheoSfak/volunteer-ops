@@ -374,7 +374,8 @@ if (isAdmin()) {
     );
     
     $pendingRequests = dbFetchAll(
-        "SELECT pr.*, u.name as volunteer_name, s.start_time, s.end_time, m.title as mission_title
+        "SELECT pr.*, u.name as volunteer_name, s.start_time, s.end_time, s.max_volunteers, m.title as mission_title,
+                (SELECT COUNT(*) FROM participation_requests ap WHERE ap.shift_id = s.id AND ap.status = ?) AS shift_approved_count
          FROM participation_requests pr
          JOIN users u ON pr.volunteer_id = u.id
          JOIN shifts s ON pr.shift_id = s.id
@@ -382,7 +383,7 @@ if (isAdmin()) {
          WHERE pr.status = ? $departmentFilter
          ORDER BY pr.created_at DESC
          LIMIT 10",
-        array_merge([PARTICIPATION_PENDING], $params)
+        array_merge([PARTICIPATION_APPROVED, PARTICIPATION_PENDING], $params)
     );
 } else {
     // Volunteer statistics
@@ -1738,22 +1739,29 @@ $swapAwaitingMe = isAdmin()
                     <div class="table-responsive">
                         <table class="table table-hover mb-0">
                             <tbody>
-                                <?php foreach ($pendingRequests as $request): ?>
+                                <?php foreach ($pendingRequests as $request):
+                                    // A request on a full shift is on the waiting list: approving it goes over the limit.
+                                    $waitlisted = (int) $request['shift_approved_count'] >= (int) $request['max_volunteers'];
+                                ?>
                                     <tr>
                                         <td>
                                             <strong><?= h($request['volunteer_name']) ?></strong>
+                                            <?php if ($waitlisted): ?>
+                                                <span class="badge bg-warning text-dark ms-1" title="Η βάρδια είναι πλήρης"><i class="bi bi-hourglass-split me-1"></i>Αναμονή</span>
+                                            <?php endif; ?>
                                             <br>
                                             <small class="text-muted">
-                                                <?= h($request['mission_title']) ?> · 
+                                                <?= h($request['mission_title']) ?> ·
                                                 <?= formatDateTime($request['start_time']) ?>
                                             </small>
                                         </td>
                                         <td class="text-end">
-                                            <form method="post" action="participation-action.php" class="d-inline">
+                                            <form method="post" action="participation-action.php" class="d-inline"<?= $waitlisted ? ' onsubmit="return confirm(\'Η βάρδια είναι πλήρης (' . (int) $request['shift_approved_count'] . '/' . (int) $request['max_volunteers'] . '). Έγκριση πάνω από το όριο θέσεων;\');"' : '' ?>>
                                                 <?= csrfField() ?>
                                                 <input type="hidden" name="id" value="<?= $request['id'] ?>">
                                                 <input type="hidden" name="action" value="approve">
-                                                <button type="submit" class="btn btn-sm btn-success" title="Έγκριση">
+                                                <?php if ($waitlisted): ?><input type="hidden" name="over_capacity" value="1"><?php endif; ?>
+                                                <button type="submit" class="btn btn-sm btn-success" title="<?= $waitlisted ? 'Έγκριση πάνω από το όριο θέσεων' : 'Έγκριση' ?>">
                                                     <i class="bi bi-check"></i>
                                                 </button>
                                             </form>

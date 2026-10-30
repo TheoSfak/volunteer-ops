@@ -987,11 +987,13 @@ include __DIR__ . '/includes/header.php';
                                                         <span class="badge bg-secondary" title="Μόνο ο διαχειριστής μπορεί να προσθέσει εθελοντές σε αυτή την αποστολή" data-bs-toggle="tooltip">
                                                             <i class="bi bi-lock-fill me-1"></i>Κλειδωμένη
                                                         </span>
-                                                    <?php elseif (!$isPast && !$isFull && $mission['status'] === STATUS_OPEN && !$isOverdue): ?>
-                                                        <button type="button" class="btn btn-sm btn-primary apply-btn"
+                                                    <?php elseif (!$isPast && $mission['status'] === STATUS_OPEN && !$isOverdue): ?>
+                                                        <button type="button" class="btn btn-sm <?= $isFull ? 'btn-outline-warning' : 'btn-primary' ?> apply-btn"
                                                                 data-shift-id="<?= $shift['id'] ?>"
+                                                                data-shift-full="<?= $isFull ? '1' : '0' ?>"
+                                                                <?= $isFull ? 'title="Η βάρδια είναι πλήρης - η αίτηση μπαίνει σε αναμονή" data-bs-toggle="tooltip"' : '' ?>
                                                                 data-shift-date="<?= formatDateTime($shift['start_time'], 'd/m/Y H:i') ?>">
-                                                            <i class="bi bi-hand-index"></i> Αίτηση
+                                                            <i class="bi <?= $isFull ? 'bi-hourglass-split' : 'bi-hand-index' ?>"></i> <?= $isFull ? 'Αναμονή' : 'Αίτηση' ?>
                                                         </button>
                                                     <?php elseif ($isOverdue && $mission['status'] === STATUS_OPEN): ?>
                                                         <span class="badge bg-secondary" title="Ο χρόνος διεξαγωγής έχει παρέλθει" data-bs-toggle="tooltip">
@@ -1066,11 +1068,12 @@ include __DIR__ . '/includes/header.php';
                                                 <span class="badge bg-secondary" title="Μόνο ο διαχειριστής μπορεί να προσθέσει εθελοντές σε αυτή την αποστολή">
                                                     <i class="bi bi-lock-fill me-1"></i>Κλειδωμένη
                                                 </span>
-                                            <?php elseif (!$isPast && !$isFull && $mission['status'] === STATUS_OPEN && !$isOverdue): ?>
-                                                <button type="button" class="btn btn-sm btn-primary apply-btn"
+                                            <?php elseif (!$isPast && $mission['status'] === STATUS_OPEN && !$isOverdue): ?>
+                                                <button type="button" class="btn btn-sm <?= $isFull ? 'btn-outline-warning' : 'btn-primary' ?> apply-btn"
                                                         data-shift-id="<?= $shift['id'] ?>"
+                                                        data-shift-full="<?= $isFull ? '1' : '0' ?>"
                                                         data-shift-date="<?= formatDateTime($shift['start_time'], 'd/m/Y H:i') ?>">
-                                                    <i class="bi bi-hand-index me-1"></i>Αίτηση
+                                                    <i class="bi <?= $isFull ? 'bi-hourglass-split' : 'bi-hand-index' ?> me-1"></i><?= $isFull ? 'Αναμονή' : 'Αίτηση' ?>
                                                 </button>
                                             <?php elseif ($isOverdue && $mission['status'] === STATUS_OPEN): ?>
                                                 <span class="badge bg-secondary" title="Ο χρόνος διεξαγωγής έχει παρέλθει">
@@ -1478,6 +1481,10 @@ if (!empty($shiftIds)) {
                 </div>
                 <div class="modal-body">
                     <p>Αίτηση για τη βάρδια: <strong id="applyShiftDate"></strong></p>
+                    <div class="alert alert-warning d-none" id="applyShiftFullNote">
+                        <i class="bi bi-hourglass-split me-1"></i>
+                        Η βάρδια είναι πλήρης. Η αίτησή σας μπαίνει σε <strong>αναμονή</strong>: δεν καταλαμβάνει θέση και θα εγκριθεί μόνο αν ο διαχειριστής αποφασίσει να προσθέσει κι άλλα άτομα.
+                    </div>
                     <div class="mb-3">
                         <label class="form-label">Σημειώσεις (προαιρετικά)</label>
                         <textarea class="form-control" name="volunteer_notes" rows="3" 
@@ -1501,6 +1508,7 @@ document.querySelectorAll('.apply-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
         document.getElementById('applyShiftId').value = this.getAttribute('data-shift-id');
         document.getElementById('applyShiftDate').textContent = this.getAttribute('data-shift-date');
+        document.getElementById('applyShiftFullNote').classList.toggle('d-none', this.getAttribute('data-shift-full') !== '1');
         var modal = new bootstrap.Modal(document.getElementById('applyModal'));
         modal.show();
     });

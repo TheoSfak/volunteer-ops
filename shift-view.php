@@ -1089,11 +1089,12 @@ include __DIR__ . '/includes/header.php';
                                     <?php endif; ?>
 
                                     <?php if ($p['status'] === PARTICIPATION_PENDING): ?>
-                                        <form method="post" class="d-inline">
+                                        <?php $overCapacity = $approvedCount >= $shift['max_volunteers']; ?>
+                                        <form method="post" class="d-inline"<?= $overCapacity ? ' onsubmit="return confirm(\'Η βάρδια είναι πλήρης (' . (int) $approvedCount . '/' . (int) $shift['max_volunteers'] . '). Έγκριση πάνω από το όριο θέσεων;\');"' : '' ?>>
                                             <?= csrfField() ?>
                                             <input type="hidden" name="action" value="approve">
                                             <input type="hidden" name="participation_id" value="<?= $p['id'] ?>">
-                                            <button type="submit" class="btn btn-sm btn-success" title="Έγκριση">
+                                            <button type="submit" class="btn btn-sm btn-success" title="<?= $overCapacity ? 'Έγκριση πάνω από το όριο θέσεων' : 'Έγκριση' ?>">
                                                 <i class="bi bi-check-lg me-1"></i>Έγκριση
                                             </button>
                                         </form>
@@ -1152,6 +1153,11 @@ include __DIR__ . '/includes/header.php';
                         <p>Κατάσταση: <?= statusBadge($myParticipation['status']) ?></p>
                         
                         <?php if ($myParticipation['status'] === PARTICIPATION_PENDING): ?>
+                            <?php if ($approvedCount >= $shift['max_volunteers']): ?>
+                                <p class="small text-muted">
+                                    <i class="bi bi-hourglass-split me-1"></i>Η βάρδια είναι πλήρης, οπότε η αίτησή σας είναι σε αναμονή μέχρι να αποφασίσει ο διαχειριστής.
+                                </p>
+                            <?php endif; ?>
                             <form method="post">
                                 <?= csrfField() ?>
                                 <input type="hidden" name="action" value="cancel">
@@ -1199,24 +1205,24 @@ include __DIR__ . '/includes/header.php';
                             Σε αυτή την αποστολή μόνο ο διαχειριστής μπορεί να προσθέσει εθελοντές.
                         </div>
                     <?php elseif ($shift['mission_status'] === STATUS_OPEN && !$isPast && !$missionOverdue): ?>
-                        <?php if ($approvedCount >= $shift['max_volunteers']): ?>
-                            <div class="alert alert-warning mb-0">
-                                <i class="bi bi-exclamation-circle me-1"></i>
-                                Η βάρδια είναι πλήρης.
+                        <?php $shiftIsFull = $approvedCount >= $shift['max_volunteers']; ?>
+                        <?php if ($shiftIsFull): ?>
+                            <div class="alert alert-warning">
+                                <i class="bi bi-hourglass-split me-1"></i>
+                                Η βάρδια είναι πλήρης. Μπορείτε να υποβάλετε αίτηση σε <strong>αναμονή</strong>: δεν καταλαμβάνει θέση και θα εγκριθεί μόνο αν αποφασίσει ο διαχειριστής να προσθέσει κι άλλα άτομα.
                             </div>
-                        <?php else: ?>
-                            <form method="post">
-                                <?= csrfField() ?>
-                                <input type="hidden" name="action" value="apply">
-                                <div class="mb-3">
-                                    <label class="form-label">Σημειώσεις (προαιρετικά)</label>
-                                    <textarea class="form-control" name="notes" rows="2"></textarea>
-                                </div>
-                                <button type="submit" class="btn btn-primary w-100">
-                                    <i class="bi bi-send me-1"></i>Υποβολή Αίτησης
-                                </button>
-                            </form>
                         <?php endif; ?>
+                        <form method="post">
+                            <?= csrfField() ?>
+                            <input type="hidden" name="action" value="apply">
+                            <div class="mb-3">
+                                <label class="form-label">Σημειώσεις (προαιρετικά)</label>
+                                <textarea class="form-control" name="notes" rows="2"></textarea>
+                            </div>
+                            <button type="submit" class="btn <?= $shiftIsFull ? 'btn-outline-warning' : 'btn-primary' ?> w-100">
+                                <i class="bi <?= $shiftIsFull ? 'bi-hourglass-split' : 'bi-send' ?> me-1"></i><?= $shiftIsFull ? 'Υποβολή Αίτησης σε Αναμονή' : 'Υποβολή Αίτησης' ?>
+                            </button>
+                        </form>
                     <?php elseif ($missionOverdue && !isAdmin()): ?>
                         <div class="alert alert-warning mb-0">
                             <i class="bi bi-clock-history me-1"></i>

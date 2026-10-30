@@ -70,9 +70,12 @@ try {
                 [$request['shift_id']]
             );
             
-            if ($currentCount >= $maxVolunteers) {
+            // A full shift only takes one more when the admin said so: the dashboard
+            // card marks a waiting-list request and asks first (over_capacity=1).
+            // Without that, two admins clicking at once still cannot over-approve by accident.
+            if ($currentCount >= $maxVolunteers && post('over_capacity') !== '1') {
                 db()->rollBack();
-                setFlash('error', 'Η βάρδια είναι πλήρης.');
+                setFlash('error', 'Η βάρδια είναι πλήρης. Εγκρίνετε από τον πίνακα με επιβεβαίωση ή από τη σελίδα της βάρδιας.');
                 redirect('dashboard.php');
             }
             
