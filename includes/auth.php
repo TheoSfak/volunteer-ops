@@ -174,7 +174,48 @@ define('WAR_ROOM_PARTNER_GUEST_PAGES', [
     'mobile-token-issue.php', 'mobile-app-setup.php', 'mobile-token-check.php',
 ]);
 
+// The endpoints the Android app's background service calls with its bearer
+// token ALONE (v3.420.3). The service runs in the same process as the app's
+// WebView, and Capacitor gives its HttpURLConnection the WebView's cookie jar,
+// so every one of these requests also carries the volunteer's logged-in session
+// cookie. For an ordinary volunteer that is harmless. For a partner-org guest
+// (users.is_external) it is not: bootstrap.php's guest gate sees a logged-in
+// guest asking for a page outside their short allow-list and answers with a
+// redirect to their landing page, which the service follows and reads as a
+// 200 HTML page. The order-alert poll then died on «Value <!DOCTYPE … cannot
+// be converted to JSONObject» (alert_poll_failed in the mobile debug log) and
+// the positions it posted were never stored, so the Action Room showed the
+// page's own pings («Το στίγμα στάλθηκε από τη σελίδα») and the screen-off phone
+// was silent. The maintenance-mode gate does the same to any non-admin.
+//
+// Listed here ONLY the scripts that need no session at all. The ones that mix
+// the two (mobile-token-check.php asks who the logged-in user is,
+// mobile-debug-log.php and vitals-ingest.php take either) must keep it.
+define('MOBILE_BEARER_ONLY_SCRIPTS', [
+    'mobile-ping-location.php', 'mobile-alerts.php', 'mobile-order-ack.php', 'mobile-gps-error.php',
+]);
+
+/**
+ * True for a request to one of MOBILE_BEARER_ONLY_SCRIPTS that carries a bearer
+ * token: the session, and every gate that hangs off it, is then not started.
+ */
+function isBearerOnlyMobileRequest() {
+    $script = basename($_SERVER['SCRIPT_NAME'] ?? '');
+    if (!in_array($script, MOBILE_BEARER_ONLY_SCRIPTS, true)) {
+        return false;
+    }
+    $header = $_SERVER['HTTP_AUTHORIZATION'] ?? ($_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? '');
+    return (bool) preg_match('/^Bearer\s+\S+$/', trim((string) $header));
+}
+
 function initSession() {
+    if (isBearerOnlyMobileRequest()) {
+        // No session_start(): no cookie is read, none is renewed or sent back,
+        // no session row is written (the phone polls every 30 s), and
+        // isLoggedIn() is false for the guest and maintenance gates.
+        $_SESSION = [];
+        return;
+    }
     if (session_status() === PHP_SESSION_NONE) {
         $currentScript = basename($_SERVER['SCRIPT_NAME'] ?? '');
         $isWarRoomExempt = in_array($currentScript, WAR_ROOM_ACTION_SCRIPTS, true);
