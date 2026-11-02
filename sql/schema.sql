@@ -2810,6 +2810,7 @@ CREATE TABLE IF NOT EXISTS `mission_restricted_areas` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     `mission_id` INT UNSIGNED NOT NULL,
     `label` VARCHAR(255) NOT NULL,
+    `kind` ENUM('danger','cliff','forbidden') NOT NULL DEFAULT 'danger',
     `geo` TEXT NOT NULL,
     `created_by` INT UNSIGNED NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

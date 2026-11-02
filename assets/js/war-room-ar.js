@@ -153,7 +153,7 @@ function arNearestOnPolygon(me, geo) {
 
 // ── The screen ───────────────────────────────────────────────────────────────
 
-const AR_COL = {green: [74, 222, 128], cyan: [34, 211, 238], red: [248, 81, 73], amber: [251, 191, 36], white: [240, 246, 242], grey: [160, 170, 165]};
+const AR_COL = {green: [74, 222, 128], cyan: [34, 211, 238], red: [248, 81, 73], orange: [255, 145, 60], amber: [251, 191, 36], white: [240, 246, 242], grey: [160, 170, 165]};
 const AR_FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const AR_MOVING_MPS = 1.5;        // faster than this and the screen dims: look where you are going
 const AR_SESSION_MS = 10 * 60000; // camera + GPS + sensors heat a phone; ask before going on
@@ -180,6 +180,11 @@ function arOrderKeys() {
         if (m.target && m.target.nav && (m.outstanding || m.kind === 'arrive')) keys.push(key);
     });
     return keys;
+}
+
+// «danger» for a zone drawn before kinds existed, or one with a kind this screen does not know.
+function arZoneKind(area) {
+    return area && (area.kind === 'cliff' || area.kind === 'forbidden') ? area.kind : 'danger';
 }
 
 function arElement() {
@@ -797,19 +802,22 @@ function arDrawWorld(S, m, me) {
         (restrictedAreas || []).forEach(a => {
             if (!a.geo || a.geo.length < 3) return;
             const vecs = a.geo.map(p => arVec(me, p[0], p[1]));
-            arDrawWall(S, vecs, AR_COL.red, 18, true, true);
+            // A cliff is orange and stands taller, so an exposed ledge cannot be mistaken for a plain danger zone.
+            const kind = arZoneKind(a);
+            const zoneCol = kind === 'cliff' ? AR_COL.orange : AR_COL.red;
+            arDrawWall(S, vecs, zoneCol, kind === 'cliff' ? 30 : 18, true, true);
             const near = arNearestOnPolygon(me, a.geo);
-            S.radar.push({poly: a.geo, col: AR_COL.red});
-            a.geo.forEach(p => { const v = arVec(me, p[0], p[1]); pushMark(arBearingElevation([v.x, v.y, 0]).az, AR_COL.red, 'sq'); });
+            S.radar.push({poly: a.geo, col: zoneCol});
+            a.geo.forEach(p => { const v = arVec(me, p[0], p[1]); pushMark(arBearingElevation([v.x, v.y, 0]).az, zoneCol, 'sq'); });
             if (near && (!info.hazard || near.dist < info.hazard.dist)) {
                 const v = arVec(me, near.lat, near.lng);
-                info.hazard = {dist: near.dist, name: a.label, az: arBearingElevation([v.x, v.y, 0]).az, inside: pointInPolygon(me.lat, me.lng, a.geo)};
+                info.hazard = {dist: near.dist, name: a.label, kind: kind, az: arBearingElevation([v.x, v.y, 0]).az, inside: pointInPolygon(me.lat, me.lng, a.geo)};
             }
         });
         if (info.hazard) {
             const hz = info.hazard;
             const p = arProject([Math.sin(hz.az * Math.PI / 180) * hz.dist, Math.cos(hz.az * Math.PI / 180) * hz.dist, 8 - AR_EYE_HEIGHT_M], S.basis, S.focal, S.cw, S.ch);
-            if (p && p.x > 0 && p.x < S.cw && hz.dist < 400) arLabelCard(ctx, S.cw, S.ch, p.x, p.y - 56, [{t: '▲ ' + t('ar.danger'), b: true, c: AR_COL.red}, {t: hz.name}, {t: formatDistanceMeters(hz.dist)}], AR_COL.red);
+            if (p && p.x > 0 && p.x < S.cw && hz.dist < 400) arLabelCard(ctx, S.cw, S.ch, p.x, p.y - 56, [{t: '▲ ' + t('ar.kind_' + hz.kind), b: true, c: hz.kind === 'cliff' ? AR_COL.orange : AR_COL.red}, {t: hz.name}, {t: formatDistanceMeters(hz.dist)}], hz.kind === 'cliff' ? AR_COL.orange : AR_COL.red);
         }
     }
     if (arState.layers.team) {
@@ -886,8 +894,10 @@ function arUpdateDynamicHud(el, m, S) {
     let text = '';
     if (info.out) text = t('ar.sector_out');
     else if (info.hazard && arState.layers.haz) {
-        if (info.hazard.inside) text = t('ar.inside_danger', {name: info.hazard.name});
-        else if (info.hazard.dist < 170 && Math.abs(arTurnTo(S.heading, info.hazard.az)) < 45) text = t('ar.danger_ahead', {name: info.hazard.name, dist: formatDistanceMeters(info.hazard.dist)});
+        // A cliff is warned about from further off: nobody stops in time at the edge.
+        const warnFrom = info.hazard.kind === 'cliff' ? 220 : 170;
+        if (info.hazard.inside) text = t('ar.inside_' + info.hazard.kind, {name: info.hazard.name});
+        else if (info.hazard.dist < warnFrom && Math.abs(arTurnTo(S.heading, info.hazard.az)) < 45) text = t('ar.ahead_' + info.hazard.kind, {name: info.hazard.name, dist: formatDistanceMeters(info.hazard.dist)});
     }
     warn.hidden = !text;
     if (warn.textContent !== text) warn.textContent = text;

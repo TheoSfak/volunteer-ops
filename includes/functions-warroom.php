@@ -7688,12 +7688,13 @@ function loadUnacknowledgedVoiceMessagesForMission(int $missionId, int $limit = 
  */
 function loadMissionRestrictedAreasForUser(int $missionId): array {
     $rows = dbFetchAll(
-        "SELECT id, label, geo, created_at FROM mission_restricted_areas WHERE mission_id = ? ORDER BY created_at ASC",
+        "SELECT id, label, kind, geo, created_at FROM mission_restricted_areas WHERE mission_id = ? ORDER BY created_at ASC",
         [$missionId]
     );
     return array_map(fn($row) => [
         'id'         => (int) $row['id'],
         'label'      => $row['label'],
+        'kind'       => $row['kind'],
         'geo'        => json_decode($row['geo'], true),
         'created_at' => date('d/m H:i', strtotime($row['created_at'])),
     ], $rows);

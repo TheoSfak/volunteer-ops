@@ -7815,6 +7815,16 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 195,
+            'description' => "Add mission_restricted_areas.kind (v3.417.0): what a drawn zone is - 'danger' (every zone so far), 'cliff' (an exposed ledge or steep drop, «Αποκρημνος γκρεμός») or 'forbidden'. All three still raise the same breach alarm; the kind is what the AR view, the map popup and the list say about the zone.",
+            'up' => function () {
+                if (!dbColumnExists('mission_restricted_areas', 'kind')) {
+                    dbExecute("ALTER TABLE mission_restricted_areas ADD COLUMN kind ENUM('danger','cliff','forbidden') NOT NULL DEFAULT 'danger' AFTER label");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

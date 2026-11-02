@@ -67,7 +67,7 @@ final class ArFieldViewTest extends TestCase
 
     public function testEveryStringTheScreenAsksForExistsInGreekAndEnglish(): void
     {
-        preg_match_all("~\bt\('(ar\.[a-z_]+)'~", $this->module, $m);
+        preg_match_all("~\bt\('(ar\.[a-z_]+)'[,)]~", $this->module, $m);
         preg_match_all("~'(ar\.[a-z_]+)'\s*=>~", $this->lang, $defined);
         $keys = array_unique($m[1]);
         $this->assertNotEmpty($keys);
@@ -76,7 +76,11 @@ final class ArFieldViewTest extends TestCase
             $this->assertSame(2, $counts[$key] ?? 0, "$key must be defined once in Greek and once in English");
         }
         // Chosen by a variable, so the scan above cannot see them.
-        foreach (['ar.turn_right', 'ar.turn_left'] as $key) {
+        $chosen = ['ar.turn_right', 'ar.turn_left'];
+        foreach (['danger', 'cliff', 'forbidden'] as $kind) {
+            array_push($chosen, 'ar.kind_' . $kind, 'ar.ahead_' . $kind, 'ar.inside_' . $kind);
+        }
+        foreach ($chosen as $key) {
             $this->assertSame(2, $counts[$key] ?? 0, "$key must be defined in both languages");
         }
     }

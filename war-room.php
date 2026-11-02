@@ -6339,6 +6339,11 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                         <button type="button" class="btn btn-outline-secondary" id="restrictedAreaCoordsAddBtn" title="<?= t('dispatch.coords_add_title') ?>"><i class="bi bi-plus-lg"></i></button>
                     </div>
                     <input type="text" id="restrictedAreaLabelInput" class="form-control" style="max-width:220px;" maxlength="255" placeholder="<?= t('restricted_area.label_placeholder') ?>">
+                    <select id="restrictedAreaKindSelect" class="form-select form-select-sm" style="max-width:210px;" aria-label="<?= t('restricted_area.kind_label') ?>">
+                        <option value="danger"><?= t('restricted_area.kind_danger') ?></option>
+                        <option value="cliff"><?= t('restricted_area.kind_cliff') ?></option>
+                        <option value="forbidden"><?= t('restricted_area.kind_forbidden') ?></option>
+                    </select>
                     <span class="badge text-bg-dark align-self-center d-none" id="restrictedAreaSizeReadout"></span>
                     <div class="ms-auto d-flex gap-2">
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="restrictedAreaClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
@@ -10144,6 +10149,10 @@ areaLayer?.on('popupopen', event => {
 // the map, admin-drawn/managed only (a map-less viewer never sees these;
 // the volunteer-facing side of this feature is purely the full-screen alarm,
 // wired separately below).
+// «Επικίνδυνη ζώνη» / «Γκρεμός» / «Απαγορευμένη ζώνη»; a zone drawn before the kind existed is a danger zone.
+function restrictedKindLabel(kind) {
+    return t('restricted_area.kind_' + (['cliff', 'forbidden'].includes(kind) ? kind : 'danger'));
+}
 function renderRestrictedAreaLayer(items) {
     if (!restrictedAreaLayer) return;
 
@@ -10162,7 +10171,7 @@ function renderRestrictedAreaLayer(items) {
         // same way (item.can_manage), this just brings restricted areas in
         // line with that, closing the gap the visibility fix above exposed
         // (non-admins never saw this popup at all before that fix).
-        const popupHtml = `<strong>${escapeHtml(item.label)}</strong>` +
+        const popupHtml = `<strong>${escapeHtml(item.label)}</strong><div class="small text-muted">${escapeHtml(restrictedKindLabel(item.kind))}</div>` +
             (canManageIncidents ? `
             <div class="mt-2">
                 <button type="button" class="btn btn-sm btn-outline-danger restricted-area-delete-btn" data-id="${item.id}">${t('common.delete')}</button>
@@ -10340,7 +10349,7 @@ function renderRestrictedAreasList(items) {
     }
     list.innerHTML = items.map(a => `
         <div class="d-flex justify-content-between align-items-center border rounded p-2 mb-1">
-            <strong class="small">${escapeHtml(a.label)}</strong>
+            <span class="small"><strong>${escapeHtml(a.label)}</strong><span class="badge text-bg-light border ms-2">${escapeHtml(restrictedKindLabel(a.kind))}</span></span>
             <button type="button" class="btn btn-sm btn-outline-danger restricted-area-list-delete-btn" data-id="${a.id}">${t('common.delete')}</button>
         </div>
     `).join('');
@@ -27674,6 +27683,7 @@ document.querySelectorAll('.team-form').forEach(form => {
     const coordsInput = document.getElementById('restrictedAreaCoordsInput');
     const coordsAddBtn = document.getElementById('restrictedAreaCoordsAddBtn');
     const labelInput = document.getElementById('restrictedAreaLabelInput');
+    const kindSelect = document.getElementById('restrictedAreaKindSelect');
     const clearBtn = document.getElementById('restrictedAreaClearBtn');
     const sendBtn = document.getElementById('restrictedAreaSendBtn');
     const sizeReadout = document.getElementById('restrictedAreaSizeReadout');
@@ -27863,7 +27873,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         }
         const data = new URLSearchParams({
             csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>,
-            geo: JSON.stringify(drawPoints), label: label,
+            geo: JSON.stringify(drawPoints), label: label, kind: kindSelect.value,
         });
         sendBtn.disabled = true;
         fetch('mission-restricted-area.php', {method:'POST', body:data}).then(response => response.json()).then(result => {

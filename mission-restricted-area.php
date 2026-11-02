@@ -129,6 +129,14 @@ if ($action === 'create') {
     }
     $label = mb_substr($label, 0, 255);
 
+    // What the zone is: «Επικίνδυνη ζώνη», «Γκρεμός», «Απαγορευμένη». Every kind raises
+    // the same breach alarm; an unknown value is refused rather than guessed.
+    $kind = (string) (post('kind') ?: 'danger');
+    if (!in_array($kind, ['danger', 'cliff', 'forbidden'], true)) {
+        echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
+        exit;
+    }
+
     $rawGeo = json_decode((string) post('geo'), true);
     if (!is_array($rawGeo) || count($rawGeo) < 3) {
         echo json_encode(['ok' => false, 'error' => t('dispatch.polygon_needs_3_points')]);
@@ -143,10 +151,10 @@ if ($action === 'create') {
     $geo = array_map(fn($pt) => [(float) $pt[0], (float) $pt[1]], $rawGeo);
 
     $areaId = dbInsert(
-        "INSERT INTO mission_restricted_areas (mission_id, label, geo, created_by, created_at) VALUES (?, ?, ?, ?, NOW())",
-        [$missionId, $label, json_encode($geo), $userId]
+        "INSERT INTO mission_restricted_areas (mission_id, label, kind, geo, created_by, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
+        [$missionId, $label, $kind, json_encode($geo), $userId]
     );
-    logAudit('create_mission_restricted_area', 'mission_restricted_areas', $areaId, null, ['mission_id' => $missionId]);
+    logAudit('create_mission_restricted_area', 'mission_restricted_areas', $areaId, null, ['mission_id' => $missionId, 'kind' => $kind]);
 
     echo json_encode(['ok' => true, 'id' => (int) $areaId, 'areas' => loadMissionRestrictedAreasForUser($missionId)]);
     exit;
