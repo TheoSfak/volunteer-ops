@@ -57,8 +57,8 @@ if (isPost()) {
         ['validateRequired', $startHour, 'Ώρα έναρξης'],
         ['validateRequired', $endDate, 'Ημερομηνία λήξης'],
         ['validateRequired', $endHour, 'Ώρα λήξης'],
-        ['validateNumber', $maxVolunteers, 1, 100, 'Μέγιστος αριθμός εθελοντών'],
-        ['validateNumber', $minVolunteers, 1, 100, 'Ελάχιστος αριθμός εθελοντών'],
+        ['validateNumber', $maxVolunteers, 1, 200, 'Μέγιστος αριθμός εθελοντών'],
+        ['validateNumber', $minVolunteers, 1, 200, 'Ελάχιστος αριθμός εθελοντών'],
     ]);
     
     if (empty($errors)) {
