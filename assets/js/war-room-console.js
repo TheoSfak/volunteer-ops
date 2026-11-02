@@ -470,7 +470,8 @@ if (typeof module !== 'undefined' && module.exports) {
             </section>
             <section class="wrc-sec wrc-teams" id="wrcTeams">
                 <header class="wrc-sec-h"><i class="bi bi-people-fill"></i><span class="wrc-h">${esc(t('console.teams_title'))}</span><span class="wrc-cnt" id="wrcTeamsCnt">0</span>
-                    <button type="button" class="wrc-link ms-auto" id="wrcSelAll">${esc(t('console.select_all'))}</button></header>
+                    <button type="button" class="wrc-link ms-auto" id="wrcSelAll">${esc(t('console.select_all'))}</button>
+                    ${typeof floorBaselineOpen === 'function' ? `<button type="button" class="wrc-link" id="wrcFloorBtn" title="${esc(t('floor.btn_title'))}" aria-label="${esc(t('floor.btn'))}"><i class="bi bi-building-up"></i></button>` : ''}</header>
                 <div class="wrc-teams-body" id="wrcTeamsBody"></div>
             </section>
         </div>
@@ -1134,12 +1135,16 @@ if (typeof module !== 'undefined' && module.exports) {
         const live = state.live[String(uid)] || {};
         const st = MEMBER_STATUS[live.field_status];
         const stale = isStale(uid);
+        // The barometer floor (v3.426.0), on its own line under the name: beside the status
+        // tag it left the name 60px wide in this narrow column.
+        const floorChip = typeof floorChipHtml === 'function' ? floorChipHtml(live.floor, t, esc) : '';
         return `<label class="wrc-m${stale ? ' stale' : ''}">
             <input type="checkbox" data-uid="${uid}"${state.selected.has(uid) ? ' checked' : ''}>
             <span class="wrc-m-n">${guestNameHtml(m.name, m.is_external, m.home_team_name, teamBadgeColorsJs(m.home_team_color)[0], teamBadgeColorsJs(m.home_team_color)[1], m.guest_country_code)}${k9BadgeHtml(uid, true)}${captainBadgeHtml(uid, true)}</span>
             ${st ? `<span class="wrc-tag wrc-tag-${st[0]}">${esc(t(st[1]))}</span>` : ''}
             ${stale ? `<i class="bi bi-wifi-off wrc-stale" title="${esc(t('console.no_contact'))}"></i>` : ''}
             ${m.takes_part ? '' : `<i class="bi bi-geo-alt-slash wrc-mut" title="${esc(t('gps_participant.self_note'))}"></i>`}
+            ${floorChip ? `<span class="wrc-m-br"></span>${floorChip}` : ''}
         </label>`;
     }
 
@@ -1253,7 +1258,7 @@ if (typeof module !== 'undefined' && module.exports) {
         });
         $('#wrcTeamsCnt', root).textContent = String(model.length);
         const sig = JSON.stringify([model.map(m => [m.team.id, m.team.label, m.team.color, m.team.transport, m.vm, m.decl, m.items.map(i => [i.kind, i.detail, i.state, i.tone]),
-            m.members.map(x => [x.user_id, x.name, isStale(x.user_id), (state.live[String(x.user_id)] || {}).field_status])]),
+            m.members.map(x => [x.user_id, x.name, isStale(x.user_id), (state.live[String(x.user_id)] || {}).field_status, (state.live[String(x.user_id)] || {}).floor || null])]),
             Array.from(state.open), Array.from(state.ordersOpen)]);
         if (sig === teamsSig) return;
         teamsSig = sig;
@@ -1346,6 +1351,10 @@ if (typeof module !== 'undefined' && module.exports) {
         if (!everyone) all.forEach(id => state.selected.add(id));
         selectionChanged();
     });
+
+    // «Επίπεδο εδάφους» (v3.426.0): the window that sets the ground level the barometer floor is measured from.
+    const floorBtn = $('#wrcFloorBtn', root);
+    if (floorBtn) floorBtn.addEventListener('click', () => floorBaselineOpen());
 
     function selectionChanged() {
         syncSelection();

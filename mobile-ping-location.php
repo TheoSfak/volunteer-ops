@@ -53,12 +53,27 @@ if (!$user) {
 // request, so recording it costs no extra query. Before v3.320.0 every label
 // was the literal 'Android', which made "which phones give bad positions"
 // unanswerable.
-$touchToken = function ($rawDevice) use ($tokenHash): void {
+//
+// v3.426.0: the same UPDATE also records whether the phone has a barometer
+// (has_baro, 1/0; absent from an older app, which leaves the column as it is),
+// so the console can say "this phone has no pressure sensor" instead of just
+// showing no floor. Falls back to the plain UPDATE if the column is missing
+// (a deploy that has not run migration 199 yet) - a ping must never fail on it.
+$touchToken = function ($rawDevice, $rawHasBaro = null) use ($tokenHash): void {
     $device = is_string($rawDevice) ? trim(preg_replace('/[\x00-\x1F\x7F]+/u', ' ', $rawDevice)) : '';
-    dbExecute(
-        "UPDATE mobile_api_tokens SET last_used_at = NOW(), device_label = COALESCE(?, device_label) WHERE token_hash = ?",
-        [$device !== '' ? mb_substr($device, 0, 100) : null, $tokenHash]
-    );
+    $deviceLabel = $device !== '' ? mb_substr($device, 0, 100) : null;
+    try {
+        dbExecute(
+            "UPDATE mobile_api_tokens SET last_used_at = NOW(), device_label = COALESCE(?, device_label),
+                    has_barometer = COALESCE(?, has_barometer) WHERE token_hash = ?",
+            [$deviceLabel, parseHasBarometer($rawHasBaro), $tokenHash]
+        );
+    } catch (Throwable $e) {
+        dbExecute(
+            "UPDATE mobile_api_tokens SET last_used_at = NOW(), device_label = COALESCE(?, device_label) WHERE token_hash = ?",
+            [$deviceLabel, $tokenHash]
+        );
+    }
 };
 
 // Two request shapes land here: plain form fields (curl/manual testing) and
@@ -86,13 +101,13 @@ if (stripos($contentType, 'application/json') !== false) {
     // "batch" as "resend these one at a time" rather than as delivered.
     if ($body !== [] && array_is_list($body)) {
         $last = end($body);
-        $touchToken(is_array($last) ? ($last['device'] ?? null) : null);
+        $touchToken(is_array($last) ? ($last['device'] ?? null) : null, is_array($last) ? ($last['has_baro'] ?? null) : null);
         $results = recordNativePingBatch($user, $shiftId, $body);
         echo json_encode(['ok' => true, 'batch' => count($results), 'results' => $results]);
         exit;
     }
 
-    $touchToken($body['device'] ?? null);
+    $touchToken($body['device'] ?? null, $body['has_baro'] ?? null);
     // 'native': bearer-token auth means this can only be the Capacitor Android
     // background-location plugin, which keeps reporting with the screen off.
     echo json_encode(recordNativePingFromJson($user, $shiftId, $body));

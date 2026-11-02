@@ -58,6 +58,8 @@ $defaults = [
     // Action Room was asked for it; off puts back the «Έφτασες;» question.
     'arrival_auto_enabled' => '1',
     'war_room_low_battery_pct' => '60',
+    // Height of one floor in metres, for the barometer floor (baroFloorHeightM()).
+    'war_room_floor_height_m' => '3',
     'war_room_max_shift_minutes' => '480',
     'war_room_grid_max_size_m' => '900',
     'war_room_grid_max_cells' => '120',
@@ -522,7 +524,7 @@ $actionRoomFields = [
     'war_room_native_sampling', 'war_room_native_full_tracking',
     'war_room_max_ping_accuracy_m', 'war_room_max_ping_speed_kmh', 'war_room_max_ping_speed_kmh_vehicle', 'war_room_gps_smoothing',
     'arrival_auto_enabled',
-    'war_room_low_battery_pct', 'war_room_max_shift_minutes',
+    'war_room_low_battery_pct', 'war_room_max_shift_minutes', 'war_room_floor_height_m',
     'vitals_enabled', 'vitals_sample_seconds', 'vitals_elevated_pct', 'vitals_critical_pct',
     'vitals_low_bpm', 'vitals_reference_age', 'vitals_stale_seconds', 'vitals_retention_days',
     'vitals_episode_tachy_minutes', 'vitals_episode_brady_minutes', 'vitals_episode_strain_minutes',
@@ -612,6 +614,16 @@ if (isPost()) {
                     // where buildSectorGridCells() clamps on both sides regardless.
                     if ($field === 'war_room_grid_max_size_m') {
                         $value = (string) max(200, min(GRID_SECTOR_SIZE_MAX_M, (int) $value ?: 900));
+                    }
+
+                    // One floor, in metres, for the barometer floor. baroFloorHeightM()
+                    // refuses anything outside 2-6 m on read as well; this keeps the
+                    // number an admin sees in the form the one actually in use.
+                    if ($field === 'war_room_floor_height_m') {
+                        $floorM = (float) str_replace(',', '.', (string) $value);
+                        $value = ($floorM >= 2.0 && $floorM <= 6.0)
+                            ? rtrim(rtrim(number_format($floorM, 2, '.', ''), '0'), '.')
+                            : '3';
                     }
 
                     // Ceiling is MAX_GRID_CELLS (config.php), which exists because
@@ -2356,6 +2368,20 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                         <input type="number" class="form-control" style="max-width:160px;" name="war_room_max_shift_minutes"
                                value="<?= h($settings['war_room_max_shift_minutes']) ?>" min="30" max="2880" step="30">
                         <small class="text-muted">Λεπτά συνεχόμενης παρουσίας εθελοντή σε αλυσίδα εγκεκριμένων βαρδιών στην ίδια αποστολή, πάνω από τα οποία εμφανίζεται προειδοποίηση κόπωσης στο Action Room (ρόστερ, χάρτης, Κοντινές Ομάδες, Αποστάσεις Ομάδων) και προτείνεται αντικατάσταση. Προεπιλογή 480 = 8 ώρες. Η "κρίσιμη" ένδειξη (κόκκινο) εμφανίζεται στο 1,5x του ορίου.</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="mb-0"><i class="bi bi-building me-1"></i>Όροφοι (βαρόμετρο κινητού)</h5>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Ύψος ενός ορόφου (μ.)</label>
+                        <input type="number" class="form-control" style="max-width:160px;" name="war_room_floor_height_m"
+                               value="<?= h($settings['war_room_floor_height_m'] ?? '3') ?>" min="2" max="6" step="0.1">
+                        <small class="text-muted">Η εφαρμογή Android στέλνει την πίεση του αέρα από το βαρόμετρο του κινητού και, αφού το συντονιστικό ορίσει «Επίπεδο εδάφους» για κάποιον, το Action Room δείχνει περίπου σε ποιον όροφο βρίσκεται και πόσα μέτρα πάνω ή κάτω από το έδαφος. Ο όροφος προκύπτει διαιρώντας τα μέτρα με αυτό το ύψος (συνήθως 3 μ.). Είναι προσέγγιση, ±1 όροφος.</small>
                     </div>
                 </div>
             </div>

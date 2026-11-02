@@ -191,6 +191,10 @@ body.wr-console-view #teamBoard { display: none !important; }
 .wrc-m { display: flex; align-items: center; gap: 7px; padding: 3px 2px; font-size: .8rem; cursor: pointer; margin: 0; }
 .wrc-m input { margin: 0; flex: none; }
 .wrc-m-n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The barometer floor chip sits on a second line, under the name and past the tick box. */
+.wrc-m { flex-wrap: wrap; row-gap: 0; }
+.wrc-m-br { flex: 0 0 100%; height: 0; }
+.wrc-m .floor-chip { margin: 1px 0 2px 24px; }
 .wrc-m.stale .wrc-m-n { color: #a3231c; }
 .wrc-stale { color: #a3231c; }
 .wrc-tag { display: inline-block; padding: 0 7px; border-radius: 9px; font-size: .68rem; font-weight: 700; background: #e8ecf2; color: #55637a; white-space: nowrap; line-height: 1.5; }

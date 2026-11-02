@@ -1267,13 +1267,31 @@ foreach ($vitalsByVolunteerId as $vitalsUserId => $reading) {
     $participantLiveByVolunteerId[$vitalsUserId]['heart_rate_at']   = $reading['recorded_at'];
 }
 
+// The floor a person is on (v3.426.0, includes/functions-baro.php): the phone's
+// air pressure against the ground level command set for that person. Rides the
+// same payload key as the heart rate above, and is gated the same way and for
+// the same reason - it is where somebody is, a position in all but name:
+// command staff see everyone's, a volunteer only their own, and the gate sits
+// here on the payload so another person's floor is never in the poll response.
+// A mission that never set a ground level costs one small indexed query. The
+// values carry no ages (only the reading's own H:i and a stale flag), so a
+// person standing still does not change the payload on every poll.
+$floorByVolunteerId = [];
+foreach (loadMissionFloors($missionId) as $floorUserId => $floor) {
+    if (!$canSeeVitalsOf($floorUserId) || !isset($participantLiveByVolunteerId[$floorUserId])) {
+        continue;
+    }
+    $participantLiveByVolunteerId[$floorUserId]['floor'] = $floor;
+    $floorByVolunteerId[$floorUserId] = $floor;
+}
+
 // Always returns each participant's LATEST ping regardless of age — a hard
 // "last 2 hours" cutoff used to make someone silently vanish from the live
 // map the moment their last ping aged past it, even though Team Trail (which
 // has no such cutoff) still showed them. The map now shows every last-known
 // position always, marking it 'is_stale' (reusing the same $pingStaleThresholdSeconds
 // as the sidebar list) once it's past due, rather than hiding it outright.
-$loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSeconds, $continuousFieldMinutesByVolunteerId, $missionShiftBinds, $missionShiftPlaceholders, $vitalsByVolunteerId, $canSeeVitalsOf, $actionRoomParticipantIds) {
+$loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSeconds, $continuousFieldMinutesByVolunteerId, $missionShiftBinds, $missionShiftPlaceholders, $vitalsByVolunteerId, $canSeeVitalsOf, $actionRoomParticipantIds, $floorByVolunteerId) {
     try {
         $field = $hasFieldStatus ? ', pr.field_status' : ', NULL AS field_status';
         // The latest ping per volunteer+shift, plus the one immediately before
@@ -1456,6 +1474,9 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                 'continuous_field_minutes' => $continuousFieldMinutesByVolunteerId[(int) $pin['user_id']] ?? null,
                 'heart_rate' => $pinVitals ? (int) $pinVitals['bpm'] : null,
                 'heart_rate_zone' => $pinVitals ? $pinVitals['zone'] : null,
+                // The barometer floor, already limited to what this viewer may
+                // see ($floorByVolunteerId). Shown in the pin's popup only.
+                'floor' => $floorByVolunteerId[(int) $pin['user_id']] ?? null,
             ];
         }
         return $pins;
@@ -2520,6 +2541,7 @@ include __DIR__ . '/includes/header.php';
     .participant-row .k9-badge,
     .participant-row .captain-badge,
     .participant-row .vitals-badge,
+    .participant-row .floor-chip,
     .participant-row .roster-team-badge {
         height: 1.25rem;
         padding-top: 0;
@@ -2535,6 +2557,31 @@ include __DIR__ . '/includes/header.php';
         padding-left: 8px;
         padding-right: 8px;
     }
+    /* The barometer floor (v3.426.0, assets/js/floor-display.js): the floor a
+       person is on, in the roster row, the console's member row and nowhere on
+       the map face. Flat backgrounds that clear 4.5:1 against the white text,
+       like the heart-rate zones: teal = a current reading, amber = the ground
+       level may have drifted (old, and no phone outside correcting the
+       weather), grey = no recent reading, this is the last known floor. */
+    .floor-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: .72em;
+        font-weight: 600;
+        color: #fff;
+        background: #0e7490;
+        border-radius: 999px;
+        padding: 1px 7px;
+        margin-left: 4px;
+        line-height: 1.35;
+        white-space: nowrap;
+        cursor: help;
+    }
+    .floor-chip.floor-drift { background: #b45309; }
+    .floor-chip.floor-stale { background: #6c757d; }
+    .floor-chip small { font-weight: 500; opacity: .92; font-size: .9em; }
+    .floor-chip.d-none { display: none; }
     /* Same problem one card up. The teams card's leader line puts three
        badges on one row — the squad label (.badge.fs-6, 32px), the "my team"
        pill (24px) and the leader's home-organisation tag
@@ -4927,7 +4974,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 
         <div class="card shadow-sm" data-card-id="participantsCard">
             <div class="card-header wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#participantsCollapse" role="button" aria-expanded="false" aria-controls="participantsCollapse">
-                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-people me-1"></i><?= t('participants.panel_title', ['count' => count($participants)]) ?></span><i class="bi bi-chevron-down wr-collapsible-chevron"></i></h5>
+                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-people me-1"></i><?= t('participants.panel_title', ['count' => count($participants)]) ?></span><span class="d-flex align-items-center gap-2"><?php if ($canManageWarRoom): ?><button type="button" class="btn btn-sm btn-outline-secondary py-0" onclick="event.stopPropagation(); floorBaselineOpen();" title="<?= h(t('floor.btn_title')) ?>"><i class="bi bi-building-up me-1"></i><?= h(t('floor.btn')) ?></button><?php endif; ?><i class="bi bi-chevron-down wr-collapsible-chevron"></i></span></h5>
             </div>
             <?php $participantSplitRows = count($participants) >= 8 ? (int)ceil(count($participants) / 2) : 0; ?>
             <div class="list-group list-group-flush collapse<?= $participantSplitRows ? ' wr-participants-cols' : '' ?>" id="participantsCollapse"<?= $participantSplitRows ? ' style="grid-template-rows: repeat(' . $participantSplitRows . ', auto);"' : '' ?>>
@@ -4963,7 +5010,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 $isOnlineNow = in_array((int)$participant['volunteer_id'], $onlinePresenceIds, true) || $hasFreshPing;
                 ?>
                 <div class="list-group-item participant-row <?= $status === 'needs_help' ? 'needs-help' : '' ?><?= $takesPart ? '' : ' participant-no-gps' ?> d-flex justify-content-between align-items-center gap-2 flex-wrap" id="participant-row-<?= (int)$participant['volunteer_id'] ?>">
-                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= $isOnlineNow ? 'presence-online' : 'presence-offline' ?>" title="<?= $isOnlineNow ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?><?= k9BadgeHtml((int) $participant['volunteer_id']) ?><?= captainBadgeHtml((int) $participant['volunteer_id']) ?></strong><?= $maySeeVitals ? vitalsBadgeHtml($participantVitals, null, (int)$participant['volunteer_id']) : '' ?><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge roster-team-badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><?php if (!empty($participant['phone']) && ($canManageWarRoom || ($myTeamId && ($teamIdByUserId[(int)$participant['volunteer_id']] ?? null) === $myTeamId))): ?><br><a href="tel:<?= h($participant['phone']) ?>" class="text-decoration-none"><i class="bi bi-telephone me-1"></i><?= h($participant['phone']) ?></a><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><span id="ping-time-<?= (int)$participant['volunteer_id'] ?>"><?= !$takesPart ? '' : ($participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => formatDateTime($participant['last_ping_at'], 'H:i d/m/Y')]) : t('participants.no_ping')) ?></span><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= ($takesPart && !empty($participant['last_ping_at']) && $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]) ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span> <span id="fatigue-badge-<?= (int)$participant['volunteer_id'] ?>" class="<?= $isCriticalFatigue ? 'text-danger' : 'text-warning' ?> <?= ($isFatigued && $takesPart) ? '' : 'd-none' ?>" title="<?= t('fatigue.tooltip') ?>"><i class="bi bi-clock-history"></i> <?= t('fatigue.badge_label', ['h' => $fatigueH, 'm' => $fatigueM]) ?></span><span id="gps-error-<?= (int)$participant['volunteer_id'] ?>" class="text-danger fw-bold <?= ($takesPart && !empty($participant['last_gps_error'])) ? '' : 'd-none' ?>"> · <i class="bi bi-slash-circle-fill"></i> <span class="gps-error-text"><?= ($takesPart && !empty($participant['last_gps_error'])) ? h(t('gps_error.row_' . $participant['last_gps_error']) . ($participant['last_gps_error_at'] ? ' ' . formatDateTime($participant['last_gps_error_at'], 'H:i') : '')) : '' ?></span></span><span id="no-gps-note-<?= (int)$participant['volunteer_id'] ?>" class="<?= $takesPart ? 'd-none' : '' ?>"> · <i class="bi bi-geo-alt-slash"></i> <?= t('gps_participant.row_off') ?></span></small></div>
+                    <div><span id="presence-<?= (int)$participant['volunteer_id'] ?>" class="presence-dot <?= $isOnlineNow ? 'presence-online' : 'presence-offline' ?>" title="<?= $isOnlineNow ? t('common.online') : t('common.offline') ?>"></span><strong><?= guestNameHtml($participant['name'], (bool)$participant['is_external'], $participant['home_team_name'], $participant['home_team_color'], $participant['guest_country_code']) ?><?= k9BadgeHtml((int) $participant['volunteer_id']) ?><?= captainBadgeHtml((int) $participant['volunteer_id']) ?></strong><?= $maySeeVitals ? vitalsBadgeHtml($participantVitals, null, (int)$participant['volunteer_id']) : '' ?><?= ($maySeeVitals && $takesPart) ? '<span id="floor-badge-' . (int)$participant['volunteer_id'] . '" class="floor-chip d-none"></span>' : '' ?><?php if (isset($teamLabelByUserId[(int)$participant['volunteer_id']])): [$pBg, $pFg] = teamBadgeColors($teamColorByUserId[(int)$participant['volunteer_id']] ?? null); ?> <span class="badge roster-team-badge" style="background:<?= h($pBg) ?>;color:<?= h($pFg) ?>;"><?= h($teamLabelByUserId[(int)$participant['volunteer_id']]) ?></span><?php endif; ?><?php if (!empty($participant['phone']) && ($canManageWarRoom || ($myTeamId && ($teamIdByUserId[(int)$participant['volunteer_id']] ?? null) === $myTeamId))): ?><br><a href="tel:<?= h($participant['phone']) ?>" class="text-decoration-none"><i class="bi bi-telephone me-1"></i><?= h($participant['phone']) ?></a><?php endif; ?><br><small class="text-muted"><?= formatDateTime($participant['start_time']) ?> – <?= date('H:i', strtotime($participant['end_time'])) ?><span id="ping-time-<?= (int)$participant['volunteer_id'] ?>"><?= !$takesPart ? '' : ($participant['last_ping_at'] ? t('participants.last_ping_label', ['time' => formatDateTime($participant['last_ping_at'], 'H:i d/m/Y')]) : t('participants.no_ping')) ?></span><span id="ping-stale-<?= (int)$participant['volunteer_id'] ?>" class="text-warning <?= ($takesPart && !empty($participant['last_ping_at']) && $pingIsStaleByVolunteerId[(int)$participant['volunteer_id']]) ? '' : 'd-none' ?>" title="<?= t('participants.stale_ping_title') ?>"><i class="bi bi-exclamation-triangle-fill"></i><?= t('participants.stale_ping_suffix') ?></span> <span id="fatigue-badge-<?= (int)$participant['volunteer_id'] ?>" class="<?= $isCriticalFatigue ? 'text-danger' : 'text-warning' ?> <?= ($isFatigued && $takesPart) ? '' : 'd-none' ?>" title="<?= t('fatigue.tooltip') ?>"><i class="bi bi-clock-history"></i> <?= t('fatigue.badge_label', ['h' => $fatigueH, 'm' => $fatigueM]) ?></span><span id="gps-error-<?= (int)$participant['volunteer_id'] ?>" class="text-danger fw-bold <?= ($takesPart && !empty($participant['last_gps_error'])) ? '' : 'd-none' ?>"> · <i class="bi bi-slash-circle-fill"></i> <span class="gps-error-text"><?= ($takesPart && !empty($participant['last_gps_error'])) ? h(t('gps_error.row_' . $participant['last_gps_error']) . ($participant['last_gps_error_at'] ? ' ' . formatDateTime($participant['last_gps_error_at'], 'H:i') : '')) : '' ?></span></span><span id="no-gps-note-<?= (int)$participant['volunteer_id'] ?>" class="<?= $takesPart ? 'd-none' : '' ?>"> · <i class="bi bi-geo-alt-slash"></i> <?= t('gps_participant.row_off') ?></span></small></div>
                     <span class="badge <?= $status === 'needs_help' ? 'bg-danger' : ($status === 'on_site' ? 'bg-success' : ($status === 'on_way' ? 'bg-warning text-dark' : 'bg-secondary')) ?>" id="status-badge-<?= (int)$participant['volunteer_id'] ?>">
                         <?= $status === 'needs_help' ? t('status.badge_needs_help') : ($status === 'on_site' ? t('status.badge_on_site') : ($status === 'on_way' ? t('status.badge_on_way') : t('status.badge_none'))) ?>
                     </span>
@@ -6510,6 +6557,40 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 
 <?php if ($mapPointsVisible): ?>
 <?php // Σημεία χάρτη (v3.361.0): the list of imported points for everybody, and for command the way to import more. ?>
+<?php if ($canManageWarRoom): ?>
+<?php /* «Επίπεδο εδάφους» (v3.426.0): the ground level the barometer floor is measured from.
+         Opened from the participants card and from the console's teams header. */ ?>
+<div class="modal fade" id="floorBaselineModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-building-up me-1"></i><?= h(t('floor.modal_title')) ?></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted mb-2"><?= h(t('floor.intro')) ?></p>
+                <div class="d-flex flex-wrap gap-3 mb-2">
+                    <button type="button" class="btn btn-sm btn-link p-0" id="floorPickReady"><?= h(t('floor.select_ready')) ?></button>
+                    <button type="button" class="btn btn-sm btn-link p-0" id="floorPickNone"><?= h(t('floor.select_none')) ?></button>
+                </div>
+                <div id="floorBaselineList" class="mb-3"></div>
+                <div class="border-top pt-3">
+                    <label class="form-label small fw-semibold mb-1" for="floorRefSelect"><i class="bi bi-broadcast-pin me-1"></i><?= h(t('floor.pick_ref')) ?></label>
+                    <select class="form-select form-select-sm" id="floorRefSelect"></select>
+                    <div class="form-text"><?= h(t('floor.ref_help')) ?></div>
+                </div>
+                <div id="floorBaselineMsg" class="small mt-3" role="status"></div>
+            </div>
+            <div class="modal-footer">
+                <small class="text-muted me-auto" id="floorHeightNote"></small>
+                <button type="button" class="btn btn-sm btn-outline-danger" id="floorClearBtn"><i class="bi bi-x-circle me-1"></i><?= h(t('floor.clear_btn')) ?></button>
+                <button type="button" class="btn btn-sm btn-primary" id="floorSetBtn"><i class="bi bi-check2-circle me-1"></i><?= h(t('floor.set_btn')) ?></button>
+            </div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <div class="modal fade" id="mapPointsModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-scrollable modal-lg">
         <div class="modal-content">
@@ -6700,6 +6781,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-utils.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/media-queue.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/trail-display.js?v=<?= APP_VERSION ?>"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/floor-display.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/floor-display.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-ar.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-ar.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/triage.js?v=<?= APP_VERSION ?>"></script>
 <?php if ($consoleView): ?>
@@ -13526,6 +13608,10 @@ function buildPinMarker(pin, interactive = true) {
     // and the logistics lines, because it is the one fact here that can mean
     // someone is in trouble right now.
     const heartRateBlock = heartRateBlockHtml(pin.heart_rate, hrZone);
+    // The barometer floor (v3.426.0): in the popup and the roster only, never
+    // a number on the map face. Absent when the viewer may not see it, when no
+    // ground level was set for this person, and when the phone has no reading.
+    const floorLine = floorPopupLineHtml(pin.floor, t, escapeHtml);
     // Fatigue: same "only rendered when actually over" idiom as batteryLine above.
     const fatigueLine = (pin.continuous_field_minutes !== null && pin.continuous_field_minutes !== undefined && pin.continuous_field_minutes > WR_MAX_SHIFT_MINUTES)
         ? `<br><span class="${pin.continuous_field_minutes >= WR_CRITICAL_SHIFT_MINUTES ? 'text-danger' : 'text-warning'} small">⏱ ${t('fatigue.pin_line', fatigueHm(pin.continuous_field_minutes))}</span>`
@@ -13572,7 +13658,7 @@ function buildPinMarker(pin, interactive = true) {
     // (depends on which render*() happened to run last that poll tick). A
     // volunteer's own live position should never be the one that silently
     // disappears underneath another marker.
-    const marker = L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}${k9BadgeHtml(pin.user_id)}${captainBadgeHtml(pin.user_id)}${liveBadgeHtml(pin.user_id)}</strong>${teamLine}${heartRateBlock}<br>${pin.time}${accuracyLine}${trackingLine}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${fatigueLine}${navLine}`);
+    const marker = L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}${k9BadgeHtml(pin.user_id)}${captainBadgeHtml(pin.user_id)}${liveBadgeHtml(pin.user_id)}</strong>${teamLine}${heartRateBlock}<br>${pin.time}${accuracyLine}${floorLine}${trackingLine}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${fatigueLine}${navLine}`);
     // The team's name above the dot, so which team a position belongs to reads
     // off the map without a click. Not on the read-only Route Order composer
     // map (interactive=false), and a volunteer with no team has no name to
@@ -17771,6 +17857,139 @@ const PARTICIPANT_STATUS_BADGE_META = {
 // previously frozen at page load (only the presence dot and stale-warning
 // icon above were poll-patched), so a status/ping update after the initial
 // render stayed invisible until a manual reload.
+// ── «Επίπεδο εδάφους»: the ground level the barometer floor is measured from ──
+// A phone's air pressure means nothing until it is compared with the SAME phone's
+// reading at ground level, so command stands people at the entrance and sets it
+// here (war-room-floor-baseline.php, includes/functions-baro.php). Optionally one
+// phone stays outside as a reference, which takes the weather off every reading.
+const floorPicked = new Set();
+let floorCandidates = null;
+let floorLoadTimer = null;
+
+function floorPost(fields) {
+    const body = new URLSearchParams({csrf_token: csrfToken, mission_id: '<?= $missionId ?>'});
+    Object.keys(fields).forEach(k => {
+        if (Array.isArray(fields[k])) fields[k].forEach(v => body.append(k + '[]', v)); else body.set(k, fields[k]);
+    });
+    return fetchWithTimeout('war-room-floor-baseline.php', {method: 'POST', body}, FIELD_POST_TIMEOUT_MS)
+        .then(r => { if (!checkSessionAlive(r)) return null; return r.json(); })
+        .catch(() => null);
+}
+
+function floorMessage(text, cls) {
+    const el = document.getElementById('floorBaselineMsg');
+    if (!el) return;
+    el.className = 'small mt-3 ' + (cls || '');
+    el.textContent = text || '';
+}
+
+function floorBaselineOpen() {
+    const el = document.getElementById('floorBaselineModal');
+    if (!el) return;
+    floorPicked.clear();
+    floorMessage('', '');
+    bootstrap.Modal.getOrCreateInstance(el).show();
+    floorBaselineLoad();
+}
+
+function floorBaselineLoad() {
+    return floorPost({action: 'candidates'}).then(res => {
+        if (!res) { floorMessage(t('common.send_failed'), 'text-danger'); return; }
+        if (!res.ok) { floorMessage(res.error || t('common.failed'), 'text-danger'); return; }
+        floorCandidates = res;
+        floorBaselineRender();
+    });
+}
+
+function floorBaselineRender() {
+    const list = document.getElementById('floorBaselineList');
+    const refSel = document.getElementById('floorRefSelect');
+    if (!list || !refSel || !floorCandidates) return;
+    const groups = floorCandidates.groups || [];
+    const wasRef = refSel.value;
+    const everyone = groups.reduce((all, g) => all.concat(g.members), []);
+    // Somebody who has gone quiet and has no ground level can't be ticked: there is nothing to set or clear.
+    floorPicked.forEach(id => { if (!everyone.some(m => m.user_id === id)) floorPicked.delete(id); });
+    if (!groups.length) {
+        list.innerHTML = `<div class="text-muted small">${escapeHtml(t('floor.nobody'))}</div>`;
+    } else {
+        list.innerHTML = groups.map(g => {
+            const [bg, fg] = g.color ? teamBadgeColorsJs(g.color) : ['#6c757d', '#ffffff'];
+            return `<div class="mb-2">
+                <div class="mb-1"><span class="badge" style="background:${escapeHtml(bg)};color:${escapeHtml(fg)}">${escapeHtml(g.label || t('floor.no_team'))}</span></div>
+                ${g.members.map(m => {
+                    const note = m.fresh ? t('floor.person_ready') : (m.has_baro === 0 ? t('floor.person_no_baro') : t('floor.person_waiting'));
+                    const tickable = m.fresh || !!m.baseline_at;
+                    return `<div class="form-check d-flex align-items-center gap-2 mb-1">
+                        <input class="form-check-input floor-pick" type="checkbox" id="floorPick${m.user_id}" data-uid="${m.user_id}"${floorPicked.has(m.user_id) ? ' checked' : ''}${tickable ? '' : ' disabled'}>
+                        <label class="form-check-label flex-grow-1" for="floorPick${m.user_id}">${escapeHtml(m.name)}</label>
+                        <span class="small ${m.fresh ? 'text-success' : 'text-muted'}">${escapeHtml(note)}</span>
+                        ${m.baseline_at ? `<span class="badge text-bg-light border">${escapeHtml(t('floor.person_set_at', {time: m.baseline_at}))}</span>` : ''}
+                    </div>`;
+                }).join('')}
+            </div>`;
+        }).join('');
+    }
+    refSel.innerHTML = `<option value="">${escapeHtml(t('floor.no_ref'))}</option>`
+        + everyone.filter(m => m.fresh).map(m => `<option value="${m.user_id}">${escapeHtml(m.name)}</option>`).join('');
+    if (wasRef && everyone.some(m => String(m.user_id) === wasRef && m.fresh)) refSel.value = wasRef;
+    const note = document.getElementById('floorHeightNote');
+    if (note) note.textContent = t('floor.height_note', {m: String(floorCandidates.floor_height_m).replace('.', jsLocale === 'en-US' ? '.' : ',')});
+}
+
+function floorBaselineApply(action) {
+    const refSel = document.getElementById('floorRefSelect');
+    const ref = refSel && refSel.value ? Number(refSel.value) : 0;
+    // A phone that stays outside is the reference, not one of the people being set.
+    const ids = Array.from(floorPicked).filter(id => action === 'clear' || id !== ref);
+    if (!ids.length) { floorMessage(t('floor.err_nobody'), 'text-danger'); return; }
+    const fields = {action, user_ids: ids};
+    if (action === 'set' && ref) fields.ref_user_id = ref;
+    const buttons = [document.getElementById('floorSetBtn'), document.getElementById('floorClearBtn')];
+    buttons.forEach(b => { if (b) b.disabled = true; });
+    floorPost(fields).then(res => {
+        if (!res) { floorMessage(t('common.send_failed'), 'text-danger'); return; }
+        if (!res.ok) { floorMessage(res.error || t('common.failed'), 'text-danger'); return; }
+        floorPicked.clear();
+        if (action === 'clear') {
+            floorMessage(t('floor.toast_cleared', {n: res.cleared}), 'text-success');
+        } else {
+            const skipped = res.skipped || [];
+            let text = t('floor.toast_set', {n: res.set.length});
+            if (skipped.length) text += ' ' + t('floor.toast_skipped', {names: skipped.map(s => s.name + ' (' + t('floor.reason_' + s.reason) + ')').join(', ')});
+            floorMessage(text, skipped.length ? 'text-warning' : 'text-success');
+        }
+        floorBaselineLoad();
+        // The chips follow the next poll; ask for it now instead of waiting up to five seconds.
+        if (typeof retryPollNow === 'function') retryPollNow();
+    }).finally(() => { buttons.forEach(b => { if (b) b.disabled = false; }); });
+}
+
+(function floorBaselineWire() {
+    const modalEl = document.getElementById('floorBaselineModal');
+    if (!modalEl) return;
+    modalEl.addEventListener('change', e => {
+        const box = e.target.closest('.floor-pick');
+        if (!box) return;
+        const id = Number(box.dataset.uid);
+        if (box.checked) floorPicked.add(id); else floorPicked.delete(id);
+    });
+    document.getElementById('floorPickReady').addEventListener('click', () => {
+        floorPicked.clear();
+        ((floorCandidates && floorCandidates.groups) || []).forEach(g => g.members.forEach(m => { if (m.fresh) floorPicked.add(m.user_id); }));
+        floorBaselineRender();
+    });
+    document.getElementById('floorPickNone').addEventListener('click', () => { floorPicked.clear(); floorBaselineRender(); });
+    document.getElementById('floorSetBtn').addEventListener('click', () => floorBaselineApply('set'));
+    document.getElementById('floorClearBtn').addEventListener('click', () => floorBaselineApply('clear'));
+    // Readings arrive all the time: keep "ready" honest while the window is open.
+    modalEl.addEventListener('shown.bs.modal', () => {
+        clearInterval(floorLoadTimer);
+        floorLoadTimer = setInterval(floorBaselineLoad, 10000);
+    });
+    modalEl.addEventListener('hidden.bs.modal', () => { clearInterval(floorLoadTimer); floorLoadTimer = null; });
+})();
+
 function renderParticipantLiveData(data) {
     Object.keys(data || {}).forEach(uid => {
         const info = data[uid];
@@ -17838,6 +18057,22 @@ function renderParticipantLiveData(data) {
                 vitalsEl.title = zone === 'stale'
                     ? t('vitals.badge_stale_tooltip', {bpm: bpm, time: info.heart_rate_at || ''})
                     : t('vitals.badge_tooltip', {bpm: bpm, zone: t('vitals.zone_' + zone)});
+            }
+        }
+
+        // The barometer floor (assets/js/floor-display.js). Same slot idea as
+        // the heart rate: the span is in the roster row for a viewer who may see
+        // this person's floor, and an absent `floor` hides it rather than leave
+        // the last one standing on screen as if it were current.
+        const floorEl = document.getElementById('floor-badge-' + uid);
+        if (floorEl) {
+            const chip = floorChipModel(info.floor, t);
+            if (!chip) {
+                floorEl.classList.add('d-none');
+            } else {
+                floorEl.className = chip.cls;
+                floorEl.innerHTML = chip.html;
+                floorEl.title = chip.title;
             }
         }
     });

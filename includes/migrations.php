@@ -7881,6 +7881,46 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 199,
+            'description' => "Barometer floor (v3.426.0): volunteer_pressure keeps every air-pressure reading the Android app sends, on its own and not on volunteer_pings - indoors a fix is refused or stops altogether, and that is exactly when the floor is wanted. volunteer_floor_baselines holds the ground-level reading command sets for a person (hpa0 = that phone's own pressure at ground level, optionally with a reference phone left outside to cancel the weather). mobile_api_tokens.has_barometer says whether the phone has the sensor at all (NULL = never reported, 0 = no sensor).",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS volunteer_pressure (
+                    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    user_id INT UNSIGNED NOT NULL,
+                    hpa DECIMAL(6,2) NOT NULL COMMENT 'Air pressure in hPa, as that phone measured it',
+                    created_at DATETIME NOT NULL COMMENT 'When the reading was TAKEN, like volunteer_pings.created_at',
+                    INDEX idx_pressure_mission_user (mission_id, user_id, id),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+                dbExecute("CREATE TABLE IF NOT EXISTS volunteer_floor_baselines (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    user_id INT UNSIGNED NOT NULL,
+                    hpa0 DECIMAL(6,2) NOT NULL COMMENT 'This phone''s own pressure at ground level',
+                    ref_user_id INT UNSIGNED NULL COMMENT 'A phone left outside, to cancel the weather',
+                    ref_hpa0 DECIMAL(6,2) NULL COMMENT 'The reference phone''s pressure at the same moment',
+                    set_by INT UNSIGNED NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_floor_baseline_mission_user (mission_id, user_id, id),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+                // information_schema, not dbColumnExists(): see migration 197.
+                $hasColumn = (int) dbFetchValue(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mobile_api_tokens' AND COLUMN_NAME = 'has_barometer'"
+                );
+                if ($hasColumn === 0) {
+                    dbExecute("ALTER TABLE mobile_api_tokens ADD COLUMN has_barometer TINYINT NULL DEFAULT NULL AFTER device_label");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

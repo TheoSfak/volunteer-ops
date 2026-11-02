@@ -1,5 +1,5 @@
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/AndroidManifest.xml b/node_modules/@capgo/background-geolocation/android/src/main/AndroidManifest.xml
-index d389cd7..7c87ec8 100644
+index d389cd7..8ad4b4c 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/AndroidManifest.xml
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/AndroidManifest.xml
 @@ -11,6 +11,14 @@
@@ -32,7 +32,7 @@ index d389cd7..7c87ec8 100644
  </manifest>
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertActionReceiver.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertActionReceiver.java
 new file mode 100644
-index 0000000..0b02922
+index 0000000..b0b19e5
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertActionReceiver.java
 @@ -0,0 +1,44 @@
@@ -735,7 +735,7 @@ index 0000000..3c50298
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertSpeaker.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertSpeaker.java
 new file mode 100644
-index 0000000..feddfe5
+index 0000000..5ea0375
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/AlertSpeaker.java
 @@ -0,0 +1,229 @@
@@ -1275,7 +1275,7 @@ index 00b9e10..623dc27 100644
              this.getContext().startForegroundService(serviceIntent);
          } else {
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
-index 85f2a02..8952c03 100644
+index 85f2a02..5a5e40a 100644
 --- a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/BackgroundGeolocationService.java
 @@ -12,6 +12,7 @@ import android.graphics.Color;
@@ -1348,7 +1348,7 @@ index 85f2a02..8952c03 100644
      private MediaPlayer mediaPlayer;
      private double[][] route;
      private double distanceThreshold;
-@@ -50,20 +86,122 @@ public class BackgroundGeolocationService extends Service {
+@@ -50,20 +86,132 @@ public class BackgroundGeolocationService extends Service {
      private Handler watchdogHandler = new Handler(Looper.getMainLooper());
      private Runnable watchdogRunnable;
      private Runnable restartRunnable;
@@ -1365,6 +1365,15 @@ index 85f2a02..8952c03 100644
 +    private long lastSentAtElapsedMs = 0L;
 +    private long lastSentFixElapsedMs = 0L;
 +    private final VopsGnssMonitor gnss = new VopsGnssMonitor();
++    // VolunteerOps patch (v3.426.0): the barometer, for the floor a person is
++    // on. See VopsBaroMonitor and keepPressureWhenNoFix().
++    private final VopsBaroMonitor baro = new VopsBaroMonitor();
++    // When a fix was last kept; starts at service creation, so the first
++    // pressure-only item is a full grace period after the service started. NOT
++    // reset when location updates are re-registered: the watchdog does that
++    // every ~minute while no fix arrives, which is exactly when the pressure
++    // must go up on its own.
++    private long lastKeptFixElapsedMs = android.os.SystemClock.elapsedRealtime();
      private PowerManager.WakeLock wakeLock;
  
      // When set (via the "url" start option), each location is also POSTed to
@@ -1412,12 +1421,13 @@ index 85f2a02..8952c03 100644
 +    }
 +
 +    // VolunteerOps patch (v3.337.0): location updates and the GNSS status
-+    // listener always start and stop together.
++    // listener always start and stop together (v3.426.0: and the barometer).
 +    private void removeLocationUpdates() {
 +        if (client != null && locationCallback != null) {
 +            client.removeLocationUpdates(locationCallback);
 +        }
 +        gnss.stop();
++        baro.stop();
 +    }
 +
 +    private void pauseTracking() {
@@ -1473,7 +1483,7 @@ index 85f2a02..8952c03 100644
      // Some devices allow a foreground service to outlive the application's main
      // activity, leading to nasty crashes as reported in issue #59. If we learn
      // that the application has been killed, all watchers are stopped and the
-@@ -77,9 +215,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -77,9 +225,7 @@ public class BackgroundGeolocationService extends Service {
          if (LocationStore.isEnabled(getApplicationContext())) {
              return false;
          }
@@ -1484,7 +1494,7 @@ index 85f2a02..8952c03 100644
          releaseMediaPlayer();
          releaseWakeLock();
          stopWatchdog();
-@@ -92,6 +228,11 @@ public class BackgroundGeolocationService extends Service {
+@@ -92,6 +238,11 @@ public class BackgroundGeolocationService extends Service {
      @Override
      public void onTaskRemoved(Intent rootIntent) {
          if (LocationStore.isEnabled(getApplicationContext())) {
@@ -1496,7 +1506,7 @@ index 85f2a02..8952c03 100644
              return;
          }
          super.onTaskRemoved(rootIntent);
-@@ -104,37 +245,96 @@ public class BackgroundGeolocationService extends Service {
+@@ -104,37 +255,96 @@ public class BackgroundGeolocationService extends Service {
      @Override
      public int onStartCommand(Intent intent, int flags, int startId) {
          Context context = getApplicationContext();
@@ -1569,7 +1579,6 @@ index 85f2a02..8952c03 100644
              locationCallback = createLocationListener(this);
 -            requestLocationUpdates();
 -            startWatchdog();
--        }
 +            if (!paused) {
 +                requestLocationUpdates();
 +                startWatchdog();
@@ -1578,7 +1587,7 @@ index 85f2a02..8952c03 100644
 +            // alert poll again, so it delivered no orders — and the poll is
 +            // now also the only way a paused service learns to resume.
 +            startAlertPolling();
-+        }
+         }
 +        // A service the system killed and restarted mid-outage still has
 +        // its kept fixes on disk; send them as soon as it can.
 +        VopsFixBuffer.drainAsync(context);
@@ -1604,7 +1613,7 @@ index 85f2a02..8952c03 100644
      }
  
      private void releaseMediaPlayer() {
-@@ -183,10 +383,18 @@ public class BackgroundGeolocationService extends Service {
+@@ -183,10 +393,18 @@ public class BackgroundGeolocationService extends Service {
  
      private void restartLocationUpdates() {
          Logger.debug("Location watchdog timed out, restarting updates");
@@ -1624,7 +1633,7 @@ index 85f2a02..8952c03 100644
          if (restartRunnable != null) {
              watchdogHandler.removeCallbacks(restartRunnable);
          }
-@@ -194,11 +402,7 @@ public class BackgroundGeolocationService extends Service {
+@@ -194,11 +412,7 @@ public class BackgroundGeolocationService extends Service {
              if (client == null || locationCallback == null) {
                  return;
              }
@@ -1637,7 +1646,7 @@ index 85f2a02..8952c03 100644
              startWatchdog();
          };
          watchdogHandler.postDelayed(restartRunnable, 10000);
-@@ -209,7 +413,17 @@ public class BackgroundGeolocationService extends Service {
+@@ -209,7 +423,17 @@ public class BackgroundGeolocationService extends Service {
          if (watchdogRunnable == null) {
              watchdogRunnable = this::restartLocationUpdates;
          }
@@ -1656,7 +1665,7 @@ index 85f2a02..8952c03 100644
      }
  
      private void stopWatchdog() {
-@@ -221,8 +435,131 @@ public class BackgroundGeolocationService extends Service {
+@@ -221,8 +445,132 @@ public class BackgroundGeolocationService extends Service {
          }
      }
  
@@ -1682,6 +1691,7 @@ index 85f2a02..8952c03 100644
 +                    // an outage, so a backlog goes up within 30s of signal
 +                    // returning even when no new fix is being produced
 +                    // (location switched off, a phone lying still in a pocket).
++                    keepPressureWhenNoFix();
 +                    VopsFixBuffer.drainAsync(getApplicationContext());
 +                    // Re-posted from inside the runnable rather than scheduled
 +                    // at a fixed rate, so a slow or hung network call can never
@@ -1789,7 +1799,7 @@ index 85f2a02..8952c03 100644
          if (nativePostUrl != null) {
              postLocationNatively(location);
          }
-@@ -242,22 +579,26 @@ public class BackgroundGeolocationService extends Service {
+@@ -242,22 +590,49 @@ public class BackgroundGeolocationService extends Service {
  
      // Delivers a location to the configured URL from native code, so it works
      // even when the WebView/JavaScript layer no longer exists.
@@ -1819,16 +1829,39 @@ index 85f2a02..8952c03 100644
 +        // v3.337.0: satellites, signal strength and second frequency at the
 +        // moment of this fix (VopsGnssMonitor).
 +        gnss.annotate(payload, elapsedMsOf(location));
++        // v3.426.0: the air pressure at the moment of this fix, and whether
++        // the phone has a barometer at all (VopsBaroMonitor).
++        baro.annotate(payload, elapsedMsOf(location));
++        lastKeptFixElapsedMs = android.os.SystemClock.elapsedRealtime();
 +        VopsFixBuffer.add(context, payload, elapsedMsOf(location));
 +        VopsFixBuffer.drainAsync(context);
      }
  
 -    private static JSONObject locationToJson(android.location.Location location) {
++    // VolunteerOps patch (v3.426.0): indoors the fixes often stop altogether
++    // (or the server turns them away as impossible jumps), and the floor is
++    // wanted exactly then. When no fix has been kept for a while, the 30 s
++    // tick keeps the air pressure on its own: an item with no coordinates,
++    // which the server stores as a pressure reading and never as a position.
++    // It goes through the same VopsFixBuffer, so after a signal outage it
++    // arrives in order with the fixes around it and at the time it was read.
++    private void keepPressureWhenNoFix() {
++        long now = android.os.SystemClock.elapsedRealtime();
++        if (now - lastKeptFixElapsedMs < VopsBaroMonitor.noFixMsBeforePressureOnly(currentIntervalMs)) return;
++        JSONObject payload = new JSONObject();
++        baro.annotate(payload, now);
++        if (!payload.has("pressure_hpa")) return;
++        try {
++            payload.put("device", VopsGpsHealth.deviceLabel());
++        } catch (org.json.JSONException ignored) {}
++        VopsFixBuffer.add(getApplicationContext(), payload, now);
++    }
++
 +    private static JSONObject locationToJson(android.location.Location location, Context context) {
          JSONObject obj = new JSONObject();
          try {
              obj.put("latitude", location.getLatitude());
-@@ -276,38 +617,111 @@ public class BackgroundGeolocationService extends Service {
+@@ -276,38 +651,112 @@ public class BackgroundGeolocationService extends Service {
              // Lets the server distinguish native-delivered updates from those
              // forwarded by the JavaScript callback.
              obj.put("source", "native");
@@ -1940,11 +1973,12 @@ index 85f2a02..8952c03 100644
 +                .build();
 +            client.requestLocationUpdates(request, locationCallback, Looper.getMainLooper());
 +            gnss.start(getApplicationContext(), currentFullTracking);
++            baro.start(getApplicationContext());
 +            DebugLog.log(
 +                getApplicationContext(),
 +                "request_updates_ok",
 +                "intervalMs=" + currentIntervalMs + " sampleMs=" + (sampling() ? currentSampleMs : 0)
-+                    + " fullTracking=" + gnss.fullTrackingActive()
++                    + " fullTracking=" + gnss.fullTrackingActive() + " baro=" + baro.sensorFlag()
 +            );
 +        } catch (SecurityException e) {
              // According to Android Studio, this method can throw a Security Exception if
@@ -1954,7 +1988,7 @@ index 85f2a02..8952c03 100644
          }
      }
  
-@@ -333,6 +747,16 @@ public class BackgroundGeolocationService extends Service {
+@@ -333,6 +782,16 @@ public class BackgroundGeolocationService extends Service {
              }
          } catch (Exception exception) {
              Logger.error("Failed to foreground service", exception);
@@ -1971,7 +2005,7 @@ index 85f2a02..8952c03 100644
          }
      }
  
-@@ -344,37 +768,45 @@ public class BackgroundGeolocationService extends Service {
+@@ -344,37 +803,45 @@ public class BackgroundGeolocationService extends Service {
              final String notificationTitle,
              final String notificationMessage,
              float distanceFilter,
@@ -2030,7 +2064,7 @@ index 85f2a02..8952c03 100644
          }
  
          void setPlannedRoute(String filePath, double[][] routeCoordinates, float distance) {
-@@ -453,6 +885,32 @@ public class BackgroundGeolocationService extends Service {
+@@ -453,6 +920,32 @@ public class BackgroundGeolocationService extends Service {
              );
          }
  
@@ -2063,7 +2097,7 @@ index 85f2a02..8952c03 100644
          // Set the Channel ID for Android O.
          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
              builder.setChannelId(BackgroundGeolocationService.class.getPackage().getName());
-@@ -462,7 +920,9 @@ public class BackgroundGeolocationService extends Service {
+@@ -462,7 +955,9 @@ public class BackgroundGeolocationService extends Service {
      }
  
      // Gets the identifier of the app's resource by name, returning 0 if not found.
@@ -2076,7 +2110,7 @@ index 85f2a02..8952c03 100644
  
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/DebugLog.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/DebugLog.java
 new file mode 100644
-index 0000000..ee599ff
+index 0000000..9c0c750
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/DebugLog.java
 @@ -0,0 +1,74 @@
@@ -2388,9 +2422,201 @@ index 2e19afe..99dafb6 100644
          } finally {
              if (connection != null) {
                  connection.disconnect();
+diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsBaroMonitor.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsBaroMonitor.java
+new file mode 100644
+index 0000000..1b7c24b
+--- /dev/null
++++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsBaroMonitor.java
+@@ -0,0 +1,186 @@
++package com.capgo.capacitor_background_geolocation;
++
++import android.content.Context;
++import android.hardware.Sensor;
++import android.hardware.SensorEvent;
++import android.hardware.SensorEventListener;
++import android.hardware.SensorManager;
++import android.os.Handler;
++import android.os.Looper;
++import android.os.SystemClock;
++import org.json.JSONObject;
++
++/**
++ * VolunteerOps addition (not upstream, v3.426.0).
++ *
++ * The phone's barometer, for the floor a person is on. GPS cannot tell a
++ * second floor from the ground, and indoors it often cannot tell much at all;
++ * the air pressure falls about 0.12 hPa per metre of height, so a change of a
++ * third of a hectopascal is roughly one floor. Only a CHANGE means anything
++ * (two phones differ by up to a hectopascal for the same air, and the weather
++ * moves it too), so this class reports the raw pressure and the server works
++ * out the floor from each phone's own change since its own ground-level
++ * reading.
++ *
++ * Same shape as VopsGnssMonitor: the sensor reports on its own schedule, each
++ * reading is kept in a short ring with its own time, and a fix is matched to
++ * the readings around it. The mean of the readings within two seconds of the
++ * fix is sent as pressure_hpa; failing that the nearest reading within ten
++ * seconds; failing that the field is left out. Unknown is never sent as 0. A
++ * phone without the sensor sends has_baro = 0 so the console can say so
++ * instead of showing a missing floor.
++ *
++ * The ring is decimated to two readings a second and holds a little over two
++ * minutes, which covers the longest a chosen fix can be older than the moment
++ * it is sent. Readings are asked to be delivered in batches (a few seconds of
++ * report latency) so the sensor hub does not wake the processor for each.
++ */
++final class VopsBaroMonitor implements SensorEventListener {
++
++    static final int RING = 256;
++    /** One stored reading per this long: the sensor may report at 5 Hz or more, two a second is plenty. */
++    static final long MIN_GAP_MS = 500L;
++    /** A fix takes the mean of the readings this close to it. */
++    static final long AVERAGE_MS = 2000L;
++    /** With none that close, the nearest one within this long is used. */
++    static final long NEAREST_MS = 10000L;
++    static final int MAX_REPORT_LATENCY_US = 3000000;
++    /** Air at the surface of the Earth; anything else from the sensor is garbage and is ignored. */
++    static final float MIN_HPA = 300f;
++    static final float MAX_HPA = 1100f;
++
++    private final long[] at = new long[RING];
++    private final float[] hpa = new float[RING];
++    private int next = 0;
++    private int count = 0;
++    private long lastStoredMs = Long.MIN_VALUE / 2;
++
++    private SensorManager sensorManager;
++    private final Handler handler = new Handler(Looper.getMainLooper());
++    // -1 = not asked yet, 0 = the phone has no pressure sensor, 1 = it has one.
++    private int sensorState = -1;
++
++    void start(Context context) {
++        stop();
++        synchronized (this) {
++            next = 0;
++            count = 0;
++            lastStoredMs = Long.MIN_VALUE / 2;
++        }
++        try {
++            sensorManager = (SensorManager) context.getApplicationContext().getSystemService(Context.SENSOR_SERVICE);
++            if (sensorManager == null) {
++                sensorState = 0;
++                return;
++            }
++            Sensor sensor = sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE);
++            if (sensor == null) {
++                sensorState = 0;
++                sensorManager = null;
++                return;
++            }
++            sensorState = 1;
++            sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL, MAX_REPORT_LATENCY_US, handler);
++        } catch (Exception e) {
++            // A sensor that cannot be read must never touch the tracking itself.
++            sensorManager = null;
++        }
++    }
++
++    void stop() {
++        try {
++            if (sensorManager != null) {
++                sensorManager.unregisterListener(this);
++            }
++        } catch (Exception ignored) {}
++        sensorManager = null;
++    }
++
++    /** 1 the phone has a barometer, 0 it has none, -1 not asked yet (never sent as a guess). */
++    int sensorFlag() {
++        return sensorState;
++    }
++
++    @Override
++    public void onSensorChanged(SensorEvent event) {
++        if (event == null || event.values == null || event.values.length == 0) return;
++        record(event.values[0], sampleTimeMs(event.timestamp, SystemClock.elapsedRealtime()));
++    }
++
++    @Override
++    public void onAccuracyChanged(Sensor sensor, int accuracy) {}
++
++    private synchronized void record(float value, long atMs) {
++        if (!(value >= MIN_HPA && value <= MAX_HPA)) return;
++        if (atMs - lastStoredMs < MIN_GAP_MS) return;
++        lastStoredMs = atMs;
++        at[next] = atMs;
++        hpa[next] = value;
++        next = (next + 1) % RING;
++        if (count < RING) count++;
++    }
++
++    /**
++     * The time of a sensor event on SystemClock.elapsedRealtime()'s clock, in
++     * milliseconds. Android documents event.timestamp as that clock, but some
++     * phones have filled it from another one (uptime, or the wall clock): a
++     * time in the future, or more than a minute old, cannot be a reading that
++     * was just delivered, so the moment of delivery is used instead.
++     */
++    static long sampleTimeMs(long eventTimestampNs, long nowElapsedMs) {
++        long ms = eventTimestampNs / 1000000L;
++        if (ms <= 0L || ms > nowElapsedMs + 1000L || nowElapsedMs - ms > 60000L) return nowElapsedMs;
++        return ms;
++    }
++
++    /**
++     * The pressure to send for a fix taken at $fixMs: the mean of the readings
++     * within AVERAGE_MS of it, else the nearest within NEAREST_MS, else NaN
++     * (unknown). Readings outside what air can be are ignored.
++     */
++    static float pick(long[] atMs, float[] values, int n, long fixMs) {
++        double sum = 0.0;
++        int close = 0;
++        long bestGap = Long.MAX_VALUE;
++        float best = Float.NaN;
++        for (int i = 0; i < n; i++) {
++            float v = values[i];
++            if (!(v >= MIN_HPA && v <= MAX_HPA)) continue;
++            long gap = Math.abs(atMs[i] - fixMs);
++            if (gap <= AVERAGE_MS) {
++                sum += v;
++                close++;
++            }
++            if (gap < bestGap) {
++                bestGap = gap;
++                best = v;
++            }
++        }
++        if (close > 0) return (float) (sum / close);
++        if (bestGap <= NEAREST_MS) return best;
++        return Float.NaN;
++    }
++
++    /**
++     * How long a phone may go without a kept fix before the pressure is sent on
++     * its own: a minute, or two cadences if those are longer. Indoors the fixes
++     * often stop altogether, and the floor is wanted exactly then.
++     */
++    static long noFixMsBeforePressureOnly(long intervalMs) {
++        return Math.max(60000L, 2L * intervalMs);
++    }
++
++    /** Adds has_baro, and pressure_hpa for the fix taken at $fixElapsedMs when there is a reading near it. */
++    synchronized void annotate(JSONObject payload, long fixElapsedMs) {
++        try {
++            if (sensorState >= 0) {
++                payload.put("has_baro", sensorState);
++            }
++            if (count == 0) return;
++            float v = pick(at, hpa, count, fixElapsedMs);
++            if (!Float.isNaN(v)) {
++                payload.put("pressure_hpa", Math.round(v * 100f) / 100.0);
++            }
++        } catch (Exception ignored) {}
++    }
++}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixBuffer.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixBuffer.java
 new file mode 100644
-index 0000000..fc959df
+index 0000000..0e8760e
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixBuffer.java
 @@ -0,0 +1,227 @@
@@ -2623,7 +2849,7 @@ index 0000000..fc959df
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixPicker.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixPicker.java
 new file mode 100644
-index 0000000..853b48d
+index 0000000..c5eb810
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsFixPicker.java
 @@ -0,0 +1,42 @@
@@ -2671,7 +2897,7 @@ index 0000000..853b48d
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGnssMonitor.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGnssMonitor.java
 new file mode 100644
-index 0000000..47cd021
+index 0000000..79ad098
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGnssMonitor.java
 @@ -0,0 +1,195 @@
@@ -2872,7 +3098,7 @@ index 0000000..47cd021
 +}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGpsHealth.java b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGpsHealth.java
 new file mode 100644
-index 0000000..f979bf0
+index 0000000..1f8d1cb
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/main/java/com/capgo/capacitor_background_geolocation/VopsGpsHealth.java
 @@ -0,0 +1,217 @@
@@ -3093,9 +3319,101 @@ index 0000000..f979bf0
 +        });
 +    }
 +}
+diff --git a/node_modules/@capgo/background-geolocation/android/src/test/java/com/capgo/capacitor_background_geolocation/VopsBaroMonitorTest.java b/node_modules/@capgo/background-geolocation/android/src/test/java/com/capgo/capacitor_background_geolocation/VopsBaroMonitorTest.java
+new file mode 100644
+index 0000000..3e30429
+--- /dev/null
++++ b/node_modules/@capgo/background-geolocation/android/src/test/java/com/capgo/capacitor_background_geolocation/VopsBaroMonitorTest.java
+@@ -0,0 +1,86 @@
++package com.capgo.capacitor_background_geolocation;
++
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertTrue;
++
++import org.junit.Test;
++
++/** VolunteerOps (v3.426.0): which barometer reading goes with a fix. */
++public class VopsBaroMonitorTest {
++
++    private static final float EPS = 0.001f;
++
++    @Test
++    public void noReadingsMeansUnknownNeverZero() {
++        assertTrue(Float.isNaN(VopsBaroMonitor.pick(new long[0], new float[0], 0, 5000L)));
++    }
++
++    @Test
++    public void aFixTakesTheMeanOfTheReadingsAroundIt() {
++        long[] at = { 8000L, 9000L, 10000L, 11000L, 12000L };
++        float[] v = { 1000.0f, 1000.2f, 1000.4f, 1000.2f, 1000.0f };
++        assertEquals(1000.16f, VopsBaroMonitor.pick(at, v, 5, 10000L), EPS);
++    }
++
++    @Test
++    public void aReadingFurtherThanTwoSecondsOutDoesNotPullTheMean() {
++        long[] at = { 5000L, 9000L, 10000L, 11000L };
++        float[] v = { 1010.0f, 1000.0f, 1000.0f, 1000.0f };
++        assertEquals(1000.0f, VopsBaroMonitor.pick(at, v, 4, 10000L), EPS);
++    }
++
++    @Test
++    public void withNothingCloseTheNearestReadingWithinTenSecondsIsUsed() {
++        long[] at = { 1000L, 4000L };
++        float[] v = { 1001.0f, 1002.0f };
++        assertEquals(1002.0f, VopsBaroMonitor.pick(at, v, 2, 10000L), EPS);
++    }
++
++    @Test
++    public void aReadingMoreThanTenSecondsAwayIsNotUsed() {
++        long[] at = { 1000L };
++        float[] v = { 1001.0f };
++        assertTrue(Float.isNaN(VopsBaroMonitor.pick(at, v, 1, 12000L)));
++    }
++
++    @Test
++    public void aSensorGlitchOutsideWhatAirCanBeIsIgnored() {
++        long[] at = { 9000L, 10000L, 11000L };
++        float[] v = { 0f, 1000.0f, 5000f };
++        assertEquals(1000.0f, VopsBaroMonitor.pick(at, v, 3, 10000L), EPS);
++        assertTrue(Float.isNaN(VopsBaroMonitor.pick(new long[] { 10000L }, new float[] { 0f }, 1, 10000L)));
++    }
++
++    @Test
++    public void onlyTheFirstNEntriesOfTheRingCount() {
++        long[] at = { 10000L, 10000L };
++        float[] v = { 1000.0f, 1100.0f };
++        assertEquals(1000.0f, VopsBaroMonitor.pick(at, v, 1, 10000L), EPS);
++    }
++
++    @Test
++    public void aSensorTimeOnTheRightClockIsKept() {
++        // 4 s old at delivery, as a batched reading is.
++        assertEquals(96000L, VopsBaroMonitor.sampleTimeMs(96000L * 1000000L, 100000L));
++        assertEquals(100000L, VopsBaroMonitor.sampleTimeMs(100000L * 1000000L, 100000L));
++    }
++
++    @Test
++    public void aSensorTimeOnAnotherClockFallsBackToTheMomentOfDelivery() {
++        long now = 5000000L;
++        // The wall clock in nanoseconds: far in the future.
++        assertEquals(now, VopsBaroMonitor.sampleTimeMs(1762000000000L * 1000000L, now));
++        // Zero or negative.
++        assertEquals(now, VopsBaroMonitor.sampleTimeMs(0L, now));
++        assertEquals(now, VopsBaroMonitor.sampleTimeMs(-5L, now));
++        // More than a minute old cannot be a reading that was just delivered.
++        assertEquals(now, VopsBaroMonitor.sampleTimeMs((now - 120000L) * 1000000L, now));
++    }
++
++    @Test
++    public void thePressureAloneIsSentAfterAMinuteOrTwoCadencesWithoutAFix() {
++        assertEquals(60000L, VopsBaroMonitor.noFixMsBeforePressureOnly(5000L));
++        assertEquals(60000L, VopsBaroMonitor.noFixMsBeforePressureOnly(30000L));
++        assertEquals(120000L, VopsBaroMonitor.noFixMsBeforePressureOnly(60000L));
++    }
++}
 diff --git a/node_modules/@capgo/background-geolocation/android/src/test/java/com/capgo/capacitor_background_geolocation/VopsFixPickerTest.java b/node_modules/@capgo/background-geolocation/android/src/test/java/com/capgo/capacitor_background_geolocation/VopsFixPickerTest.java
 new file mode 100644
-index 0000000..eff7772
+index 0000000..159069a
 --- /dev/null
 +++ b/node_modules/@capgo/background-geolocation/android/src/test/java/com/capgo/capacitor_background_geolocation/VopsFixPickerTest.java
 @@ -0,0 +1,66 @@

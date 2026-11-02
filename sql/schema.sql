@@ -1554,6 +1554,7 @@ CREATE TABLE IF NOT EXISTS `mobile_api_tokens` (
     `user_id` INT UNSIGNED NOT NULL,
     `token_hash` CHAR(64) NOT NULL COMMENT 'SHA-256 of the raw token; raw value is never stored',
     `device_label` VARCHAR(100) NOT NULL DEFAULT 'Android app',
+    `has_barometer` TINYINT NULL DEFAULT NULL COMMENT 'v199: 1 = the phone has a pressure sensor, 0 = it has none, NULL = never reported',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `last_used_at` TIMESTAMP NULL,
     `revoked_at` TIMESTAMP NULL,
@@ -3346,6 +3347,38 @@ CREATE TABLE IF NOT EXISTS `mission_sector_exit_watch` (
     `updated_at` DATETIME NOT NULL,
     UNIQUE KEY `uk_sector_exit_watch` (`sector_id`, `user_id`),
     FOREIGN KEY (`sector_id`) REFERENCES `mission_search_sectors`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- BAROMETER FLOOR — v3.426.0 (migration 199)
+-- volunteer_pressure: every air-pressure reading the Android app sends, kept
+-- on its own (indoors a GPS fix is refused or stops, which is when the floor
+-- is wanted). volunteer_floor_baselines: the ground-level reading command sets
+-- for a person, optionally with a reference phone left outside.
+-- =============================================
+CREATE TABLE IF NOT EXISTS `volunteer_pressure` (
+    `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `hpa` DECIMAL(6,2) NOT NULL COMMENT 'Air pressure in hPa, as that phone measured it',
+    `created_at` DATETIME NOT NULL COMMENT 'When the reading was TAKEN, like volunteer_pings.created_at',
+    INDEX `idx_pressure_mission_user` (`mission_id`, `user_id`, `id`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `volunteer_floor_baselines` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `hpa0` DECIMAL(6,2) NOT NULL COMMENT 'This phone''s own pressure at ground level',
+    `ref_user_id` INT UNSIGNED NULL COMMENT 'A phone left outside, to cancel the weather',
+    `ref_hpa0` DECIMAL(6,2) NULL COMMENT 'The reference phone''s pressure at the same moment',
+    `set_by` INT UNSIGNED NOT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_floor_baseline_mission_user` (`mission_id`, `user_id`, `id`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

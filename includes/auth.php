@@ -132,6 +132,10 @@ define('WAR_ROOM_ACTION_SCRIPTS', [
     //   · mobile-debug-log.php — the page's own diagnostic uploads, which are
     //     most wanted from exactly the guest phones nobody has tested.
     'mission-voice.php', 'mission-live.php', 'vitals-ingest.php', 'mobile-debug-log.php',
+    // war-room-floor-baseline.php (the «Επίπεδο εδάφους» window of the barometer
+    // floor, v3.426.0) is used from the same long-open tab; command staff only,
+    // which the endpoint itself checks.
+    'war-room-floor-baseline.php',
 ]);
 
 // Pages (not AJAX) a partner-org guest AND a mission visitor may open, on top

@@ -313,6 +313,85 @@ function parseGnssFields(array $body): array {
 }
 
 /**
+ * The air pressure a phone's barometer read (hPa), as the Android app reports
+ * it (v3.426.0, VopsBaroMonitor.java). Rejected, never clamped, when it is
+ * absent or outside what air can be at the surface of the Earth: a clamped
+ * 1100 would look like a real reading and place somebody 700 m underground.
+ * 300 to 1100 hPa covers the Dead Sea shore and a Himalayan base camp alike.
+ */
+function parsePressureHpa($raw): ?float {
+    if ($raw === null || $raw === '' || is_bool($raw) || !is_numeric($raw)) {
+        return null;
+    }
+    $hpa = (float) $raw;
+    if (!is_finite($hpa) || $hpa < 300.0 || $hpa > 1100.0) {
+        return null;
+    }
+    return round($hpa, 2);
+}
+
+/**
+ * Whether the phone says it has a barometer: 1 yes, 0 no, null = not said
+ * (every app older than v3.426.0), which must stay "not known" and never turn
+ * into "no sensor".
+ */
+function parseHasBarometer($raw): ?int {
+    if ($raw === 1 || $raw === '1' || $raw === true) {
+        return 1;
+    }
+    if ($raw === 0 || $raw === '0' || $raw === false) {
+        return 0;
+    }
+    return null;
+}
+
+/**
+ * Keep one air-pressure reading of a phone (v3.426.0). Deliberately NOT part of
+ * recordVolunteerPing(): indoors a GPS fix is refused as an implausible jump or
+ * stops altogether, and that is exactly when the floor is wanted, so the
+ * reading is stored whether or not the fix beside it survives. The same gates
+ * decide WHO may write one - an approved participant of an open mission who
+ * takes part in the Action Room - and the same half hour decides how old a
+ * reading may be. The row is stamped with when the reading was TAKEN
+ * ($fixAgeMs, measured on the device), so a reading that waited out a signal
+ * outage lands at its own time.
+ *
+ * Best-effort: a missing table (before migration 199) or a lock must never
+ * turn a ping into an error. Returns whether a row was stored.
+ */
+function recordVolunteerPressure(array $user, int $shiftId, ?float $hpa, ?int $fixAgeMs = null): bool {
+    if ($hpa === null) {
+        return false;
+    }
+    $userId = (int) $user['id'];
+    $fixAgeSeconds = $fixAgeMs === null ? 0 : (int) round(max(0, $fixAgeMs) / 1000);
+    if ($fixAgeSeconds > WAR_ROOM_MAX_FIX_AGE_SECONDS) {
+        return false;
+    }
+    try {
+        $missionId = (int) dbFetchValue(
+            "SELECT s.mission_id FROM participation_requests pr
+             JOIN shifts s ON pr.shift_id = s.id
+             JOIN missions m ON s.mission_id = m.id
+             WHERE pr.shift_id = ? AND pr.volunteer_id = ? AND pr.status = ?
+               AND m.status = ? AND m.show_in_ops = 1 AND m.deleted_at IS NULL",
+            [$shiftId, $userId, PARTICIPATION_APPROVED, STATUS_OPEN]
+        );
+        if ($missionId <= 0 || !isActionRoomParticipant($missionId, $userId)) {
+            return false;
+        }
+        dbInsert(
+            "INSERT INTO volunteer_pressure (mission_id, user_id, hpa, created_at)
+             VALUES (?, ?, ?, DATE_SUB(NOW(), INTERVAL ? SECOND))",
+            [$missionId, $userId, $hpa, $fixAgeSeconds]
+        );
+        return true;
+    } catch (Exception $e) {
+        return false;
+    }
+}
+
+/**
  * One step of the position filter: a Kalman filter with a constant-position
  * model, run once per accepted fix at write time (v3.321.0, reworked in
  * v3.322.1 after a real walk).
@@ -477,6 +556,18 @@ const NATIVE_PING_BATCH_MAX = 100;
  * BackgroundGeolocationService.java).
  */
 function recordNativePingFromJson(array $user, int $shiftId, array $body): array {
+    // The air pressure first, and on its own (v3.426.0): the fix below may be
+    // refused as an implausible jump or not come at all once the person is
+    // inside a building, and the floor is wanted exactly then. An item with a
+    // reading and no coordinates is the app's own "no fix for a while, here is
+    // the pressure" tick; it is answered ok so the phone does not keep it.
+    $pressure = parsePressureHpa($body['pressure_hpa'] ?? null);
+    $stored = $pressure !== null
+        && recordVolunteerPressure($user, $shiftId, $pressure, parseFixAgeMs($body['fix_age_ms'] ?? null));
+    if ($pressure !== null && !isset($body['latitude']) && !isset($body['longitude'])) {
+        return ['ok' => true, 'pressure_only' => true, 'stored' => $stored];
+    }
+
     $accuracy = (isset($body['accuracy']) && is_numeric($body['accuracy']))
         ? min((float) $body['accuracy'], 5000.0)
         : null;
