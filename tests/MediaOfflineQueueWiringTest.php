@@ -116,6 +116,23 @@ final class MediaOfflineQueueWiringTest extends TestCase
         $this->assertGreaterThanOrEqual(197, DB_SCHEMA_VERSION);
     }
 
+    public function testTheRedOfflineBarSaysPhotosAndVideosAreSaved(): void
+    {
+        $lang = $this->source('includes/lang/war-room.php');
+        $this->assertSame(2, preg_match_all("/'gui\.offline_bar_warroom'\s*=>/", $lang), 'one per language');
+        preg_match_all("/'gui\.offline_bar_warroom'\s*=>\s*'([^\r\n]*)',\r?\n/", $lang, $m);
+        $this->assertCount(2, $m[1]);
+        [$greek, $english] = $m[1];
+        // Photos and videos are queued now, so the bar must not say they are not.
+        $this->assertStringContainsString('φωτογραφίες και βίντεο αποθηκεύονται', $greek);
+        $this->assertStringNotContainsString('Φωτογραφίες και μηνύματα όχι', $greek);
+        $this->assertStringContainsString('photos and videos are saved', $english);
+        $this->assertStringNotContainsString('Photos and messages are not', $english);
+        // Chat messages are still NOT queued, and the bar must keep saying so.
+        $this->assertStringContainsString('μηνύματα όχι', $greek);
+        $this->assertStringContainsString('Messages are not', $english);
+    }
+
     public function testEveryNewStringExistsInGreekAndEnglish(): void
     {
         $lang = $this->source('includes/lang/war-room.php');

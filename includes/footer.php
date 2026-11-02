@@ -346,8 +346,9 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
     // War Room's field reports — Route Order actions (depart/arrive/complete)
     // AND field status incl. the SOS button — queue locally and sync
     // automatically once back online (see war-room.php's flushQueue()).
-    // Everything else on this bar's generic message still applies there too
-    // (photos/videos/dispatch/chat are NOT queued), so the text is amended,
+    // Photos and videos are queued too since v3.423.0 (IndexedDB, see
+    // assets/js/media-queue.js). Everything else on this bar's generic message
+    // still applies there too (dispatch/chat are NOT queued), so the text is amended,
     // not replaced, and only on that page — every other page's warning stays
     // exactly as before.
     var isWarRoom = /\/war-room\.php/.test(window.location.pathname);
