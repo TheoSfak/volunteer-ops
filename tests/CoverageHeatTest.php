@@ -7,11 +7,14 @@ namespace Tests;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The heat layer of the «Πίνακας» console look (v3.431.0): where the teams have been and for how long.
+ * The heat layer of the «Πίνακας» console look (v3.431.0, judged on the ground since v3.432.0): where the teams
+ * have been and for how long, with the SAME idea of «seen» as Verified Coverage (🛰️).
  *
- * Three layers, like CoverageTerrainTest:
- *  - the pure pieces (seconds per cell, the three rules about which fixes count, the grid growing when there
- *    are too many cells, the colour scale) on hand-made walks;
+ * Four layers, like CoverageTerrainTest:
+ *  - the pure pieces on hand-made walks: seconds per cell, and the rules of each ground (which fixes are
+ *    believed, how long a silence may be, how far a searcher sees, the ground beside a building);
+ *  - the heat against Verified Coverage itself, on the same walk and the same ground: a cell has heat where the
+ *    🛰️ computation would call it covered;
  *  - computeMissionCoverageHeat() end to end against the test database, inside a transaction that is always
  *    rolled back, and the signature the page asks «anything new?» with;
  *  - the plumbing that only fails in production (the real bootstrap chain in a fresh process, the allow-list of
@@ -45,28 +48,44 @@ final class CoverageHeatTest extends TestCase
         ];
     }
 
-    private function total(array $heat): int
+    /** One ground for the whole map. */
+    private function ground(string $terrain, array $buildings = []): array
     {
-        return array_sum(array_column($heat['cells'], 2));
+        return ['terrains' => [$terrain], 'at' => fn(float $lat, float $lng): string => $terrain, 'buildings' => $buildings];
+    }
+
+    /** Metres from the fix at (x, y) to the centre of a heat cell. */
+    private function metresFrom(array $cell, float $x, float $y): float
+    {
+        return hypot(
+            ($cell[0] - (self::LAT0 + $y / self::M_PER_DEG_LAT)) * self::M_PER_DEG_LAT,
+            ($cell[1] - (self::LNG0 + $x / self::M_PER_DEG_LNG)) * self::M_PER_DEG_LNG
+        );
     }
 
     // ── the seconds ──────────────────────────────────────────────────────────
 
-    public function testSomeoneWhoStandsStillLeavesAllTheirTimeInOneCell(): void
+    public function testSomeoneWhoStandsStillGivesAllTheirTimeToEveryCellInSight(): void
     {
         $rows = [];
         for ($s = 0; $s <= 600; $s += 30) {
             $rows[] = $this->fix(1, 100, 100, $s);
         }
         $heat = coverageHeatCells($rows);
-        $this->assertCount(1, $heat['cells']);
-        $this->assertSame(600, $heat['cells'][0][2], '20 stretches of 30 s, all in the same place');
+        $this->assertSame(600, $heat['max'], '20 stretches of 30 s: the whole ten minutes');
+        $this->assertSame(array_fill(0, count($heat['cells']), 600), array_column($heat['cells'], 2), 'every cell in sight was in sight for all of it');
+        $this->assertGreaterThanOrEqual(1, count($heat['cells']));
+        $this->assertLessThanOrEqual(9, count($heat['cells']), 'open country sees 25 m: a handful of 20 m cells, not the neighbourhood');
+        foreach ($heat['cells'] as $cell) {
+            $this->assertLessThanOrEqual(25 + 15, $this->metresFrom($cell, 100, 100), 'in sight, or the cell the fix is in');
+        }
         $this->assertSame(20, $heat['cell_m']);
         $this->assertSame(1, $heat['people']);
         $this->assertSame(21, $heat['fixes']);
+        $this->assertSame(['rural'], $heat['terrains']);
     }
 
-    public function testSomeoneWalkingPassesEveryCellQuicklyAndTheirTimeIsKept(): void
+    public function testSomeoneWalkingHasEachCellInSightOnlyWhileTheyAreNearIt(): void
     {
         // 100 m east at 1 m/s, a fix every 10 s.
         $rows = [];
@@ -74,11 +93,12 @@ final class CoverageHeatTest extends TestCase
             $rows[] = $this->fix(1, $s, 0, $s);
         }
         $heat = coverageHeatCells($rows);
-        $this->assertGreaterThanOrEqual(5, count($heat['cells']), 'a hundred metres crosses at least five cells of twenty');
-        $this->assertLessThanOrEqual(7, count($heat['cells']));
-        // Rounding each cell to whole seconds can move the sum by at most half a second per cell.
-        $this->assertEqualsWithDelta(100, $this->total($heat), count($heat['cells']) / 2 + 0.5);
-        $this->assertLessThan(35, $heat['max'], 'nobody lingered anywhere');
+        // A cell in the middle of the line has the walker within 25 m for about half of the walk (50 s of 100).
+        $this->assertGreaterThan(35, $heat['max']);
+        $this->assertLessThan(75, $heat['max']);
+        // The band is the line and 25 m either side of it, in cells of 20: well over the five cells the line itself crosses.
+        $this->assertGreaterThanOrEqual(10, count($heat['cells']));
+        $this->assertLessThanOrEqual(40, count($heat['cells']));
     }
 
     public function testTheSameTimeSpentInOnePlaceIsHotterThanThePassingThrough(): void
@@ -90,8 +110,10 @@ final class CoverageHeatTest extends TestCase
             $walk[] = $this->fix(2, $s, 200, $s);
         }
         $heat = coverageHeatCells(array_merge($stand, $walk));
-        $this->assertSame(100, $heat['max'], 'the standing person put 100 s into one cell');
+        $this->assertSame(100, $heat['max'], 'the standing person put 100 s into every cell around them');
         $this->assertSame(2, $heat['people']);
+        $walkOnly = coverageHeatCells($walk);
+        $this->assertLessThan(100, $walkOnly['max']);
     }
 
     public function testTwoPeopleAreNotJoinedByALineBetweenTheirFixes(): void
@@ -100,8 +122,10 @@ final class CoverageHeatTest extends TestCase
         // 1 km "walk" in 10 s (a jump, refused) and neither would count as standing still.
         $rows = [$this->fix(1, 0, 0, 0), $this->fix(2, 1000, 0, 10), $this->fix(1, 0, 0, 20), $this->fix(2, 1000, 0, 30)];
         $heat = coverageHeatCells($rows);
-        $this->assertCount(2, $heat['cells']);
-        $this->assertSame([20, 20], array_column($heat['cells'], 2));
+        $this->assertSame(20, $heat['max']);
+        foreach ($heat['cells'] as $cell) {
+            $this->assertLessThan(45, min($this->metresFrom($cell, 0, 0), $this->metresFrom($cell, 1000, 0)), 'nothing in between');
+        }
     }
 
     public function testRowsInAnyOrderGiveTheSameAnswer(): void
@@ -111,64 +135,236 @@ final class CoverageHeatTest extends TestCase
             $rows[] = $this->fix(1, $s * 2, 0, $s);
             $rows[] = $this->fix(2, 0, $s * 2, $s);
         }
-        $shuffled = array_reverse($rows);
-        $this->assertSame(coverageHeatCells($rows), coverageHeatCells($shuffled));
+        $this->assertSame(coverageHeatCells($rows), coverageHeatCells(array_reverse($rows)));
     }
 
-    // ── which fixes count ────────────────────────────────────────────────────
+    // ── the rules of each ground ─────────────────────────────────────────────
 
-    public function testAFixVaguerThanTheCellIsNotBelieved(): void
+    public function testEachGroundBelievesAFixOnlyUpToItsOwnAccuracy(): void
     {
-        $rows = [$this->fix(1, 0, 0, 0, 5.0), $this->fix(1, 0, 0, 30, 80.0), $this->fix(1, 0, 0, 60, 5.0)];
-        $heat = coverageHeatCells($rows);
-        $this->assertSame(2, $heat['fixes'], 'the 80 m fix is left out');
-        // The two that remain are 60 s apart: a stretch, with the silence in the middle not counted against it.
-        $this->assertSame(60, $this->total($heat));
-        $this->assertSame(30.0, (float) COVERAGE_HEAT_MAX_ACCURACY_M);
-        $this->assertSame(0, coverageHeatCells([$this->fix(1, 0, 0, 0, 31.0)])['fixes']);
+        // The three limits are Verified Coverage's own (COVERAGE_TERRAIN_PROFILES), not a number of the heat's.
+        $this->assertSame(100.0, coverageHeatLoosestAccuracy(['rural']));
+        $this->assertSame(50.0, coverageHeatLoosestAccuracy(['mountain']));
+        $this->assertSame(30.0, coverageHeatLoosestAccuracy(['urban']));
+        $this->assertSame(100.0, coverageHeatLoosestAccuracy());
+        foreach (['rural' => [100.0, 101.0], 'mountain' => [50.0, 51.0], 'urban' => [30.0, 31.0]] as $terrain => [$fine, $vague]) {
+            $in = coverageHeatCells([$this->fix(1, 0, 0, 0, $fine)], $this->ground($terrain));
+            $out = coverageHeatCells([$this->fix(1, 0, 0, 0, $vague)], $this->ground($terrain));
+            $this->assertSame(1, $in['fixes'], "$terrain believes $fine m");
+            $this->assertNotEmpty($in['cells'], $terrain);
+            $this->assertSame(0, $out['fixes'], "$terrain does not believe $vague m");
+            $this->assertSame([], $out['cells'], $terrain);
+        }
         $this->assertSame(1, coverageHeatCells([$this->fix(1, 0, 0, 0, null)])['fixes'], 'a fix with no accuracy is believed, as everywhere else');
     }
 
-    public function testAFixBeforeALongSilenceIsNotJoinedToTheOneAfterIt(): void
+    public function testAFixThatIsNotBelievedNeitherCountsNorEndsAStretch(): void
     {
-        $rows = [$this->fix(1, 0, 0, 0), $this->fix(1, 0, 0, 400)];   // 400 s: past the 300 s
-        $heat = coverageHeatCells($rows);
-        $this->assertSame(COVERAGE_HEAT_POINT_S * 2, $this->total($heat), 'two lone fixes, a few seconds each; the silence is nobody\'s time');
-        $edge = coverageHeatCells([$this->fix(1, 0, 0, 0), $this->fix(1, 0, 0, 300)]);
-        $this->assertSame(300, $this->total($edge), '300 s is still a stretch');
+        // The vague fix in the middle is skipped, so the two good ones are 60 s apart: a stretch of rural ground (30 min).
+        $rows = [$this->fix(1, 0, 0, 0, 5.0), $this->fix(1, 0, 0, 30, 80.0), $this->fix(1, 0, 0, 60, 5.0)];
+        $rural = coverageHeatCells($rows, $this->ground('rural'));
+        $this->assertSame(60, $rural['max']);
+        // On a mountain (50 m) the same middle fix is not believed either; the two stay a stretch of 60 s (limit 300).
+        $this->assertSame(60, coverageHeatCells($rows, $this->ground('mountain'))['max']);
+    }
+
+    public function testEachGroundAllowsItsOwnSilenceBetweenTwoFixes(): void
+    {
+        $this->assertSame(1800, COVERAGE_TERRAIN_PROFILES['rural']['max_gap_s']);
+        $this->assertSame(300, COVERAGE_TERRAIN_PROFILES['mountain']['max_gap_s']);
+        $this->assertSame(120, COVERAGE_TERRAIN_PROFILES['urban']['max_gap_s']);
+        foreach (['rural' => 1800, 'mountain' => 300, 'urban' => 120] as $terrain => $gap) {
+            $edge = coverageHeatCells([$this->fix(1, 0, 0, 0), $this->fix(1, 0, 0, $gap)], $this->ground($terrain));
+            $this->assertSame($gap, $edge['max'], "$terrain: a silence of exactly $gap s is still a stretch");
+            $past = coverageHeatCells([$this->fix(1, 0, 0, 0), $this->fix(1, 0, 0, $gap + 1)], $this->ground($terrain));
+            // Two lone fixes in the same place: the silence is nobody's time.
+            $this->assertSame(COVERAGE_HEAT_POINT_S * 2, $past['max'], "$terrain: one second more and it is lost signal");
+        }
+    }
+
+    public function testEachGroundSeesAsFarAsItsOwnRadius(): void
+    {
+        // A fix exactly at the centre of a cell: the cells in sight are the ones whose centres are within the radius.
+        [$dLat, $dLng] = coverageHeatCellDegrees(20.0, 35.2);
+        $i = (int) floor(35.2 / $dLat);
+        $j = (int) floor(24.9 / $dLng);
+        $at = fn(int $second) => ['user_id' => 1, 'lat' => ($i + 0.5) * $dLat, 'lng' => ($j + 0.5) * $dLng, 'accuracy_meters' => 5.0, 'created_at' => date('Y-m-d H:i:s', self::T0 + $second)];
+        $rows = [$at(0), $at(60)];
+        $counts = [];
+        foreach (['rural' => 25, 'mountain' => 15, 'urban' => 10] as $terrain => $radius) {
+            $this->assertSame($radius, COVERAGE_TERRAIN_PROFILES[$terrain]['radius_m']);
+            $counts[$terrain] = count(coverageHeatCells($rows, $this->ground($terrain))['cells']);
+        }
+        // Rural: the cell itself and its four neighbours at 20 m (the diagonals are 28 m away). The others: only its own.
+        $this->assertSame(['rural' => 5, 'mountain' => 1, 'urban' => 1], $counts);
+    }
+
+    public function testACellIsJudgedByTheRulesOfItsOwnGround(): void
+    {
+        // The map's west half is open country and its east half a town. A 40 m fix is believed in the open and not in the town.
+        $boundary = 24.9020;
+        $ground = [
+            'terrains' => ['rural', 'urban'],
+            'at' => fn(float $lat, float $lng): string => $lng > $boundary ? 'urban' : 'rural',
+        ];
+        $west = fn(int $s) => $this->fix(1, 0, 0, $s, 40.0);                  // 24.9000: rural
+        $east = fn(int $s) => $this->fix(2, 400, 0, $s, 40.0);                 // 24.9044: urban
+        $heat = coverageHeatCells([$west(0), $west(30), $east(0), $east(30)], $ground);
+        $this->assertSame(['rural', 'urban'], $heat['terrains']);
+        $this->assertNotEmpty($heat['cells']);
+        foreach ($heat['cells'] as $cell) {
+            $this->assertLessThanOrEqual($boundary, $cell[1], 'only the open country was credited: 40 m is not evidence in a town');
+        }
+        // And a believed fix in the town is credited with the town's short sight.
+        $town = coverageHeatCells([$this->fix(2, 400, 0, 0, 10.0), $this->fix(2, 400, 0, 30, 10.0)], $ground);
+        $this->assertSame(30, $town['max']);
+        $this->assertLessThanOrEqual(2, count($town['cells']), 'a town sees 10 m: one or two cells');
+        foreach ($town['cells'] as $cell) {
+            $this->assertGreaterThan($boundary, $cell[1]);
+        }
+    }
+
+    public function testTheGroundBesideARegisteredBuildingIsLeftOut(): void
+    {
+        $rows = [$this->fix(1, 100, 100, 0), $this->fix(1, 100, 100, 60)];
+        $free = coverageHeatCells($rows);
+        $building = [self::LAT0 + 100 / self::M_PER_DEG_LAT, self::LNG0 + 110 / self::M_PER_DEG_LNG];   // 10 m east of the fix
+        $near = coverageHeatCells($rows, ['buildings' => [$building]]);
+        $this->assertLessThan(count($free['cells']), count($near['cells']), 'the cells beside the building are gone');
+        foreach ($near['cells'] as $cell) {
+            $this->assertGreaterThan(COVERAGE_BUILDING_EXCLUSION_M, hypot(
+                ($cell[0] - $building[0]) * self::M_PER_DEG_LAT,
+                ($cell[1] - $building[1]) * self::M_PER_DEG_LNG
+            ), 'no heat within 15 m of a building, as there is none in the sector\'s counts');
+        }
+        $this->assertSame(15, COVERAGE_BUILDING_EXCLUSION_M);
     }
 
     public function testAJumpOfThePositionIsNotAWalk(): void
     {
-        // 5 km in 60 s is 83 m/s.
-        $rows = [$this->fix(1, 0, 0, 0), $this->fix(1, 5000, 0, 60)];
-        $heat = coverageHeatCells($rows);
+        // 5 km in 60 s is 83 m/s: two lone fixes, five seconds each.
+        $heat = coverageHeatCells([$this->fix(1, 0, 0, 0), $this->fix(1, 5000, 0, 60)], $this->ground('urban'));
         $this->assertCount(2, $heat['cells']);
         $this->assertSame([COVERAGE_HEAT_POINT_S, COVERAGE_HEAT_POINT_S], array_column($heat['cells'], 2));
-        // A car on a good road (30 m/s) is not a jump.
-        $car = coverageHeatCells([$this->fix(1, 0, 0, 0), $this->fix(1, 1800, 0, 60)]);
-        $this->assertEqualsWithDelta(60, $this->total($car), count($car['cells']) / 2 + 0.5);
+        // A car on a good road (30 m/s) is not a jump, as it is not for Verified Coverage.
+        $car = coverageHeatCells([$this->fix(1, 0, 0, 0), $this->fix(1, 1800, 0, 60)], $this->ground('urban'));
+        $this->assertGreaterThan(80, count($car['cells']));
+        $this->assertSame(60, array_sum(array_column($car['cells'], 2)) > 0 ? 60 : 0);
+    }
+
+    public function testTwoFixesInTheSameSecondAreNotAStretchAndDoNotBreakIt(): void
+    {
+        // A phone that reports twice in one second (a retried upload): no time passed, so no speed can be worked out.
+        $heat = coverageHeatCells([$this->fix(1, 0, 0, 10), $this->fix(1, 3, 0, 10), $this->fix(1, 3, 0, 40)], $this->ground('urban'));
+        $this->assertSame(1, $heat['people']);
+        $this->assertGreaterThanOrEqual(30, $heat['max'], 'the thirty seconds between the second and third fix are still counted');
     }
 
     public function testAPersonHeardOnceIsOnTheMapFaintly(): void
     {
-        $heat = coverageHeatCells([$this->fix(1, 0, 0, 0)]);
-        $this->assertSame([[$heat['cells'][0][0], $heat['cells'][0][1], COVERAGE_HEAT_POINT_S]], $heat['cells']);
+        $heat = coverageHeatCells([$this->fix(1, 0, 0, 0)], $this->ground('urban'));
+        $this->assertSame(COVERAGE_HEAT_POINT_S, $heat['max']);
     }
 
     public function testNothingBelievedIsNothingDrawn(): void
     {
-        $this->assertSame(['cells' => [], 'cell_m' => 20, 'max' => 0, 'p95' => 0, 'people' => 0, 'fixes' => 0], coverageHeatCells([]));
-        $none = coverageHeatCells([$this->fix(1, 0, 0, 0, 90.0)]);
+        $this->assertSame(['cells' => [], 'cell_m' => 20, 'max' => 0, 'p95' => 0, 'people' => 0, 'fixes' => 0, 'terrains' => ['rural']], coverageHeatCells([]));
+        $none = coverageHeatCells([$this->fix(1, 0, 0, 0, 120.0)]);
         $this->assertSame([], $none['cells']);
         $this->assertSame(0, $none['fixes']);
+    }
+
+    // ── the ground of a point ────────────────────────────────────────────────
+
+    public function testThePointsGroundComesFromItsSectorThenItsAreaThenOpenCountry(): void
+    {
+        $square = fn(float $south, float $west, float $size) => [[$south, $west], [$south, $west + $size], [$south + $size, $west + $size], [$south + $size, $west]];
+        $shape = fn(array $geo, string $terrain) => coverageHeatShape($geo, $terrain);
+        $sectors = [$shape($square(35.20, 24.90, 0.002), 'urban')];
+        $areas = [$shape($square(35.19, 24.89, 0.02), 'mountain')];
+
+        $this->assertSame('urban', coverageHeatTerrainAt(35.201, 24.901, $sectors, $areas), 'inside a sector: its ground');
+        $this->assertSame('mountain', coverageHeatTerrainAt(35.205, 24.905, $sectors, $areas), 'inside the area but outside every sector: the area\'s ground');
+        $this->assertSame('rural', coverageHeatTerrainAt(35.30, 24.50, $sectors, $areas), 'outside everything: open country');
+
+        // Two sectors on the same ground: the stricter one wins (the one that believes the fewest fixes).
+        $both = [$shape($square(35.20, 24.90, 0.002), 'rural'), $shape($square(35.20, 24.90, 0.002), 'urban'), $shape($square(35.20, 24.90, 0.002), 'mountain')];
+        $this->assertSame('urban', coverageHeatTerrainAt(35.201, 24.901, $both, []));
+        $this->assertNull(coverageHeatShape('[[35.2,24.9],[35.2,24.91]]', 'rural'), 'two corners are not a polygon');
+        $this->assertNull(coverageHeatShape('not json', 'rural'));
+    }
+
+    // ── the heat against Verified Coverage ───────────────────────────────────
+
+    /**
+     * The point of the whole change: the heat has no idea of «seen» of its own. On the same walk over the same
+     * ground, the cells that have heat are the cells Verified Coverage counts as covered. The two grids differ (the
+     * sector's is derived from its size, the heat's is 20 m), so the percentages are compared, not the cells.
+     */
+    public function testTheHeatCoversWhatVerifiedCoverageCountsAsCoveredOnEachGround(): void
+    {
+        $size = 200.0;
+        $corner = [[self::LAT0, self::LNG0], [self::LAT0 + $size / self::M_PER_DEG_LAT, self::LNG0],
+            [self::LAT0 + $size / self::M_PER_DEG_LAT, self::LNG0 + $size / self::M_PER_DEG_LNG], [self::LAT0, self::LNG0 + $size / self::M_PER_DEG_LNG]];
+        // A lawnmower walk, lines 40 m apart, one fix every 7 m (5 s at 1.4 m/s), 6 m accuracy.
+        $rows = [];
+        $second = 0;
+        for ($line = 0; $line <= 5; $line++) {
+            $y = 20 + $line * 32.0;
+            for ($x = 0.0; $x <= $size; $x += 7.0) {
+                $rows[] = $this->fix(1, $line % 2 === 0 ? $x : $size - $x, $y, $second, 6.0);
+                $second += 5;
+            }
+        }
+        $this->assertNotEmpty($rows);
+
+        foreach (['rural', 'mountain', 'urban'] as $terrain) {
+            $profile = COVERAGE_TERRAIN_PROFILES[$terrain];
+            $tracks = coverageTracksFromPings($rows, $profile['max_gap_s'], $profile['max_accuracy_m']);
+            $coverage = coverageSweepPolygon($corner, $tracks, $profile)['percent'];
+
+            $heat = coverageHeatCells($rows, $this->ground($terrain));
+            [$dLat, $dLng] = coverageHeatCellDegrees((float) $heat['cell_m'], 35.2);
+            $has = [];
+            foreach ($heat['cells'] as $cell) {
+                $has[((int) floor($cell[0] / $dLat)) . ':' . ((int) floor($cell[1] / $dLng))] = true;
+            }
+            $total = 0;
+            $covered = 0;
+            for ($i = (int) floor(self::LAT0 / $dLat); $i <= (int) floor($corner[1][0] / $dLat); $i++) {
+                for ($j = (int) floor(self::LNG0 / $dLng); $j <= (int) floor($corner[2][1] / $dLng); $j++) {
+                    if (!pointInPolygon(($i + 0.5) * $dLat, ($j + 0.5) * $dLng, $corner)) {
+                        continue;
+                    }
+                    $total++;
+                    $covered += isset($has[$i . ':' . $j]) ? 1 : 0;
+                }
+            }
+            $heatPercent = (int) round($covered / $total * 100);
+            $this->assertEqualsWithDelta($coverage, $heatPercent, 12, "$terrain: 🛰️ says $coverage %, the heat has $heatPercent % of the same square");
+        }
+    }
+
+    public function testTheGroundsOrderTheSamePictureTheSameWayAsTheirSightRadii(): void
+    {
+        // A wider sight covers more of the same walk, on the heat as on 🛰️.
+        $rows = [];
+        for ($x = 0; $x <= 200; $x += 7) {
+            $rows[] = $this->fix(1, $x, 100, (int) ($x / 1.4), 6.0);
+        }
+        $cells = [];
+        foreach (['rural', 'mountain', 'urban'] as $terrain) {
+            $cells[$terrain] = count(coverageHeatCells($rows, $this->ground($terrain))['cells']);
+        }
+        $this->assertGreaterThan($cells['mountain'], $cells['rural']);
+        $this->assertGreaterThanOrEqual($cells['urban'], $cells['mountain']);
     }
 
     // ── the grid ─────────────────────────────────────────────────────────────
 
     public function testACellIsTwentyMetresAndTheCentreIsInsideIt(): void
     {
-        $heat = coverageHeatCells([$this->fix(1, 123, 456, 0)]);
+        $heat = coverageHeatCells([$this->fix(1, 123, 456, 0)], $this->ground('urban'));
         [$lat, $lng] = $heat['cells'][0];
         [$dLat, $dLng] = coverageHeatCellDegrees(20.0, 35.2);
         $this->assertEqualsWithDelta(20.0, $dLat * self::M_PER_DEG_LAT, 0.5);
@@ -183,12 +379,12 @@ final class CoverageHeatTest extends TestCase
     {
         // The grid is anchored to the earth, not to the data: a team far away must not shift the cells of a team
         // that did not move, or the layer would shimmer every time anybody pinged.
-        $alone = coverageHeatCells([$this->fix(1, 300, 300, 0)]);
-        $withOthers = coverageHeatCells([$this->fix(1, 300, 300, 0), $this->fix(2, 4000, 3000, 0), $this->fix(3, -2500, 1000, 0)]);
+        $alone = coverageHeatCells([$this->fix(1, 300, 300, 0)], $this->ground('urban'));
+        $withOthers = coverageHeatCells([$this->fix(1, 300, 300, 0), $this->fix(2, 4000, 3000, 0), $this->fix(3, -2500, 1000, 0)], $this->ground('urban'));
         $this->assertContains($alone['cells'][0], $withOthers['cells']);
     }
 
-    public function testTheCellsGrowWhenThereAreTooManyToDrawAndNoTimeIsLost(): void
+    public function testTheCellsGrowWhenThereAreTooManyToDrawAndTheMostIsKept(): void
     {
         $rows = [];
         for ($i = 0; $i < 10; $i++) {
@@ -196,17 +392,17 @@ final class CoverageHeatTest extends TestCase
                 $rows[] = $this->fix(1 + $i * 10 + $j, $i * 30, $j * 30, 0);   // 100 people, 30 m apart, each heard once
             }
         }
-        $fine = coverageHeatCells($rows, 20, 6000);
+        $fine = coverageHeatCells($rows, $this->ground('urban'), 20, 6000);
         $this->assertSame(20, $fine['cell_m']);
         $this->assertCount(100, $fine['cells']);
 
-        $coarse = coverageHeatCells($rows, 20, 30);
+        $coarse = coverageHeatCells($rows, $this->ground('urban'), 20, 30);
         $this->assertGreaterThan(20, $coarse['cell_m']);
         $this->assertLessThanOrEqual(160, $coarse['cell_m']);
         $this->assertLessThanOrEqual(30, count($coarse['cells']));
-        $this->assertSame(100 * COVERAGE_HEAT_POINT_S, $this->total($coarse), 'coarser cells hold the same seconds');
-        // Doubled each time: 20, 40, 80, 160.
-        $this->assertContains($coarse['cell_m'], [40, 80, 160]);
+        $this->assertContains($coarse['cell_m'], [40, 80, 160], 'doubled each time');
+        // A coarser cell holds everybody who was in it: nobody's time is lost when the cells are larger than the sight.
+        $this->assertSame(100 * COVERAGE_HEAT_POINT_S, array_sum(array_column($coarse['cells'], 2)));
     }
 
     public function testPastTheCoarsestCellOnlyTheBusiestAreKept(): void
@@ -218,7 +414,7 @@ final class CoverageHeatTest extends TestCase
         for ($s = 0; $s <= 300; $s += 30) {
             $rows[] = $this->fix(1, 50000, 0, $s);                   // one place where somebody stood 300 s
         }
-        $heat = coverageHeatCells($rows, 20, 5);
+        $heat = coverageHeatCells($rows, $this->ground('urban'), 20, 5);
         $this->assertSame(160, $heat['cell_m']);
         $this->assertCount(5, $heat['cells']);
         $this->assertSame(300, $heat['cells'][0][2], 'the busiest cell leads the list');
@@ -236,7 +432,7 @@ final class CoverageHeatTest extends TestCase
         for ($s = 0; $s <= 3600; $s += 30) {
             $rows[] = $this->fix(1, 9000, 0, $s);                    // one cell of 3600 s
         }
-        $heat = coverageHeatCells($rows);
+        $heat = coverageHeatCells($rows, $this->ground('urban'));
         $this->assertCount(40, $heat['cells']);
         $this->assertSame(3600, $heat['max']);
         $this->assertSame(5, $heat['p95'], '38 of 40 cells are 5 s: the 95th percentile ignores the one extreme cell');
@@ -244,23 +440,29 @@ final class CoverageHeatTest extends TestCase
 
     // ── the database, end to end ─────────────────────────────────────────────
 
+    private function makeMission(): array
+    {
+        $uid = (int) dbInsert("INSERT INTO users (name, email, password) VALUES (?, ?, ?)", ['Heat Walker', 'heat-' . uniqid('', true) . '@example.invalid', 'x']);
+        $typeId = (int) dbFetchValue("SELECT id FROM mission_types ORDER BY id LIMIT 1");
+        $missionId = (int) dbInsert(
+            "INSERT INTO missions (title, location, start_datetime, end_datetime, mission_type_id, status, show_in_ops) VALUES (?, ?, ?, ?, ?, 'OPEN', 1)",
+            ['Heat Mission', 'Ηράκλειο', date('Y-m-d H:i:s', time() - 7200), date('Y-m-d H:i:s', time() + 7200), $typeId]
+        );
+        $shiftId = (int) dbInsert("INSERT INTO shifts (mission_id, start_time, end_time) VALUES (?, ?, ?)", [$missionId, date('Y-m-d H:i:s', time() - 3600), date('Y-m-d H:i:s', time() + 3600)]);
+        return [$uid, $missionId, $shiftId];
+    }
+
     public function testAMissionsHeatComesFromItsPingsAndTheSignatureSaysWhenSomethingNewArrived(): void
     {
         db()->beginTransaction();
         try {
-            $uid = (int) dbInsert("INSERT INTO users (name, email, password) VALUES (?, ?, ?)", ['Heat Walker', 'heat-' . uniqid('', true) . '@example.invalid', 'x']);
-            $typeId = (int) dbFetchValue("SELECT id FROM mission_types ORDER BY id LIMIT 1");
-            $missionId = (int) dbInsert(
-                "INSERT INTO missions (title, location, start_datetime, end_datetime, mission_type_id, status, show_in_ops) VALUES (?, ?, ?, ?, ?, 'OPEN', 1)",
-                ['Heat Mission', 'Ηράκλειο', date('Y-m-d H:i:s', time() - 7200), date('Y-m-d H:i:s', time() + 7200), $typeId]
-            );
-            $shiftId = (int) dbInsert("INSERT INTO shifts (mission_id, start_time, end_time) VALUES (?, ?, ?)", [$missionId, date('Y-m-d H:i:s', time() - 3600), date('Y-m-d H:i:s', time() + 3600)]);
+            [$uid, $missionId, $shiftId] = $this->makeMission();
             $insert = fn(int $second, ?float $accuracy) => dbInsert(
                 "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, accuracy_meters, source, created_at) VALUES (?, ?, ?, ?, ?, 'auto', ?)",
                 [$uid, $shiftId, self::LAT0, self::LNG0, $accuracy, date('Y-m-d H:i:s', self::T0 + $second)]
             );
 
-            $this->assertSame('0-0', coverageHeatSignature($missionId), 'no pings yet');
+            $this->assertMatchesRegularExpression('~^0-0-[0-9a-f]+$~', coverageHeatSignature($missionId), 'no pings yet');
             $this->assertSame([], computeMissionCoverageHeat($missionId)['cells']);
 
             $insert(0, 5.0);
@@ -268,23 +470,71 @@ final class CoverageHeatTest extends TestCase
             $insert(120, 5.0);
             $first = coverageHeatSignature($missionId);
             $heat = computeMissionCoverageHeat($missionId);
-            $this->assertSame($first, $heat['sig'], 'the answer carries the signature of the pings it was made from');
-            $this->assertSame(120, $heat['cells'][0][2]);
+            $this->assertSame($first, $heat['sig'], 'the answer carries the signature of what it was made from');
+            $this->assertSame(120, $heat['max']);
             $this->assertSame(3, $heat['fixes']);
+            $this->assertSame(['rural'], $heat['terrains'], 'no sector, no area: open country');
 
-            $insert(180, 90.0);   // not believed: it must not even count as news
+            $insert(180, 120.0);   // vaguer than any ground believes: it must not even count as news
             $this->assertSame($first, coverageHeatSignature($missionId));
 
             $insert(180, 5.0);
             $this->assertNotSame($first, coverageHeatSignature($missionId), 'a believed fix is news');
-            $this->assertSame(180, computeMissionCoverageHeat($missionId)['cells'][0][2]);
+            $this->assertSame(180, computeMissionCoverageHeat($missionId)['max']);
 
             // Another mission's pings are not this one's.
-            $otherId = (int) dbInsert(
-                "INSERT INTO missions (title, location, start_datetime, end_datetime, mission_type_id, status, show_in_ops) VALUES (?, ?, ?, ?, ?, 'OPEN', 1)",
-                ['Other Mission', 'Ηράκλειο', date('Y-m-d H:i:s', time() - 7200), date('Y-m-d H:i:s', time() + 7200), $typeId]
-            );
-            $this->assertSame('0-0', coverageHeatSignature($otherId));
+            [, $otherId] = $this->makeMission();
+            $this->assertMatchesRegularExpression('~^0-0-~', coverageHeatSignature($otherId));
+        } finally {
+            if (db()->inTransaction()) {
+                db()->rollBack();
+            }
+        }
+    }
+
+    public function testTheGroundOfTheMissionDecidesWhatIsBelievedAndChangingItMovesTheSignature(): void
+    {
+        db()->beginTransaction();
+        try {
+            [$uid, $missionId, $shiftId] = $this->makeMission();
+            foreach ([0, 60] as $second) {
+                dbInsert(
+                    "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, accuracy_meters, source, created_at) VALUES (?, ?, ?, ?, ?, 'auto', ?)",
+                    [$uid, $shiftId, self::LAT0, self::LNG0, 40.0, date('Y-m-d H:i:s', self::T0 + $second)]   // 40 m: open country believes it, a town does not
+                );
+            }
+            $open = computeMissionCoverageHeat($missionId);
+            $this->assertSame(60, $open['max'], 'open country believes a 40 m fix');
+
+            // An area around the walker, with no ground chosen yet: nothing changes, and a sector with no buildings is open country too.
+            $geo = json_encode([[self::LAT0 - 0.001, self::LNG0 - 0.001], [self::LAT0 - 0.001, self::LNG0 + 0.001], [self::LAT0 + 0.001, self::LNG0 + 0.001], [self::LAT0 + 0.001, self::LNG0 - 0.001]]);
+            $areaId = (int) dbInsert("INSERT INTO mission_search_areas (mission_id, label, geo, created_by) VALUES (?, ?, ?, ?)", [$missionId, 'Περιοχή', $geo, $uid]);
+            $sectorId = (int) dbInsert("INSERT INTO mission_search_sectors (mission_id, area_id, label, geo, created_by) VALUES (?, ?, ?, ?, ?)", [$missionId, $areaId, 'Τομέας Α', $geo, $uid]);
+            $auto = computeMissionCoverageHeat($missionId);
+            $this->assertNotSame($open['sig'], $auto['sig'], 'a sector appeared');
+            $this->assertSame(['rural'], $auto['terrains']);
+            $this->assertSame(60, $auto['max']);
+
+            // A registered building makes the sector urban (the area chose nothing): the 40 m fix is not believed there,
+            // and the ground within 15 m of the building is left out whatever the ground.
+            dbInsert("INSERT INTO mission_sector_buildings (sector_id, label, lat, lng, floor_count, created_by) VALUES (?, ?, ?, ?, ?, ?)", [$sectorId, 'Κτίριο', self::LAT0 + 0.0009, self::LNG0 + 0.0009, 3, $uid]);
+            $urban = computeMissionCoverageHeat($missionId);
+            $this->assertNotSame($auto['sig'], $urban['sig'], 'a building appeared');
+            $this->assertContains('urban', $urban['terrains']);
+            $this->assertSame([], $urban['cells'], 'a town does not believe what an open field does');
+
+            // The area is told it is open country: the sector inherits it, and the same fixes count again.
+            dbExecute("UPDATE mission_search_areas SET terrain = 'rural' WHERE id = ?", [$areaId]);
+            $rural = computeMissionCoverageHeat($missionId);
+            $this->assertNotSame($urban['sig'], $rural['sig'], 'changing an area\'s ground is news');
+            $this->assertSame(60, $rural['max']);
+
+            // And a mountain: 50 m is believed, 40 m too.
+            dbExecute("UPDATE mission_search_areas SET terrain = 'mountain' WHERE id = ?", [$areaId]);
+            $mountain = computeMissionCoverageHeat($missionId);
+            $this->assertNotSame($rural['sig'], $mountain['sig']);
+            $this->assertContains('mountain', $mountain['terrains']);
+            $this->assertSame(60, $mountain['max']);
         } finally {
             if (db()->inTransaction()) {
                 db()->rollBack();
@@ -293,6 +543,24 @@ final class CoverageHeatTest extends TestCase
     }
 
     // ── the plumbing ─────────────────────────────────────────────────────────
+
+    public function testTheHeatHasNoIdeaOfSeenOfItsOwn(): void
+    {
+        $lib = self::source('includes/functions-coverage-heat.php');
+        // Every number about the ground comes from Verified Coverage's table and helper, none is restated here.
+        $this->assertStringContainsString('COVERAGE_TERRAIN_PROFILES', $lib);
+        $this->assertStringContainsString('coverageEffectiveTerrain(', $lib);
+        $this->assertStringContainsString('COVERAGE_BUILDING_EXCLUSION_M', $lib);
+        $this->assertDoesNotMatchRegularExpression('~const COVERAGE_HEAT_(MAX_ACCURACY|MAX_GAP|RADIUS|SIGHT)~', $lib);
+        $this->assertStringContainsString("\$profile['max_accuracy_m']", $lib);
+        $this->assertStringContainsString("\$profile['max_gap_s']", $lib);
+        $this->assertStringContainsString("\$profile['radius_m']", $lib);
+        // Read from the same tables, with the same gates.
+        $this->assertStringContainsString('mission_search_sectors', $lib);
+        $this->assertStringContainsString('mission_search_areas', $lib);
+        $this->assertStringContainsString('mission_sector_buildings', $lib);
+        $this->assertStringContainsString('JOIN shifts s ON s.id = vp.shift_id', $lib);
+    }
 
     public function testTheRealBootstrapLoadsTheHeatFunctions(): void
     {
@@ -318,12 +586,16 @@ require_once $argv[1] . '/includes/functions-core.php';
 require_once $argv[1] . '/includes/functions-warroom.php';
 require_once $argv[1] . '/includes/functions-coverage-heat.php';
 // A mission that does not exist: every reader answers empty, and getting that far is the point - an undefined
-// function is a fatal in this process.
+// function is a fatal in this process (the heat uses COVERAGE_TERRAIN_PROFILES, pointInPolygon() and
+// gpsDistanceMeters() of functions-warroom.php, which the real bootstrap loads before it).
 $one = coverageHeatCells([['user_id' => 1, 'lat' => 35.2, 'lng' => 24.9, 'accuracy_meters' => 5, 'created_at' => '2027-01-01 10:00:00']]);
+$ground = coverageHeatGround(0);
 echo implode('|', [
-    json_encode(count($one['cells'])),
+    json_encode(count($one['cells']) > 0),
     json_encode(coverageHeatCellDegrees(20.0, 35.2)[0] > 0),
-    json_encode(coverageHeatSignature(0)),
+    json_encode(preg_match('~^0-0-[0-9a-f]+$~', coverageHeatSignature(0)) === 1),
+    json_encode($ground['terrains']),
+    json_encode($ground['at'](35.2, 24.9)),
     json_encode(computeMissionCoverageHeat(0)['cells']),
 ]);
 PHP;
@@ -336,7 +608,7 @@ PHP;
         }
         $this->assertStringNotContainsString('undefined function', $output, $output);
         $this->assertStringNotContainsString('Fatal error', $output, $output);
-        $this->assertSame('1|true|"0-0"|[]', trim($output), $output);
+        $this->assertSame('true|true|true|["rural"]|"rural"|[]', trim($output), $output);
     }
 
     public function testTheEndpointIsOnTheAllowListAndOnlyCommandStaffGetThePicture(): void
@@ -398,10 +670,10 @@ PHP;
                 $this->assertArrayHasKey($key, $strings[$lang], "$key in $lang");
             }
         }
-        // The legend says what the server believes, so the two numbers must agree.
-        $this->assertStringContainsString('30 μ', $strings['el']['console.ov_heat_info']);
-        $this->assertStringContainsString('30 m', $strings['en']['console.ov_heat_info']);
-        $this->assertSame(30, COVERAGE_HEAT_MAX_ACCURACY_M);
+        // The legend says whose rules the picture follows; it must not state a number that is not the server's.
+        $this->assertStringContainsString('🛰️', $strings['el']['console.ov_heat_info']);
+        $this->assertStringContainsString('🛰️', $strings['en']['console.ov_heat_info']);
+        $this->assertDoesNotMatchRegularExpression('~\b30 ?(μ|m)\b~u', $strings['el']['console.ov_heat_info'] . $strings['en']['console.ov_heat_info']);
     }
 
     public function testTheHeatNeverLeavesTheBuildingAndIsNeverStored(): void

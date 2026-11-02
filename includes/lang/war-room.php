@@ -3188,13 +3188,13 @@ return [
         // The four compass letters in one string: north, south, east, west (Βόρεια, Νότια, Ανατολικά, Δυτικά).
         'console.ov_compass' => 'ΒΝΑΔ',
         'console.ov_coords_toggle' => 'Συντεταγμένες και ύψος κάτω από τον δείκτη',
-        'console.ov_heat_toggle' => 'Θερμικός χάρτης παρουσίας: πού και πόση ώρα έμειναν οι ομάδες',
-        'console.ov_heat_title' => 'Χρόνος επί τόπου',
+        'console.ov_heat_toggle' => 'Θερμικός χάρτης κάλυψης: πού και πόση ώρα είχαν οι ομάδες το έδαφος στο οπτικό τους πεδίο',
+        'console.ov_heat_title' => 'Χρόνος κάλυψης',
         'console.ov_heat_low' => 'λίγος',
         'console.ov_heat_high' => 'έως {n} λ',
         'console.ov_heat_none' => 'Δεν υπάρχουν ακόμη επαληθευμένα στίγματα',
         'console.ov_heat_failed' => 'Δεν φορτώθηκε ο θερμικός χάρτης',
-        'console.ov_heat_info' => 'Από {fixes} στίγματα {people} ατόμων, με ακρίβεια έως 30 μ. · κελιά {cell} μ.',
+        'console.ov_heat_info' => 'Από {fixes} στίγματα {people} ατόμων, με τους κανόνες του 🛰️ για το κάθε έδαφος · κελιά {cell} μ.',
         // checkin.php — the page the shift's attendance QR opens
         'checkin.page_title' => 'Check-in παρουσίας',
         'checkin.disabled_title' => 'Το QR check-in είναι απενεργοποιημένο',
@@ -6356,13 +6356,13 @@ return [
         // The four compass letters in one string: north, south, east, west.
         'console.ov_compass' => 'NSEW',
         'console.ov_coords_toggle' => 'Coordinates and height under the pointer',
-        'console.ov_heat_toggle' => 'Presence heat map: where the teams have been, and for how long',
-        'console.ov_heat_title' => 'Time on the ground',
+        'console.ov_heat_toggle' => 'Coverage heat map: where, and for how long, the teams had the ground in sight',
+        'console.ov_heat_title' => 'Time covered',
         'console.ov_heat_low' => 'little',
         'console.ov_heat_high' => 'up to {n} min',
         'console.ov_heat_none' => 'No verified positions yet',
         'console.ov_heat_failed' => 'The heat map did not load',
-        'console.ov_heat_info' => 'From {fixes} fixes of {people} people, accurate to 30 m or better · {cell} m cells',
+        'console.ov_heat_info' => 'From {fixes} fixes of {people} people, by the 🛰️ rules of each ground · {cell} m cells',
         // checkin.php — the page the shift's attendance QR opens
         'checkin.page_title' => 'Attendance check-in',
         'checkin.disabled_title' => 'QR check-in is switched off',
