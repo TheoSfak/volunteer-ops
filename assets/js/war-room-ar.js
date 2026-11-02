@@ -151,6 +151,41 @@ function arNearestOnPolygon(me, geo) {
     return {lat: p.lat, lng: p.lng, dist: best.dist};
 }
 
+// Which kind of orientation event this is, judged from the event alone:
+// 'absolute' (alpha is measured from north), 'ios' (a relative alpha beside
+// webkitCompassHeading) or null (relative to wherever the page loaded: no
+// compass). It keeps no state on purpose. Android sends BOTH a
+// deviceorientationabsolute and a relative deviceorientation stream; a rule that
+// said "an absolute event has been seen, so accept the rest" let the relative
+// stream through, and the beacon flipped between two headings every frame.
+function arEventKind(e) {
+    if (!e || typeof e.alpha !== 'number' || typeof e.beta !== 'number' || typeof e.gamma !== 'number') return null;
+    if (e.absolute === true) return 'absolute';
+    if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)) return 'ios';
+    return null;
+}
+
+// The next reading blended into the last one, as the three axes themselves, and
+// made orthonormal again. Never blend the Euler angles instead: a phone held
+// upright (beta near 90) is the singular pose of that convention, where alpha
+// and gamma swap large values for a tiny physical movement, so averaging them
+// one by one throws the camera sideways while the axes underneath barely move.
+// k is the share of the new reading, 0..1.
+function arSmoothBasis(prev, next, k) {
+    if (!prev) return next;
+    const mix = (a, b) => [a[0] * (1 - k) + b[0] * k, a[1] * (1 - k) + b[1] * k, a[2] * (1 - k) + b[2] * k];
+    const norm = v => { const l = Math.hypot(v[0], v[1], v[2]); return l > 1e-9 ? [v[0] / l, v[1] / l, v[2] / l] : null; };
+    const f = norm(mix(prev.f, next.f));
+    const uRaw = mix(prev.u, next.u);
+    if (!f) return next;
+    const d = uRaw[0] * f[0] + uRaw[1] * f[1] + uRaw[2] * f[2];
+    const u = norm([uRaw[0] - d * f[0], uRaw[1] - d * f[1], uRaw[2] - d * f[2]]);
+    if (!u) return next;
+    // The phone's axes are right, up and back (-f): right = forward x up.
+    const r = [f[1] * u[2] - f[2] * u[1], f[2] * u[0] - f[0] * u[2], f[0] * u[1] - f[1] * u[0]];
+    return {r: r, u: u, f: f};
+}
+
 // ── The screen ───────────────────────────────────────────────────────────────
 
 const AR_COL = {green: [74, 222, 128], cyan: [34, 211, 238], red: [248, 81, 73], orange: [255, 145, 60], amber: [251, 191, 36], white: [240, 246, 242], grey: [160, 170, 165]};
@@ -392,30 +427,25 @@ function arResize() {
 // two are lined up while the phone stands upright. A relative event on its own
 // is no compass, and neither is nothing: the screen then says so.
 function arOnOrientation(e) {
-    if (!arState || typeof e.alpha !== 'number' || typeof e.beta !== 'number' || typeof e.gamma !== 'number') return;
+    const kind = arEventKind(e);
+    if (!arState || !kind) return;
     const screenAngle = arScreenAngle();
     let alpha = e.alpha;
-    if (e.absolute === true) {
-        arState.absolute = true;
-    } else if (typeof e.webkitCompassHeading === 'number' && !isNaN(e.webkitCompassHeading)) {
-        arState.absolute = true;
+    if (kind === 'ios') {
         const raw = arBasis(alpha, e.beta, e.gamma, screenAngle);
         if (e.beta > 55 && e.beta < 125) {
             const off = e.webkitCompassHeading - arHeading(raw);
             arState.iosOffset = smoothHeading(arState.iosOffset || 0, ((off % 360) + 360) % 360, 0.2);
         }
         alpha = e.alpha - arState.iosOffset;
-    } else if (!arState.absolute) {
-        return; // relative to wherever the page loaded: not a compass
     }
-    const p = arState.pose;
-    arState.pose = {
-        alpha: smoothHeading(p ? p.alpha : null, ((alpha % 360) + 360) % 360, 0.35),
-        beta: p ? p.beta + (e.beta - p.beta) * 0.35 : e.beta,
-        gamma: p ? p.gamma + (e.gamma - p.gamma) * 0.35 : e.gamma,
-        screenAngle: screenAngle,
-    };
-    arState.orientAt = Date.now();
+    arState.absolute = true;
+    // Time-based, so the steadiness does not depend on how often the phone reports (about 120 ms to settle).
+    const now = Date.now();
+    const dt = arState.orientAt ? Math.min(0.25, Math.max(0.008, (now - arState.orientAt) / 1000)) : 1;
+    const basis = arSmoothBasis(arState.pose ? arState.pose.basis : null, arBasis(alpha, e.beta, e.gamma, screenAngle), 1 - Math.exp(-dt / 0.12));
+    arState.pose = {basis: basis, screenAngle: screenAngle};
+    arState.orientAt = now;
 }
 function arScreenAngle() {
     return (screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (Number(window.orientation) || 0);
@@ -710,8 +740,7 @@ function arFrame(now) {
         el.querySelector('.wr-ar-banner').textContent = me ? note : t('arrow.no_fix');
         return;
     }
-    const pose = arState.pose;
-    const basis = arBasis(pose.alpha, pose.beta, pose.gamma, pose.screenAngle);
+    const basis = arState.pose.basis;
     const S = {
         ctx: ctx, cw: arState.cw, ch: arState.ch, dpr: arState.dpr, now: now, basis: basis,
         focal: arFocalPx(arState.cw, arState.ch), heading: arHeading(basis), pitch: arPitch(basis),
@@ -1057,6 +1086,8 @@ if (typeof module !== 'undefined' && module.exports) {
         arTurnTo,
         arSubdivide,
         arNearestOnPolygon,
+        arEventKind,
+        arSmoothBasis,
         arOfferCandidate,
     };
 }

@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 
 const {
     arLocal, arFromLocal, arBasis, arHeading, arPitch, arFocalPx, arProject,
-    arBearingElevation, arTurnTo, arSubdivide, arNearestOnPolygon, arOfferCandidate,
+    arBearingElevation, arTurnTo, arSubdivide, arNearestOnPolygon, arOfferCandidate, arEventKind, arSmoothBasis,
 } = require('../../assets/js/war-room-ar.js');
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) <= eps, `${a} is not within ${eps} of ${b}`);
@@ -162,4 +162,54 @@ test('nothing is offered for an order that is too far, not yet received, finishe
 test('the offer is for an order not yet offered, so an order already offered gives way to the next', () => {
     const entries = new Map([['one', order({})], ['two', order({})]]);
     assert.equal(arOfferCandidate(offerMe, entries, ['one'], 150), entries.get('two'));
+});
+
+// ── steadiness: the beacon jumping left and right on a real phone ──
+test('an event is a compass only when it says so, whatever came before it', () => {
+    const base = {alpha: 10, beta: 90, gamma: 0};
+    assert.equal(arEventKind({...base, absolute: true}), 'absolute');
+    // Android sends a relative deviceorientation stream beside the absolute one; it must never be used.
+    assert.equal(arEventKind({...base, absolute: false}), null);
+    assert.equal(arEventKind({...base}), null);
+    assert.equal(arEventKind({...base, absolute: false, webkitCompassHeading: 123}), 'ios');
+    assert.equal(arEventKind({alpha: null, beta: 90, gamma: 0, absolute: true}), null);
+    assert.equal(arEventKind(null), null);
+});
+
+test('smoothing the axes: all the way is the new reading, none of the way is the old one', () => {
+    const north = arBasis(0, 90, 0, 0), east = arBasis(270, 90, 0, 0);
+    const all = arSmoothBasis(north, east, 1), none = arSmoothBasis(north, east, 0);
+    near(arHeading(all), 90); near(arHeading(none), 0);
+    assert.equal(arSmoothBasis(null, east, 0.3), east);
+});
+
+test('halfway between north and east is north-east, and the axes stay unit length and square', () => {
+    const b = arSmoothBasis(arBasis(0, 90, 0, 0), arBasis(270, 90, 0, 0), 0.5);
+    near(arHeading(b), 45, 1e-6);
+    const dot = (a, c) => a[0] * c[0] + a[1] * c[1] + a[2] * c[2];
+    near(dot(b.f, b.f), 1); near(dot(b.u, b.u), 1); near(dot(b.r, b.r), 1);
+    near(dot(b.f, b.u), 0); near(dot(b.f, b.r), 0); near(dot(b.u, b.r), 0);
+    assert.ok(b.r[0] > 0.7, 'right is still east-ish'); // north-east view: right of it is south-east
+});
+
+test('an upright phone reports the same pose with very different alpha and gamma; smoothing must not move it', () => {
+    // At beta 90 only alpha + gamma matters: these two readings are one physical pose.
+    const a = arBasis(350, 90, 40, 0), b = arBasis(10, 90, 20, 0);
+    near(arHeading(a), arHeading(b), 1e-9);
+    // Averaging the Euler angles (alpha 180, gamma 30) would face the other way; the axes do not.
+    const mid = arSmoothBasis(a, b, 0.5);
+    near(arHeading(mid), arHeading(b), 1e-9);
+    near(arPitch(mid), 0, 1e-9);
+});
+
+test('a steady phone with a little compass noise stays within the noise, not a few dozen degrees', () => {
+    let basis = null;
+    const heads = [];
+    for (let i = 0; i < 120; i++) {
+        const noise = (i % 2 ? 1 : -1) * 3; // plus or minus 3 degrees, every reading
+        basis = arSmoothBasis(basis, arBasis(360 - (40 + noise), 90, 0, 0), 1 - Math.exp(-0.016 / 0.12));
+        if (i > 30) heads.push(arHeading(basis));
+    }
+    const spread = Math.max(...heads) - Math.min(...heads);
+    assert.ok(spread < 1.2, 'spread was ' + spread);
 });
