@@ -2,13 +2,13 @@
 //
 // The pure half of the «Πίνακας» look of the console (assets/js/war-room-console-overlay.js): which teams the
 // bottom bar shows and how the previous / next buttons move through them, the mission clock, the GPS
-// readout and what the selected-team card says. The part that needs a page (moving the controls into the
+// readout, what the selected-team card says and which live stream the floating video tile shows. The part that needs a page (moving the controls into the
 // rails, the clicks) is exercised in the browser.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows} = require('../../assets/js/war-room-console-overlay.js');
+const {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft} = require('../../assets/js/war-room-console-overlay.js');
 
 test('the team window shows all the teams when they fit', () => {
     assert.deepEqual(wrcOvWindow(4, -1, 0, 6), {start: 0, size: 4, more: false});
@@ -98,4 +98,38 @@ test('the battery warning follows the thresholds the page is given', () => {
     assert.equal(wrcOvTeamRows(base, pins).battery.tone, 'ok', 'the default is 30');
     assert.equal(wrcOvTeamRows(base, pins, 60, 20).battery.tone, 'warn', 'Settings say a warning below 60');
     assert.equal(wrcOvTeamRows(base, [{user_id: 1, battery_level: 20}], 60, 20).battery.tone, 'bad');
+});
+
+test('only streams that are on air count, newest first', () => {
+    const rows = [
+        {id: 4, uid: '7', status: 'live'}, {id: 9, uid: '8', status: 'requested'}, {id: 6, uid: '9', status: 'live'}, {id: 2, uid: '3', status: 'ended'},
+    ];
+    assert.deepEqual(wrcOvLiveStreams(rows).map(r => r.id), [6, 4], 'a request nobody accepted yet and an ended stream are not shown');
+    assert.deepEqual(wrcOvLiveStreams([]), []);
+    assert.deepEqual(wrcOvLiveStreams(undefined), []);
+});
+
+test('the tile follows the newest stream and keeps the one command picked', () => {
+    const live = [{id: 6}, {id: 4}];
+    assert.deepEqual(wrcOvTilePick(live, null, new Set()), {id: 6, show: true}, 'nothing picked yet: the newest');
+    assert.deepEqual(wrcOvTilePick(live, 4, new Set()), {id: 4, show: true}, 'the pick stays while that stream is on air');
+    assert.deepEqual(wrcOvTilePick([{id: 6}], 4, new Set()), {id: 6, show: true}, 'the picked stream ended: the one that is left');
+    assert.deepEqual(wrcOvTilePick([], 4, new Set()), {id: null, show: false}, 'nothing on air: no tile');
+});
+
+test('a tile put away stays away until a new stream comes', () => {
+    const away = new Set([6, 4]);
+    assert.deepEqual(wrcOvTilePick([{id: 6}, {id: 4}], 6, away), {id: 6, show: false}, 'both are put away');
+    assert.deepEqual(wrcOvTilePick([{id: 11}, {id: 6}, {id: 4}], 6, away), {id: 11, show: true}, 'a stream that was not there when it was put away brings it back, and is the one shown');
+    assert.deepEqual(wrcOvTilePick([{id: 6}], null, new Set([6])), {id: 6, show: false});
+});
+
+test('the time left is minutes and seconds, and nothing while it is not known', () => {
+    assert.equal(wrcOvLeft(552), '09:12');
+    assert.equal(wrcOvLeft(600), '10:00');
+    assert.equal(wrcOvLeft(5), '00:05');
+    assert.equal(wrcOvLeft(0), '00:00');
+    assert.equal(wrcOvLeft(-3), '00:00', 'a clock that ran past the end does not show a minus');
+    assert.equal(wrcOvLeft(NaN), '');
+    assert.equal(wrcOvLeft(undefined), '');
 });

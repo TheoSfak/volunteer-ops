@@ -89,8 +89,32 @@ function wrcOvTeamRows(team, pins, low, critical) {
     return rows;
 }
 
+/** The streams that are on air, newest first. Rows: {id, uid, status, name, left}. */
+function wrcOvLiveStreams(rows) {
+    return (rows || []).filter(r => r.status === 'live').sort((a, b) => b.id - a.id);
+}
+
+/**
+ * Which stream the floating tile shows and whether it shows at all. `live` is wrcOvLiveStreams(), `current`
+ * the stream shown last time and `dismissed` a Set of stream ids command has put away: a new stream is not
+ * in it, so it brings the tile back by itself. -> {id, show}
+ */
+function wrcOvTilePick(live, current, dismissed) {
+    if (!live.length) return {id: null, show: false};
+    const open = live.filter(s => !dismissed.has(s.id));
+    if (!open.length) return {id: (live.find(s => s.id === current) || live[0]).id, show: false};
+    return {id: (open.find(s => s.id === current) || open[0]).id, show: true};
+}
+
+/** Seconds left of a stream as «mm:ss» (nothing while it is not known). */
+function wrcOvLeft(seconds) {
+    if (typeof seconds !== 'number' || isNaN(seconds)) return '';
+    const left = Math.max(0, Math.floor(seconds));
+    return String(Math.floor(left / 60)).padStart(2, '0') + ':' + String(left % 60).padStart(2, '0');
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows};
+    module.exports = {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft};
 }
 
 // ── the view ─────────────────────────────────────────────────────────────────
@@ -183,6 +207,114 @@ if (typeof module !== 'undefined' && module.exports) {
     const verbRow = $('#wrcVerbs', composer);
     if (verbRow && verbRow.parentNode) verbRow.parentNode.classList.add('wrc-ov-verbrow');
 
+    // ── the live video tile (under the queue) ────────────────────────────────
+    // Whoever is on air shows here, so command does not have to open the Media tab to see them. Each live stream
+    // gets a <video> of its own, tagged data-live-tile (never data-live-video, which is the Live card's): the
+    // page's live-video code attaches the stream's track to it through the SDK like to the card's, because a
+    // track whose attached elements are all hidden is paused by adaptiveStream. The card keeps the stop button.
+    const queueEl = $('#wrcQueue', root);
+    const tile = mk('div', 'wrc-ov-tile');
+    tile.hidden = true;
+    tile.innerHTML = '<div class="wrc-ov-tile-stage"></div>'
+        + `<div class="wrc-ov-tile-c wrc-ov-tile-tl"><b class="wrc-ov-tile-who"></b><span><i class="wrc-ov-rec"></i>${esc(t('console.ov_tile_live'))} <span class="wrc-ov-tile-left"></span></span></div>`
+        + '<div class="wrc-ov-tile-c wrc-ov-tile-br"></div>'
+        + `<div class="wrc-ov-tile-wait">${esc(t('console.ov_tile_wait'))}</div>`
+        + `<div class="wrc-ov-tile-btns"><button type="button" data-ov-tile="full" title="${esc(t('console.ov_fullscreen'))}" aria-label="${esc(t('console.ov_fullscreen'))}"><i class="bi bi-arrows-fullscreen"></i></button>`
+        + `<button type="button" data-ov-tile="close" title="${esc(t('console.ov_tile_close'))}" aria-label="${esc(t('console.ov_tile_close'))}"><i class="bi bi-x-lg"></i></button></div>`
+        + '<div class="wrc-ov-tile-pick"></div>';
+    if (queueEl && queueEl.parentNode) queueEl.parentNode.insertBefore(tile, queueEl.nextSibling);
+    const stage = $('.wrc-ov-tile-stage', tile);
+    const tileUi = {current: null, dismissed: new Set()};
+    const tileVideos = new Map();   // user id -> its <video>
+    let lastView = null;
+
+    function liveRows() {
+        return $$('#liveStreamsBody .live-stream-item[data-stream-id]').map(el => {
+            const who = $('strong', el);
+            const name = who ? (who.firstChild && who.firstChild.nodeType === 3 ? who.firstChild.textContent : who.textContent) : '';
+            const left = $('.live-remaining[data-seconds-left]', el);
+            return {id: Number(el.dataset.streamId), uid: String(el.dataset.userId), status: el.dataset.status, name: name.trim(), left: left ? parseInt(left.dataset.secondsLeft, 10) : NaN};
+        });
+    }
+    function dropVideo(uid) {
+        const v = tileVideos.get(uid);
+        if (!v) return;
+        tileVideos.delete(uid);
+        if (typeof window.liveDetachTile === 'function') window.liveDetachTile(v);
+        try { v.srcObject = null; } catch (e) { /* nothing attached */ }
+        v.remove();
+    }
+    function teamOf(uid) {
+        const tm = lastView && lastView.teams.find(x => x.members.includes(Number(uid)));
+        return tm ? tm.label : '';
+    }
+    function syncTile() {
+        if (!engaged) { Array.from(tileVideos.keys()).forEach(dropVideo); tile.hidden = true; return; }
+        const live = wrcOvLiveStreams(liveRows());
+        const pick = wrcOvTilePick(live, tileUi.current, tileUi.dismissed);
+        tileUi.current = pick.id;
+        const onAir = new Set(live.map(r => r.uid));
+        Array.from(tileVideos.keys()).forEach(uid => { if (!onAir.has(uid)) dropVideo(uid); });
+        // Reveal first, attach second: a browser that will not start a video it cannot draw (WebKit) is not asked to.
+        tile.hidden = !pick.show;
+        if (pick.show) {
+            let fresh = false;
+            live.forEach(r => {
+                if (tileVideos.has(r.uid)) return;
+                const v = mk('video', 'wrc-ov-tile-v');
+                v.autoplay = true; v.muted = true; v.playsInline = true;
+                v.setAttribute('playsinline', '');
+                v.setAttribute('data-live-tile', r.uid);
+                stage.appendChild(v);
+                tileVideos.set(r.uid, v);
+                fresh = true;
+            });
+            if (fresh && typeof window.liveReattachAll === 'function') window.liveReattachAll();
+        }
+        const shown = live.find(r => r.id === pick.id) || null;
+        tileVideos.forEach((v, uid) => v.classList.toggle('on', !!shown && pick.show && shown.uid === uid));
+        paintTile(live, shown, pick.show);
+    }
+    function paintTile(live, shown, visible) {
+        if (!visible || !shown) { sigs.tilePick = ''; return; }
+        const v = tileVideos.get(shown.uid);
+        $('.wrc-ov-tile-who', tile).textContent = [teamOf(shown.uid), shown.name].filter(Boolean).join(' · ');
+        $('.wrc-ov-tile-left', tile).textContent = wrcOvLeft(shown.left);
+        $('.wrc-ov-tile-br', tile).textContent = v && v.videoWidth ? v.videoWidth + '×' + v.videoHeight : '';
+        tile.classList.toggle('waiting', !(v && v.readyState >= 2 && v.videoWidth));
+        tile.setAttribute('aria-label', t('console.ov_tile_aria', {name: shown.name}));
+        put($('.wrc-ov-tile-pick', tile), 'tilePick', live.length > 1
+            ? live.map((r, i) => `<button type="button" data-ov-tile-pick="${r.id}" class="${r.id === shown.id ? 'on' : ''}" title="${esc(t('console.ov_tile_pick', {name: r.name}))}" aria-label="${esc(t('console.ov_tile_pick', {name: r.name}))}">${i + 1}</button>`).join('')
+            : '');
+        // A video that was put away while hidden, or that the browser paused, is asked to play again.
+        if (v && v.srcObject && v.paused) { const p = v.play(); if (p && p.catch) p.catch(() => { /* the page's own retry loop reports it */ }); }
+    }
+    let tileSoon = 0;
+    function syncTileSoon() { if (!tileSoon) tileSoon = setTimeout(() => { tileSoon = 0; syncTile(); }, 50); }
+    const liveBody = $('#liveStreamsBody');
+    if (liveBody && window.MutationObserver) new MutationObserver(syncTileSoon).observe(liveBody, {childList: true, subtree: true, attributes: true, attributeFilter: ['data-status']});
+    setInterval(syncTile, 1000);
+
+    tile.addEventListener('click', e => {
+        const pickBtn = e.target.closest('[data-ov-tile-pick]');
+        if (pickBtn) { tileUi.current = Number(pickBtn.dataset.ovTilePick); syncTile(); return; }
+        const act = e.target.closest('[data-ov-tile]');
+        if (act && act.dataset.ovTile === 'close') {
+            wrcOvLiveStreams(liveRows()).forEach(r => tileUi.dismissed.add(r.id));
+            syncTile();
+            return;
+        }
+        if (act && act.dataset.ovTile === 'full') {
+            if (document.fullscreenElement) { document.exitFullscreen(); return; }
+            const v = $('.wrc-ov-tile-v.on', tile);
+            const fallback = () => { if (v && v.webkitEnterFullscreen) v.webkitEnterFullscreen(); };
+            if (tile.requestFullscreen) tile.requestFullscreen().catch(fallback); else fallback();
+            return;
+        }
+        // The picture itself: command is looking at what is on air.
+        if (e.target.closest('.wrc-ov-tile-stage') && typeof api.watchLive === 'function') api.watchLive();
+    });
+
     // ── moving the real controls in, and back ────────────────────────────────
     const moved = [];
     let engaged = false;
@@ -260,6 +392,7 @@ if (typeof module !== 'undefined' && module.exports) {
         if (!engaged) return;
         engaged = false;
         html.removeAttribute('data-wrc-ov');
+        syncTile();
         giveBack();
         top.contains(op) && op.remove();
         const m = mapNow();
@@ -392,11 +525,13 @@ if (typeof module !== 'undefined' && module.exports) {
         if (!engaged) return;
         setFlags();
         const v = api.view();
+        lastView = v;
         paintRail(v);
         paintBottom(v);
         paintSelected(v);
         paintReadout(v);
         paintComposerHead(v);
+        syncTile();
     }
     let queued = 0;
     function schedule() { if (!queued) queued = setTimeout(() => { queued = 0; update(); }, 0); }
@@ -429,7 +564,18 @@ if (typeof module !== 'undefined' && module.exports) {
             return;
         }
         const live = e.target.closest('[data-ov="live"]');
-        if (live) { const kpi = $('.wrc-kpi[data-kpi="live"]'); if (kpi) kpi.click(); return; }
+        if (live) {
+            // With the tile put away, the camera brings it back; with the tile up (or nothing on air) it opens the Live card as before.
+            if (tile.hidden && wrcOvLiveStreams(liveRows()).length) {
+                tileUi.dismissed.clear();
+                if (typeof api.watchLive === 'function') api.watchLive();
+                syncTile();
+                return;
+            }
+            const kpi = $('.wrc-kpi[data-kpi="live"]');
+            if (kpi) kpi.click();
+            return;
+        }
         if (e.target.closest('[data-ov="teams"]')) {
             save(teamsKey(), teamsOpen() ? 'closed' : 'open');
             update();

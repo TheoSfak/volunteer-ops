@@ -3180,6 +3180,11 @@ return [
         'console.ov_clock_title' => 'Χρόνος από την έναρξη της αποστολής',
         'console.ov_clock_before' => 'Χρόνος μέχρι την έναρξη της αποστολής',
         'console.ov_gps_title' => '{n} από {total} στέλνουν στίγμα (μετρούν μόνο όσοι έχουν GPS ανοιχτό)',
+        'console.ov_tile_live' => 'Ζωντανά',
+        'console.ov_tile_close' => 'Κλείσιμο του βίντεο (ξανανοίγει με νέα μετάδοση ή με το κουμπί της κάμερας)',
+        'console.ov_tile_pick' => 'Μετάδοση από {name}',
+        'console.ov_tile_wait' => 'Αναμονή εικόνας…',
+        'console.ov_tile_aria' => 'Ζωντανή μετάδοση από {name}',
         // checkin.php — the page the shift's attendance QR opens
         'checkin.page_title' => 'Check-in παρουσίας',
         'checkin.disabled_title' => 'Το QR check-in είναι απενεργοποιημένο',
@@ -6333,6 +6338,11 @@ return [
         'console.ov_clock_title' => 'Time since the mission started',
         'console.ov_clock_before' => 'Time until the mission starts',
         'console.ov_gps_title' => '{n} of {total} are reporting a position (only people with GPS on count)',
+        'console.ov_tile_live' => 'Live',
+        'console.ov_tile_close' => 'Hide the video (it comes back with a new stream or with the camera button)',
+        'console.ov_tile_pick' => 'Stream from {name}',
+        'console.ov_tile_wait' => 'Waiting for the picture…',
+        'console.ov_tile_aria' => 'Live stream from {name}',
         // checkin.php — the page the shift's attendance QR opens
         'checkin.page_title' => 'Attendance check-in',
         'checkin.disabled_title' => 'QR check-in is switched off',

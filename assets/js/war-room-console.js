@@ -1935,6 +1935,8 @@ if (typeof module !== 'undefined' && module.exports) {
         view,
         pickTeam,
         clearSelection,
+        // The red LIVE button's «I have looked at what is on air» (stops the flashing), for a look that shows the picture itself.
+        watchLive,
         onPoll(data) {
             if (data.teams) setTeams(data.teams);
             if (data.pingStaleness) state.stale = data.pingStaleness;

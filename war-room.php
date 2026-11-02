@@ -30009,7 +30009,7 @@ setInterval(function () {
     // elements paused, and nothing re-plays them on its own.
     document.addEventListener('visibilitychange', function () {
         if (document.hidden) return;
-        document.querySelectorAll('#myLivePreview, video[data-live-video]').forEach(v => {
+        document.querySelectorAll('#myLivePreview, video[data-live-video], video[data-live-tile]').forEach(v => {
             if (v.srcObject && v.paused) { dbg('re-play after unhide'); liveForcePlay(v); }
         });
     });
@@ -30610,7 +30610,25 @@ setInterval(function () {
         // the track arrived, and the tile stays black for the whole stream.
         if (vid) { liveAttach(track, vid); dbg('attached remote video for ' + uid); }
         else dbg('no tile yet for participant ' + uid);
+        // The «Πίνακας» look's floating tile shows the same track in a <video> of its own. It must be
+        // attached through the SDK like the card's, not copied from it: adaptiveStream pauses a track
+        // whose attached elements are all hidden, and the card is hidden whenever another tab is open.
+        liveAttachTile(track, uid);
     }
+
+    function liveAttachTile(track, uid) {
+        const tile = document.querySelector('video[data-live-tile="' + uid + '"]');
+        if (tile) liveAttach(track, tile);
+    }
+    // The tile is built after the stream is already flowing, and goes before it ends.
+    window.liveAttachTile = liveAttachTile;
+    window.liveReattachAll = reattachAll;
+    window.liveDetachTile = function (video) {
+        if (!viewRoom || !video) return;
+        viewRoom.remoteParticipants.forEach(p => p.trackPublications.forEach(tp => {
+            if (tp.track && tp.kind === 'video') { try { tp.track.detach(video); } catch (e) { /* already gone */ } }
+        }));
+    };
 
     async function ensureViewer() {
         if (viewRoom || viewConnecting) return;

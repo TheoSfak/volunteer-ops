@@ -47,6 +47,7 @@ html[data-wrc-skin="overlay"] .wrc-ov-tools,
 html[data-wrc-skin="overlay"] .wrc-ov-sel,
 html[data-wrc-skin="overlay"] .wrc-ov-collapse,
 html[data-wrc-skin="overlay"] .wrc-ov-cmp-h,
+html[data-wrc-skin="overlay"] .wrc-ov-tile,
 html[data-wrc-skin="overlay"] .wrc-ov-ti { display: none; }
 
 /* ══ the window: one screen, the map is the ground ═══════════════════════════ */
@@ -383,6 +384,36 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-go-alt { background: transparent
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc[data-ov-composer="closed"] .wrc-composer { background: none; box-shadow: none; pointer-events: none; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc[data-ov-composer="closed"] .wrc-composer > :not(.wrc-toast) { display: none; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-toast { bottom: calc(100% + 8px); border-radius: 6px; }
+
+/* ══ the live video tile: whoever is on air, under the queue, in the photo's orange frame ══ */
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile {
+    display: block; position: relative; flex: none; width: 100%; aspect-ratio: 16 / 9; border: 3px solid var(--ov-org); border-radius: 3px;
+    background: #0b0e10; overflow: hidden; box-shadow: 0 8px 26px rgba(0, 0, 0, .5);
+}
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile[hidden] { display: none; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-stage { position: absolute; inset: 0; cursor: pointer; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-v { display: none; position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #0b0e10; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-v.on { display: block; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-c { position: absolute; padding: 3px 7px; background: rgba(0, 0, 0, .62); color: #fff; font: 700 10.5px/1.35 var(--ov-mono); letter-spacing: .03em; pointer-events: none; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-tl { left: 6px; top: 6px; display: flex; flex-direction: column; max-width: calc(100% - 78px); }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-transform: uppercase; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-br { right: 6px; bottom: 6px; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-br:empty { display: none; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-rec { display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 50%; background: var(--ov-red); animation: wrcOvRec 1.4s ease-in-out infinite; }
+@keyframes wrcOvRec { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-rec { animation: none; } }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-wait { position: absolute; inset: 0; display: none; place-items: center; color: var(--ov-mut); font: 600 13px var(--ov-font); pointer-events: none; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile.waiting .wrc-ov-tile-wait { display: grid; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-btns { position: absolute; right: 6px; top: 6px; display: flex; gap: 4px; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-btns button,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-pick button {
+    width: 26px; height: 26px; padding: 0; border: 0; border-radius: 4px; background: rgba(0, 0, 0, .62); color: #fff; font: 700 12px var(--ov-mono); display: grid; place-items: center; cursor: pointer;
+}
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-btns button:hover,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-pick button:hover { background: rgba(0, 0, 0, .85); }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-pick { position: absolute; left: 6px; bottom: 6px; display: flex; gap: 4px; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-pick button.on { background: var(--ov-org); color: #1b1000; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile:fullscreen { width: 100vw; height: 100vh; aspect-ratio: auto; border: 0; border-radius: 0; }
 
 /* ══ the right panel: the feed (and the other tabs), then the selected team ══ */
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-dock { position: absolute; z-index: 10; top: 86px; right: 20px; width: var(--ov-dock-w); bottom: 150px; display: flex; flex-direction: column; overflow: hidden; }
