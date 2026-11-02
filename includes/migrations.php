@@ -7825,6 +7825,16 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 196,
+            'description' => "Add mission_restricted_areas.shape (v3.419.0): 'polygon' (every zone so far) or 'line', an open line along an edge such as a cliff. A line has no inside, so a person within RESTRICTED_LINE_BREACH_M (10 m) of it raises the same breach alarm a polygon does; geo keeps the same [[lat,lng],...] list.",
+            'up' => function () {
+                if (!dbColumnExists('mission_restricted_areas', 'shape')) {
+                    dbExecute("ALTER TABLE mission_restricted_areas ADD COLUMN shape ENUM('polygon','line') NOT NULL DEFAULT 'polygon' AFTER kind");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

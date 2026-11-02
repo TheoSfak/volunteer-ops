@@ -136,10 +136,11 @@ function arSubdivide(points, maxLen, closed) {
 
 // The closest spot on a polygon's outline to `me`: {lat, lng, dist}. geo is
 // [[lat, lng], ...] as the orders carry it.
-function arNearestOnPolygon(me, geo) {
+// With open set it is an open line (a cliff edge): the last point is not joined to the first.
+function arNearestOnPolygon(me, geo, open) {
     const pts = geo.map(p => arLocal(me, {lat: Number(p[0]), lng: Number(p[1])}));
     let best = null;
-    for (let i = 0; i < pts.length; i++) {
+    for (let i = 0; i < (open ? pts.length - 1 : pts.length); i++) {
         const a = pts[i], b = pts[(i + 1) % pts.length];
         const vx = b.x - a.x, vy = b.y - a.y, l2 = vx * vx + vy * vy;
         const t = l2 ? Math.max(0, Math.min(1, (-a.x * vx - a.y * vy) / l2)) : 0;
@@ -228,6 +229,7 @@ const AR_COMPASS_STALE_MS = 15000; // a phone held still sends nothing: a quiet 
 const AR_SESSION_MS = 10 * 60000; // camera + GPS + sensors heat a phone; ask before going on
 const AR_SECTOR_OUT_M = 100;      // the same distance the server warns at (checkSectorExitWarnings)
 const AR_MAX_ELEV_POINTS = 90;
+const AR_LINE_BREACH_M = 10;      // within this of a restricted LINE is "at the edge" (RESTRICTED_LINE_BREACH_M in functions-warroom.php)
 const AR_SAFETY_KEY = 'wrArSafetySeen';
 let arState = null;
 
@@ -748,7 +750,8 @@ function arDrawRadar(S, me) {
         if (item.poly) {
             ctx.strokeStyle = arRgba(item.col, .95); ctx.lineWidth = 1.5; ctx.beginPath();
             item.poly.forEach((p, i) => { const q = at(p[0], p[1]); if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); });
-            ctx.closePath(); ctx.stroke();
+            if (!item.open) ctx.closePath();
+            ctx.stroke();
         } else {
             const q = at(item.lat, item.lng);
             ctx.fillStyle = arRgba(item.col, 1); ctx.beginPath(); ctx.arc(q.x, q.y, item.size, 0, 7); ctx.fill();
@@ -899,18 +902,20 @@ function arDrawLayers(S, me, info) {
     info.hazard = null;
     if (arState.layers.haz) {
         (restrictedAreas || []).forEach(a => {
-            if (!a.geo || a.geo.length < 3) return;
+            // A zone is a closed area or an open line along an edge; a line has no inside.
+            const line = a.shape === 'line';
+            if (!a.geo || a.geo.length < (line ? 2 : 3)) return;
             const vecs = a.geo.map(p => arVec(me, p[0], p[1]));
             // A cliff is orange and stands taller, so an exposed ledge cannot be mistaken for a plain danger zone.
             const kind = arZoneKind(a);
             const zoneCol = kind === 'cliff' ? AR_COL.orange : AR_COL.red;
-            arDrawWall(S, vecs, zoneCol, kind === 'cliff' ? 30 : 18, true, true);
-            const near = arNearestOnPolygon(me, a.geo);
-            S.radar.push({poly: a.geo, col: zoneCol});
+            arDrawWall(S, vecs, zoneCol, kind === 'cliff' ? 30 : 18, !line, true);
+            const near = arNearestOnPolygon(me, a.geo, line);
+            S.radar.push({poly: a.geo, col: zoneCol, open: line});
             a.geo.forEach(p => { const v = arVec(me, p[0], p[1]); pushMark(arBearingElevation([v.x, v.y, 0]).az, zoneCol, 'sq'); });
             if (near && (!info.hazard || near.dist < info.hazard.dist)) {
                 const v = arVec(me, near.lat, near.lng);
-                info.hazard = {dist: near.dist, name: a.label, kind: kind, az: arBearingElevation([v.x, v.y, 0]).az, inside: pointInPolygon(me.lat, me.lng, a.geo)};
+                info.hazard = {dist: near.dist, name: a.label, kind: kind, az: arBearingElevation([v.x, v.y, 0]).az, inside: line ? near.dist <= AR_LINE_BREACH_M : pointInPolygon(me.lat, me.lng, a.geo)};
             }
         });
         if (info.hazard) {

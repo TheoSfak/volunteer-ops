@@ -5906,13 +5906,17 @@ function checkRestrictedAreaBreach(int $missionId, int $userId, ?int $teamId, in
     try {
         dbFetchOne("SELECT id FROM participation_requests WHERE id = ? FOR UPDATE", [$prId]);
 
-        $areas = dbFetchAll("SELECT id, label, geo FROM mission_restricted_areas WHERE mission_id = ?", [$missionId]);
+        $areas = dbFetchAll("SELECT id, label, shape, geo FROM mission_restricted_areas WHERE mission_id = ?", [$missionId]);
         foreach ($areas as $area) {
             $geo = json_decode((string) $area['geo'], true);
-            if (!is_array($geo) || count($geo) < 3) {
+            // A line (an edge, a cliff) has no inside: being within RESTRICTED_LINE_BREACH_M of it is the breach.
+            $isLine = ($area['shape'] ?? 'polygon') === 'line';
+            if (!is_array($geo) || count($geo) < ($isLine ? 2 : 3)) {
                 continue;
             }
-            $inside = pointInPolygon($lat, $lng, $geo);
+            $inside = $isLine
+                ? pointToPolylineDistanceMeters($lat, $lng, $geo) <= RESTRICTED_LINE_BREACH_M
+                : pointInPolygon($lat, $lng, $geo);
             $openId = dbFetchValue(
                 "SELECT id FROM mission_restricted_area_breaches
                  WHERE restricted_area_id = ? AND user_id = ? AND exited_at IS NULL AND resolved_at IS NULL",
@@ -7688,13 +7692,14 @@ function loadUnacknowledgedVoiceMessagesForMission(int $missionId, int $limit = 
  */
 function loadMissionRestrictedAreasForUser(int $missionId): array {
     $rows = dbFetchAll(
-        "SELECT id, label, kind, geo, created_at FROM mission_restricted_areas WHERE mission_id = ? ORDER BY created_at ASC",
+        "SELECT id, label, kind, shape, geo, created_at FROM mission_restricted_areas WHERE mission_id = ? ORDER BY created_at ASC",
         [$missionId]
     );
     return array_map(fn($row) => [
         'id'         => (int) $row['id'],
         'label'      => $row['label'],
         'kind'       => $row['kind'],
+        'shape'      => $row['shape'],
         'geo'        => json_decode($row['geo'], true),
         'created_at' => date('d/m H:i', strtotime($row['created_at'])),
     ], $rows);
@@ -8354,6 +8359,21 @@ function pointToSegmentDistanceMeters(float $lat, float $lng, float $latA, float
     $projX = $ax + $t * $dx;
     $projY = $ay + $t * $dy;
     return sqrt($projX * $projX + $projY * $projY);
+}
+
+/** How close to a restricted LINE (a cliff edge) counts as being in breach of it. */
+const RESTRICTED_LINE_BREACH_M = 10;
+
+/**
+ * Distance in meters from a point to an open polyline, the shortest of its segments.
+ * The line twin of pointToPolygonDistanceMeters(): no inside, no closing edge.
+ */
+function pointToPolylineDistanceMeters(float $lat, float $lng, array $geo): float {
+    $min = INF;
+    for ($i = 0, $n = count($geo) - 1; $i < $n; $i++) {
+        $min = min($min, pointToSegmentDistanceMeters($lat, $lng, (float) $geo[$i][0], (float) $geo[$i][1], (float) $geo[$i + 1][0], (float) $geo[$i + 1][1]));
+    }
+    return $min;
 }
 
 /**

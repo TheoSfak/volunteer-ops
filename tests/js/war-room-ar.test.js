@@ -279,3 +279,20 @@ test('a real move is followed: a fix far outside the error, and fixes while walk
     for (let i = 1; i <= 8; i++) walk = arSmoothFix(walk, fixAt(i * 1.4, 0, 8), 1.4);
     assert.ok(arLocal({lat: 35.2, lng: 24.9}, walk).y > 8.5, 'kept up while walking');
 });
+
+// ── a restricted LINE (a cliff edge): open, no inside ──
+test('the nearest point on an open line does not close the last point back to the first', () => {
+    const me = {lat: 35.2, lng: 24.9};
+    const dl = (m) => m / (111190 * Math.cos(35.2 * Math.PI / 180));
+    const d = (m) => m / 111190;
+    // An L: 100 m east of me, then 100 m north from there. Me is 40 m west of the corner's start... measure to the open ends.
+    const geo = [[35.2 + d(20), 24.9 + dl(30)], [35.2 + d(20), 24.9 + dl(130)], [35.2 + d(120), 24.9 + dl(130)]];
+    const open = arNearestOnPolygon(me, geo, true);
+    const closed = arNearestOnPolygon(me, geo, false);
+    // Open: nearest is the first leg, about 36 m (30 east, 20 north). Closed adds the diagonal back to the start, which can be nearer.
+    near(open.dist, Math.hypot(30, 20), 0.8);
+    assert.ok(closed.dist <= open.dist + 1e-9, 'closing can only add edges');
+    // A point past the end of the line: the distance is to the end, not to a closing edge.
+    const beyond = arNearestOnPolygon({lat: 35.2 + d(300), lng: 24.9 + dl(130)}, geo, true);
+    near(beyond.dist, 180, 1);
+});

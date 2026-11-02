@@ -2811,6 +2811,7 @@ CREATE TABLE IF NOT EXISTS `mission_restricted_areas` (
     `mission_id` INT UNSIGNED NOT NULL,
     `label` VARCHAR(255) NOT NULL,
     `kind` ENUM('danger','cliff','forbidden') NOT NULL DEFAULT 'danger',
+    `shape` ENUM('polygon','line') NOT NULL DEFAULT 'polygon',
     `geo` TEXT NOT NULL,
     `created_by` INT UNSIGNED NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

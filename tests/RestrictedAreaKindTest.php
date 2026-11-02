@@ -61,7 +61,7 @@ final class RestrictedAreaKindTest extends TestCase
     {
         $src = (string) file_get_contents(__DIR__ . '/../mission-restricted-area.php');
         $this->assertStringContainsString("in_array(\$kind, ['danger', 'cliff', 'forbidden'], true)", $src);
-        $this->assertStringContainsString('INSERT INTO mission_restricted_areas (mission_id, label, kind, geo, created_by, created_at)', $src);
+        $this->assertStringContainsString('INSERT INTO mission_restricted_areas (mission_id, label, kind, shape, geo, created_by, created_at)', $src);
         $this->assertLessThan(
             strpos($src, 'INSERT INTO mission_restricted_areas'),
             strpos($src, "in_array(\$kind"),

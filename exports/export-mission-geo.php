@@ -249,16 +249,18 @@ foreach ($sectorRows as $row) {
 
 // Restricted / no-go zones.
 $restrictedRows = dbFetchAll(
-    "SELECT id, label, geo, created_at FROM mission_restricted_areas WHERE mission_id = ? ORDER BY created_at",
+    "SELECT id, label, shape, geo, created_at FROM mission_restricted_areas WHERE mission_id = ? ORDER BY created_at",
     [$missionId]
 );
 foreach ($restrictedRows as $row) {
     $geo = json_decode($row['geo'], true);
-    if (!is_array($geo) || count($geo) < 3) {
+    // An open line along an edge is a line in the export, not a polygon of two points.
+    $isLine = ($row['shape'] ?? 'polygon') === 'line';
+    if (!is_array($geo) || count($geo) < ($isLine ? 2 : 3)) {
         continue;
     }
     $features[] = geoFeature(
-        'restricted', 'Polygon', $geo,
+        'restricted', $isLine ? 'Line' : 'Polygon', $geo,
         $row['label'],
         t('geo.desc.restricted'),
         null,

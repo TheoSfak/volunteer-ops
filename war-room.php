@@ -1531,7 +1531,11 @@ $loadRestrictedAreaProximity = function () use ($missionId, $user, &$restrictedA
         $result[] = [
             'id'         => $area['id'],
             'label'      => $area['label'],
-            'distance_m' => pointToPolygonDistanceMeters((float) $myPing['lat'], (float) $myPing['lng'], $area['geo']),
+            // A line has no inside: 0 means within RESTRICTED_LINE_BREACH_M of it, the same distance that raises the breach.
+            'distance_m' => ($area['shape'] ?? 'polygon') === 'line'
+                ? max(0.0, pointToPolylineDistanceMeters((float) $myPing['lat'], (float) $myPing['lng'], $area['geo']) - RESTRICTED_LINE_BREACH_M)
+                : pointToPolygonDistanceMeters((float) $myPing['lat'], (float) $myPing['lng'], $area['geo']),
+            'shape'      => $area['shape'] ?? 'polygon',
         ];
     }
     usort($result, fn($a, $b) => $a['distance_m'] <=> $b['distance_m']);
@@ -6348,6 +6352,10 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                         <button type="button" class="btn btn-outline-secondary" id="restrictedAreaCoordsAddBtn" title="<?= t('dispatch.coords_add_title') ?>"><i class="bi bi-plus-lg"></i></button>
                     </div>
                     <input type="text" id="restrictedAreaLabelInput" class="form-control" style="max-width:220px;" maxlength="255" placeholder="<?= t('restricted_area.label_placeholder') ?>">
+                    <select id="restrictedAreaShapeSelect" class="form-select form-select-sm" style="max-width:200px;" aria-label="<?= t('restricted_area.shape_label') ?>">
+                        <option value="polygon"><?= t('restricted_area.shape_polygon') ?></option>
+                        <option value="line"><?= t('restricted_area.shape_line') ?></option>
+                    </select>
                     <select id="restrictedAreaKindSelect" class="form-select form-select-sm" style="max-width:210px;" aria-label="<?= t('restricted_area.kind_label') ?>">
                         <option value="danger"><?= t('restricted_area.kind_danger') ?></option>
                         <option value="cliff"><?= t('restricted_area.kind_cliff') ?></option>
@@ -6360,7 +6368,8 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                     </div>
                 </div>
                 <div class="small text-muted px-2 py-1 bg-light border-bottom">
-                    <?= t('restricted_area.map_instructions') ?>
+                    <span id="restrictedAreaInstrPolygon"><?= t('restricted_area.map_instructions') ?></span>
+                    <span id="restrictedAreaInstrLine" hidden><?= t('restricted_area.map_instructions_line', ['m' => RESTRICTED_LINE_BREACH_M]) ?></span>
                 </div>
                 <div id="restrictedAreaComposerMap" style="flex:1;min-height:0;"></div>
             </div>
@@ -10188,10 +10197,18 @@ function renderRestrictedAreaLayer(items) {
         // Drawn on top of everything, clicked from underneath everything: the
         // hatch takes no clicks, and the popup lives on an invisible copy in
         // restrictedHitPane (see its note at map init).
+        let layer;
+        if (item.shape === 'line') {
+            const lineColor = item.kind === 'cliff' ? '#fd7e14' : '#dc3545';
+            L.polyline(item.geo, {pane: 'restrictedAreaPane', color: lineColor, weight: 6, opacity: 0.9, dashArray: '10,6', interactive: false}).addTo(restrictedAreaLayer);
+            // No overlap picker for a line: it has no area to be inside of, so a click opens its own popup.
+            layer = L.polyline(item.geo, {pane: 'restrictedHitPane', weight: 18, opacity: 0}).addTo(restrictedAreaLayer).bindPopup(popupHtml).bindTooltip(escapeHtml(item.label), {sticky: true});
+        } else {
         const visual = L.polygon(item.geo, {pane: 'restrictedAreaPane', color: '#dc3545', weight: 3, fillColor: 'url(#restrictedHatch)', fillOpacity: 0.55, interactive: false}).addTo(restrictedAreaLayer);
         bindTieredPolygonLabel(visual, item.label, item.geo, 'wr-polygon-label wr-polygon-label-restricted', {slack: LABEL_SLACK_RESTRICTED, short: LABEL_RESTRICTED_SHORT});
-        const layer = L.polygon(item.geo, {pane: 'restrictedHitPane', weight: 3, opacity: 0, fillColor: '#dc3545', fillOpacity: 0}).addTo(restrictedAreaLayer).bindPopup(popupHtml);
+        layer = L.polygon(item.geo, {pane: 'restrictedHitPane', weight: 3, opacity: 0, fillColor: '#dc3545', fillOpacity: 0}).addTo(restrictedAreaLayer).bindPopup(popupHtml);
         markMapPickable(layer, {kind: 'restricted', id: item.id, color: '#dc3545', title: item.label, sub: t('map_pick.kind_restricted'), visual});
+        }
         layer.restrictedAreaId = item.id;
         if (String(item.id) === String(openId)) reopenLayer = layer;
     });
@@ -10264,7 +10281,7 @@ function renderSectorsReference(layer) {
 function renderRestrictedAreasReference(layer) {
     if (!layer) return;
     restrictedAreas.forEach(item => {
-        L.polygon(item.geo, {color:'#dc3545', weight:2, opacity:0.6, dashArray:'4,3', fillOpacity:0.08}).addTo(layer).bindTooltip(escapeHtml(item.label));
+        (item.shape === 'line' ? L.polyline : L.polygon)(item.geo, {color:'#dc3545', weight:2, opacity:0.6, dashArray:'4,3', fillOpacity:0.08}).addTo(layer).bindTooltip(escapeHtml(item.label));
     });
 }
 function renderRoutesReference(layer) {
@@ -10358,7 +10375,7 @@ function renderRestrictedAreasList(items) {
     }
     list.innerHTML = items.map(a => `
         <div class="d-flex justify-content-between align-items-center border rounded p-2 mb-1">
-            <span class="small"><strong>${escapeHtml(a.label)}</strong><span class="badge text-bg-light border ms-2">${escapeHtml(restrictedKindLabel(a.kind))}</span></span>
+            <span class="small"><strong>${escapeHtml(a.label)}</strong><span class="badge text-bg-light border ms-2">${escapeHtml(restrictedKindLabel(a.kind))}</span>${a.shape === 'line' ? `<span class="badge text-bg-light border ms-1">${t('restricted_area.shape_line_short')}</span>` : ''}</span>
             <button type="button" class="btn btn-sm btn-outline-danger restricted-area-list-delete-btn" data-id="${a.id}">${t('common.delete')}</button>
         </div>
     `).join('');
@@ -13627,7 +13644,7 @@ function renderRestrictedAreaProximity(items) {
     list.innerHTML = items.map(area => {
         const near = area.distance_m <= RESTRICTED_AREA_PROXIMITY_WARN_METERS;
         const line = area.distance_m <= 0
-            ? `<span class="text-danger fw-bold">${t('restricted_area.proximity_inside')}</span>`
+            ? `<span class="text-danger fw-bold">${t(area.shape === 'line' ? 'restricted_area.proximity_at_line' : 'restricted_area.proximity_inside')}</span>`
             : `<span class="${near ? 'text-danger fw-semibold' : 'text-muted'}">${formatDistanceMeters(area.distance_m)}</span>`;
         return `<div class="d-flex justify-content-between align-items-center py-1 border-bottom">
             <div><i class="bi bi-exclamation-triangle-fill text-danger me-1"></i>${escapeHtml(area.label)}</div>
@@ -27697,6 +27714,16 @@ document.querySelectorAll('.team-form').forEach(form => {
     const coordsAddBtn = document.getElementById('restrictedAreaCoordsAddBtn');
     const labelInput = document.getElementById('restrictedAreaLabelInput');
     const kindSelect = document.getElementById('restrictedAreaKindSelect');
+    const shapeSelect = document.getElementById('restrictedAreaShapeSelect');
+    const instrPolygon = document.getElementById('restrictedAreaInstrPolygon');
+    const instrLine = document.getElementById('restrictedAreaInstrLine');
+    // An open line along an edge, or a closed area. A line is finished with two points and has no closing click.
+    const isLine = () => shapeSelect.value === 'line';
+    const lineLengthMeters = pts => pts.reduce((sum, p, i) => i ? sum + L.latLng(pts[i - 1]).distanceTo(L.latLng(p)) : 0, 0);
+    function syncShapeUi() {
+        instrPolygon.hidden = isLine();
+        instrLine.hidden = !isLine();
+    }
     const clearBtn = document.getElementById('restrictedAreaClearBtn');
     const sendBtn = document.getElementById('restrictedAreaSendBtn');
     const sizeReadout = document.getElementById('restrictedAreaSizeReadout');
@@ -27725,6 +27752,12 @@ document.querySelectorAll('.team-form').forEach(form => {
 
     // Twin of the search-area composer's own readout above, same reasoning.
     function updateSizeReadout() {
+        if (isLine()) {
+            const metres = lineLengthMeters(drawPoints);
+            sizeReadout.textContent = metres > 0 ? t('restricted_area.line_length', {length: formatDistanceMeters(metres)}) : '';
+            sizeReadout.classList.toggle('d-none', metres <= 0);
+            return;
+        }
         const m2 = drawPoints.length >= 3 ? polygonAreaSquareMeters(drawPoints) : 0;
         const text = formatAreaSquareMeters(m2);
         // The extent goes beside the area because an area alone cannot be
@@ -27754,13 +27787,13 @@ document.querySelectorAll('.team-form').forEach(form => {
         updateSizeReadout();
         if (shapeLayer) { composerMap.removeLayer(shapeLayer); shapeLayer = null; }
         if (drawPoints.length < 2) return;
-        shapeLayer = isClosed
+        shapeLayer = (isClosed && !isLine())
             ? L.polygon(drawPoints, {color:'#dc3545', fillOpacity:0.15}).addTo(composerMap)
             : L.polyline(drawPoints, {color:'#dc3545'}).addTo(composerMap);
     }
 
     function updateSendState() {
-        sendBtn.disabled = !(isClosed && drawPoints.length >= 3);
+        sendBtn.disabled = isLine() ? drawPoints.length < 2 : !(isClosed && drawPoints.length >= 3);
     }
 
     function addDrawPoint(lat, lng) {
@@ -27806,7 +27839,7 @@ document.querySelectorAll('.team-form').forEach(form => {
 
     function onMapClick(e) {
         if (isClosed) return;
-        if (drawPoints.length >= 3) {
+        if (!isLine() && drawPoints.length >= 3) {
             const firstPoint = composerMap.latLngToContainerPoint(L.latLng(drawPoints[0]));
             const clickPoint = composerMap.latLngToContainerPoint(e.latlng);
             if (firstPoint.distanceTo(clickPoint) < 16) {
@@ -27859,10 +27892,19 @@ document.querySelectorAll('.team-form').forEach(form => {
         addressStatus.textContent = '';
         coordsInput.value = '';
         labelInput.value = '';
+        shapeSelect.value = 'polygon';
+        kindSelect.value = 'danger';
+        syncShapeUi();
         document.removeEventListener('keydown', keydownHandler);
     });
 
     clearBtn.addEventListener('click', resetDrawing);
+    // Another shape starts the drawing again; an edge is most often a cliff, so that is the kind offered for it.
+    shapeSelect.addEventListener('change', () => {
+        resetDrawing();
+        kindSelect.value = isLine() ? 'cliff' : 'danger';
+        syncShapeUi();
+    });
 
     addressSearchBtn.addEventListener('click', () => {
         const q = addressInput.value.trim();
@@ -27886,7 +27928,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         }
         const data = new URLSearchParams({
             csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>,
-            geo: JSON.stringify(drawPoints), label: label, kind: kindSelect.value,
+            geo: JSON.stringify(drawPoints), label: label, kind: kindSelect.value, shape: shapeSelect.value,
         });
         sendBtn.disabled = true;
         fetch('mission-restricted-area.php', {method:'POST', body:data}).then(response => response.json()).then(result => {
