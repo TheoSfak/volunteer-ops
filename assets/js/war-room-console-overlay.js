@@ -113,8 +113,55 @@ function wrcOvLeft(seconds) {
     return String(Math.floor(left / 60)).padStart(2, '0') + ':' + String(left % 60).padStart(2, '0');
 }
 
+/**
+ * A position as degrees, minutes and seconds with the compass letters: 35.2142, 24.7519 -> «35°12'51" Β, 24°45'07" Α».
+ * `compass` is the four letters north, south, east, west in one string («ΒΝΑΔ», «NSEW»).
+ */
+function wrcOvDms(lat, lng, compass) {
+    const letters = Array.from(compass || 'NSEW');
+    const part = (value, positive, negative) => {
+        const abs = Math.abs(value);
+        let deg = Math.floor(abs);
+        let min = Math.floor((abs - deg) * 60);
+        let sec = Math.round(((abs - deg) * 60 - min) * 60);
+        if (sec === 60) { sec = 0; min += 1; }
+        if (min === 60) { min = 0; deg += 1; }
+        return deg + '°' + String(min).padStart(2, '0') + "'" + String(sec).padStart(2, '0') + '" ' + (value < 0 ? negative : positive);
+    };
+    return part(lat, letters[0], letters[1]) + ', ' + part(lng, letters[2], letters[3]);
+}
+
+/** The cell a height is asked for and remembered by: about 100 m, which is what the terrain model resolves (90 m). */
+function wrcOvCell(lat, lng) {
+    return lat.toFixed(3) + ',' + lng.toFixed(3);
+}
+
+/**
+ * A rolling allowance: at most `max` asks in the last `windowMs`. `stamps` are the times of the asks so far;
+ * -> {ok, stamps} with `now` added when the ask is allowed. (The server's own limit for heights is shared with
+ * the point menu and the measuring tool, so the pointer may only ever use a part of it.)
+ */
+function wrcOvBudget(stamps, now, max, windowMs) {
+    const recent = (stamps || []).filter(ts => ts > now - windowMs);
+    if (recent.length >= max) return {ok: false, stamps: recent};
+    return {ok: true, stamps: recent.concat([now])};
+}
+
+/**
+ * Where the tooltip goes: to the lower right of the pointer, or to the other side of it when that side has no
+ * room. (x, y) the pointer, (w, h) the tooltip, (vw, vh) the window. -> {x, y} the tooltip's top left corner.
+ */
+function wrcOvTipAt(x, y, w, h, vw, vh, gap) {
+    const g = gap === undefined ? 20 : gap;
+    let left = x + g;
+    let top = y + g;
+    if (left + w > vw - 4) left = Math.max(4, x - g - w);
+    if (top + h > vh - 4) top = Math.max(4, y - g - h);
+    return {x: Math.round(left), y: Math.round(top)};
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft};
+    module.exports = {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvTipAt};
 }
 
 // ── the view ─────────────────────────────────────────────────────────────────
@@ -315,6 +362,108 @@ if (typeof module !== 'undefined' && module.exports) {
         if (e.target.closest('.wrc-ov-tile-stage') && typeof api.watchLive === 'function') api.watchLive();
     });
 
+    // ── the pointer: a ring and a tooltip with the position under it ─────────
+    // The photo's white ring and black coordinates label. The position is the map's own answer for the pointer
+    // (nothing is asked); the height of the ground comes a moment after the pointer rests, from the same server
+    // door as the point menu and the measuring tool (measureElevations), remembered per ~100 m cell and kept to
+    // a part of that door's allowance so it can never use up the heights those two need.
+    const PTR_KEY = 'wr-console-ov-pointer';
+    const PTR_REST_MS = 700;
+    const PTR_BUDGET = 40;            // asks per ten minutes; the server grants 120 to all three users of the door
+    const PTR_WINDOW_MS = 600000;
+    const ptrRing = mk('div', 'wrc-ov-ptr-ring');
+    const ptrTip = mk('div', 'wrc-ov-ptr-tip');
+    ptrRing.hidden = true;
+    ptrTip.hidden = true;
+    ptrTip.innerHTML = '<span class="wrc-ov-ptr-pos"></span><span class="wrc-ov-ptr-h"></span>';
+    root.append(ptrRing, ptrTip);
+    const ptrPos = $('.wrc-ov-ptr-pos', ptrTip);
+    const ptrH = $('.wrc-ov-ptr-h', ptrTip);
+    const ptr = {on: true, at: null, cell: '', heights: new Map(), stamps: [], rest: 0, bound: false};
+    try { ptr.on = localStorage.getItem(PTR_KEY) !== 'off'; } catch (e) { /* blocked storage: it starts on */ }
+    // A touch screen has no pointer to follow: a tap would leave the label where it landed.
+    const canHover = !window.matchMedia || window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+    const ptrBtn = mk('button', 'btn');
+    ptrBtn.type = 'button';
+    ptrBtn.innerHTML = `<i class="bi bi-cursor"></i>${esc(t('console.ov_coords_toggle'))}`;
+    ptrBtn.title = t('console.ov_coords_toggle');
+    function paintPtrBtn() {
+        ptrBtn.classList.toggle('active', ptr.on);
+        ptrBtn.setAttribute('aria-pressed', ptr.on ? 'true' : 'false');
+    }
+    paintPtrBtn();
+    ptrBtn.addEventListener('click', () => {
+        ptr.on = !ptr.on;
+        try { localStorage.setItem(PTR_KEY, ptr.on ? 'on' : 'off'); } catch (e) { /* not remembered */ }
+        paintPtrBtn();
+        if (!ptr.on) hidePtr();
+    });
+
+    function hidePtr() {
+        clearTimeout(ptr.rest);
+        ptr.at = null;
+        ptrRing.hidden = true;
+        ptrTip.hidden = true;
+    }
+    function heightText(metres) {
+        const loc = typeof jsLocale !== 'undefined' ? jsLocale : undefined;
+        return ' · ~' + Math.round(metres).toLocaleString(loc) + ' ' + t('common.unit_m');
+    }
+    function paintPtr() {
+        if (!ptr.at) return;
+        const {latlng, x, y} = ptr.at;
+        ptrPos.textContent = wrcOvDms(latlng.lat, latlng.lng, t('console.ov_compass'));
+        const known = ptr.heights.get(ptr.cell);
+        ptrH.textContent = typeof known === 'number' ? heightText(known) : '';
+        ptrRing.style.transform = `translate(${Math.round(x - 14)}px, ${Math.round(y - 14)}px)`;
+        ptrRing.hidden = false;
+        ptrTip.hidden = false;
+        const box = ptrTip.getBoundingClientRect();
+        const at = wrcOvTipAt(x, y, box.width, box.height, window.innerWidth, window.innerHeight);
+        ptrTip.style.transform = `translate(${at.x}px, ${at.y}px)`;
+    }
+    function askHeight(cell, latlng) {
+        if (typeof measureElevations !== 'function' || ptr.heights.has(cell)) return;
+        const grant = wrcOvBudget(ptr.stamps, Date.now(), PTR_BUDGET, PTR_WINDOW_MS);
+        ptr.stamps = grant.stamps;
+        if (!grant.ok) return;
+        ptr.heights.set(cell, false);   // asked: not asked again for this cell, whatever the answer
+        measureElevations([[Number(latlng.lat.toFixed(5)), Number(latlng.lng.toFixed(5))]]).then(heights => {
+            if (!heights || typeof heights[0] !== 'number') return;
+            ptr.heights.set(cell, heights[0]);
+            if (ptr.cell === cell) paintPtr();
+        });
+    }
+    function movePtr(latlng, x, y) {
+        if (!engaged || !ptr.on || !canHover) return;
+        ptr.cell = wrcOvCell(latlng.lat, latlng.lng);
+        ptr.at = {latlng, x, y};
+        paintPtr();
+        clearTimeout(ptr.rest);
+        const cell = ptr.cell;
+        ptr.rest = setTimeout(() => { if (ptr.cell === cell && ptr.at) askHeight(cell, ptr.at.latlng); }, PTR_REST_MS);
+    }
+    function bindPointer() {
+        const m = mapNow();
+        if (ptr.bound || !m) return;
+        ptr.bound = true;
+        m.on('mousemove', e => {
+            const oe = e.originalEvent;
+            // Over a popup or one of the map's own controls the label would be in the way of what is being read.
+            if (!oe || (oe.target && oe.target.closest && oe.target.closest('.leaflet-popup, .leaflet-control'))) { hidePtr(); return; }
+            movePtr(e.latlng, oe.clientX, oe.clientY);
+        });
+        m.on('mouseout', hidePtr);
+        m.on('dragstart', hidePtr);
+        // The map moving under a pointer that stands still (it follows the teams) changes what is under it.
+        m.on('moveend', () => {
+            if (!ptr.at) return;
+            const rect = m.getContainer().getBoundingClientRect();
+            const latlng = m.containerPointToLatLng([ptr.at.x - rect.left, ptr.at.y - rect.top]);
+            movePtr(latlng, ptr.at.x, ptr.at.y);
+        });
+    }
+
     // ── moving the real controls in, and back ────────────────────────────────
     const moved = [];
     let engaged = false;
@@ -364,6 +513,8 @@ if (typeof module !== 'undefined' && module.exports) {
             if (back) { const was = back.className; back.className = 'bi bi-house-fill'; undo.push(() => { back.className = was; }); }
         }
         take($('#mapFullscreenToggle'), tools);
+        if (canHover) tools.appendChild(ptrBtn);
+        bindPointer();
         // The acknowledgement panel floats over the map like the rest: inside the board, under its menus.
         take($('#ackTracker'), root);
         take($('#trailFilterBar'), root);
@@ -392,6 +543,7 @@ if (typeof module !== 'undefined' && module.exports) {
         if (!engaged) return;
         engaged = false;
         html.removeAttribute('data-wrc-ov');
+        hidePtr();
         syncTile();
         giveBack();
         top.contains(op) && op.remove();

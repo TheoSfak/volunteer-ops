@@ -2,13 +2,14 @@
 //
 // The pure half of the «Πίνακας» look of the console (assets/js/war-room-console-overlay.js): which teams the
 // bottom bar shows and how the previous / next buttons move through them, the mission clock, the GPS
-// readout, what the selected-team card says and which live stream the floating video tile shows. The part that needs a page (moving the controls into the
+// readout, what the selected-team card says, which live stream the floating video tile shows and the pointer's
+// label (the position as degrees, minutes and seconds, the height cell, the allowance and where the label goes). The part that needs a page (moving the controls into the
 // rails, the clicks) is exercised in the browser.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft} = require('../../assets/js/war-room-console-overlay.js');
+const {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvTipAt} = require('../../assets/js/war-room-console-overlay.js');
 
 test('the team window shows all the teams when they fit', () => {
     assert.deepEqual(wrcOvWindow(4, -1, 0, 6), {start: 0, size: 4, more: false});
@@ -132,4 +133,48 @@ test('the time left is minutes and seconds, and nothing while it is not known', 
     assert.equal(wrcOvLeft(-3), '00:00', 'a clock that ran past the end does not show a minus');
     assert.equal(wrcOvLeft(NaN), '');
     assert.equal(wrcOvLeft(undefined), '');
+});
+
+test('a position is degrees, minutes and seconds with the compass letters', () => {
+    assert.equal(wrcOvDms(35.2142, 24.7519, 'ΒΝΑΔ'), `35°12'51" Β, 24°45'07" Α`);
+    assert.equal(wrcOvDms(35.2142, 24.7519, 'NSEW'), `35°12'51" N, 24°45'07" E`);
+    assert.equal(wrcOvDms(-33.8688, -70.6693, 'NSEW'), `33°52'08" S, 70°40'09" W`, 'south and west: the letter, not a minus sign');
+    assert.equal(wrcOvDms(-33.8688, 151.2093, 'ΒΝΑΔ'), `33°52'08" Ν, 151°12'33" Α`);
+    assert.equal(wrcOvDms(0, 0), `0°00'00" N, 0°00'00" E`, 'no letters given: north and east');
+});
+
+test('seconds that round up to sixty carry into the minutes and the degrees', () => {
+    assert.equal(wrcOvDms(35.99999, 24.29999, 'NSEW'), `36°00'00" N, 24°18'00" E`);
+    assert.equal(wrcOvDms(35.19999, 25.0, 'NSEW'), `35°12'00" N, 25°00'00" E`);
+});
+
+test('a height is asked for per cell of about a hundred metres', () => {
+    assert.equal(wrcOvCell(35.21424, 24.75191), '35.214,24.752');
+    assert.equal(wrcOvCell(35.21449, 24.75151), '35.214,24.752', 'a few metres away is the same cell');
+    assert.notEqual(wrcOvCell(35.2142, 24.7519), wrcOvCell(35.2152, 24.7519), 'a hundred metres north is another');
+});
+
+test('the pointer may ask for heights only a few times in ten minutes', () => {
+    const win = 600000;
+    let stamps = [];
+    for (let i = 0; i < 3; i++) {
+        const g = wrcOvBudget(stamps, 1000 + i, 3, win);
+        assert.equal(g.ok, true);
+        stamps = g.stamps;
+    }
+    const over = wrcOvBudget(stamps, 2000, 3, win);
+    assert.equal(over.ok, false, 'the fourth ask is refused');
+    assert.equal(over.stamps.length, 3, 'and a refused ask is not counted');
+    const later = wrcOvBudget(stamps, 1000 + win, 3, win);
+    assert.equal(later.ok, true, 'ten minutes after the first ask, that one has left the window');
+    assert.equal(later.stamps.length, 3, 'the two that are left and the new one');
+    assert.deepEqual(wrcOvBudget(undefined, 5, 1, win), {ok: true, stamps: [5]});
+});
+
+test('the label goes to the lower right of the pointer, and to the other side where that has no room', () => {
+    assert.deepEqual(wrcOvTipAt(100, 100, 200, 30, 1440, 900), {x: 120, y: 120}, 'room on both sides');
+    assert.deepEqual(wrcOvTipAt(1300, 100, 200, 30, 1440, 900), {x: 1080, y: 120}, 'no room to the right: to the left of the pointer');
+    assert.deepEqual(wrcOvTipAt(100, 880, 200, 30, 1440, 900), {x: 120, y: 830}, 'no room below: above the pointer');
+    assert.deepEqual(wrcOvTipAt(1300, 880, 200, 30, 1440, 900), {x: 1080, y: 830}, 'the corner: both');
+    assert.deepEqual(wrcOvTipAt(10, 10, 2000, 30, 1440, 900), {x: 4, y: 30}, 'a label wider than the window is kept on screen at its left edge');
 });

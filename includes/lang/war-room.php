@@ -3185,6 +3185,9 @@ return [
         'console.ov_tile_pick' => 'Μετάδοση από {name}',
         'console.ov_tile_wait' => 'Αναμονή εικόνας…',
         'console.ov_tile_aria' => 'Ζωντανή μετάδοση από {name}',
+        // The four compass letters in one string: north, south, east, west (Βόρεια, Νότια, Ανατολικά, Δυτικά).
+        'console.ov_compass' => 'ΒΝΑΔ',
+        'console.ov_coords_toggle' => 'Συντεταγμένες και ύψος κάτω από τον δείκτη',
         // checkin.php — the page the shift's attendance QR opens
         'checkin.page_title' => 'Check-in παρουσίας',
         'checkin.disabled_title' => 'Το QR check-in είναι απενεργοποιημένο',
@@ -6343,6 +6346,9 @@ return [
         'console.ov_tile_pick' => 'Stream from {name}',
         'console.ov_tile_wait' => 'Waiting for the picture…',
         'console.ov_tile_aria' => 'Live stream from {name}',
+        // The four compass letters in one string: north, south, east, west.
+        'console.ov_compass' => 'NSEW',
+        'console.ov_coords_toggle' => 'Coordinates and height under the pointer',
         // checkin.php — the page the shift's attendance QR opens
         'checkin.page_title' => 'Attendance check-in',
         'checkin.disabled_title' => 'QR check-in is switched off',

@@ -48,6 +48,8 @@ html[data-wrc-skin="overlay"] .wrc-ov-sel,
 html[data-wrc-skin="overlay"] .wrc-ov-collapse,
 html[data-wrc-skin="overlay"] .wrc-ov-cmp-h,
 html[data-wrc-skin="overlay"] .wrc-ov-tile,
+html[data-wrc-skin="overlay"] .wrc-ov-ptr-ring,
+html[data-wrc-skin="overlay"] .wrc-ov-ptr-tip,
 html[data-wrc-skin="overlay"] .wrc-ov-ti { display: none; }
 
 /* ══ the window: one screen, the map is the ground ═══════════════════════════ */
@@ -414,6 +416,19 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-pick button:hover { back
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-pick { position: absolute; left: 6px; bottom: 6px; display: flex; gap: 4px; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile-pick button.on { background: var(--ov-org); color: #1b1000; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tile:fullscreen { width: 100vw; height: 100vh; aspect-ratio: auto; border: 0; border-radius: 0; }
+
+/* ══ the pointer: a ring and a black label with the position (and the height of the ground) under it ══ */
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-ptr-ring {
+    display: block; position: fixed; left: 0; top: 0; z-index: 5; width: 28px; height: 28px; box-sizing: border-box;
+    border: 2.5px solid #fff; border-radius: 50%; box-shadow: 0 0 0 1.5px rgba(0, 0, 0, .35); pointer-events: none;
+}
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-ptr-tip {
+    display: block; position: fixed; left: 0; top: 0; z-index: 5; padding: 6px 11px; background: #0a0d0f; color: #fff;
+    border: 1px solid rgba(255, 255, 255, .2); font: 700 14.5px/1.2 var(--ov-font); letter-spacing: .03em; white-space: nowrap; pointer-events: none;
+}
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-ptr-ring[hidden],
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-ptr-tip[hidden] { display: none; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-ptr-h { color: var(--ov-mut); }
 
 /* ══ the right panel: the feed (and the other tabs), then the selected team ══ */
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-dock { position: absolute; z-index: 10; top: 86px; right: 20px; width: var(--ov-dock-w); bottom: 150px; display: flex; flex-direction: column; overflow: hidden; }
