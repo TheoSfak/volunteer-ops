@@ -16512,10 +16512,14 @@ function postRouteAction(action, id, extra) {
 // network happened to come back — see resolveEventTimestamp() in
 // includes/functions-warroom.php, which both replayed endpoints share.
 //
-// Three kinds ride this queue:
+// Five kinds ride this queue:
 //   kind:'route'  → mission-route.php  (depart/arrive/complete)
 //   kind:'status' → volunteer-status.php (on_way/on_site/needs_help, i.e. SOS)
 //   kind:'triage' → mission-triage.php (assess/set_card/merge/bulk_green)
+//   kind:'order'   → mission-order.php   (acknowledge/complete), only written by offline.html
+//   kind:'decline' → mission-decline.php («Δεν μπορώ»), only written by offline.html
+// offline.html (assets/js/field-mode.js) appends to this same queue while the
+// page cannot load at all; the real page sends it all on the next load.
 //
 // Desk-side admin actions (cancel/skip/edit_waypoint/create, SOS acknowledge/
 // resolve) deliberately do NOT go through this — they're not the ones losing
@@ -16621,11 +16625,36 @@ function postRouteActionQueueable(action, id, extra) {
     });
 }
 
+// The two answers the offline field view (assets/js/field-mode.js) can queue
+// that the live page itself sends straight away: «Ελήφθη»/«Ολοκληρώθηκε» on an
+// order, and «Δεν μπορώ». Same contract as postFieldStatus(): the server's
+// JSON, {networkError:true} when it cannot be reached, null on a lost login.
+// Both endpoints are safe to replay (an order already received or completed
+// is answered ok, a decline already standing for the scope is ignored).
+function postQueuedForm(url, params) {
+    const body = new URLSearchParams(Object.assign({csrf_token: csrfToken}, params));
+    return fetchWithTimeout(url, {method: 'POST', body: body}, FIELD_POST_TIMEOUT_MS).then(response => {
+        if (!checkSessionAlive(response)) return null;
+        return response.json();
+    }).catch(() => ({ok: false, error: t('common.network_error'), networkError: true}));
+}
+
 function sendQueuedItem(item) {
     // Triage writes carry their own ids (victim / assessment / bulk uuid), so
     // a replay that already landed is recognised server-side and ignored.
     if (item.kind === 'triage') {
         return postTriage(Object.assign({}, item.params, {queued: '1'}));
+    }
+    // Queued from offline.html: {kind:'order', action:'acknowledge'|'complete', orderId}
+    // and {kind:'decline', target:'order'|'route', id, reason, note}.
+    if (item.kind === 'order') {
+        return postQueuedForm('mission-order.php', {action: item.action, order_id: String(item.orderId)});
+    }
+    if (item.kind === 'decline') {
+        return postQueuedForm('mission-decline.php', {
+            mission_id: '<?= $missionId ?>', action: 'decline', kind: item.target, id: String(item.id),
+            reason: item.reason, note: item.note || ''
+        });
     }
     if (item.kind === 'status') {
         return postFieldStatus(item.prId, item.status, item.extra || {}).then(result => {
@@ -16741,8 +16770,65 @@ const SNAPSHOT_KEY = 'wr_field_snapshot';
 const OFFLINE_CONTACTS = <?= json_encode($offlineContacts, JSON_UNESCAPED_UNICODE) ?>;
 const SNAPSHOT_MISSION = <?= json_encode(['id' => $missionId, 'title' => $mission['title'], 'location' => $mission['location'] ?? ''], JSON_UNESCAPED_UNICODE) ?>;
 const SNAPSHOT_LANG = <?= json_encode($__viewerLang) ?>;
+// The participation request SOS and «Έφτασα» are filed against
+// (volunteer-status.php). null for a viewer who is not a participant, who
+// then gets no SOS button on the offline field view.
+const SNAPSHOT_PR_ID = <?= json_encode(!empty($myAssignments) ? (int) $myAssignments[0]['pr_id'] : null) ?>;
+// Positions age by the minute, everything else by the event, so a quiet
+// mission rewrites localStorage once a minute for the team's dots and not
+// every 5 s poll.
+const SNAPSHOT_POSITIONS_EVERY_MS = 60000;
+const SNAPSHOT_MAX_MAP_POINTS = 150;
+
+// "16:23 22/10/2026" (the pin's display time) back into a timestamp, so the
+// offline map can say how old each teammate's dot is.
+function snapshotPinTs(pin) {
+    const m = /^(\d{1,2}):(\d{2}) (\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(pin.time || '');
+    return m ? new Date(+m[5], +m[4] - 1, +m[3], +m[1], +m[2]).getTime() : null;
+}
+
+// Only my own team: the same rule the routes below follow, for the same
+// reason - other teams' movements do not belong in a phone's offline storage.
+function snapshotTeamMembers() {
+    const mine = pins.find(p => String(p.user_id) === String(WR_MY_USER_ID));
+    let label = mine && mine.team_label;
+    if (!label && opMyTeamId) {
+        const team = teams.find(x => String(x.id) === String(opMyTeamId));
+        label = team && team.label;
+    }
+    if (!label) return {label: null, members: []};
+    return {
+        label: label,
+        members: pins
+            .filter(p => p.team_label === label && String(p.user_id) !== String(WR_MY_USER_ID) && p.lat && p.lng)
+            .map(p => ({id: p.user_id, name: p.name, lat: p.lat, lng: p.lng, ts: snapshotPinTs(p), acc: p.accuracy_m ?? null, status: p.status || null}))
+    };
+}
+
+// The rows of the order popup that are still open, flattened to what the
+// offline field view needs to list them, point at them and answer them. The
+// popup models are the one place that already knows each order's next step and
+// where it points (opModelFromOrder / FromRoute / FromDispatch / FromSector).
+function snapshotFieldOrders() {
+    const out = [];
+    opEntries.forEach(m => {
+        // 'team' and 'info' rows are notices ("you are now on team X") with
+        // nothing to answer, so they stay on the live page.
+        if (!m.outstanding || ['order', 'route', 'dispatch', 'sector'].indexOf(m.kind) === -1) return;
+        out.push({
+            key: m.key, kind: m.kind, id: m.id, orderId: m.orderId || null, type: m.type,
+            title: m.title, text: m.text, meta: m.meta, acked: !!m.acked,
+            step: m.step, steps: (m.steps || []).length,
+            canDecline: !!m.canDecline, declineForTeam: !!m.declineForTeam,
+            nextWaypointId: m.nextWaypointId || null, nextWaypointOpen: !!m.nextWaypointOpen,
+            nav: m.target && m.target.nav ? {lat: Number(m.target.nav.lat), lng: Number(m.target.nav.lng)} : null
+        });
+    });
+    return out;
+}
 
 let lastSnapshotSignature = '';
+let lastSnapshotWriteAt = 0;
 function saveFieldSnapshot() {
     // Cancelled routes are noise on a screen someone is reading in the field,
     // and only my own team's routes belong on a phone at all — command staff
@@ -16759,25 +16845,64 @@ function saveFieldSnapshot() {
     const activeRoutes = routes.filter(r => r.status !== 'cancelled');
     const myTeamRoutes = activeRoutes.filter(r => r.is_route_member);
     const snapRoutes = myTeamRoutes.length ? myTeamRoutes : activeRoutes;
-    const signature = JSON.stringify([snapRoutes, myTasks]);
-    if (signature === lastSnapshotSignature) return;
+    // The offline field view (assets/js/field-mode.js) also draws a map: my
+    // team's sectors, the command post, the clues and the imported points.
+    const mySectors = sectors.filter(s => s.is_my_team);
+    const myAreaIds = new Set(mySectors.map(s => String(s.area_id)));
+    const team = snapshotTeamMembers();
+    const fieldOrders = snapshotFieldOrders();
+    const command = commandPost && commandPost.lat ? {
+        lat: Number(commandPost.lat), lng: Number(commandPost.lng),
+        note: commandPost.note || '', follows: !!commandPost.follow
+    } : null;
+    const mapLayers = {
+        sectors: mySectors.map(s => ({id: s.id, label: s.label, geo: s.geo, status: s.status, statusLabel: s.status_label})),
+        areas: areas.filter(a => myAreaIds.has(String(a.id))).map(a => ({id: a.id, label: a.label, geo: a.geo})),
+        pois: pointsOfInterest.map(p => ({lat: p.lat, lng: p.lng, at: p.created_at, checked: !!p.checked_at})),
+        points: MP_VISIBLE ? (mapPoints || []).slice(0, SNAPSHOT_MAX_MAP_POINTS).map(p => ({lat: p.lat, lng: p.lng, name: p.name})) : []
+    };
+    const signature = JSON.stringify([snapRoutes, myTasks, fieldOrders, command, mapLayers, team.label, SNAPSHOT_PR_ID]);
+    const positionsDue = Date.now() - lastSnapshotWriteAt >= SNAPSHOT_POSITIONS_EVERY_MS;
+    if (signature === lastSnapshotSignature && !positionsDue) return;
     lastSnapshotSignature = signature;
-    try {
-        localStorage.setItem(SNAPSHOT_KEY, JSON.stringify({
-            savedAt: Date.now(),
-            lang: SNAPSHOT_LANG,
-            mission: SNAPSHOT_MISSION,
-            routes: snapRoutes,
-            tasks: myTasks,
-            contacts: OFFLINE_CONTACTS
-        }));
-    } catch (e) {
-        // Quota exceeded on a phone with a full origin: the snapshot is a
-        // nice-to-have, the queue in the same storage is not. Drop the
-        // snapshot rather than let a failed write bubble anywhere near the
-        // field-report path.
-        try { localStorage.removeItem(SNAPSHOT_KEY); } catch (e2) {}
+    lastSnapshotWriteAt = Date.now();
+    const view = (typeof map !== 'undefined' && map && map.getCenter)
+        ? {lat: map.getCenter().lat, lng: map.getCenter().lng, zoom: map.getZoom()}
+        : null;
+    const snapshot = {
+        v: 2,
+        savedAt: Date.now(),
+        lang: SNAPSHOT_LANG,
+        mission: Object.assign({}, SNAPSHOT_MISSION, missionLocation.lat ? {lat: missionLocation.lat, lng: missionLocation.lng} : {}),
+        me: {userId: WR_MY_USER_ID, prId: SNAPSHOT_PR_ID, teamLabel: team.label},
+        routes: snapRoutes,
+        tasks: myTasks,
+        orders: fieldOrders,
+        contacts: OFFLINE_CONTACTS,
+        command: command,
+        sectors: mapLayers.sectors,
+        areas: mapLayers.areas,
+        pois: mapLayers.pois,
+        points: mapLayers.points,
+        members: team.members,
+        view: view
+    };
+    // Quota exceeded on a phone with a full origin: the snapshot is a
+    // nice-to-have, the queue in the same storage is not. Shed the heaviest,
+    // most replaceable parts first - the teammates' dots (the next poll draws
+    // them again), then the imported points and clues - and only then give up
+    // on the snapshot. Never let a failed write near the field-report path.
+    const shedding = [['members', []], ['view', null], ['points', []], ['pois', []]];
+    for (let attempt = 0; attempt <= shedding.length; attempt++) {
+        try {
+            localStorage.setItem(SNAPSHOT_KEY, JSON.stringify(snapshot));
+            return;
+        } catch (e) {
+            if (attempt === shedding.length) break;
+            snapshot[shedding[attempt][0]] = shedding[attempt][1];
+        }
     }
+    try { localStorage.removeItem(SNAPSHOT_KEY); } catch (e2) {}
 }
 
 // Shared by depart/arrive/complete: on a needs_confirm response, ask once and

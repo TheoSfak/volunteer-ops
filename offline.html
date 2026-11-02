@@ -6,6 +6,10 @@
     <title>Εκτός Σύνδεσης - VolunteerOps</title>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1e3c72">
+    <!-- Self-hosted Leaflet (assets/leaflet/, precached by sw.js): the CDN copy
+         lives in a cache that every release wipes, and this page has to draw a
+         map with no network at all. -->
+    <link rel="stylesheet" href="assets/leaflet/leaflet.css">
     <style>
         * {
             margin: 0;
@@ -175,6 +179,118 @@
             color: rgba(255, 255, 255, 0.6);
             margin-top: 2rem;
         }
+
+        /* ── Field view (assets/js/field-mode.js) ─────────────────────────── */
+        /* The splash header is the whole screen on a phone; with a map to show
+           it shrinks to a title and the retry countdown. */
+        body.field-view .offline-icon, body.field-view #offBody { display: none; }
+        body.field-view h1 { font-size: 1.05rem; margin-bottom: .4rem; }
+        body.field-view .retry-btn { padding: .3rem .9rem; font-size: .8rem; border-radius: 8px; border-width: 1px; }
+        body.field-view .status-text { margin-top: .5rem; }
+        body.field-view .snap-age { margin-bottom: .5rem; }
+        body.field-view .snap-mission-loc { margin-bottom: .6rem; }
+        .fm-queue {
+            background: rgba(220, 38, 38, .3);
+            border: 1px solid rgba(248, 113, 113, .6);
+            border-radius: 10px;
+            padding: .6rem .8rem;
+            font-size: .84rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+        .fm-bar { display: flex; gap: .5rem; margin-bottom: .75rem; }
+        .fm-bar .fm-note { font-size: .84rem; color: rgba(255,255,255,.75); }
+        .fm-sos, .fm-arrived {
+            flex: 1;
+            border: 2px solid transparent;
+            border-radius: 12px;
+            padding: .85rem .5rem;
+            font-size: 1rem;
+            font-weight: 800;
+            color: #fff;
+            cursor: pointer;
+        }
+        .fm-sos { background: #dc2626; border-color: #fecaca; }
+        .fm-sos.armed { background: #fff; color: #b91c1c; animation: blink 0.8s ease-in-out infinite; }
+        .fm-sos.queued, .fm-arrived.queued { opacity: .65; cursor: default; }
+        .fm-arrived { background: #16a34a; border-color: #bbf7d0; flex: .7; }
+        .fm-mapwrap { position: relative; border-radius: 12px; overflow: hidden; border: 1px solid rgba(255,255,255,.3); }
+        .fm-map { height: 56vh; min-height: 300px; background: #cbd5e1; }
+        .fm-nomap { padding: 2rem 1rem; text-align: center; color: #0f172a; }
+        .fm-nav {
+            position: absolute; left: 8px; right: 8px; bottom: 8px; z-index: 1000;
+            display: flex; align-items: center; gap: .7rem;
+            background: rgba(15, 23, 42, .88); color: #fff;
+            border-radius: 12px; padding: .5rem .7rem;
+        }
+        .fm-nav[hidden], .fm-geo[hidden] { display: none; }
+        .fm-nav-text { font-size: .85rem; line-height: 1.35; min-width: 0; overflow-wrap: anywhere; }
+        .fm-nav-dist { font-size: 1.35rem; font-weight: 800; }
+        .fm-arrow { width: 46px; height: 46px; flex: none; fill: #38bdf8; transition: transform .25s linear; }
+        .fm-geo {
+            position: absolute; left: 8px; right: 8px; top: 8px; z-index: 1000;
+            background: rgba(120, 53, 15, .92); color: #fff; font-size: .8rem;
+            border-radius: 10px; padding: .45rem .7rem;
+        }
+        .fm-layers { display: flex; flex-wrap: wrap; gap: .4rem; margin: .6rem 0 .25rem; }
+        .fm-layer {
+            background: rgba(255,255,255,.12); color: #fff;
+            border: 1px solid rgba(255,255,255,.3); border-radius: 8px;
+            padding: .35rem .7rem; font-size: .8rem; font-weight: 600; cursor: pointer;
+        }
+        .fm-layer.on { background: #fff; color: #1e3c72; }
+        .fm-me {
+            width: 20px; height: 20px; border-radius: 50%;
+            background: #2563eb; border: 3px solid #fff;
+            box-shadow: 0 0 0 2px rgba(37, 99, 235, .45), 0 1px 5px rgba(0,0,0,.5);
+        }
+        .fm-dot {
+            width: 28px; height: 28px; border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 12px; font-weight: 800; color: #fff;
+            border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0,0,0,.5);
+        }
+        .fm-mate { background: #0d9488; }
+        .fm-radio { border-style: dashed; }
+        .fm-cp { background: #7c3aed; font-size: 16px; }
+        .fm-poi { background: #2563eb; }
+        .fm-poi-done { background: #6b7280; }
+        .fm-point { background: #ea580c; }
+        .fm-target { background: #dc2626; opacity: .8; }
+        .fm-target-on { opacity: 1; transform: scale(1.2); }
+        .fm-order {
+            background: rgba(255, 255, 255, 0.09);
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 12px;
+            padding: .7rem .85rem;
+            margin-bottom: .55rem;
+        }
+        .fm-order.follow { border-color: #38bdf8; }
+        .fm-order-title { font-weight: 700; font-size: .92rem; }
+        .fm-order-text { font-size: .86rem; margin-top: .25rem; line-height: 1.45; overflow-wrap: anywhere; }
+        .fm-dim { font-size: .76rem; color: rgba(255,255,255,.65); }
+        .fm-pending { font-size: .8rem; font-weight: 600; margin-top: .4rem; color: #fde68a; }
+        .fm-order-btns { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .55rem; }
+        .fm-act {
+            border: none; border-radius: 9px; padding: .5rem .9rem;
+            font-size: .85rem; font-weight: 700; color: #fff; cursor: pointer;
+        }
+        .fm-act.ghost { background: rgba(255,255,255,.18); }
+        .fm-act.warn { background: #d97706; }
+        .fm-act.ok { background: #16a34a; }
+        .fm-act.danger { background: transparent; color: #fca5a5; border: 1px solid rgba(252,165,165,.6); }
+        .fm-decline { margin-top: .55rem; display: flex; flex-wrap: wrap; gap: .4rem; }
+        .fm-reason {
+            background: rgba(255,255,255,.14); color: #fff; border: 1px solid rgba(255,255,255,.3);
+            border-radius: 8px; padding: .4rem .7rem; font-size: .8rem; cursor: pointer;
+        }
+        .fm-note-input {
+            flex-basis: 100%; border-radius: 8px; border: 1px solid rgba(255,255,255,.3);
+            background: rgba(0,0,0,.25); color: #fff; padding: .45rem .6rem; font-size: .85rem;
+        }
+        .fm-radio-card { border-style: dashed; }
+        /* Leaflet's tooltips/popups sit over the white page, not this gradient. */
+        .leaflet-container { font-family: inherit; }
     </style>
 </head>
 <body>
@@ -194,9 +310,16 @@
         </div>
     </div>
 
-    <!-- Field snapshot, rendered only when war-room.php has left one behind. -->
+    <!-- Field snapshot, rendered only when war-room.php has left one behind.
+         snapTop: how old it is and which mission; fieldMode: the map and the
+         buttons (assets/js/field-mode.js); snap: the route, orders, numbers. -->
+    <div class="snap" id="snapTop" hidden></div>
+    <div class="snap" id="fieldMode" hidden></div>
     <div class="snap" id="snap" hidden></div>
 
+    <script src="assets/leaflet/leaflet.js"></script>
+    <script src="assets/js/esri-imagery.js"></script>
+    <script src="assets/js/field-mode.js"></script>
     <script>
     (function() {
         // Auto-reload when back online
@@ -222,7 +345,29 @@
                 queuedSos: '🆘 Το SOS σας ΔΕΝ έχει φύγει ακόμα. Τηλεφωνήστε αν μπορείτε.',
                 retrying: 'Επανάληψη σε {n}δ...',
                 retryingNow: 'Επανασύνδεση...',
-                minutesAgo: 'πριν {n} λεπτά', hoursAgo: 'πριν {n} ώρες', justNow: 'μόλις τώρα'
+                minutesAgo: 'πριν {n} λεπτά', hoursAgo: 'πριν {n} ώρες', justNow: 'μόλις τώρα',
+                // Field view (assets/js/field-mode.js)
+                fieldTitle: 'Εκτός σύνδεσης — Πεδίο',
+                fieldBody: 'Δεν υπάρχει σύνδεση. Ο χάρτης, η θέση σου και οι ενέργειες δουλεύουν· ό,τι πατήσεις θα σταλεί μόλις επανέλθει το δίκτυο.',
+                poi: 'Σημείο ενδιαφέροντος', commandPost: 'Συντονιστικό',
+                noMapLib: 'Ο χάρτης δεν είναι διαθέσιμος.',
+                geoDenied: 'Η τοποθεσία δεν επιτρέπεται για την εφαρμογή.',
+                geoUnavailable: 'Δεν υπάρχει στίγμα GPS ακόμα.',
+                noFix: 'Αναμονή για στίγμα GPS...',
+                northUp: '(Β προς τα πάνω)',
+                layer_street: 'Δρόμοι', layer_topo: 'Τοπογραφικός', layer_satellite: 'Δορυφόρος', layer_hybrid: 'Δορυφόρος + ονόματα',
+                locate: 'Η θέση μου',
+                sos: '🆘 SOS', sosAgain: 'Πάτα ξανά για SOS', sosQueued: '🆘 SOS καταγράφηκε',
+                arrived: '✔ Έφτασα', arrivedQueued: '✔ Καταγράφηκε',
+                noParticipation: 'Δεν έχεις συμμετοχή σε βάρδια αυτής της αποστολής — δεν υπάρχουν κουμπιά SOS/Έφτασα.',
+                orders: 'Οι Εντολές μου',
+                ack: 'Ελήφθη', complete: 'Ολοκληρώθηκε', arrivedHere: 'Έφτασα στο σημείο', cantDo: 'Δεν μπορώ', follow: 'Δείξε',
+                pendingAck: 'Το «Ελήφθη» περιμένει δίκτυο', pendingComplete: 'Το «Ολοκληρώθηκε» περιμένει δίκτυο',
+                pendingArrive: 'Η άφιξη περιμένει δίκτυο', pendingDecline: 'Το «Δεν μπορώ» περιμένει δίκτυο',
+                reason_unsafe: 'Δεν είναι ασφαλές', reason_no_access: 'Δεν υπάρχει πρόσβαση', reason_busy: 'Είμαι σε άλλη εντολή',
+                reason_injury: 'Τραυματισμός / εξάντληση', reason_other: 'Άλλο',
+                reasonNote: 'Σημείωση (υποχρεωτική στο «Άλλο»)', reasonNeedsNote: 'Γράψε μια σημείωση για το «Άλλο».',
+                radio: 'Από ραδιοζεύξη'
             },
             en: {
                 title: 'Offline — Your mission details',
@@ -243,7 +388,29 @@
                 queuedSos: '🆘 Your SOS has NOT been sent yet. Call if you can.',
                 retrying: 'Retrying in {n}s...',
                 retryingNow: 'Reconnecting...',
-                minutesAgo: '{n} minutes ago', hoursAgo: '{n} hours ago', justNow: 'just now'
+                minutesAgo: '{n} minutes ago', hoursAgo: '{n} hours ago', justNow: 'just now',
+                // Field view (assets/js/field-mode.js)
+                fieldTitle: 'Offline — Field view',
+                fieldBody: 'No connection. The map, your position and the action buttons work; whatever you tap is sent as soon as the network returns.',
+                poi: 'Point of interest', commandPost: 'Command post',
+                noMapLib: 'The map is not available.',
+                geoDenied: 'Location is not allowed for the app.',
+                geoUnavailable: 'No GPS fix yet.',
+                noFix: 'Waiting for a GPS fix...',
+                northUp: '(north up)',
+                layer_street: 'Streets', layer_topo: 'Topographic', layer_satellite: 'Satellite', layer_hybrid: 'Satellite + names',
+                locate: 'My position',
+                sos: '🆘 SOS', sosAgain: 'Tap again for SOS', sosQueued: '🆘 SOS recorded',
+                arrived: '✔ I have arrived', arrivedQueued: '✔ Recorded',
+                noParticipation: 'You have no shift on this mission — there are no SOS/arrived buttons.',
+                orders: 'My Orders',
+                ack: 'Received', complete: 'Completed', arrivedHere: 'Arrived at the point', cantDo: "Can't do it", follow: 'Point to it',
+                pendingAck: '«Received» is waiting for network', pendingComplete: '«Completed» is waiting for network',
+                pendingArrive: 'Arrival is waiting for network', pendingDecline: "«Can't do it» is waiting for network",
+                reason_unsafe: 'Not safe', reason_no_access: 'No access', reason_busy: 'On another order',
+                reason_injury: 'Injury / exhaustion', reason_other: 'Other',
+                reasonNote: 'Note (required for «Other»)', reasonNeedsNote: 'Write a note for «Other».',
+                radio: 'Over the radio'
             }
         };
 
@@ -292,22 +459,51 @@
         var retryDelay = Math.min(3000 * Math.pow(2, retry.n), 60000);
         try { sessionStorage.setItem(RETRY_KEY, JSON.stringify({ n: retry.n + 1, at: Date.now() })); } catch (e) {}
 
+        // The field view (map, GPS dot, buttons) must not be torn down every few
+        // seconds by a blind reload: the map would flash, the SOS confirmation
+        // vanish, the volunteer lose their place. When it is on, each attempt
+        // first asks the network a question a failed fetch() CAN answer, and
+        // only reloads once something answered. (The comment above predates
+        // sw.js leaving background .php requests alone - they now go straight to
+        // the network and fail as the network failure they are; api-* paths are
+        // never touched by the service worker at all.) A reply of any kind, even
+        // a redirect to the login page, means the server is reachable; the reload
+        // that follows is still the real test, and if it lands back here the
+        // backoff above has already counted it.
+        var fieldView = !!(snapshot && snapshot.v >= 2 && snapshot.mission && window.VoFieldMode);
         var retryAt = Date.now() + retryDelay;
-        setTimeout(function () { location.reload(); }, retryDelay);
+        var retryStrings = STRINGS[(snapshot && snapshot.lang) || 'el'] || STRINGS.el;
+        var waitEl = document.getElementById('offWaiting');
+
+        function networkAnswers() {
+            var ctl = window.AbortController ? new AbortController() : null;
+            var timer = setTimeout(function () { if (ctl) ctl.abort(); }, 8000);
+            return fetch('api-war-room-layout.php', {cache: 'no-store', credentials: 'same-origin', signal: ctl ? ctl.signal : undefined})
+                .then(function () { clearTimeout(timer); return true; }, function () { clearTimeout(timer); return false; });
+        }
+        function attempt() {
+            if (!fieldView) { location.reload(); return; }
+            networkAnswers().then(function (up) {
+                if (up) { location.reload(); return; }
+                retryDelay = Math.min(retryDelay * 2, 60000);
+                retryAt = Date.now() + retryDelay;
+                setTimeout(attempt, retryDelay);
+            });
+        }
+        setTimeout(attempt, retryDelay);
 
         // Count it down in the status line, so the wait reads as the app working
         // rather than the app stuck. STRINGS is available here; t() is not — it
         // is defined below the early-return, and this has to work without a
         // snapshot.
-        var retryStrings = STRINGS[(snapshot && snapshot.lang) || 'el'] || STRINGS.el;
-        var waitEl = document.getElementById('offWaiting');
         (function countdown() {
-            if (!waitEl) return;
-            var left = Math.max(0, Math.round((retryAt - Date.now()) / 1000));
-            waitEl.textContent = left > 0
-                ? retryStrings.retrying.split('{n}').join(left)
-                : retryStrings.retryingNow;
-            if (left > 0) setTimeout(countdown, 1000);
+            if (waitEl) {
+                var left = Math.max(0, Math.round((retryAt - Date.now()) / 1000));
+                waitEl.textContent = left > 0
+                    ? retryStrings.retrying.split('{n}').join(left)
+                    : retryStrings.retryingNow;
+            }
+            setTimeout(countdown, 1000);
         })();
 
         if (!snapshot || !snapshot.mission) return;
@@ -335,7 +531,8 @@
         try {
             queue = JSON.parse(localStorage.getItem('wr_offline_queue_' + snapshot.mission.id) || '[]');
         } catch (e) {}
-        if (queue.length) {
+        // The field view owns its own (live) queue banner; it changes with every tap.
+        if (queue.length && !fieldView) {
             var hasSos = queue.some(function(i) { return i.kind === 'status' && i.status === 'needs_help'; });
             var queuedText = queue.length === 1 ? t('queued_one') : t('queued', {n: queue.length});
             html += '<div class="snap-queue">' + esc(queuedText);
@@ -351,6 +548,8 @@
         if (snapshot.mission.location) {
             html += '<div class="snap-mission-loc">📍 ' + esc(snapshot.mission.location) + '</div>';
         }
+        var topHtml = html;
+        html = '';
 
         (snapshot.routes || []).forEach(function(route) {
             html += '<div class="snap-section-title">' + esc(t('route'));
@@ -377,7 +576,8 @@
             });
         });
 
-        if ((snapshot.tasks || []).length) {
+        // In the field view the same orders are cards with buttons (field-mode.js).
+        if ((snapshot.tasks || []).length && !fieldView) {
             html += '<div class="snap-section-title">' + esc(t('tasks')) + '</div>';
             snapshot.tasks.forEach(function(task) {
                 // Shape comes from loadMyTaskOrdersForUser(): label/sent_at,
@@ -406,11 +606,25 @@
             });
         }
 
+        document.getElementById('snapTop').innerHTML = topHtml;
+        document.getElementById('snapTop').hidden = false;
         document.getElementById('snap').innerHTML = html;
         document.getElementById('snap').hidden = false;
         document.body.classList.add('has-snapshot');
-        document.getElementById('offTitle').textContent = t('title');
-        document.getElementById('offBody').textContent = t('body');
+        document.getElementById('offTitle').textContent = t(fieldView ? 'fieldTitle' : 'title');
+        document.getElementById('offBody').textContent = t(fieldView ? 'fieldBody' : 'body');
+        if (fieldView) {
+            var host = document.getElementById('fieldMode');
+            host.hidden = false;
+            document.body.classList.add('field-view');
+            // A page that fails to draw its map must still show the lists below it.
+            try {
+                window.VoFieldMode.init({snapshot: snapshot, strings: T, host: host});
+            } catch (e) {
+                host.hidden = true;
+                if (window.console) console.error('field view', e);
+            }
+        }
         // #offWaiting belongs to the retry countdown above, which owns it from
         // load; setting t('waiting') here would overwrite it for one second.
     })();

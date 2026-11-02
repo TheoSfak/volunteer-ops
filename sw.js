@@ -25,7 +25,7 @@
 //
 // Bumping costs a one-off refetch of CDN assets and static images. It does NOT
 // touch the map tile cache below, which is deliberately kept out of this.
-const CACHE_VERSION = 'vo-v3.421.0';
+const CACHE_VERSION = 'vo-v3.422.0';
 const STATIC_CACHE = CACHE_VERSION + '-static';
 const RUNTIME_CACHE = CACHE_VERSION + '-runtime';
 
@@ -61,7 +61,11 @@ const PRECACHE_URLS = [
     './assets/leaflet/images/layers-2x.png',
     './assets/leaflet/images/marker-icon.png',
     './assets/leaflet/images/marker-icon-2x.png',
-    './assets/leaflet/images/marker-shadow.png'
+    './assets/leaflet/images/marker-shadow.png',
+    // The offline field view (offline.html) is made of these two scripts; the
+    // page itself is only the shell.
+    './assets/js/field-mode.js',
+    './assets/js/esri-imagery.js'
 ];
 
 // ── INSTALL ─────────────────────────────────────────────────────────────────
