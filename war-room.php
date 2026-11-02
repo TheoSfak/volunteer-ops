@@ -2852,6 +2852,20 @@ include __DIR__ . '/includes/header.php';
     .wr-ar-bottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 40px 12px max(12px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, rgba(8, 12, 10, 0), rgba(8, 12, 10, .88) 36%); display: flex; flex-direction: column; gap: 6px; }
     .wr-ar-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
     .wr-ar-tile { padding: 6px 7px; border-radius: 10px; background: rgba(8, 12, 10, .62); border: 1px solid rgba(255, 255, 255, .14); }
+    .wr-ar-calibpill { width: 100%; padding: 7px 10px; border-radius: 10px; border: 1px solid #ffd27a; background: rgba(120, 72, 0, .88); color: #fff3d6; font-weight: 600; font-size: 12.5px; text-align: center; }
+    .wr-ar-calibpill[hidden] { display: none; }
+    .wr-ar-calib { position: absolute; inset: 0; z-index: 3; background: rgba(0, 0, 0, .78); display: flex; align-items: center; justify-content: center; padding: 20px; }
+    .wr-ar-calib[hidden] { display: none; }
+    .wr-ar-calibbox { width: min(100%, 380px); background: #1b2420; border: 1px solid rgba(255, 255, 255, .2); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .wr-ar-calibtitle { font-size: 17px; font-weight: 700; }
+    .wr-ar-fig8 { width: 100%; height: 110px; }
+    .wr-ar-fig8 path { fill: none; stroke: rgba(255, 255, 255, .35); stroke-width: 3; stroke-dasharray: 6 6; }
+    .wr-ar-fig8dot { fill: #34d27b; offset-path: path('M100,50 C100,18 40,18 40,50 C40,82 100,82 100,50 C100,18 160,18 160,50 C160,82 100,82 100,50 Z'); animation: wr-ar-fig8 3.2s linear infinite; }
+    @keyframes wr-ar-fig8 { from { offset-distance: 0%; } to { offset-distance: 100%; } }
+    @media (prefers-reduced-motion: reduce) { .wr-ar-fig8dot { animation: none; offset-distance: 25%; } }
+    .wr-ar-calibsteps { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+    .wr-ar-calibstatus { min-height: 1.4em; text-align: center; font-weight: 600; font-size: 14px; color: #ffd27a; }
+    .wr-ar-calibstatus.is-good { color: #7ef0a8; }
     .wr-ar-tilebtn { text-align: left; color: inherit; font: inherit; }
     .wr-ar-debug { font: 10.5px/1.3 ui-monospace, Consolas, monospace; color: #c9f5da; background: rgba(8, 12, 10, .75); border-radius: 8px; padding: 5px 8px; word-break: break-word; }
     .wr-ar-debug[hidden] { display: none; }

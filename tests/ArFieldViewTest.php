@@ -124,4 +124,23 @@ final class ArFieldViewTest extends TestCase
         $this->assertStringContainsString('arState.fastFixes >= 2', $this->module);
         $this->assertStringContainsString('data-ar="debug"', $this->module);
     }
+
+    public function testTheCompassIsCheckedAndTheFigureEightIsOneTapAway(): void
+    {
+        // Three stand-ins for an accuracy no browser reports: the field strength, the wander of a held-still phone, iOS's own figure.
+        $this->assertStringContainsString('new Magnetometer({frequency: 10})', $this->module);
+        $this->assertStringContainsString('c.jitter = arJitterRms(', $this->module);
+        $this->assertStringContainsString('webkitCompassAccuracy', $this->module);
+        // It has to stay poor for a while before the pill appears, so one bad second does not flash it.
+        $this->assertMatchesRegularExpression('~const AR_CALIB_SHOW_AFTER_MS = (\d+)~', $this->module);
+        preg_match('~const AR_CALIB_SHOW_AFTER_MS = (\d+)~', $this->module, $m);
+        $this->assertGreaterThanOrEqual(3000, (int) $m[1]);
+        // The dialog is always reachable by hand: a link, as well as the pill.
+        $this->assertSame(2, substr_count($this->module, 'data-ar="calib"'), 'the pill and the link both open it');
+        $this->assertStringContainsString("case 'calib': arOpenCalib(); break;", $this->module);
+        // A sensor that is not there must not break the screen.
+        $this->assertStringContainsString("if (typeof Magnetometer === 'undefined') return;", $this->module);
+        // The animation honours reduced motion.
+        $this->assertStringContainsString('prefers-reduced-motion: reduce) { .wr-ar-fig8dot { animation: none;', $this->warRoom);
+    }
 }

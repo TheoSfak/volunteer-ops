@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 
 const {
     arLocal, arFromLocal, arBasis, arHeading, arPitch, arFocalPx, arProject,
-    arBearingElevation, arTurnTo, arSubdivide, arNearestOnPolygon, arOfferCandidate, arEventKind, arSmoothBasis, arSmoothingTau, arAngleBetween, arSmoothFix,
+    arBearingElevation, arTurnTo, arSubdivide, arNearestOnPolygon, arOfferCandidate, arEventKind, arSmoothBasis, arSmoothingTau, arAngleBetween, arSmoothFix, arFieldQuality, arJitterRms, arCompassQuality,
 } = require('../../assets/js/war-room-ar.js');
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) <= eps, `${a} is not within ${eps} of ${b}`);
@@ -295,4 +295,46 @@ test('the nearest point on an open line does not close the last point back to th
     // A point past the end of the line: the distance is to the end, not to a closing edge.
     const beyond = arNearestOnPolygon({lat: 35.2 + d(300), lng: 24.9 + dl(130)}, geo, true);
     near(beyond.dist, 180, 1);
+});
+
+// ── is the compass any good ──
+test('the magnetic field: Earth is 25-65 microtesla, a car or a railing pushes it out', () => {
+    assert.equal(arFieldQuality(48), 'good');
+    assert.equal(arFieldQuality(25), 'good');
+    assert.equal(arFieldQuality(65), 'good');
+    assert.equal(arFieldQuality(22), 'fair');
+    assert.equal(arFieldQuality(70), 'fair');
+    assert.equal(arFieldQuality(120), 'poor');
+    assert.equal(arFieldQuality(8), 'poor');
+    assert.equal(arFieldQuality(null), null);
+    assert.equal(arFieldQuality(NaN), null);
+});
+
+test('root mean square of the offsets', () => {
+    near(arJitterRms([3, 3, 3, 3]), 3);
+    near(arJitterRms([0, 4]), Math.sqrt(8));
+    assert.equal(arJitterRms([]), null);
+    assert.equal(arJitterRms(null), null);
+});
+
+test('no readings at all is a good compass: nothing says otherwise', () => {
+    assert.deepEqual(arCompassQuality({fieldUt: null, jitterDeg: null, iosAccuracy: null}), {level: 'good', reasons: []});
+    assert.deepEqual(arCompassQuality({}), {level: 'good', reasons: []});
+});
+
+test('the worst signal decides, and the reasons come worst first', () => {
+    const q = arCompassQuality({fieldUt: 110, jitterDeg: 3.5, iosAccuracy: null});
+    assert.equal(q.level, 'poor');
+    assert.deepEqual(q.reasons, ['field', 'jitter']);
+    assert.equal(arCompassQuality({fieldUt: 48, jitterDeg: 1.2, iosAccuracy: 8}).level, 'good');
+    assert.equal(arCompassQuality({fieldUt: 48, jitterDeg: 4, iosAccuracy: null}).level, 'fair');
+    assert.equal(arCompassQuality({fieldUt: 48, jitterDeg: 9, iosAccuracy: null}).level, 'poor');
+});
+
+test('iOS: a negative accuracy means no heading at all, and more than 30 degrees is poor', () => {
+    assert.equal(arCompassQuality({iosAccuracy: -1}).level, 'poor');
+    assert.equal(arCompassQuality({iosAccuracy: 40}).level, 'poor');
+    assert.equal(arCompassQuality({iosAccuracy: 25}).level, 'fair');
+    assert.equal(arCompassQuality({iosAccuracy: 10}).level, 'good');
+    assert.deepEqual(arCompassQuality({iosAccuracy: 40}).reasons, ['ios']);
 });

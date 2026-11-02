@@ -219,12 +219,58 @@ function arSmoothFix(prev, fix, speed) {
     return {lat: prev.lat + (fix.lat - prev.lat) * g, lng: prev.lng + (fix.lng - prev.lng) * g, acc: fix.acc};
 }
 
+// ── Is the compass any good? ──
+// A browser cannot ask the phone how well its compass is calibrated (Android
+// gives no accuracy at all), so three things stand in for it. iOS reports one
+// (webkitCompassAccuracy). The magnetic field strength says whether something
+// is bending the field: Earth's is 25-65 microtesla, and a car, a steel
+// railing, a speaker or a power line pushes it outside that. And a phone held
+// still whose compass still wanders is a compass that is not sure.
+
+// microtesla -> 'good' | 'fair' | 'poor' | null (no reading).
+function arFieldQuality(ut) {
+    if (typeof ut !== 'number' || isNaN(ut)) return null;
+    if (ut >= 25 && ut <= 65) return 'good';
+    if (ut >= 20 && ut <= 75) return 'fair';
+    return 'poor';
+}
+
+// Root mean square of a list of offsets, in degrees; null for none.
+function arJitterRms(offsets) {
+    if (!offsets || !offsets.length) return null;
+    return Math.sqrt(offsets.reduce((sum, v) => sum + v * v, 0) / offsets.length);
+}
+
+// The worst of the signals that have a reading. jitterDeg is only meaningful
+// for a phone that is held still (null otherwise); iosAccuracy is degrees, with
+// a negative number meaning iOS has no heading at all. reasons names every
+// signal that is not good, worst first.
+function arCompassQuality(signals) {
+    const order = {good: 0, fair: 1, poor: 2};
+    const found = [];
+    const field = arFieldQuality(signals.fieldUt);
+    if (field && field !== 'good') found.push({level: field, reason: 'field'});
+    if (typeof signals.jitterDeg === 'number') {
+        const level = signals.jitterDeg <= 2.5 ? 'good' : (signals.jitterDeg <= 5 ? 'fair' : 'poor');
+        if (level !== 'good') found.push({level: level, reason: 'jitter'});
+    }
+    if (typeof signals.iosAccuracy === 'number') {
+        const a = signals.iosAccuracy;
+        const level = a < 0 ? 'poor' : (a <= 15 ? 'good' : (a <= 30 ? 'fair' : 'poor'));
+        if (level !== 'good') found.push({level: level, reason: 'ios'});
+    }
+    found.sort((a, b) => order[b.level] - order[a.level]);
+    return {level: found.length ? found[0].level : 'good', reasons: found.map(f => f.reason)};
+}
+
 // ── The screen ───────────────────────────────────────────────────────────────
 
 const AR_COL = {green: [74, 222, 128], cyan: [34, 211, 238], red: [248, 81, 73], orange: [255, 145, 60], amber: [251, 191, 36], white: [240, 246, 242], grey: [160, 170, 165]};
 const AR_FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const AR_MOVING_MPS = 1.5;        // faster than this and the screen dims: look where you are going
 const AR_STILL_MPS = 0.8;         // and it stays dimmed until the speed has fallen below this
+const AR_CALIB_SHOW_AFTER_MS = 5000;  // a poor compass must stay poor this long before the screen says so
+const AR_CALIB_CLEAR_AFTER_MS = 4000; // and a good one this long before it takes it back
 const AR_COMPASS_STALE_MS = 15000; // a phone held still sends nothing: a quiet compass is not a dead one
 const AR_SESSION_MS = 10 * 60000; // camera + GPS + sensors heat a phone; ask before going on
 const AR_SECTOR_OUT_M = 100;      // the same distance the server warns at (checkSectorExitWarnings)
@@ -293,6 +339,7 @@ function arElement() {
         </div>
         <canvas class="wr-ar-radar"></canvas>
         <div class="wr-ar-bottom">
+            <button type="button" class="wr-ar-calibpill" data-ar="calib" hidden></button>
             <div class="wr-ar-tiles">
                 <div class="wr-ar-tile"><small>${escapeHtml(t('ar.tile_dist'))}</small><b data-ar-k="dist"></b></div>
                 <div class="wr-ar-tile"><small>${escapeHtml(t('ar.tile_dz'))}</small><b data-ar-k="dz"></b></div>
@@ -305,7 +352,21 @@ function arElement() {
             <button type="button" class="wr-ar-go" data-ar="go" hidden></button>
             <div class="wr-ar-links">
                 <button type="button" data-ar="compass"><i class="bi bi-compass me-1"></i>${escapeHtml(t('arrow.open_btn'))}</button>
+                <button type="button" data-ar="calib">${escapeHtml(t('ar.calib_link'))}</button>
                 <button type="button" data-ar="decline" hidden>${escapeHtml(t('decline.btn'))}</button>
+            </div>
+        </div>
+        <div class="wr-ar-calib" hidden>
+            <div class="wr-ar-calibbox">
+                <div class="wr-ar-calibtitle">${escapeHtml(t('ar.calib_title'))}</div>
+                <svg class="wr-ar-fig8" viewBox="0 0 200 100" aria-hidden="true"><path d="M100,50 C100,18 40,18 40,50 C40,82 100,82 100,50 C100,18 160,18 160,50 C160,82 100,82 100,50 Z"/><circle class="wr-ar-fig8dot" r="6"/></svg>
+                <ol class="wr-ar-calibsteps">
+                    <li>${escapeHtml(t('ar.calib_step_away'))}</li>
+                    <li>${escapeHtml(t('ar.calib_step_wave'))}</li>
+                    <li>${escapeHtml(t('ar.calib_step_hold'))}</li>
+                </ol>
+                <div class="wr-ar-calibstatus" aria-live="polite"></div>
+                <button type="button" class="wr-ar-go" data-ar="calibdone">${escapeHtml(t('ar.calib_done'))}</button>
             </div>
         </div>
         <div class="wr-ar-msg" hidden><div class="wr-ar-msgbox"><div class="wr-ar-msgtext"></div><button type="button" class="wr-ar-go" data-ar="msgok"></button></div></div>`;
@@ -326,6 +387,8 @@ function arElement() {
             case 'go': arGo(btn); break;
             case 'msgok': arMessageDone(); break;
             case 'debug': arState.debug = !arState.debug; break;
+            case 'calib': arOpenCalib(); break;
+            case 'calibdone': arCloseCalib(); break;
             case 'compass': { const m = opEntries.get(arState.key); arClose(); if (m) arrowOpen(m); break; }
             case 'decline': { const m = opEntries.get(arState.key); arClose(); if (m) opAct('decline', m, btn); break; }
         }
@@ -340,7 +403,7 @@ function arOpen(m) {
     const el = arElement();
     arState = {
         key: m ? m.key : null, layers: {bound: true, team: true, haz: true},
-        pose: null, orientAt: 0, absolute: false, iosOffset: 0, sm: null, fastFixes: 0, evUsed: 0, evIgnored: 0, evRate: '', evAt: 0, debug: false,
+        pose: null, orientAt: 0, absolute: false, iosOffset: 0, sm: null, compass: {samples: [], fieldUt: null, fieldAt: 0, iosAcc: null, jitter: null, level: 'good', poorSince: 0, goodSince: 0, reasons: [], at: 0, shown: false, openedAt: 0}, mag: null, fastFixes: 0, evUsed: 0, evIgnored: 0, evRate: '', evAt: 0, debug: false,
         fix: null, watchId: null, stream: null, wakeLock: null, raf: 0, onOrient: null, onKey: null, onResize: null,
         elev: new Map(), meElev: null, meElevAt: null, elevBusy: false, elevKey: '',
         openedAt: Date.now(), elevAt: -1e9, message: null, moving: false, warnSig: '', cw: 0, ch: 0, dpr: 1,
@@ -389,6 +452,7 @@ function arOpen(m) {
             .then(lock => { if (arState) arState.wakeLock = lock; else lock.release().catch(() => {}); })
             .catch(() => {});
     }
+    arStartMagnetometer();
     arState.onKey = e => { if (e.key === 'Escape') arClose(); };
     document.addEventListener('keydown', arState.onKey);
     let seen = false;
@@ -416,6 +480,7 @@ function arClose() {
     if (arState.watchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(arState.watchId);
     if (arState.stream) arState.stream.getTracks().forEach(tr => tr.stop());
     if (arState.wakeLock) arState.wakeLock.release().catch(() => {});
+    if (arState.mag) { try { arState.mag.stop(); } catch (e) { /* already stopped */ } }
     arState = null;
 }
 
@@ -494,8 +559,98 @@ function arOnOrientation(e) {
     const tau = prevBasis ? arSmoothingTau(arAngleBetween(prevBasis, raw)) : 0.06;
     const basis = arSmoothBasis(prevBasis, raw, 1 - Math.exp(-dt / tau));
     arState.pose = {basis: basis, screenAngle: screenAngle};
+    // How far each reading is from where the view settled: on a phone held still, that is the compass's own noise.
+    if (prevBasis) arState.compass.samples.push({t: now, off: arAngleBetween(prevBasis, raw), f: basis.f});
+    if (kind === 'ios' && typeof e.webkitCompassAccuracy === 'number') arState.compass.iosAcc = e.webkitCompassAccuracy;
     arState.orientAt = now;
 }
+// The magnetometer, on a browser that exposes it (Chrome on Android does, over
+// https, without asking). Its field strength is the interference check; a phone
+// or browser without it simply never reports one.
+function arStartMagnetometer() {
+    try {
+        if (typeof Magnetometer === 'undefined') return;
+        const sensor = new Magnetometer({frequency: 10});
+        sensor.addEventListener('reading', () => {
+            if (!arState) return;
+            const ut = Math.hypot(sensor.x, sensor.y, sensor.z);
+            const c = arState.compass;
+            c.fieldUt = c.fieldUt === null ? ut : c.fieldUt + (ut - c.fieldUt) * 0.2;
+            c.fieldAt = Date.now();
+        });
+        sensor.addEventListener('error', () => {});
+        sensor.start();
+        arState.mag = sensor;
+    } catch (e) { /* no permission, or no such sensor: the other two signals still work */ }
+}
+
+// Called every frame, works four times a second. A poor compass has to stay
+// poor for a few seconds before the screen says so, and a good one has to stay
+// good before it takes it back, so a single bad second does not flash a warning.
+function arUpdateCompass() {
+    const c = arState.compass, now = Date.now();
+    if (now - c.at < 250) return;
+    c.at = now;
+    while (c.samples.length && c.samples[0].t < now - 3000) c.samples.shift();
+    c.jitter = null;
+    const n = c.samples.length;
+    if (n >= 20 && c.samples[n - 1].t - c.samples[0].t >= 1500 && arAngleBetween({f: c.samples[0].f}, {f: c.samples[n - 1].f}) < 3) {
+        c.jitter = arJitterRms(c.samples.map(s => s.off));
+    }
+    if (c.fieldUt !== null && now - c.fieldAt > 5000) c.fieldUt = null; // the sensor went quiet
+    const q = arCompassQuality({fieldUt: c.fieldUt, jitterDeg: c.jitter, iosAccuracy: c.iosAcc});
+    c.level = q.level; c.reasons = q.reasons;
+    if (q.level === 'poor') {
+        c.goodSince = 0;
+        if (!c.poorSince) c.poorSince = now;
+        if (now - c.poorSince >= AR_CALIB_SHOW_AFTER_MS) c.shown = true;
+    } else {
+        c.poorSince = 0;
+        if (!c.goodSince) c.goodSince = now;
+        if (now - c.goodSince >= AR_CALIB_CLEAR_AFTER_MS) c.shown = false;
+    }
+}
+
+function arCalibReasonText(c) {
+    const first = c.reasons[0];
+    if (first === 'field') return t('ar.calib_reason_field', {ut: Math.round(c.fieldUt === null ? 0 : c.fieldUt)});
+    if (first === 'jitter') return t('ar.calib_reason_jitter', {deg: c.jitter === null ? '?' : c.jitter.toFixed(1)});
+    if (first === 'ios') return t('ar.calib_reason_ios', {deg: c.iosAcc === null ? '?' : Math.round(c.iosAcc)});
+    return t('ar.calib_pill');
+}
+
+function arOpenCalib() {
+    const box = document.querySelector('#wrAr .wr-ar-calib');
+    if (!box || !arState) return;
+    arState.compass.openedAt = Date.now();
+    box.hidden = false;
+}
+function arCloseCalib() {
+    const box = document.querySelector('#wrAr .wr-ar-calib');
+    if (box) box.hidden = true;
+    if (arState) arState.compass.openedAt = 0;
+}
+
+// The pill under the compass strip, and the figure-8 dialog's live status line.
+function arUpdateCompassHud(el) {
+    const c = arState.compass;
+    const pill = el.querySelector('.wr-ar-calibpill');
+    pill.hidden = !c.shown;
+    if (c.shown) {
+        const text = '\u26A0 ' + arCalibReasonText(c) + ' \u00B7 ' + t('ar.calib_pill_tap');
+        if (pill.textContent !== text) pill.textContent = text;
+    }
+    const box = el.querySelector('.wr-ar-calib');
+    if (box.hidden) return;
+    const status = box.querySelector('.wr-ar-calibstatus');
+    const good = c.level === 'good' && c.goodSince && Date.now() - c.goodSince >= 2000;
+    const text = good ? t('ar.calib_good') : (c.level === 'good' ? t('ar.calib_checking') : arCalibReasonText(c));
+    if (status.textContent !== text) status.textContent = text;
+    status.classList.toggle('is-good', !!good);
+    // It is good again after the shake: the dialog has done its job.
+    if (good && Date.now() - c.openedAt > 6000) arCloseCalib();
+}
+
 function arScreenAngle() {
     return (screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (Number(window.orientation) || 0);
 }
@@ -784,6 +939,8 @@ function arFrame(now) {
     ctx.clearRect(0, 0, arState.cw, arState.ch);
     el.classList.toggle('wr-ar-dim', arState.moving);
     arUpdateStaticHud(el, m);
+    arUpdateCompass();
+    arUpdateCompassHud(el);
     if (Date.now() - arState.openedAt > AR_SESSION_MS && !arState.message) {
         arState.timedOut = true;
         arShowMessage(t('ar.timeout'), t('ar.continue'));
@@ -949,7 +1106,7 @@ function arUpdateDebug(el, S) {
     const raw = arState.fix ? arState.fix.coords : null;
     const wander = me && raw ? Math.round(Math.hypot(arLocal(me, {lat: raw.latitude, lng: raw.longitude}).x, arLocal(me, {lat: raw.latitude, lng: raw.longitude}).y)) : '-';
     const age = arState.orientAt ? ((now - arState.orientAt) / 1000).toFixed(1) : '-';
-    const text = 'hdg ' + (S ? Math.round(S.heading) : '-') + '\u00B0 pitch ' + (S ? Math.round(S.pitch) : '-') + '\u00B0 | ' + arState.evRate + ' | last ' + age + 's | raw-vs-used ' + wander + ' m | moving ' + (arState.moving ? 'yes' : 'no') + (raw && typeof raw.speed === 'number' ? ' (' + raw.speed.toFixed(1) + ' m/s)' : '');
+    const text = 'hdg ' + (S ? Math.round(S.heading) : '-') + '\u00B0 pitch ' + (S ? Math.round(S.pitch) : '-') + '\u00B0 | ' + arState.evRate + ' | last ' + age + 's | raw-vs-used ' + wander + ' m | compass ' + arState.compass.level + (arState.compass.fieldUt !== null ? ' ' + Math.round(arState.compass.fieldUt) + 'uT' : '') + (arState.compass.jitter !== null ? ' \u00B1' + arState.compass.jitter.toFixed(1) + '\u00B0' : '') + ' | moving ' + (arState.moving ? 'yes' : 'no') + (raw && typeof raw.speed === 'number' ? ' (' + raw.speed.toFixed(1) + ' m/s)' : '');
     if (box.textContent !== text) box.textContent = text;
 }
 
@@ -1166,6 +1323,9 @@ if (typeof module !== 'undefined' && module.exports) {
         arSmoothingTau,
         arAngleBetween,
         arSmoothFix,
+        arFieldQuality,
+        arJitterRms,
+        arCompassQuality,
         arOfferCandidate,
     };
 }
