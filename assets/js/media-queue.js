@@ -154,10 +154,54 @@
         return (queue || []).filter(q => q.kind === 'media').length;
     }
 
-    // Two lanes share the one queue so a clip crawling up a weak uplink never
-    // holds an SOS behind it:
-    //   'fast'  every item that is not a file, in order
+    // ── GPS positions kept by the page (v3.425.0) ───────────────────────────
+    // A browser tab or an iPhone has no background service, so a position the
+    // page could not send used to be dropped. The page now keeps it, as
+    // {kind:'ping', shiftId, lat, lng, acc, speed, battery, source, at} where
+    // `at` is the fix's own time on the phone's clock. The server stamps a fix
+    // at its real time (fix_age_ms) and refuses one older than half an hour
+    // (WAR_ROOM_MAX_FIX_AGE_SECONDS), so nothing older is worth keeping, and a
+    // trail of one every 5 s must not grow without bound.
+    const PING_QUEUE_MAX_AGE_MS = 1800000;
+    const PING_QUEUE_MAX = 200;
+    const PING_BATCH_MAX = 50;
+
+    function countQueuedPings(queue) {
+        return (queue || []).filter(q => q.kind === 'ping').length;
+    }
+
+    // The queue with every expired position gone and room for one more: past
+    // the cap the OLDEST positions go, because the newest say where the person
+    // is now. Everything that is not a position is untouched, in place.
+    function prunePings(queue, now) {
+        const cutoff = now - PING_QUEUE_MAX_AGE_MS;
+        const kept = queue.filter(q => q.kind !== 'ping' || q.at >= cutoff);
+        let excess = countQueuedPings(kept) - (PING_QUEUE_MAX - 1);
+        return excess > 0 ? kept.filter(q => q.kind !== 'ping' || excess-- <= 0) : kept;
+    }
+
+    // What the next request carries: the oldest live positions of ONE shift (a
+    // request names one), at most PING_BATCH_MAX, in the order they were taken
+    // - the server skips a fix older than the newest it holds, so order is
+    // load-bearing. `expired` are queued positions past the half hour: they
+    // are dropped, never sent (the server would only log them as refused).
+    function collectPingBatch(queue, now) {
+        const cutoff = now - PING_QUEUE_MAX_AGE_MS;
+        const out = {shiftId: null, items: [], expired: []};
+        queue.forEach(q => {
+            if (q.kind !== 'ping') return;
+            if (q.at < cutoff) { out.expired.push(q); return; }
+            if (out.shiftId === null) out.shiftId = q.shiftId;
+            if (String(q.shiftId) === String(out.shiftId) && out.items.length < PING_BATCH_MAX) out.items.push(q);
+        });
+        return out;
+    }
+
+    // Three lanes share the one queue so a slow upload never holds an SOS
+    // behind it, and a backlog of positions never does either:
+    //   'fast'  every item that is not a file or a position, in order
     //   'media' the files, in order
+    //   'gps'   the positions, in order
     // The one cross-lane rule: «Ολοκληρώθηκε» at a route point waits for that
     // point's photo/video still ahead of it in the queue (the server refuses
     // to complete a point whose required file is missing), and while it waits
@@ -174,7 +218,11 @@
                 if (q.waypointId !== null && q.waypointId !== undefined) waiting.add(String(q.waypointId));
                 continue;
             }
-            if (lane === 'media') continue;
+            if (q.kind === 'ping') {
+                if (lane === 'gps') return i;
+                continue;
+            }
+            if (lane !== 'fast') continue;
             if (q.kind === 'route') {
                 if (routeHeld) continue;
                 if (q.action === 'complete' && waiting.has(String(q.id))) { routeHeld = true; continue; }
@@ -241,6 +289,7 @@
     const api = {
         MAX_COUNTED_TRIES, isIosDevice, newMediaId, mediaFileName, mediaKind, makeSpec, buildFormData,
         classifyFailure, queuedMediaFor, countQueuedMedia, nextQueueIndex,
+        PING_QUEUE_MAX_AGE_MS, PING_QUEUE_MAX, PING_BATCH_MAX, countQueuedPings, prunePings, collectPingBatch,
         put, get, remove, requestPersistence,
     };
     root.VoMediaQueue = api;

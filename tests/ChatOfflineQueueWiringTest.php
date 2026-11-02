@@ -111,10 +111,13 @@ final class ChatOfflineQueueWiringTest extends TestCase
     public function testGpsPositionsAreOnlyPromisedWhereTheyAreReallyKept(): void
     {
         $footer = $this->source('includes/footer.php');
-        // The positions sentence needs the Android background service to be running.
+        // The app's sentence needs the Android background service to be running.
         $this->assertStringContainsString("t('myping.native_keeps')", $footer);
         $this->assertStringContainsString('refreshNativeTrackingLive()', $footer);
-        $this->assertMatchesRegularExpression('/\(live \? \' \' \+ nativeKeeps : \'\'\)/', $footer);
+        // Otherwise the page's own sentence, and only for a person this page tracks;
+        // anyone else (an admin with no position) gets none.
+        $this->assertMatchesRegularExpression('/\(live \? \' \' \+ nativeKeeps : \(webKept \? \' \' \+ webKeeps : \'\'\)\)/', $footer);
+        $this->assertStringContainsString("typeof webPositionsKept === 'function' && webPositionsKept()", $footer);
     }
 
     public function testEveryNewStringExistsInGreekAndEnglish(): void

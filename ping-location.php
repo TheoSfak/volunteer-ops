@@ -20,12 +20,32 @@ if (!isPost()) {
 
 // AJAX-safe CSRF check (verifyCsrf() redirects on failure which breaks fetch)
 if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', (string) $_POST['csrf_token'])) {
-    echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
+    // `csrf` tells the page's offline queue this is a page that needs
+    // reloading (the login was renewed elsewhere), not a position the server
+    // refuses: the queue keeps its positions instead of discarding them.
+    echo json_encode(['ok' => false, 'csrf' => true, 'error' => t('common.invalid_request')]);
     exit;
 }
 
 $user     = getCurrentUser();
 $shiftId  = (int) post('shift_id');
+
+// A JSON LIST of fixes is the backlog the page kept while it could not send
+// (v3.425.0): one request for up to 50 positions instead of one POST per fix,
+// so the phone catches up in a moment once signal returns instead of holding
+// its CURRENT position back behind the backlog. Each fix is judged exactly as
+// if it had arrived on its own, at its own fix time. The reply says "batch".
+$batchRaw = post('batch');
+if ($batchRaw !== null && $batchRaw !== '') {
+    $items = json_decode((string) $batchRaw, true);
+    if (is_array($items) && $items !== [] && array_is_list($items)) {
+        $results = recordBrowserPingBatch($user, $shiftId, $items);
+        echo json_encode(['ok' => true, 'batch' => count($results), 'results' => $results]);
+        exit;
+    }
+    echo json_encode(['ok' => false, 'error' => 'Malformed batch']);
+    exit;
+}
 $lat      = (float) post('lat');
 $lng      = (float) post('lng');
 $source   = post('source') === 'auto' ? 'auto' : 'manual';

@@ -519,6 +519,60 @@ function recordNativePingBatch(array $user, int $shiftId, array $items): array {
 }
 
 /**
+ * Most positions one browser request may carry when the page empties the
+ * backlog it kept while it could not send (v3.425.0). The page's own batches
+ * are 50; the cap only bounds what a malformed or hostile body can make one
+ * PHP request do.
+ */
+const BROWSER_PING_BATCH_MAX = 100;
+
+/**
+ * Positions a browser tab or an iPhone kept while it had no signal, recorded
+ * through the same path as one that arrived on its own: each is judged at its
+ * OWN fix time (fix_age_ms), exactly as recordNativePingBatch() does for the
+ * Android app. Same order rule too - the write path skips a fix older than the
+ * newest one already stored - so the batch is sorted oldest first here rather
+ * than trusting the sender to have kept the order.
+ *
+ * Each item: lat, lng, accuracy, battery_level, fix_age_ms, speed, source
+ * ('manual' for a tap on the button, anything else is the passive capture).
+ */
+function recordBrowserPingBatch(array $user, int $shiftId, array $items): array {
+    $items = array_slice(array_values($items), 0, BROWSER_PING_BATCH_MAX);
+    $ageOf = fn($item) => is_array($item) ? (parseFixAgeMs($item['fix_age_ms'] ?? null) ?? 0) : 0;
+    // Oldest first = largest age first (usort is stable from PHP 8.0, so two
+    // fixes of the same age keep the order they were sent in).
+    usort($items, fn($a, $b) => $ageOf($b) <=> $ageOf($a));
+    $results = [];
+    foreach ($items as $item) {
+        if (!is_array($item)) {
+            $results[] = ['ok' => false, 'error' => 'Malformed fix'];
+            continue;
+        }
+        $accuracy = (isset($item['accuracy']) && is_numeric($item['accuracy']))
+            ? min((float) $item['accuracy'], 5000.0)
+            : null;
+        // Reject, not clamp: see ping-location.php for why a battery value
+        // outside 0-100 is dropped rather than capped.
+        $rawBattery = $item['battery_level'] ?? null;
+        $battery = (is_numeric($rawBattery) && (int) $rawBattery >= 0 && (int) $rawBattery <= 100)
+            ? (int) $rawBattery
+            : null;
+        $results[] = recordVolunteerPing(
+            $user, $shiftId,
+            (float) ($item['lat'] ?? 0), (float) ($item['lng'] ?? 0),
+            $accuracy, $battery,
+            ($item['source'] ?? '') === 'manual' ? 'manual' : 'auto',
+            'browser',
+            parseFixAgeMs($item['fix_age_ms'] ?? null),
+            false,
+            parseSpeedMps($item['speed'] ?? null)
+        );
+    }
+    return $results;
+}
+
+/**
  * Count a refused fix for the GPS quality report. The refused position is
  * never stored — that is what refusing it means — so without this nothing
  * could ever say that one phone was turned away forty times and another

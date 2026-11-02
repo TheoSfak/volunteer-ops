@@ -1467,6 +1467,8 @@ return [
         // Chat messages kept on the phone while there is no signal
         'queue.chat_pending' => 'Μηνύματα που περιμένουν σήμα: {count}. Είναι αποθηκευμένα στο κινητό και θα σταλούν αυτόματα.',
         'queue.chat_failed' => 'Το μήνυμα «{text}» δεν στάλθηκε: {error}',
+        // GPS positions kept by the page while there is no signal
+        'queue.ping_pending' => 'Στίγματα GPS που περιμένουν σήμα: {count}. Θα σταλούν αυτόματα.',
         'chat.pending' => 'σε αναμονή αποστολής',
         'shortage.empty_list' => 'Δεν υπάρχουν ανοιχτές αναφορές έλλειψης.',
         'shortage.seen_at_prefix' => ' · Είδατε: {time}',
@@ -1576,6 +1578,8 @@ return [
         'myping.sending' => 'Αποστολή στίγματος…',
         'myping.no_connection' => 'Δεν υπάρχει σύνδεση με τον διακομιστή — δεν επιβεβαιώθηκε ότι το στίγμα στάλθηκε. Δοκιμάστε ξανά σε λίγο.',
         'myping.native_keeps' => 'Η εφαρμογή συνεχίζει να καταγράφει τα στίγματά σας και θα τα στείλει όλα μόλις επανέλθει η σύνδεση.',
+        'myping.saved_offline' => 'Δεν υπάρχει σύνδεση. Το στίγμα αποθηκεύτηκε και θα σταλεί αυτόματα μόλις επανέλθει το δίκτυο.',
+        'myping.web_keeps' => 'Όσο αυτή η σελίδα μένει ανοιχτή, κρατά τα στίγματά σας των τελευταίων 30 λεπτών και θα τα στείλει όλα μόλις επανέλθει το δίκτυο.',
         'myping.gps_denied' => 'Δεν δόθηκε άδεια πρόσβασης στο GPS.',
         'myping.gps_unavailable' => 'Το κινητό δεν μπορεί να βρει θέση αυτή τη στιγμή.',
         'myping.gps_timeout' => 'Το κινητό άργησε πολύ να βρει θέση. Δοκίμασε σε ανοιχτό χώρο.',
@@ -4565,6 +4569,8 @@ return [
         // Chat messages kept on the phone while there is no signal
         'queue.chat_pending' => 'Messages waiting for a signal: {count}. They are saved on this phone and will be sent automatically.',
         'queue.chat_failed' => 'The message "{text}" was not sent: {error}',
+        // GPS positions kept by the page while there is no signal
+        'queue.ping_pending' => 'GPS positions waiting for a signal: {count}. They will be sent automatically.',
         'chat.pending' => 'waiting to send',
         'shortage.empty_list' => 'There are no open shortage reports.',
         'shortage.seen_at_prefix' => ' · Seen: {time}',
@@ -4674,6 +4680,8 @@ return [
         'myping.sending' => 'Sending location…',
         'myping.no_connection' => 'No connection to the server — the location was not confirmed as sent. Try again shortly.',
         'myping.native_keeps' => 'The app keeps recording your positions and will send them all as soon as the connection is back.',
+        'myping.saved_offline' => 'No connection. The position was saved and will be sent automatically as soon as the network returns.',
+        'myping.web_keeps' => 'While this page stays open it keeps your positions from the last 30 minutes and will send them all as soon as the network returns.',
         'myping.gps_denied' => 'GPS access was not granted.',
         'myping.gps_unavailable' => 'Your phone cannot get a position right now.',
         'myping.gps_timeout' => 'Your phone took too long to get a position. Try in the open.',

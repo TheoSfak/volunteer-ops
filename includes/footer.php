@@ -355,13 +355,19 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
     if (isWarRoom && barText) {
         barText.textContent = <?= json_encode(t('gui.offline_bar_warroom'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
     }
-    // GPS positions are kept through an outage ONLY by the Android app's
-    // background service (war-room.php's refreshNativeTrackingLive(): running
-    // and not paused by command). In a browser tab, and on an iPhone, a
-    // position that cannot be sent is dropped, so the sentence about positions
-    // is added only while that service is really recording.
+    // GPS positions are kept through an outage in two different ways, and the
+    // sentence says which one applies. The Android app's background service
+    // (war-room.php's refreshNativeTrackingLive(): running and not paused by
+    // command) records even with the screen off. A browser tab or an iPhone
+    // keeps them in the page's own queue (since v3.425.0), but only while the
+    // page stays open - a phone suspends the page's GPS when the screen locks -
+    // and only a person this page tracks (webPositionsKept()) has any to keep.
+    // Anyone else, an admin with no position of their own, gets no sentence.
     var baseBarText = barText ? barText.textContent : '';
     var nativeKeeps = <?= json_encode(t('myping.native_keeps'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
+    // v3.425.0: outside the app the page itself keeps the last half hour of
+    // positions (war-room.php's enqueuePing), for as long as it stays open.
+    var webKeeps = <?= json_encode(t('myping.web_keeps'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
     function update() {
         var offline = !navigator.onLine;
         bar.style.display = offline ? 'block' : 'none';
@@ -369,7 +375,8 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
         if (offline && isWarRoom && barText && typeof refreshNativeTrackingLive === 'function') {
             refreshNativeTrackingLive().then(function (live) {
                 if (navigator.onLine) return;
-                barText.textContent = baseBarText + (live ? ' ' + nativeKeeps : '');
+                var webKept = typeof webPositionsKept === 'function' && webPositionsKept();
+                barText.textContent = baseBarText + (live ? ' ' + nativeKeeps : (webKept ? ' ' + webKeeps : ''));
                 document.body.style.paddingTop = bar.offsetHeight + 'px';
             }).catch(function () {});
         }

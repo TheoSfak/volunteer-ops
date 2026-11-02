@@ -16611,12 +16611,14 @@ function renderQueueStatus() {
     // two of them are a video each, which is what decides how long they take.
     const mediaCount = VoMediaQueue.countQueuedMedia(queue);
     const chatCount = queue.filter(q => q.kind === 'chat').length;
-    const actionCount = queue.length - mediaCount - chatCount;
+    const pingCount = VoMediaQueue.countQueuedPings(queue);
+    const actionCount = queue.length - mediaCount - chatCount - pingCount;
     const pendingText = actionCount === 1 ? t('queue.pending_one') : t('queue.pending', {count: actionCount});
     const lines = [];
     if (actionCount) lines.push(`<i class="bi bi-wifi-off me-1"></i>${pendingText}`);
     if (chatCount) lines.push(`<i class="bi bi-chat-dots-fill me-1"></i>${t('queue.chat_pending', {count: chatCount})}`);
     if (mediaCount) lines.push(`<i class="bi bi-camera-fill me-1"></i>${t('queue.media_pending', {count: mediaCount})}`);
+    if (pingCount) lines.push(`<i class="bi bi-geo-alt-fill me-1"></i>${t('queue.ping_pending', {count: pingCount})}`);
     el.innerHTML = lines.map((line, i) => i ? `<div class="mt-1">${line}</div>` : line).join('') +
         (sosPending ? `<div class="fw-bold mt-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>${t('queue.sos_pending')}</div>` : '');
 }
@@ -16803,9 +16805,71 @@ function sendQueuedChat(item) {
     });
 }
 
+// ── GPS positions (v3.425.0) ────────────────────────────────────────────────
+//   kind:'ping' → ping-location.php  {shiftId, lat, lng, acc, speed, battery, source, at}
+// A browser tab or an iPhone has no background service, so a position the page
+// could not send used to be dropped and the trail had a hole in it. The page
+// now keeps it, with the moment the phone TOOK it (`at`), and sends the backlog
+// in one request when it can, oldest first; the server stamps each at its own
+// fix time. Half an hour is all the server accepts (WAR_ROOM_MAX_FIX_AGE_SECONDS),
+// so nothing older is kept. Positions have their own lane: they never hold an
+// SOS behind them and an SOS never holds them.
+//
+// Only while this PAGE is open: a phone suspends the page's GPS when the screen
+// locks, and only the Android app's background service records through that.
+function enqueuePing(ping) {
+    const queue = VoMediaQueue.prunePings(loadQueue(), Date.now());
+    queue.push(Object.assign({kind: 'ping'}, ping));
+    saveQueue(queue);
+    renderQueueStatus();
+}
+
+// Whether this page is tracking its person at all (the same buttons that send
+// the positions), so the red offline bar only mentions positions where the
+// page really keeps them.
+function webPositionsKept() {
+    return !!navigator.geolocation && document.querySelectorAll('.send-ping').length > 0;
+}
+
+// Resolves true when the page kept the position. Inside the Android app with
+// its background service recording, the service already keeps every position
+// through an outage and sends it, so the page keeping a second copy would only
+// make the server judge the same walk twice.
+function keepPositionForLater(ping) {
+    return refreshNativeTrackingLive().then(live => {
+        if (live) return false;
+        enqueuePing(ping);
+        return true;
+    }, () => { enqueuePing(ping); return true; });
+}
+
+// One request for the oldest live positions of one shift. Same contract as
+// every other sendQueuedItem() branch: the server's JSON, {networkError:true} to
+// try again later, null when the login has to be renewed first. A position the
+// server REFUSES (too imprecise, an impossible jump) is judged and gone, like
+// any position that arrived on its own - no notice, the next one is a minute away.
+function sendQueuedPings() {
+    const now = Date.now();
+    const batch = VoMediaQueue.collectPingBatch(loadQueue(), now);
+    const settle = () => batch.expired.concat(batch.items).forEach(removeQueueItem);
+    if (!batch.items.length) { settle(); return Promise.resolve({ok: true}); }
+    const fixes = batch.items.map(p => ({
+        lat: p.lat, lng: p.lng, accuracy: p.acc, battery_level: p.battery, speed: p.speed,
+        source: p.source, fix_age_ms: Math.max(0, now - p.at)
+    }));
+    return postQueuedForm('ping-location.php', {shift_id: String(batch.shiftId), batch: JSON.stringify(fixes)}).then(result => {
+        if (!result || result.networkError) return result;
+        // A stale page token: they wait for the reload (and expire in half an hour anyway).
+        if (result.csrf) return null;
+        settle();
+        return {ok: true};
+    });
+}
+
 function sendQueuedItem(item) {
     if (item.kind === 'media') return sendQueuedMedia(item);
     if (item.kind === 'chat') return sendQueuedChat(item);
+    if (item.kind === 'ping') return sendQueuedPings();
     // Triage writes carry their own ids (victim / assessment / bulk uuid), so
     // a replay that already landed is recognised server-side and ignored.
     if (item.kind === 'triage') {
@@ -16860,7 +16924,7 @@ const QUEUE_LOCK_TTL_MS = 30000;
 // duplicate that slips through anyway is answered by the server's client_uuid
 // guard for files, and by the replay guards the text items already have.
 function queueLockKey(lane) {
-    return lane === 'media' ? QUEUE_LOCK_KEY + '_media' : QUEUE_LOCK_KEY;
+    return lane === 'fast' ? QUEUE_LOCK_KEY : QUEUE_LOCK_KEY + '_' + lane;
 }
 function acquireQueueLock(lane) {
     try {
@@ -16898,10 +16962,11 @@ function removeQueueItem(item) {
 // one rule that makes a route point's completion wait for its own file, is
 // VoMediaQueue.nextQueueIndex(). With no files queued the fast lane is exactly
 // the old single queue: head first, stop at the first one that cannot be sent.
-const queueFlushInFlight = {fast: false, media: false};
+const queueFlushInFlight = {fast: false, media: false, gps: false};
 function flushQueue() {
     flushQueueLane('fast');
     flushQueueLane('media');
+    flushQueueLane('gps');
 }
 function flushQueueLane(lane) {
     if (queueFlushInFlight[lane]) return;
@@ -22800,7 +22865,20 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
                     status.textContent = t('myping.ping_send_failed');
                     status.className = 'small mb-2 text-danger';
                 } else {
-                    showPingNoConnection(status);
+                    // The position is kept and sent when the connection is back
+                    // (except inside the Android app, where its background
+                    // service already keeps every position and says so).
+                    keepPositionForLater({
+                        shiftId: button.dataset.shiftId, lat: fix.lat, lng: fix.lng, acc: fix.acc ?? null,
+                        battery: batteryLevel ?? null, speed: fix.speed ?? null, source: 'manual', at: fix.ts
+                    }).then(kept => {
+                        if (kept) {
+                            status.textContent = t('myping.saved_offline');
+                            status.className = 'small mb-2 text-warning';
+                        } else {
+                            showPingNoConnection(status);
+                        }
+                    });
                 }
             }).finally(() => button.disabled = false);
         });
@@ -23098,9 +23176,21 @@ function sendAutoPing(position) {
             // cadence would otherwise leave one more request hanging, and a
             // browser allows only a handful per site before it queues the rest
             // — the poll and the manual ping included — behind them.
+            // A position that could not be sent is kept, with the moment it was
+            // TAKEN, and goes out when the connection is back (see
+            // keepPositionForLater). One the server answered and refused is
+            // not kept: that is a verdict, not an outage.
+            const keep = () => keepPositionForLater({
+                shiftId: button.dataset.shiftId, lat: position.coords.latitude, lng: position.coords.longitude,
+                acc: position.coords.accuracy || null, battery: batteryLevel ?? null,
+                speed: (typeof position.coords.speed === 'number' && !isNaN(position.coords.speed)) ? position.coords.speed : null,
+                source: 'auto', at: position.timestamp
+            });
+            if (navigator.onLine === false) { keep(); return; }
             fetchWithTimeout('ping-location.php', {method: 'POST', body: data}, FIELD_POST_TIMEOUT_MS)
                 .then(response => checkSessionAlive(response) ? response.json() : null)
-                .then(result => { if (result && !result.ok) showMyPingRefused(result.error); })
+                // null: the login lapsed or the server was busy - no answer to the position.
+                .then(result => { if (result === null) keep(); else if (!result.ok) showMyPingRefused(result.error); }, keep)
                 .catch(() => {});
         });
     });

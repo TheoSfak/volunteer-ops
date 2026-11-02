@@ -10,6 +10,7 @@ const assert = require('node:assert/strict');
 const {
     isIosDevice, newMediaId, mediaFileName, mediaKind, makeSpec, buildFormData,
     classifyFailure, queuedMediaFor, countQueuedMedia, nextQueueIndex,
+    PING_QUEUE_MAX_AGE_MS, PING_QUEUE_MAX, PING_BATCH_MAX, countQueuedPings, prunePings, collectPingBatch,
 } = require('../../assets/js/media-queue.js');
 
 const entries = fd => Array.from(fd.entries()).reduce((o, [k, v]) => { o[k] = v; return o; }, {});
@@ -162,4 +163,70 @@ test('a point is not held by a file that belongs to a different point', () => {
         {kind: 'route', action: 'complete', id: '31'},
     ];
     assert.equal(nextQueueIndex(queue, 'fast'), 1);
+});
+
+// ── GPS positions kept by the page (v3.425.0) ───────────────────────────────
+
+const NOW = Date.UTC(2026, 10, 2, 12, 0, 0);
+const ping = (minutesAgo, extra) => Object.assign({kind: 'ping', shiftId: 94, lat: 35.3, lng: 25.1, acc: 8, source: 'auto', at: NOW - minutesAgo * 60000}, extra);
+
+test('positions get their own lane: they never hold an SOS and an SOS never holds them', () => {
+    const queue = [ping(5), ping(4), {kind: 'status', prId: 3, status: 'needs_help'}, {kind: 'chat', teamId: '', text: 'hi', uuid: 'u'}];
+    assert.equal(nextQueueIndex(queue, 'fast'), 2, 'the SOS goes first in its lane, past the positions');
+    assert.equal(nextQueueIndex(queue, 'gps'), 0);
+    assert.equal(nextQueueIndex(queue, 'media'), -1);
+    // Only positions queued: the fast lane has nothing, the gps lane has all of it.
+    assert.equal(nextQueueIndex([ping(3)], 'fast'), -1);
+    assert.equal(nextQueueIndex([ping(3)], 'gps'), 0);
+});
+
+test('a position never ends up in the media lane or blocks a route point', () => {
+    const queue = [
+        {kind: 'media', mediaId: 'a', mediaType: 'photo', waypointId: 31}, ping(2),
+        {kind: 'route', action: 'complete', id: '31'}, {kind: 'route', action: 'depart', id: '32'},
+    ];
+    assert.equal(nextQueueIndex(queue, 'media'), 0);
+    assert.equal(nextQueueIndex(queue, 'gps'), 1);
+    // The completion still waits for its photo: the position in between changes nothing.
+    assert.equal(nextQueueIndex(queue, 'fast'), -1);
+});
+
+test('positions older than half an hour are pruned, everything else is left alone', () => {
+    const sos = {kind: 'status', prId: 3, status: 'needs_help'};
+    const queue = [ping(45), sos, ping(31), ping(29), ping(1)];
+    const kept = prunePings(queue, NOW);
+    assert.deepEqual(kept.map(q => q.kind === 'ping' ? Math.round((NOW - q.at) / 60000) : q.kind), ['status', 29, 1]);
+    assert.equal(PING_QUEUE_MAX_AGE_MS, 30 * 60000, 'the same half hour the server refuses past');
+    // Exactly at the line is still kept.
+    assert.equal(prunePings([ping(30)], NOW).length, 1);
+});
+
+test('past the cap the oldest positions go and the newest are kept, with room for one more', () => {
+    const queue = [];
+    for (let i = 0; i < PING_QUEUE_MAX + 25; i++) queue.push(ping(29, {at: NOW - 1700000 + i * 1000, lat: i}));
+    const kept = prunePings(queue, NOW);
+    assert.equal(countQueuedPings(kept), PING_QUEUE_MAX - 1);
+    assert.equal(kept[kept.length - 1].lat, PING_QUEUE_MAX + 24, 'the newest survived');
+    assert.equal(kept[0].lat, 26, 'the 26 oldest went');
+    // A queue under the cap is returned whole.
+    assert.equal(prunePings([ping(3), ping(2)], NOW).length, 2);
+});
+
+test('a batch is the oldest live positions of one shift, in the order they were taken', () => {
+    const queue = [ping(40), ping(20, {lat: 1}), ping(10, {shiftId: 95, lat: 2}), ping(5, {lat: 3}), {kind: 'chat', teamId: '', text: 'x', uuid: 'u'}];
+    const batch = collectPingBatch(queue, NOW);
+    assert.equal(batch.shiftId, 94);
+    assert.deepEqual(batch.items.map(q => q.lat), [1, 3], 'the other shift waits for its own request');
+    assert.equal(batch.expired.length, 1, 'the 40-minute-old one is dropped, not sent');
+    assert.deepEqual(collectPingBatch([], NOW), {shiftId: null, items: [], expired: []});
+    assert.equal(collectPingBatch([{kind: 'status'}], NOW).items.length, 0);
+});
+
+test('a batch is never larger than the server is willing to take at once', () => {
+    const queue = [];
+    for (let i = 0; i < PING_BATCH_MAX + 30; i++) queue.push(ping(20, {at: NOW - 1200000 + i * 1000, lat: i}));
+    const batch = collectPingBatch(queue, NOW);
+    assert.equal(batch.items.length, PING_BATCH_MAX);
+    assert.equal(batch.items[0].lat, 0, 'oldest first');
+    assert.equal(batch.items[PING_BATCH_MAX - 1].lat, PING_BATCH_MAX - 1);
 });
