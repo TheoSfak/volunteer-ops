@@ -7610,11 +7610,16 @@ function addMapBaseLayers(targetMap, toggleBtnId) {
             attribution: '© OpenStreetMap',
             maxNativeZoom: 19,
             maxZoom: MAP_MAX_ZOOM,
+            // CORS tiles (all four hosts send Access-Control-Allow-Origin: *) are
+            // cached by sw.js as readable responses, not opaque ones that Chrome
+            // counts as megabytes each against the storage quota.
+            crossOrigin: true,
         }),
         topo: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
             attribution: '© OpenTopoMap (CC-BY-SA)',
             maxNativeZoom: 17,
             maxZoom: MAP_MAX_ZOOM,
+            crossOrigin: true,
         }),
         satellite: satelliteTiles,
         hybrid: L.layerGroup([
@@ -7623,12 +7628,14 @@ function addMapBaseLayers(targetMap, toggleBtnId) {
                 maxNativeZoom: 19,
                 maxZoom: MAP_MAX_ZOOM,
                 zIndex: 2,
+                crossOrigin: true,
             }),
             L.tileLayer(esriReference + 'World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
                 attribution: 'Labels © Esri',
                 maxNativeZoom: 19,
                 maxZoom: MAP_MAX_ZOOM,
                 zIndex: 3,
+                crossOrigin: true,
             }),
         ]),
     };

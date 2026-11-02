@@ -25,7 +25,7 @@
 //
 // Bumping costs a one-off refetch of CDN assets and static images. It does NOT
 // touch the map tile cache below, which is deliberately kept out of this.
-const CACHE_VERSION = 'vo-v3.420.3';
+const CACHE_VERSION = 'vo-v3.421.0';
 const STATIC_CACHE = CACHE_VERSION + '-static';
 const RUNTIME_CACHE = CACHE_VERSION + '-runtime';
 
@@ -36,12 +36,32 @@ const RUNTIME_CACHE = CACHE_VERSION + '-runtime';
 // signal drops. It is capped instead, because a long shift spent panning
 // could otherwise grow it without limit on a phone.
 const TILE_CACHE = 'vo-tiles-v1';
-const TILE_CACHE_MAX = 800;
-const TILE_HOST_RE = /(^|\.)tile\.openstreetmap\.org$/;
+const TILE_CACHE_MAX = 3000;
+// Street, topographic and Esri imagery/reference tiles - every layer the map
+// can show, so whatever a volunteer has looked at survives the signal going.
+// Nothing here is ever fetched ahead of time: OpenStreetMap forbids bulk
+// prefetch, Esri's World Imagery is not licensed for offline export, and
+// OpenTopoMap discourages mass downloads, so this cache only keeps what the
+// person actually viewed.
+const TILE_HOST_RE = /(^|\.)tile\.openstreetmap\.org$|(^|\.)tile\.opentopomap\.org$/;
+const ESRI_TILE_HOST = 'server.arcgisonline.com';
+function isTileRequest(url) {
+    return TILE_HOST_RE.test(url.hostname)
+        || (url.hostname === ESRI_TILE_HOST && url.pathname.indexOf('/MapServer/tile/') !== -1);
+}
 
 // Keep install resilient: only precache local assets that are required offline.
 const PRECACHE_URLS = [
-    './offline.html'
+    './offline.html',
+    // Leaflet, self-hosted: the CDN copy lives in the runtime cache, which a
+    // release wipes, and the offline field map has to start with no network.
+    './assets/leaflet/leaflet.css',
+    './assets/leaflet/leaflet.js',
+    './assets/leaflet/images/layers.png',
+    './assets/leaflet/images/layers-2x.png',
+    './assets/leaflet/images/marker-icon.png',
+    './assets/leaflet/images/marker-icon-2x.png',
+    './assets/leaflet/images/marker-shadow.png'
 ];
 
 // ── INSTALL ─────────────────────────────────────────────────────────────────
@@ -106,10 +126,17 @@ self.addEventListener('fetch', event => {
     // Map tiles: cache-first, no revalidation (a tile never changes), capped.
     // Whatever the volunteer has already looked at stays on the map when the
     // connection goes — which is most of what an offline map needs to be.
-    if (TILE_HOST_RE.test(url.hostname)) {
+    if (isTileRequest(url)) {
         event.respondWith(
             caches.open(TILE_CACHE).then(cache =>
-                cache.match(request).then(cached => cached || fetch(request).then(response => {
+                cache.match(request).then(cachedHit => {
+                    // A tile stored by an older release is opaque (loaded without
+                    // CORS). Handing an opaque response to a request that now asks
+                    // for CORS is a network error, so such an entry is ignored and
+                    // replaced.
+                    const cached = (cachedHit && cachedHit.type === 'opaque' && request.mode === 'cors') ? null : cachedHit;
+                    return cached;
+                }).then(cached => cached || fetch(request).then(response => {
                     if (response.ok || response.type === 'opaque') {
                         cache.put(request, response.clone()).then(() => trimTileCache(cache)).catch(() => {});
                     }
