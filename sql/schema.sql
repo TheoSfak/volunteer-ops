@@ -1469,7 +1469,7 @@ CREATE TABLE IF NOT EXISTS `volunteer_pings` (
     `accuracy_meters` DECIMAL(8, 2) NULL COMMENT 'Geolocation API accuracy radius, meters',
     `battery_level` TINYINT UNSIGNED NULL COMMENT 'Phone battery percentage (0-100) at time of ping, best-effort',
     `source` ENUM('manual','auto') NOT NULL DEFAULT 'manual',
-    `via` ENUM('browser','native') NULL COMMENT 'Which client produced the fix; NULL = unknown (pre-v159 rows)',
+    `via` ENUM('browser','native','mesh') NULL COMMENT 'Which client produced the fix; NULL = unknown (pre-v159 rows); mesh = over the LoRa radio via the command post gateway',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `raw_lat` DECIMAL(10, 8) NULL COMMENT 'What the device reported; lat/lng hold the filtered estimate (v163). NULL = pre-v163 row, lat/lng are raw',
     `raw_lng` DECIMAL(11, 8) NULL,
@@ -3380,6 +3380,37 @@ CREATE TABLE IF NOT EXISTS `volunteer_floor_baselines` (
     INDEX `idx_floor_baseline_mission_user` (`mission_id`, `user_id`, `id`),
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- LORA GATEWAY — v3.427.0 (migration 200)
+-- mesh_nodes: which person carries which Meshtastic node. mesh_packets: every
+-- position packet the command post's gateway forwarded, for dedupe and for
+-- "who was heard, how well" - no coordinates. volunteer_pings.via gains 'mesh'.
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mesh_nodes` (
+    `node_num` INT UNSIGNED NOT NULL PRIMARY KEY COMMENT 'Meshtastic node number, 32 bits (shown as !570dee8c)',
+    `user_id` INT UNSIGNED NOT NULL COMMENT 'Whoever carries the node: its positions are theirs',
+    `label` VARCHAR(60) NULL,
+    `created_by` INT UNSIGNED NOT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_mesh_nodes_user` (`user_id`),
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `mesh_packets` (
+    `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `node_num` INT UNSIGNED NOT NULL,
+    `packet_id` INT UNSIGNED NOT NULL COMMENT 'The sender''s packet id; with node_num it names one transmission',
+    `mission_id` INT UNSIGNED NULL,
+    `snr` DECIMAL(5,2) NULL,
+    `rssi` SMALLINT NULL,
+    `hops` TINYINT UNSIGNED NULL,
+    `outcome` VARCHAR(16) NOT NULL DEFAULT '' COMMENT 'recorded, unbound, blurred, refused...',
+    `heard_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `uk_mesh_packet` (`node_num`, `packet_id`),
+    INDEX `idx_mesh_packets_node` (`node_num`, `id`),
+    INDEX `idx_mesh_packets_heard` (`heard_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

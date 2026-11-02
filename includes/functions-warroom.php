@@ -5744,6 +5744,22 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
         }
     }
 
+    // The same rule for a position that came over the LoRa radio (v3.427.0): a
+    // phone that is still reporting by itself, from the app or from a page,
+    // gives a finer fix than the node in its pocket, and the pin would
+    // alternate between two receivers. The radio takes over when the phone
+    // has been quiet for a minute and a half, which is exactly when it is
+    // wanted. Deliberately shorter than the two-cadence window above: that
+    // one would hold the pin on a stale phone fix for six minutes while the
+    // radio already has the person's position.
+    if ($via === 'mesh') {
+        foreach ($recentRows as $row) {
+            if ($row['via'] !== 'mesh' && (int) $row['age_s'] < MESH_PHONE_ACTIVE_SECONDS) {
+                return ['ok' => true, 'skipped' => 'phone_active', 'ts' => date('H:i:s')];
+            }
+        }
+    }
+
     // Never store a fix older than the newest one already on file. It keeps
     // "the highest id is the latest position" true, which the map pin, the
     // team positions and every MAX(id) lookup rely on. With real fix times
@@ -5919,7 +5935,7 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
             // unrecognised caller is exactly the case where a guess would be
             // wrong, and NULL is what every pre-v159 row already says.
             [$userId, $shiftId, $estimate['lat'], $estimate['lng'], $estimate['acc'], $batteryLevel, $source,
-             in_array($via, ['browser', 'native'], true) ? $via : null,
+             in_array($via, ['browser', 'native', 'mesh'], true) ? $via : null,
              $fixAgeSeconds,
              $lat, $lng, $accuracy, $speedMps,
              $gnss['used'] ?? null, $gnss['cn0'] ?? null, $gnss['dual'] ?? null]

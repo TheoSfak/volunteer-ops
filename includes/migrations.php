@@ -7921,6 +7921,46 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 200,
+            'description' => "LoRa gateway (v3.427.0): mesh_nodes binds a Meshtastic node number to the person carrying it, mesh_packets remembers every position packet the command post's gateway has forwarded (the dedupe key is the node and its packet id - the same packet reaches the gateway twice when two nodes repeat it - and it carries no coordinates, only who was heard and how well), and volunteer_pings.via gets 'mesh' for a position that arrived over the radio.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mesh_nodes (
+                    node_num INT UNSIGNED NOT NULL PRIMARY KEY COMMENT 'Meshtastic node number, 32 bits (shown as !570dee8c)',
+                    user_id INT UNSIGNED NOT NULL COMMENT 'Whoever carries the node: its positions are theirs',
+                    label VARCHAR(60) NULL,
+                    created_by INT UNSIGNED NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_mesh_nodes_user (user_id),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+                dbExecute("CREATE TABLE IF NOT EXISTS mesh_packets (
+                    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    node_num INT UNSIGNED NOT NULL,
+                    packet_id INT UNSIGNED NOT NULL COMMENT 'The sender''s packet id; with node_num it names one transmission',
+                    mission_id INT UNSIGNED NULL,
+                    snr DECIMAL(5,2) NULL,
+                    rssi SMALLINT NULL,
+                    hops TINYINT UNSIGNED NULL,
+                    outcome VARCHAR(16) NOT NULL DEFAULT '' COMMENT 'recorded, unbound, blurred, refused...',
+                    heard_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_mesh_packet (node_num, packet_id),
+                    INDEX idx_mesh_packets_node (node_num, id),
+                    INDEX idx_mesh_packets_heard (heard_at)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+                // information_schema, not dbColumnExists(): see migration 197.
+                $viaType = (string) dbFetchValue(
+                    "SELECT COLUMN_TYPE FROM information_schema.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'volunteer_pings' AND COLUMN_NAME = 'via'"
+                );
+                if ($viaType !== '' && strpos($viaType, "'mesh'") === false) {
+                    dbExecute("ALTER TABLE volunteer_pings MODIFY COLUMN via ENUM('browser','native','mesh') NULL COMMENT 'Which client produced the fix; NULL = unknown (pre-v159 rows); mesh = over the LoRa radio via the command post gateway'");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

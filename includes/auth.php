@@ -136,6 +136,10 @@ define('WAR_ROOM_ACTION_SCRIPTS', [
     // floor, v3.426.0) is used from the same long-open tab; command staff only,
     // which the endpoint itself checks.
     'war-room-floor-baseline.php',
+    // mesh-ingest.php (the LoRa gateway at the command post, v3.427.0) is called
+    // from the same long-open tab, for hours, by the page that holds the radio
+    // on its USB cable; command staff only, which the endpoint itself checks.
+    'mesh-ingest.php',
 ]);
 
 // Pages (not AJAX) a partner-org guest AND a mission visitor may open, on top

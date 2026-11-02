@@ -93,9 +93,12 @@ function loadMissionGpsQuality(int $missionId): array {
                        + POW((vp.lng - vp.raw_lng) * 111320 * COS(RADIANS(vp.lat)), 2)) END AS shift_m
            FROM volunteer_pings vp
            JOIN shifts s ON s.id = vp.shift_id
-          WHERE s.mission_id = ?",
+          WHERE s.mission_id = ?
+            AND (vp.via IS NULL OR vp.via <> 'mesh')",
         [$missionId]
     );
+    // A position that came over the LoRa radio (v3.427.0) is the node's, not the
+    // phone's: this report judges the phone's GPS, so those rows stay out of it.
     foreach ($rows as $row) {
         $uid = (int) $row['user_id'];
         $people[$uid]['fixes']++;

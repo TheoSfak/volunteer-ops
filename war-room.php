@@ -4974,7 +4974,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 
         <div class="card shadow-sm" data-card-id="participantsCard">
             <div class="card-header wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#participantsCollapse" role="button" aria-expanded="false" aria-controls="participantsCollapse">
-                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-people me-1"></i><?= t('participants.panel_title', ['count' => count($participants)]) ?></span><span class="d-flex align-items-center gap-2"><?php if ($canManageWarRoom): ?><button type="button" class="btn btn-sm btn-outline-secondary py-0" onclick="event.stopPropagation(); floorBaselineOpen();" title="<?= h(t('floor.btn_title')) ?>"><i class="bi bi-building-up me-1"></i><?= h(t('floor.btn')) ?></button><?php endif; ?><i class="bi bi-chevron-down wr-collapsible-chevron"></i></span></h5>
+                <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-people me-1"></i><?= t('participants.panel_title', ['count' => count($participants)]) ?></span><span class="d-flex align-items-center gap-2"><?php if ($canManageWarRoom): ?><button type="button" class="btn btn-sm btn-outline-secondary py-0" onclick="event.stopPropagation(); floorBaselineOpen();" title="<?= h(t('floor.btn_title')) ?>"><i class="bi bi-building-up me-1"></i><?= h(t('floor.btn')) ?></button><button type="button" class="btn btn-sm btn-outline-secondary py-0" data-mesh-btn onclick="event.stopPropagation(); meshGatewayOpen();" title="<?= h(t('mesh.btn_title')) ?>"><i class="bi bi-broadcast-pin me-1"></i><?= h(t('mesh.btn')) ?></button><?php endif; ?><i class="bi bi-chevron-down wr-collapsible-chevron"></i></span></h5>
             </div>
             <?php $participantSplitRows = count($participants) >= 8 ? (int)ceil(count($participants) / 2) : 0; ?>
             <div class="list-group list-group-flush collapse<?= $participantSplitRows ? ' wr-participants-cols' : '' ?>" id="participantsCollapse"<?= $participantSplitRows ? ' style="grid-template-rows: repeat(' . $participantSplitRows . ', auto);"' : '' ?>>
@@ -6555,6 +6555,22 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
     </div>
 </div>
 
+<?php if ($canManageWarRoom): ?>
+<?php /* «Πύλη LoRa» (v3.427.0): the Meshtastic node on this computer's USB cable and
+         the nodes the people of the mission carry (assets/js/mesh-gateway.js). */ ?>
+<div class="modal fade" id="meshGatewayModal" tabindex="-1">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-broadcast-pin me-1"></i><?= h(t('mesh.modal_title')) ?></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="meshGatewayBody"></div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <?php if ($mapPointsVisible): ?>
 <?php // Σημεία χάρτη (v3.361.0): the list of imported points for everybody, and for command the way to import more. ?>
 <?php if ($canManageWarRoom): ?>
@@ -6782,6 +6798,10 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/media-queue.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/trail-display.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/floor-display.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/floor-display.js') ?>"></script>
+<?php if ($canManageWarRoom): ?>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/mesh-protocol.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/mesh-protocol.js') ?>"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/mesh-gateway.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/mesh-gateway.js') ?>"></script>
+<?php endif; ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-ar.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-ar.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/triage.js?v=<?= APP_VERSION ?>"></script>
 <?php if ($consoleView): ?>
@@ -13634,9 +13654,13 @@ function buildPinMarker(pin, interactive = true) {
     // volunteer. Until now a coordinator could not tell that apart from "they
     // have stopped moving". Absent (older rows, any unrecognised client) is
     // left silent rather than guessed either way.
+    // And the radio case (v3.427.0): the position came over LoRa from the
+    // person's node, so the phone itself is not sending right now.
     const trackingLine = pin.via === 'browser'
         ? `<br><span class="small text-muted"><i class="bi bi-window me-1"></i>${t('map.tracked_by_browser')}</span>`
-        : '';
+        : (pin.via === 'mesh'
+            ? `<br><span class="small text-muted"><i class="bi bi-broadcast-pin me-1"></i>${t('map.tracked_by_mesh')}</span>`
+            : '');
     // Always rendered for an admin regardless of battery level, so there's
     // something to notice/hover even on a healthy pin — deliberately NOT
     // the native disabled attribute, which would swallow the click
@@ -17988,6 +18012,26 @@ function floorBaselineApply(action) {
         floorLoadTimer = setInterval(floorBaselineLoad, 10000);
     });
     modalEl.addEventListener('hidden.bs.modal', () => { clearInterval(floorLoadTimer); floorLoadTimer = null; });
+})();
+
+// ── «Πύλη LoRa»: a Meshtastic node on this computer's USB cable ──────────────
+// The page is the gateway (assets/js/mesh-gateway.js over Web Serial); what it
+// hears goes to mesh-ingest.php (includes/functions-mesh.php). Command staff only.
+function meshPost(fields) {
+    const body = new URLSearchParams({csrf_token: csrfToken, mission_id: '<?= $missionId ?>'});
+    Object.keys(fields).forEach(k => body.set(k, fields[k]));
+    return fetchWithTimeout('mesh-ingest.php', {method: 'POST', body}, FIELD_POST_TIMEOUT_MS)
+        .then(r => { if (!checkSessionAlive(r)) return null; return r.json(); })
+        .catch(() => null);
+}
+
+function meshGatewayOpen() {
+    if (window.MeshGateway) window.MeshGateway.open();
+}
+
+(function meshGatewayWire() {
+    if (!window.MeshGateway || !document.getElementById('meshGatewayModal')) return;
+    window.MeshGateway.init({post: meshPost, t, esc: escapeHtml});
 })();
 
 function renderParticipantLiveData(data) {

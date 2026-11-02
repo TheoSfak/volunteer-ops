@@ -471,7 +471,8 @@ if (typeof module !== 'undefined' && module.exports) {
             <section class="wrc-sec wrc-teams" id="wrcTeams">
                 <header class="wrc-sec-h"><i class="bi bi-people-fill"></i><span class="wrc-h">${esc(t('console.teams_title'))}</span><span class="wrc-cnt" id="wrcTeamsCnt">0</span>
                     <button type="button" class="wrc-link ms-auto" id="wrcSelAll">${esc(t('console.select_all'))}</button>
-                    ${typeof floorBaselineOpen === 'function' ? `<button type="button" class="wrc-link" id="wrcFloorBtn" title="${esc(t('floor.btn_title'))}" aria-label="${esc(t('floor.btn'))}"><i class="bi bi-building-up"></i></button>` : ''}</header>
+                    ${typeof floorBaselineOpen === 'function' ? `<button type="button" class="wrc-link" id="wrcFloorBtn" title="${esc(t('floor.btn_title'))}" aria-label="${esc(t('floor.btn'))}"><i class="bi bi-building-up"></i></button>` : ''}
+                    ${typeof meshGatewayOpen === 'function' && window.MeshGateway ? `<button type="button" class="wrc-link" id="wrcMeshBtn" data-mesh-btn title="${esc(t('mesh.btn_title'))}" aria-label="${esc(t('mesh.btn'))}"><i class="bi bi-broadcast-pin"></i></button>` : ''}</header>
                 <div class="wrc-teams-body" id="wrcTeamsBody"></div>
             </section>
         </div>
@@ -1355,6 +1356,8 @@ if (typeof module !== 'undefined' && module.exports) {
     // «Επίπεδο εδάφους» (v3.426.0): the window that sets the ground level the barometer floor is measured from.
     const floorBtn = $('#wrcFloorBtn', root);
     if (floorBtn) floorBtn.addEventListener('click', () => floorBaselineOpen());
+    const meshBtn = $('#wrcMeshBtn', root);
+    if (meshBtn) meshBtn.addEventListener('click', () => meshGatewayOpen());
 
     function selectionChanged() {
         syncSelection();
