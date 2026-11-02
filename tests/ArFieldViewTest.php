@@ -109,4 +109,19 @@ final class ArFieldViewTest extends TestCase
         $this->assertStringContainsString('key: m ? m.key : null', $this->module);
         $this->assertStringContainsString('function arDrawLayers(S, me, info)', $this->module);
     }
+
+    public function testAStillPhoneKeepsItsLastCompassReadingAndTheBeamStays(): void
+    {
+        // Browsers send orientation events only when the reading changes, so a phone held still goes quiet.
+        // A 3 second limit blanked the beam and brought it back with the next wobble.
+        $this->assertMatchesRegularExpression('~const AR_COMPASS_STALE_MS = (\d+)~', $this->module);
+        preg_match('~const AR_COMPASS_STALE_MS = (\d+)~', $this->module, $m);
+        $this->assertGreaterThanOrEqual(10000, (int) $m[1]);
+        $this->assertStringContainsString('< AR_COMPASS_STALE_MS', $this->module);
+        // The position and the compass are steadied, and the dimming needs two good fast fixes in a row.
+        $this->assertStringContainsString('arSmoothFix(arState.sm', $this->module);
+        $this->assertStringContainsString('arSmoothingTau(arAngleBetween(prevBasis, raw))', $this->module);
+        $this->assertStringContainsString('arState.fastFixes >= 2', $this->module);
+        $this->assertStringContainsString('data-ar="debug"', $this->module);
+    }
 }

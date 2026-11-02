@@ -186,11 +186,45 @@ function arSmoothBasis(prev, next, k) {
     return {r: r, u: u, f: f};
 }
 
+// How hard to smooth a compass reading, as a time constant in seconds, by how far
+// the new reading is from where the view is now. A phone held still wanders by a
+// degree or two and must look still; a real turn leaves the view behind by more
+// than that and is followed at once. The distance, not the change since the last
+// event, decides it: a slow turn changes by a fraction of a degree per event.
+function arSmoothingTau(offsetDeg) {
+    if (offsetDeg < 1) return 0.6;
+    if (offsetDeg < 2.5) return 0.3;
+    if (offsetDeg < 6) return 0.15;
+    return 0.06;
+}
+
+// The angle in degrees between two camera directions.
+function arAngleBetween(a, b) {
+    const d = a.f[0] * b.f[0] + a.f[1] * b.f[1] + a.f[2] * b.f[2];
+    return Math.acos(Math.max(-1, Math.min(1, d))) * 180 / Math.PI;
+}
+
+// A new GPS fix blended into the position the screen uses. A receiver held
+// still wanders by its own error, and close to the target a few metres is a big
+// swing of the beam, so a fix inside its own error moves the position only a
+// little; one outside it, or any fix while walking, is followed. fix is
+// {lat, lng, acc}; speed is metres per second or null.
+function arSmoothFix(prev, fix, speed) {
+    if (!prev) return {lat: fix.lat, lng: fix.lng, acc: fix.acc};
+    const l = arLocal(prev, fix), d = Math.hypot(l.x, l.y);
+    const acc = Math.max(5, fix.acc || 20);
+    const walking = typeof speed === 'number' && !isNaN(speed) && speed >= 0.7;
+    const g = d > 2 * acc ? 0.8 : (walking ? 0.5 : (d > acc ? 0.3 : 0.12));
+    return {lat: prev.lat + (fix.lat - prev.lat) * g, lng: prev.lng + (fix.lng - prev.lng) * g, acc: fix.acc};
+}
+
 // ── The screen ───────────────────────────────────────────────────────────────
 
 const AR_COL = {green: [74, 222, 128], cyan: [34, 211, 238], red: [248, 81, 73], orange: [255, 145, 60], amber: [251, 191, 36], white: [240, 246, 242], grey: [160, 170, 165]};
 const AR_FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const AR_MOVING_MPS = 1.5;        // faster than this and the screen dims: look where you are going
+const AR_STILL_MPS = 0.8;         // and it stays dimmed until the speed has fallen below this
+const AR_COMPASS_STALE_MS = 15000; // a phone held still sends nothing: a quiet compass is not a dead one
 const AR_SESSION_MS = 10 * 60000; // camera + GPS + sensors heat a phone; ask before going on
 const AR_SECTOR_OUT_M = 100;      // the same distance the server warns at (checkSectorExitWarnings)
 const AR_MAX_ELEV_POINTS = 90;
@@ -261,8 +295,9 @@ function arElement() {
                 <div class="wr-ar-tile"><small>${escapeHtml(t('ar.tile_dist'))}</small><b data-ar-k="dist"></b></div>
                 <div class="wr-ar-tile"><small>${escapeHtml(t('ar.tile_dz'))}</small><b data-ar-k="dz"></b></div>
                 <div class="wr-ar-tile"><small>${escapeHtml(t('ar.tile_eta'))}</small><b data-ar-k="eta"></b></div>
-                <div class="wr-ar-tile"><small>${escapeHtml(t('ar.tile_gps'))}</small><b data-ar-k="gps"></b></div>
+                <button type="button" class="wr-ar-tile wr-ar-tilebtn" data-ar="debug"><small>${escapeHtml(t('ar.tile_gps'))}</small><b data-ar-k="gps"></b></button>
             </div>
+            <div class="wr-ar-debug" data-ar-k="debug" hidden></div>
             <div class="wr-ar-title" data-ar-k="title"></div>
             <div class="wr-ar-hint" data-ar-k="hint"></div>
             <button type="button" class="wr-ar-go" data-ar="go" hidden></button>
@@ -288,6 +323,7 @@ function arElement() {
             case 'next': arStep(1); break;
             case 'go': arGo(btn); break;
             case 'msgok': arMessageDone(); break;
+            case 'debug': arState.debug = !arState.debug; break;
             case 'compass': { const m = opEntries.get(arState.key); arClose(); if (m) arrowOpen(m); break; }
             case 'decline': { const m = opEntries.get(arState.key); arClose(); if (m) opAct('decline', m, btn); break; }
         }
@@ -302,7 +338,7 @@ function arOpen(m) {
     const el = arElement();
     arState = {
         key: m ? m.key : null, layers: {bound: true, team: true, haz: true},
-        pose: null, orientAt: 0, absolute: false, iosOffset: 0,
+        pose: null, orientAt: 0, absolute: false, iosOffset: 0, sm: null, fastFixes: 0, evUsed: 0, evIgnored: 0, evRate: '', evAt: 0, debug: false,
         fix: null, watchId: null, stream: null, wakeLock: null, raf: 0, onOrient: null, onKey: null, onResize: null,
         elev: new Map(), meElev: null, meElevAt: null, elevBusy: false, elevKey: '',
         openedAt: Date.now(), elevAt: -1e9, message: null, moving: false, warnSig: '', cw: 0, ch: 0, dpr: 1,
@@ -336,7 +372,13 @@ function arOpen(m) {
             if (!arState) return;
             arState.fix = pos;
             const speed = pos.coords.speed;
-            arState.moving = typeof speed === 'number' && !isNaN(speed) && speed >= AR_MOVING_MPS;
+            arState.sm = arSmoothFix(arState.sm, {lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy}, speed);
+            // A vague fix can report a speed it does not have; it takes two fast fixes in a row, from a fix good
+            // enough to trust, to dim the screen, and a speed that has fallen back to bring it back.
+            const fast = typeof speed === 'number' && !isNaN(speed) && speed >= AR_MOVING_MPS && (pos.coords.accuracy || 99) <= 30;
+            arState.fastFixes = fast ? arState.fastFixes + 1 : 0;
+            if (arState.fastFixes >= 2) arState.moving = true;
+            else if (!(typeof speed === 'number' && speed >= AR_STILL_MPS)) arState.moving = false;
             arLoadElevations(false);
         }, () => {}, {enableHighAccuracy: true, maximumAge: 0, timeout: 20000});
     }
@@ -428,7 +470,9 @@ function arResize() {
 // is no compass, and neither is nothing: the screen then says so.
 function arOnOrientation(e) {
     const kind = arEventKind(e);
+    if (arState && !kind) arState.evIgnored++;
     if (!arState || !kind) return;
+    arState.evUsed++;
     const screenAngle = arScreenAngle();
     let alpha = e.alpha;
     if (kind === 'ios') {
@@ -443,7 +487,10 @@ function arOnOrientation(e) {
     // Time-based, so the steadiness does not depend on how often the phone reports (about 120 ms to settle).
     const now = Date.now();
     const dt = arState.orientAt ? Math.min(0.25, Math.max(0.008, (now - arState.orientAt) / 1000)) : 1;
-    const basis = arSmoothBasis(arState.pose ? arState.pose.basis : null, arBasis(alpha, e.beta, e.gamma, screenAngle), 1 - Math.exp(-dt / 0.12));
+    const raw = arBasis(alpha, e.beta, e.gamma, screenAngle);
+    const prevBasis = arState.pose ? arState.pose.basis : null;
+    const tau = prevBasis ? arSmoothingTau(arAngleBetween(prevBasis, raw)) : 0.06;
+    const basis = arSmoothBasis(prevBasis, raw, 1 - Math.exp(-dt / tau));
     arState.pose = {basis: basis, screenAngle: screenAngle};
     arState.orientAt = now;
 }
@@ -454,6 +501,8 @@ function arScreenAngle() {
 function arMe() {
     const pos = arState.fix || (typeof latestAutoPosition !== 'undefined' ? latestAutoPosition : null);
     if (!pos || !pos.coords || Date.now() - pos.timestamp > 2 * 60000) return null;
+    // The smoothed position once there is one (see arSmoothFix), else the raw fix.
+    if (arState.fix && arState.sm) return {lat: arState.sm.lat, lng: arState.sm.lng, acc: arState.sm.acc};
     return {lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy};
 }
 
@@ -723,7 +772,9 @@ function arFrame(now) {
     const me = arMe();
     // The ground heights, once a spot is known and again when it has moved far or the order changed.
     if (now - arState.elevAt > 2500) { arState.elevAt = now; arLoadElevations(false); }
-    const poseFresh = arState.pose && Date.now() - arState.orientAt < 3000;
+    // Browsers send orientation events only when the reading changes, so a phone held still goes quiet: the last
+    // pose stays good for a long while instead of the beam vanishing and coming back with the next wobble.
+    const poseFresh = arState.pose && Date.now() - arState.orientAt < AR_COMPASS_STALE_MS;
     const world = el.querySelector('.wr-ar-world');
     const ctx = world.getContext('2d');
     ctx.setTransform(arState.dpr, 0, 0, arState.dpr, 0, 0);
@@ -879,6 +930,24 @@ function arDrawLayers(S, me, info) {
     }
 }
 
+// What the screen is working from, for when it misbehaves on a phone: tap the GPS tile.
+function arUpdateDebug(el, S) {
+    const box = el.querySelector('[data-ar-k="debug"]');
+    box.hidden = !arState.debug;
+    if (!arState.debug) return;
+    const now = Date.now();
+    if (now - arState.evAt >= 1000) {
+        arState.evRate = arState.evUsed + ' ok / ' + arState.evIgnored + ' ignored per s';
+        arState.evUsed = 0; arState.evIgnored = 0; arState.evAt = now;
+    }
+    const me = arMe();
+    const raw = arState.fix ? arState.fix.coords : null;
+    const wander = me && raw ? Math.round(Math.hypot(arLocal(me, {lat: raw.latitude, lng: raw.longitude}).x, arLocal(me, {lat: raw.latitude, lng: raw.longitude}).y)) : '-';
+    const age = arState.orientAt ? ((now - arState.orientAt) / 1000).toFixed(1) : '-';
+    const text = 'hdg ' + (S ? Math.round(S.heading) : '-') + '\u00B0 pitch ' + (S ? Math.round(S.pitch) : '-') + '\u00B0 | ' + arState.evRate + ' | last ' + age + 's | raw-vs-used ' + wander + ' m | moving ' + (arState.moving ? 'yes' : 'no') + (raw && typeof raw.speed === 'number' ? ' (' + raw.speed.toFixed(1) + ' m/s)' : '');
+    if (box.textContent !== text) box.textContent = text;
+}
+
 function arSignedMetres(v) {
     return (v >= 0 ? '+' : '−') + Math.round(Math.abs(v)) + ' ' + t('common.unit_m');
 }
@@ -912,6 +981,7 @@ function arUpdateDynamicHud(el, m, S) {
     const set = (k, v) => { const e = el.querySelector('[data-ar-k="' + k + '"]'); if (e && e.textContent !== v) e.textContent = v; };
     const me = arMe();
     set('gps', me && typeof me.acc === 'number' ? '±' + Math.round(me.acc) + ' ' + t('common.unit_m') : '—');
+    arUpdateDebug(el, S);
     const go = el.querySelector('[data-ar="go"]');
     if (!S || !info) {
         go.hidden = true;
@@ -1088,6 +1158,9 @@ if (typeof module !== 'undefined' && module.exports) {
         arNearestOnPolygon,
         arEventKind,
         arSmoothBasis,
+        arSmoothingTau,
+        arAngleBetween,
+        arSmoothFix,
         arOfferCandidate,
     };
 }

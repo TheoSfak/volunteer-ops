@@ -2848,6 +2848,10 @@ include __DIR__ . '/includes/header.php';
     .wr-ar-bottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 40px 12px max(12px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, rgba(8, 12, 10, 0), rgba(8, 12, 10, .88) 36%); display: flex; flex-direction: column; gap: 6px; }
     .wr-ar-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
     .wr-ar-tile { padding: 6px 7px; border-radius: 10px; background: rgba(8, 12, 10, .62); border: 1px solid rgba(255, 255, 255, .14); }
+    .wr-ar-tilebtn { text-align: left; color: inherit; font: inherit; }
+    .wr-ar-debug { font: 10.5px/1.3 ui-monospace, Consolas, monospace; color: #c9f5da; background: rgba(8, 12, 10, .75); border-radius: 8px; padding: 5px 8px; word-break: break-word; }
+    .wr-ar-debug[hidden] { display: none; }
+    .wr-ar-world, .wr-ar-top, .wr-ar-rail, .wr-ar-radar, .wr-ar-bottom, .wr-ar-warn { transition: opacity .3s; }
     .wr-ar-tile small { display: block; font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase; color: #aebdb3; }
     .wr-ar-tile b { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
     .wr-ar-title { text-align: center; color: #c5d1c9; font-size: 12px; }

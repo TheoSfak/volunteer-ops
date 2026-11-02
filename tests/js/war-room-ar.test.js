@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 
 const {
     arLocal, arFromLocal, arBasis, arHeading, arPitch, arFocalPx, arProject,
-    arBearingElevation, arTurnTo, arSubdivide, arNearestOnPolygon, arOfferCandidate, arEventKind, arSmoothBasis,
+    arBearingElevation, arTurnTo, arSubdivide, arNearestOnPolygon, arOfferCandidate, arEventKind, arSmoothBasis, arSmoothingTau, arAngleBetween, arSmoothFix,
 } = require('../../assets/js/war-room-ar.js');
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) <= eps, `${a} is not within ${eps} of ${b}`);
@@ -212,4 +212,70 @@ test('a steady phone with a little compass noise stays within the noise, not a f
     }
     const spread = Math.max(...heads) - Math.min(...heads);
     assert.ok(spread < 1.2, 'spread was ' + spread);
+});
+
+// ── a phone held still ──
+test('a still phone is smoothed hard and a real turn is followed at once', () => {
+    assert.ok(arSmoothingTau(0.4) > arSmoothingTau(2) && arSmoothingTau(2) > arSmoothingTau(4) && arSmoothingTau(4) > arSmoothingTau(20));
+    assert.ok(arSmoothingTau(20) <= 0.08);
+});
+
+test('the angle between two camera directions', () => {
+    near(arAngleBetween(arBasis(0, 90, 0, 0), arBasis(270, 90, 0, 0)), 90, 1e-9);
+    near(arAngleBetween(arBasis(0, 90, 0, 0), arBasis(0, 90, 0, 0)), 0, 1e-6);
+});
+
+function run(headings, dtSec) {
+    // The screen's own loop: adaptive smoothing of a reading per step.
+    let basis = null;
+    const out = [];
+    for (const h of headings) {
+        const raw = arBasis(360 - h, 90, 0, 0);
+        const tau = basis ? arSmoothingTau(arAngleBetween(basis, raw)) : 0.06;
+        basis = arSmoothBasis(basis, raw, 1 - Math.exp(-dtSec / tau));
+        out.push(arHeading(basis));
+    }
+    return out;
+}
+
+test('adaptive smoothing: 3 degrees of noise on a still phone settles to well under a degree', () => {
+    const readings = Array.from({length: 240}, (_, i) => 40 + (i % 3 === 0 ? 3 : (i % 3 === 1 ? -3 : 0.5)));
+    const out = run(readings, 0.016).slice(60);
+    assert.ok(Math.max(...out) - Math.min(...out) < 0.9, 'spread ' + (Math.max(...out) - Math.min(...out)));
+});
+
+test('adaptive smoothing: a steady 40 degrees per second turn is followed within a few degrees', () => {
+    const readings = Array.from({length: 120}, (_, i) => 40 + i * 0.016 * 40);
+    const out = run(readings, 0.016);
+    const lag = readings[119] - out[119];
+    assert.ok(lag >= 0 && lag < 7, 'lag ' + lag);
+});
+
+test('adaptive smoothing: a sudden 30 degree turn is caught up within a quarter of a second', () => {
+    const readings = [...Array.from({length: 40}, () => 40), ...Array.from({length: 40}, () => 70)];
+    const out = run(readings, 0.016);
+    assert.ok(Math.abs(out[40 + 15] - 70) < 3, 'after 15 steps: ' + out[55]);
+});
+
+const fixAt = (northM, eastM, acc) => ({lat: 35.2 + northM / 111190, lng: 24.9 + eastM / (111190 * Math.cos(35.2 * Math.PI / 180)), acc});
+
+test('a receiver wandering inside its own error barely moves the position', () => {
+    let pos = arSmoothFix(null, fixAt(0, 0, 12), 0);
+    const wander = [[6, 3], [-5, 7], [4, -6], [-7, -4], [5, 5], [-6, 2]];
+    let worst = 0;
+    for (const [n, e] of wander) {
+        pos = arSmoothFix(pos, fixAt(n, e, 12), 0);
+        const l = arLocal({lat: 35.2, lng: 24.9}, pos);
+        worst = Math.max(worst, Math.hypot(l.x, l.y));
+    }
+    assert.ok(worst < 3.5, 'moved ' + worst + ' m on fixes that wandered up to 8 m');
+});
+
+test('a real move is followed: a fix far outside the error, and fixes while walking', () => {
+    let pos = arSmoothFix(null, fixAt(0, 0, 8), 0);
+    pos = arSmoothFix(pos, fixAt(60, 0, 8), 0);
+    near(arLocal({lat: 35.2, lng: 24.9}, pos).y, 48, 1);
+    let walk = arSmoothFix(null, fixAt(0, 0, 8), 1.4);
+    for (let i = 1; i <= 8; i++) walk = arSmoothFix(walk, fixAt(i * 1.4, 0, 8), 1.4);
+    assert.ok(arLocal({lat: 35.2, lng: 24.9}, walk).y > 8.5, 'kept up while walking');
 });
