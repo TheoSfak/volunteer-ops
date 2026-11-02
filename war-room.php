@@ -2821,6 +2821,50 @@ include __DIR__ . '/includes/header.php';
     .wr-arrow-actions { margin-top: auto; padding-top: 1rem; display: flex; gap: .5rem; }
     .wr-arrow-actions > * { flex: 1; min-height: 52px; display: inline-flex; align-items: center; justify-content: center; }
     .wr-arrow-actions > [hidden] { display: none; }
+    /* «AR Προβολή Πεδίου» (assets/js/war-room-ar.js): the camera view. Fixed dark glass on a camera picture, so no theme tokens. */
+    .wr-ar { position: fixed; inset: 0; z-index: 2100; background: #111418; color: #f2f6f3; overflow: hidden; font-size: 13px; line-height: 1.3; }
+    .wr-ar[hidden] { display: none; }
+    body.wr-ar-open { overflow: hidden; }
+    .wr-ar button { font: inherit; color: inherit; cursor: pointer; }
+    .wr-ar-video, .wr-ar-world { position: absolute; inset: 0; width: 100%; height: 100%; }
+    .wr-ar-video { object-fit: cover; }
+    .wr-ar-top { position: absolute; top: 0; left: 0; right: 0; padding: max(8px, env(safe-area-inset-top)) 10px 0; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+    .wr-ar-top > * { pointer-events: auto; }
+    .wr-ar-toprow { display: flex; gap: 6px; align-items: center; }
+    .wr-ar-x { flex: none; width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, .22); background: rgba(8, 12, 10, .62); }
+    .wr-ar-steps { flex: 1; min-width: 0; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; }
+    .wr-ar-step { padding: 6px 3px; text-align: center; font-size: 10.5px; border-radius: 8px; background: rgba(8, 12, 10, .55); border: 1px solid rgba(255, 255, 255, .14); color: #aebdb3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .wr-ar-step.is-done { background: rgba(52, 210, 123, .22); color: #c9f5da; border-color: rgba(52, 210, 123, .5); }
+    .wr-ar-step.is-cur { background: #e8efe9; color: #0a110d; font-weight: 700; border-color: #e8efe9; }
+    .wr-ar-pager { flex: none; display: flex; align-items: center; background: rgba(8, 12, 10, .62); border-radius: 99px; padding: 2px; }
+    .wr-ar-pager button { width: 30px; height: 30px; border: 0; background: none; }
+    .wr-ar-banner { padding: 8px 12px; text-align: center; font-weight: 600; font-size: 14px; background: rgba(8, 12, 10, .62); border: 1px solid rgba(255, 255, 255, .14); border-radius: 10px; }
+    .wr-ar-tape { display: block; width: 100%; height: 34px; border-radius: 8px; }
+    .wr-ar-warn { position: absolute; left: 10px; right: 10px; top: calc(max(8px, env(safe-area-inset-top)) + 134px); padding: 8px 11px; border-radius: 10px; background: rgba(180, 35, 24, .92); border: 1px solid #ff9a90; font-weight: 600; font-size: 12.5px; }
+    .wr-ar-rail { position: absolute; left: 10px; top: calc(max(8px, env(safe-area-inset-top)) + 184px); display: flex; flex-direction: column; gap: 6px; }
+    .wr-ar-chip { padding: 5px 11px; border-radius: 99px; border: 1px solid rgba(255, 255, 255, .28); background: rgba(8, 12, 10, .55); font-size: 11.5px; }
+    .wr-ar-chip[aria-pressed="true"] { background: #e8efe9; color: #0a110d; border-color: #e8efe9; }
+    .wr-ar-radar { position: absolute; right: 10px; top: calc(max(8px, env(safe-area-inset-top)) + 184px); width: 80px; height: 80px; }
+    .wr-ar-bottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 40px 12px max(12px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, rgba(8, 12, 10, 0), rgba(8, 12, 10, .88) 36%); display: flex; flex-direction: column; gap: 6px; }
+    .wr-ar-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+    .wr-ar-tile { padding: 6px 7px; border-radius: 10px; background: rgba(8, 12, 10, .62); border: 1px solid rgba(255, 255, 255, .14); }
+    .wr-ar-tile small { display: block; font-size: 9.5px; letter-spacing: .05em; text-transform: uppercase; color: #aebdb3; }
+    .wr-ar-tile b { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .wr-ar-title { text-align: center; color: #c5d1c9; font-size: 12px; }
+    .wr-ar-hint { text-align: center; color: #c5d1c9; font-size: 12px; min-height: 1.2em; }
+    .wr-ar-go { width: 100%; min-height: 52px; padding: 12px; border: 0; border-radius: 12px; background: #34d27b; color: #04210f !important; font-weight: 700; font-size: 16px; }
+    .wr-ar-go:disabled { background: rgba(255, 255, 255, .2); color: #e8efe9 !important; cursor: not-allowed; }
+    .wr-ar-go[hidden] { display: none; }
+    .wr-ar-links { display: flex; justify-content: space-between; gap: 8px; }
+    .wr-ar-links button { background: none; border: 0; color: #c5d1c9; font-size: 12px; text-decoration: underline; padding: 6px 2px; min-height: 36px; }
+    .wr-ar-links [hidden] { display: none; }
+    .wr-ar-msg { position: absolute; inset: 0; z-index: 3; background: rgba(0, 0, 0, .72); display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .wr-ar-msg[hidden] { display: none; }
+    .wr-ar-msgbox { max-width: 360px; background: #1b2420; border: 1px solid rgba(255, 255, 255, .2); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 14px; font-size: 15px; }
+    .wr-ar-dim .wr-ar-world, .wr-ar-dim .wr-ar-top, .wr-ar-dim .wr-ar-rail, .wr-ar-dim .wr-ar-radar, .wr-ar-dim .wr-ar-bottom, .wr-ar-dim .wr-ar-warn { opacity: .08; }
+    .wr-ar-dim::after, .wr-ar-lowered::before { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; font-size: 26px; font-weight: 700; pointer-events: none; text-shadow: 0 2px 12px #000; }
+    .wr-ar-dim::after { content: attr(data-look); }
+    .wr-ar-lowered::before { content: attr(data-lower); background: rgba(8, 12, 10, .8); }
     .wr-op-actions .btn { min-height: 44px; }
     .wr-op-steps { margin-top: .75rem; }
     .wr-op-step { display: flex; gap: .6rem; position: relative; padding-bottom: .65rem; }
@@ -6603,6 +6647,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg==" crossorigin="anonymous"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-utils.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/trail-display.js?v=<?= APP_VERSION ?>"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-ar.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-ar.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/triage.js?v=<?= APP_VERSION ?>"></script>
 <?php if ($consoleView): ?>
 <?php /* defer: it reads the page's own state (the poll's arrays, the render
@@ -15677,7 +15722,10 @@ function opDirectionsHtml(m) {
 }
 // «Πυξίδα» — the arrow screen (arrowOpen()), for anything with a place.
 function opCompassBtnHtml(m) {
-    return m.target && m.target.nav ? opBtn('compass', 'bi-compass', t('arrow.open_btn'), 'btn-outline-primary') : '';
+    if (!m.target || !m.target.nav) return '';
+    // «AR» (war-room-ar.js) beside it, on a phone that has the camera and the sensors for it.
+    return opBtn('compass', 'bi-compass', t('arrow.open_btn'), 'btn-outline-primary')
+        + (typeof arSupported === 'function' && arSupported() ? opBtn('ar', 'bi-badge-ar', t('ar.open_btn'), 'btn-outline-primary') : '');
 }
 
 // The one button of the first step: [data-op, icon, label]. Every one of them
@@ -16304,6 +16352,7 @@ function opAct(op, m, btn) {
     }
     // Over the popup, which stays where it was underneath.
     if (op === 'compass') { arrowOpen(m); return; }
+    if (op === 'ar') { arOpen(m); return; }
     if (op === 'arrived') { opConfirmArrival(m, btn); opToast(t('popup.arrived_toast')); return; }
     // The team steps record the receipt themselves, server-side.
     const ack = (!m.acked && !['complete', 'arrive', 'depart', 'dcomplete'].includes(op)) ? opAcknowledge(m, btn) : null;
