@@ -1410,11 +1410,17 @@ CREATE TABLE IF NOT EXISTS `mission_chat_messages` (
     `team_id` INT UNSIGNED NULL,
     `user_id` INT UNSIGNED NOT NULL,
     `message` TEXT NOT NULL,
+    -- An id the phone makes for each message before sending it (migration
+    -- v198): a message written with no signal is sent again later, and a send
+    -- whose reply never arrived may already be stored - the same id is answered
+    -- with the first row instead of posting twice. NULL for older rows.
+    `client_uuid` VARCHAR(64) NULL,
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
-    INDEX `idx_chat_room` (`mission_id`, `team_id`, `id`)
+    INDEX `idx_chat_room` (`mission_id`, `team_id`, `id`),
+    UNIQUE KEY `uk_chat_client_uuid` (`mission_id`, `user_id`, `client_uuid`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================

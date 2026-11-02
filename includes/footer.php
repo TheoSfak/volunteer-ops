@@ -355,10 +355,24 @@ if (isLoggedIn() && getSetting('achievements_enabled', '1') === '1') {
     if (isWarRoom && barText) {
         barText.textContent = <?= json_encode(t('gui.offline_bar_warroom'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
     }
+    // GPS positions are kept through an outage ONLY by the Android app's
+    // background service (war-room.php's refreshNativeTrackingLive(): running
+    // and not paused by command). In a browser tab, and on an iPhone, a
+    // position that cannot be sent is dropped, so the sentence about positions
+    // is added only while that service is really recording.
+    var baseBarText = barText ? barText.textContent : '';
+    var nativeKeeps = <?= json_encode(t('myping.native_keeps'), JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>;
     function update() {
         var offline = !navigator.onLine;
         bar.style.display = offline ? 'block' : 'none';
         document.body.style.paddingTop = offline ? (bar.offsetHeight + 'px') : '';
+        if (offline && isWarRoom && barText && typeof refreshNativeTrackingLive === 'function') {
+            refreshNativeTrackingLive().then(function (live) {
+                if (navigator.onLine) return;
+                barText.textContent = baseBarText + (live ? ' ' + nativeKeeps : '');
+                document.body.style.paddingTop = bar.offsetHeight + 'px';
+            }).catch(function () {});
+        }
     }
     window.addEventListener('online', update);
     window.addEventListener('offline', update);

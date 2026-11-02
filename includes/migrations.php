@@ -7859,6 +7859,28 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 198,
+            'description' => "Add mission_chat_messages.client_uuid (v3.424.0): an id the phone makes for each chat message before it is sent. A message written with no signal waits on the phone and is sent again later, and a send whose reply never arrived may already be stored - a second send with the same id is answered with the first row instead of posting the message twice. NULL for every earlier message; the unique key ignores NULLs.",
+            'up' => function () {
+                // information_schema, not dbColumnExists(): see migration 197.
+                $hasColumn = (int) dbFetchValue(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_chat_messages' AND COLUMN_NAME = 'client_uuid'"
+                );
+                if ($hasColumn === 0) {
+                    dbExecute("ALTER TABLE mission_chat_messages ADD COLUMN client_uuid VARCHAR(64) NULL AFTER message");
+                }
+                $hasKey = (int) dbFetchValue(
+                    "SELECT COUNT(*) FROM information_schema.STATISTICS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_chat_messages' AND INDEX_NAME = 'uk_chat_client_uuid'"
+                );
+                if ($hasKey === 0) {
+                    dbExecute("ALTER TABLE mission_chat_messages ADD UNIQUE KEY uk_chat_client_uuid (mission_id, user_id, client_uuid)");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

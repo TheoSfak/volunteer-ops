@@ -222,7 +222,10 @@ if (!isPost()) {
 
 // ── POST: send or delete ────────────────────────────────────────────────────
 if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', (string) $_POST['csrf_token'])) {
-    echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
+    // `csrf` tells the offline queue this is a page that needs reloading (the
+    // login was renewed elsewhere), not a message the server refuses: the
+    // queue keeps the message instead of discarding it.
+    echo json_encode(['ok' => false, 'csrf' => true, 'error' => t('common.invalid_request')]);
     exit;
 }
 
@@ -238,10 +241,68 @@ if ($action === 'send') {
         $message = mb_substr($message, 0, 2000);
     }
 
-    $messageId = dbInsert(
-        "INSERT INTO mission_chat_messages (mission_id, team_id, user_id, message, created_at) VALUES (?, ?, ?, ?, NOW())",
-        [$missionId, $teamId, $userId, $message]
-    );
+    // What the page draws a sent message from. One builder for the row stored
+    // below and for the duplicate answered just under it.
+    $sentPayload = function (array $row) use ($user, $userId): array {
+        [$homeBg, $homeFg] = teamBadgeColors($user['home_team_color'] ?? null);
+        return [
+            'id'                 => (int) $row['id'],
+            'user_id'            => (int) $userId,
+            'name'               => $user['name'],
+            'is_external'        => (bool) $user['is_external'],
+            'guest_org_name'     => $user['guest_org_name'],
+            'home_team_name'     => $user['home_team_name'] ?? null,
+            'home_team_color_bg' => $homeBg,
+            'home_team_color_fg' => $homeFg,
+            'guest_country_code' => $user['guest_country_code'] ?? null,
+            'message'            => $row['message'],
+            'time'               => date('H:i', strtotime((string) $row['created_at'])),
+            'mine'               => true,
+            'can_delete'         => true,
+        ];
+    };
+
+    // A message written with no signal waits on the phone and is sent again
+    // with the id the phone made for it. A send whose reply never arrived does
+    // not mean the server never got it, so the same id is answered with the
+    // row already stored: no second message in the room, and no second
+    // notification to everyone it was addressed to.
+    $clientUuid = trim((string) post('client_uuid'));
+    if ($clientUuid !== '' && !preg_match('/^[A-Za-z0-9-]{8,64}$/', $clientUuid)) {
+        $clientUuid = '';
+    }
+    $storedByUuid = "SELECT id, message, created_at FROM mission_chat_messages
+                     WHERE mission_id = ? AND user_id = ? AND client_uuid = ?";
+    if ($clientUuid !== '') {
+        $already = dbFetchOne($storedByUuid, [$missionId, $userId, $clientUuid]);
+        if ($already) {
+            echo json_encode(['ok' => true, 'message' => $sentPayload($already)]);
+            exit;
+        }
+    }
+
+    // The moment it was written. A message sent straight away has no
+    // reported_at and gets "now"; one that waited for a signal carries the time
+    // the person wrote it (same rule as every other replayed field report).
+    [$createdAt] = resolveEventTimestamp();
+
+    try {
+        $messageId = dbInsert(
+            "INSERT INTO mission_chat_messages (mission_id, team_id, user_id, message, client_uuid, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            [$missionId, $teamId, $userId, $message, $clientUuid !== '' ? $clientUuid : null, $createdAt]
+        );
+    } catch (PDOException $e) {
+        // Two copies of the same send arrived together (a replay in a second
+        // tab) and the other was stored first: 1062 on uk_chat_client_uuid.
+        if ($clientUuid !== '' && (int) ($e->errorInfo[1] ?? 0) === 1062) {
+            $already = dbFetchOne($storedByUuid, [$missionId, $userId, $clientUuid]);
+            if ($already) {
+                echo json_encode(['ok' => true, 'message' => $sentPayload($already)]);
+                exit;
+            }
+        }
+        throw $e;
+    }
 
     if ($teamId && $team) {
         notifyMissionTeamChat($missionId, $mission['title'], $team, $userId, $user['name'], $message, $canManageWarRoom, $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null);
@@ -254,22 +315,11 @@ if ($action === 'send') {
         notifyMissionGeneralChat($missionId, $mission['title'], $userId, $user['name'], $message, $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null);
     }
 
-    [$homeBg, $homeFg] = teamBadgeColors($user['home_team_color'] ?? null);
-    echo json_encode(['ok' => true, 'message' => [
-        'id'                 => (int) $messageId,
-        'user_id'            => (int) $userId,
-        'name'               => $user['name'],
-        'is_external'        => (bool) $user['is_external'],
-        'guest_org_name'     => $user['guest_org_name'],
-        'home_team_name'     => $user['home_team_name'] ?? null,
-        'home_team_color_bg' => $homeBg,
-        'home_team_color_fg' => $homeFg,
-        'guest_country_code' => $user['guest_country_code'] ?? null,
-        'message'            => $message,
-        'time'               => date('H:i'),
-        'mine'               => true,
-        'can_delete'         => true,
-    ]]);
+    echo json_encode(['ok' => true, 'message' => $sentPayload([
+        'id'         => $messageId,
+        'message'    => $message,
+        'created_at' => $createdAt,
+    ])]);
     exit;
 }
 

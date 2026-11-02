@@ -16610,11 +16610,14 @@ function renderQueueStatus() {
     // Files are counted on their own line: "3 field actions" would hide that
     // two of them are a video each, which is what decides how long they take.
     const mediaCount = VoMediaQueue.countQueuedMedia(queue);
-    const actionCount = queue.length - mediaCount;
+    const chatCount = queue.filter(q => q.kind === 'chat').length;
+    const actionCount = queue.length - mediaCount - chatCount;
     const pendingText = actionCount === 1 ? t('queue.pending_one') : t('queue.pending', {count: actionCount});
-    const mediaLine = `<i class="bi bi-camera-fill me-1"></i>${t('queue.media_pending', {count: mediaCount})}`;
-    el.innerHTML = (actionCount ? `<i class="bi bi-wifi-off me-1"></i>${pendingText}` : '') +
-        (mediaCount ? (actionCount ? `<div class="mt-1">${mediaLine}</div>` : mediaLine) : '') +
+    const lines = [];
+    if (actionCount) lines.push(`<i class="bi bi-wifi-off me-1"></i>${pendingText}`);
+    if (chatCount) lines.push(`<i class="bi bi-chat-dots-fill me-1"></i>${t('queue.chat_pending', {count: chatCount})}`);
+    if (mediaCount) lines.push(`<i class="bi bi-camera-fill me-1"></i>${t('queue.media_pending', {count: mediaCount})}`);
+    el.innerHTML = lines.map((line, i) => i ? `<div class="mt-1">${line}</div>` : line).join('') +
         (sosPending ? `<div class="fw-bold mt-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>${t('queue.sos_pending')}</div>` : '');
 }
 
@@ -16773,8 +16776,36 @@ function afterQueuedMediaSent(item, uploaded) {
     mediaSignature = JSON.stringify(media);
 }
 
+// ── Chat messages (v3.424.0) ────────────────────────────────────────────────
+//   kind:'chat' → mission-chat.php  {teamId ('' = general room), text, uuid, at}
+// A message written with no signal waits here, shown in its room as "waiting
+// to send" (the chat code below draws it from this queue), and goes out with
+// the id the phone made for it and the time it was written. It is the text
+// lane's own item, so it keeps its place among the other field reports.
+//
+// Same contract as every other sendQueuedItem() branch: the server's JSON,
+// {networkError:true} to try again later, null when the login has to be
+// renewed first (postQueuedForm). A message the server will never take (the
+// mission closed, the person moved off that team) is reported with its text, so
+// it can be written again, and its waiting bubble is removed.
+function sendQueuedChat(item) {
+    return postQueuedForm('mission-chat.php', {
+        action: 'send', mission_id: '<?= $missionId ?>', team_id: item.teamId, message: item.text,
+        client_uuid: item.uuid, reported_at: item.at, queued: '1'
+    }).then(result => {
+        if (!result || result.networkError) return result;
+        // A stale page token: the message stays queued and goes out after a reload.
+        if (result.csrf) return null;
+        if (window.wrChat) window.wrChat.chatLeftQueue(item, !!result.ok);
+        if (result.ok) return result;
+        const preview = item.text.length > 60 ? item.text.slice(0, 57) + '…' : item.text;
+        return {ok: false, error: t('queue.chat_failed', {text: preview, error: result.error || t('common.failed')})};
+    });
+}
+
 function sendQueuedItem(item) {
     if (item.kind === 'media') return sendQueuedMedia(item);
+    if (item.kind === 'chat') return sendQueuedChat(item);
     // Triage writes carry their own ids (victim / assessment / bulk uuid), so
     // a replay that already landed is recognised server-side and ignored.
     if (item.kind === 'triage') {
@@ -26586,6 +26617,45 @@ document.querySelectorAll('.team-form').forEach(form => {
         chatMessagesEl.appendChild(wrap);
     }
 
+    // A message that is still waiting for a signal (the offline queue, see
+    // sendQueuedChat() in the queue section) is shown in its own room, at the
+    // bottom, dimmed and marked "waiting to send". Drawn from the queue every
+    // time, so it survives switching rooms and reloading the page, and is gone
+    // the moment the queue lets go of it. The caller scrolls.
+    function renderPendingChat() {
+        chatMessagesEl.querySelectorAll('[data-pending-chat]').forEach(el => el.remove());
+        loadQueue().filter(q => q.kind === 'chat' && String(q.teamId) === String(activeTeamId)).forEach(q => {
+            const wrap = document.createElement('div');
+            wrap.className = 'mb-2 d-flex justify-content-end';
+            wrap.dataset.pendingChat = q.uuid;
+            const bubble = document.createElement('div');
+            bubble.className = 'p-2 rounded bg-primary text-white';
+            bubble.style.cssText = 'max-width:75%;opacity:.65;';
+            const meta = document.createElement('div');
+            meta.className = 'small text-white-50';
+            meta.innerHTML = '<i class="bi bi-hourglass-split me-1"></i>' + escapeHtml(t('chat.pending'));
+            const body = document.createElement('div');
+            body.textContent = q.text;
+            body.style.whiteSpace = 'pre-wrap';
+            bubble.appendChild(meta);
+            bubble.appendChild(body);
+            wrap.appendChild(bubble);
+            chatMessagesEl.appendChild(wrap);
+        });
+    }
+
+    // The queue has finished with a message: sent, or refused for good. Its
+    // waiting bubble goes, and when it was sent the room is read at once, so
+    // the real message appears in its place in the conversation.
+    // Deliberately NOT done the way a live send is (lastIdByRoom set to the new
+    // message's id): a message that waited out an outage gets an id far past
+    // what the others said meanwhile, and moving the cursor there would skip
+    // every one of those messages.
+    function chatLeftQueue(item, sent) {
+        chatMessagesEl.querySelectorAll('[data-pending-chat]').forEach(el => { if (el.dataset.pendingChat === item.uuid) el.remove(); });
+        if (sent && String(item.teamId) === String(activeTeamId)) pollRoom();
+    }
+
     function loadRoom(teamId) {
         activeTeamId = teamId;
         lastIdByRoom[teamId] = 0;
@@ -26597,6 +26667,7 @@ document.querySelectorAll('.team-form').forEach(form => {
                 if (!data.ok) { chatMessagesEl.textContent = data.error || t('chat.load_error'); return; }
                 data.messages.forEach(renderMessage);
                 if (data.messages.length) lastIdByRoom[teamId] = data.messages[data.messages.length - 1].id;
+                renderPendingChat();
                 chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
             })
             .catch(() => { chatMessagesEl.textContent = t('chat.load_error'); });
@@ -26631,6 +26702,7 @@ document.querySelectorAll('.team-form').forEach(form => {
                 const nearBottom = chatMessagesEl.scrollHeight - chatMessagesEl.scrollTop - chatMessagesEl.clientHeight < 60;
                 data.messages.forEach(renderMessage);
                 lastIdByRoom[teamId] = data.messages[data.messages.length - 1].id;
+                renderPendingChat(); // keeps what is still waiting below what just arrived
                 if (nearBottom) chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
             })
             .catch(() => {})
@@ -26689,7 +26761,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         });
     }
     // A hook rather than an event because the poll needs a value back; the same shape as window.wrConsole.
-    window.wrChat = {cursorParam, apply: applyChatUnread};
+    window.wrChat = {cursorParam, apply: applyChatUnread, chatLeftQueue};
 
     function deleteMessage(id, el) {
         const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: missionId, message_id: id});
@@ -26814,8 +26886,23 @@ document.querySelectorAll('.team-form').forEach(form => {
         event.preventDefault();
         const text = chatInput.value.trim();
         if (!text) return;
-        const data = new URLSearchParams({csrf_token: csrfToken, action: 'send', mission_id: missionId, team_id: activeTeamId, message: text});
-        fetch('mission-chat.php', {method: 'POST', body: data}).then(response => response.json()).then(result => {
+        // The id the phone makes for this message travels with every attempt,
+        // so one that did arrive but whose reply was lost is not posted twice
+        // when the queue sends it again.
+        const item = {kind: 'chat', teamId: String(activeTeamId), text, uuid: VoMediaQueue.newMediaId(), at: new Date().toISOString()};
+        // No valid answer (no connection, no reply in time, a login page): the
+        // message is kept on the phone, shown in the room as waiting, and sent
+        // by the offline queue when it can be.
+        const keepForLater = () => {
+            enqueueAction(item);
+            chatInput.value = '';
+            renderPendingChat();
+            chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+        };
+        // Not even trying when the phone knows it is offline.
+        if (navigator.onLine === false) { keepForLater(); return; }
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'send', mission_id: missionId, team_id: activeTeamId, message: text, client_uuid: item.uuid});
+        fetchWithTimeout('mission-chat.php', {method: 'POST', body: data}, FIELD_POST_TIMEOUT_MS).then(response => response.json()).then(result => {
             if (result.ok) {
                 renderMessage(result.message);
                 lastIdByRoom[activeTeamId] = result.message.id;
@@ -26824,7 +26911,7 @@ document.querySelectorAll('.team-form').forEach(form => {
             } else {
                 alert(result.error || t('common.send_failed'));
             }
-        }).catch(() => alert(t('common.send_failed')));
+        }, keepForLater);
     });
 
     loadRoom('');
