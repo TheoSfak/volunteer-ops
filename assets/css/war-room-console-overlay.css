@@ -50,6 +50,7 @@ html[data-wrc-skin="overlay"] .wrc-ov-cmp-h,
 html[data-wrc-skin="overlay"] .wrc-ov-tile,
 html[data-wrc-skin="overlay"] .wrc-ov-ptr-ring,
 html[data-wrc-skin="overlay"] .wrc-ov-ptr-tip,
+html[data-wrc-skin="overlay"] .wrc-ov-heat-legend,
 html[data-wrc-skin="overlay"] .wrc-ov-ti { display: none; }
 
 /* ══ the window: one screen, the map is the ground ═══════════════════════════ */
@@ -429,6 +430,26 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-ptr-tip {
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-ptr-ring[hidden],
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-ptr-tip[hidden] { display: none; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-ptr-h { color: var(--ov-mut); }
+
+/* ══ the heat layer: its canvas (blurred, under the shapes) and its legend above the bottom-right pair ══ */
+html[data-wrc-skin="overlay"] .wrc-ov-heat-canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-heat-legend {
+    display: block; position: absolute; z-index: 30; right: 84px; bottom: 82px; width: 172px; box-sizing: border-box; padding: 6px 10px 6px; line-height: 1.25;
+    background: var(--ov-panel); border-radius: 6px; box-shadow: 0 8px 26px rgba(0, 0, 0, .42); color: #fff;
+}
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-heat-legend[hidden] { display: none; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-heat-t { display: block; font: 700 11px var(--ov-font); letter-spacing: .07em; text-transform: uppercase; color: var(--ov-mut); }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-heat-bar {
+    display: block; height: 8px; margin: 4px 0 2px; border-radius: 2px;
+    background: linear-gradient(90deg, #2c46c8, #2cc3d6 25%, #3fd05a 50%, #f2d33a 75%, #e5322d);
+}
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-heat-lo,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-heat-hi { display: inline-block; width: 49%; font: 500 11px var(--ov-mono); color: var(--ov-mut); }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-heat-hi { text-align: right; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-heat-msg { display: block; margin-top: 4px; font: 600 12px/1.3 var(--ov-font); font-style: normal; color: var(--ov-org); }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-heat-msg:empty { display: none; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-heat-legend.empty .wrc-ov-heat-bar,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-heat-legend.empty .wrc-ov-heat-lo { display: none; }
 
 /* ══ the right panel: the feed (and the other tabs), then the selected team ══ */
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-dock { position: absolute; z-index: 10; top: 86px; right: 20px; width: var(--ov-dock-w); bottom: 150px; display: flex; flex-direction: column; overflow: hidden; }

@@ -22,6 +22,7 @@ require_once __DIR__ . '/includes/functions-command-post.php';
 require_once __DIR__ . '/includes/functions-map-points.php';
 require_once __DIR__ . '/includes/functions-baro.php';
 require_once __DIR__ . '/includes/functions-mesh.php';
+require_once __DIR__ . '/includes/functions-coverage-heat.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/i18n.php';
 require_once __DIR__ . '/includes/permissions.php';

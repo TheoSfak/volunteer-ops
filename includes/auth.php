@@ -140,6 +140,10 @@ define('WAR_ROOM_ACTION_SCRIPTS', [
     // from the same long-open tab, for hours, by the page that holds the radio
     // on its USB cable; command staff only, which the endpoint itself checks.
     'mesh-ingest.php',
+    // mission-coverage-heat.php (the heat layer of the «Πίνακας» console look, v3.431.0)
+    // is asked every half minute from the same long-open tab while the layer is on;
+    // command staff only, which the endpoint itself checks.
+    'mission-coverage-heat.php',
 ]);
 
 // Pages (not AJAX) a partner-org guest AND a mission visitor may open, on top

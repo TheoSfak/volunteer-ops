@@ -3,13 +3,14 @@
 // The pure half of the «Πίνακας» look of the console (assets/js/war-room-console-overlay.js): which teams the
 // bottom bar shows and how the previous / next buttons move through them, the mission clock, the GPS
 // readout, what the selected-team card says, which live stream the floating video tile shows and the pointer's
-// label (the position as degrees, minutes and seconds, the height cell, the allowance and where the label goes). The part that needs a page (moving the controls into the
+// label (the position as degrees, minutes and seconds, the height cell, the allowance and where the label goes)
+// and the heat layer's colour scale and cell size on the screen. The part that needs a page (moving the controls into the
 // rails, the clicks) is exercised in the browser.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvTipAt} = require('../../assets/js/war-room-console-overlay.js');
+const {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes} = require('../../assets/js/war-room-console-overlay.js');
 
 test('the team window shows all the teams when they fit', () => {
     assert.deepEqual(wrcOvWindow(4, -1, 0, 6), {start: 0, size: 4, more: false});
@@ -177,4 +178,44 @@ test('the label goes to the lower right of the pointer, and to the other side wh
     assert.deepEqual(wrcOvTipAt(100, 880, 200, 30, 1440, 900), {x: 120, y: 830}, 'no room below: above the pointer');
     assert.deepEqual(wrcOvTipAt(1300, 880, 200, 30, 1440, 900), {x: 1080, y: 830}, 'the corner: both');
     assert.deepEqual(wrcOvTipAt(10, 10, 2000, 30, 1440, 900), {x: 4, y: 30}, 'a label wider than the window is kept on screen at its left edge');
+});
+
+test('the heat scale runs from nothing to the 95th percentile and stays there', () => {
+    assert.equal(wrcOvHeatT(0, 600), 0);
+    assert.equal(wrcOvHeatT(600, 600), 1);
+    assert.equal(wrcOvHeatT(5000, 600), 1, 'a cell above the scale is simply the reddest');
+    const low = wrcOvHeatT(10, 600);
+    const mid = wrcOvHeatT(60, 600);
+    assert.ok(low > 0 && low < mid && mid < 1, 'more time is hotter');
+    assert.ok(wrcOvHeatT(60, 600) - wrcOvHeatT(10, 600) > 0.1, 'ten seconds against a minute can be told apart (a logarithmic scale)');
+    assert.equal(wrcOvHeatT(30, 0), 1, 'no scale given: anything is the top of it');
+    assert.equal(wrcOvHeatT(-5, 600), 0);
+});
+
+test('the heat colours go blue, cyan, green, yellow, red, and the faint end is more transparent', () => {
+    assert.deepEqual(wrcOvHeatColor(0), {r: 44, g: 70, b: 200, a: 0.38});
+    assert.deepEqual(wrcOvHeatColor(0.25), {r: 44, g: 195, b: 214, a: 0.47});
+    assert.deepEqual(wrcOvHeatColor(0.5), {r: 63, g: 208, b: 90, a: 0.55});
+    assert.deepEqual(wrcOvHeatColor(0.75), {r: 242, g: 211, b: 58, a: 0.64});
+    assert.deepEqual(wrcOvHeatColor(1), {r: 229, g: 50, b: 45, a: 0.72});
+    const between = wrcOvHeatColor(0.375);
+    assert.ok(between.r > 44 && between.r < 63 && between.g > 195 && between.g < 208, 'between cyan and green it is a mix of the two');
+    assert.deepEqual(wrcOvHeatColor(-1), wrcOvHeatColor(0), 'out of range is clamped');
+    assert.deepEqual(wrcOvHeatColor(7), wrcOvHeatColor(1));
+});
+
+test('a cell is as many pixels as its metres take at that zoom and latitude', () => {
+    // At zoom 17 on the equator a pixel is 1.194 m; at 35 N it is 0.978 m.
+    assert.ok(Math.abs(wrcOvHeatCellPx(20, 0, 17) - 16.75) < 0.1);
+    assert.ok(Math.abs(wrcOvHeatCellPx(20, 35.2, 17) - 20.45) < 0.1);
+    assert.ok(Math.abs(wrcOvHeatCellPx(20, 35.2, 18) - 2 * wrcOvHeatCellPx(20, 35.2, 17)) < 1e-9, 'one zoom level more doubles it');
+    assert.ok(wrcOvHeatCellPx(160, 35.2, 12) < wrcOvHeatCellPx(160, 35.2, 14), 'zoomed out, the cell is small');
+});
+
+test('the busiest cell is stated in whole minutes, at least one', () => {
+    assert.equal(wrcOvHeatMinutes(600), 10);
+    assert.equal(wrcOvHeatMinutes(601), 11);
+    assert.equal(wrcOvHeatMinutes(5), 1);
+    assert.equal(wrcOvHeatMinutes(0), 1);
+    assert.equal(wrcOvHeatMinutes(undefined), 1);
 });

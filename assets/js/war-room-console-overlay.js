@@ -160,8 +160,41 @@ function wrcOvTipAt(x, y, w, h, vw, vh, gap) {
     return {x: Math.round(left), y: Math.round(top)};
 }
 
+/**
+ * Where a cell sits on the colour scale, 0 (blue) to 1 (red): its seconds on a logarithmic scale up to `scale`
+ * (the answer's 95th percentile). Logarithmic because the difference between ten seconds and a minute matters
+ * as much as the one between an hour and a night, and clamped so the few cells above the scale are simply red.
+ */
+function wrcOvHeatT(seconds, scale) {
+    const top = Math.max(1, scale || 1);
+    return Math.max(0, Math.min(1, Math.log1p(Math.max(0, seconds)) / Math.log1p(top)));
+}
+
+/** The colour at `t` on the scale blue - cyan - green - yellow - red, with the fainter end more transparent. -> {r, g, b, a} */
+function wrcOvHeatColor(t) {
+    const stops = [[0, [44, 70, 200]], [0.25, [44, 195, 214]], [0.5, [63, 208, 90]], [0.75, [242, 211, 58]], [1, [229, 50, 45]]];
+    const x = Math.max(0, Math.min(1, t));
+    let i = 1;
+    while (i < stops.length - 1 && x > stops[i][0]) i++;
+    const [t0, c0] = stops[i - 1];
+    const [t1, c1] = stops[i];
+    const f = t1 === t0 ? 0 : (x - t0) / (t1 - t0);
+    const mix = k => Math.round(c0[k] + (c1[k] - c0[k]) * f);
+    return {r: mix(0), g: mix(1), b: mix(2), a: Math.round((0.38 + 0.34 * x) * 100) / 100};
+}
+
+/** How many screen pixels a cell of `cellM` metres is at this latitude and zoom (Web Mercator, 256 px tiles). */
+function wrcOvHeatCellPx(cellM, lat, zoom) {
+    return cellM / (156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, zoom));
+}
+
+/** The busiest cell as the legend's figure: whole minutes, at least one. */
+function wrcOvHeatMinutes(seconds) {
+    return Math.max(1, Math.ceil((seconds || 0) / 60));
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvTipAt};
+    module.exports = {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes};
 }
 
 // ── the view ─────────────────────────────────────────────────────────────────
@@ -464,6 +497,146 @@ if (typeof module !== 'undefined' && module.exports) {
         });
     }
 
+    // ── the heat layer: where the teams have been, and for how long ──────────
+    // Blue to red over the map, drawn on a canvas of its own (thousands of cells are too many SVG nodes), from
+    // mission-coverage-heat.php: person-seconds per ~20 m cell over the verified fixes of the whole mission, scaled
+    // to the busiest 5 %. Off until asked for (the button beside the command post and the map points, remembered
+    // in the browser); while it is on the page asks every half minute and the server answers «unchanged» in one
+    // line when no new fix has come. Never shown below 1200 px: the button is not there to turn it on.
+    const HEAT_KEY = 'wr-console-ov-heat';
+    const HEAT_EVERY_MS = 30000;
+    const heat = {on: false, layer: null, sig: '', timer: 0, busy: false, data: null};
+    try { heat.on = localStorage.getItem(HEAT_KEY) === 'on'; } catch (e) { /* blocked storage: it starts off */ }
+    const heatBtn = mk('button', 'wrc-ov-sq wrc-ov-heat-btn');
+    heatBtn.type = 'button';
+    heatBtn.innerHTML = '<i class="bi bi-fire"></i>';
+    heatBtn.title = t('console.ov_heat_toggle');
+    heatBtn.setAttribute('aria-label', t('console.ov_heat_toggle'));
+    const heatLegend = mk('div', 'wrc-ov-heat-legend');
+    heatLegend.hidden = true;
+    heatLegend.innerHTML = `<b class="wrc-ov-heat-t">${esc(t('console.ov_heat_title'))}</b><i class="wrc-ov-heat-bar"></i>`
+        + `<span class="wrc-ov-heat-lo">${esc(t('console.ov_heat_low'))}</span><span class="wrc-ov-heat-hi"></span><em class="wrc-ov-heat-msg"></em>`;
+    root.appendChild(heatLegend);
+    function paintHeatBtn() {
+        heatBtn.classList.toggle('on', heat.on);
+        heatBtn.setAttribute('aria-pressed', heat.on ? 'true' : 'false');
+    }
+    paintHeatBtn();
+
+    /** The layer is built the first time it is needed: Leaflet is there by then, and a page without a map never gets one. */
+    function heatLayer() {
+        const m = mapNow();
+        if (heat.layer || !m || typeof L === 'undefined') return heat.layer;
+        if (!m.getPane('ovHeatPane')) {
+            m.createPane('ovHeatPane');
+            // Over the map tiles (200), under the areas (340), sectors (350), pins and everything drawn on top of the ground.
+            m.getPane('ovHeatPane').style.zIndex = 330;
+            m.getPane('ovHeatPane').style.pointerEvents = 'none';
+        }
+        const Heat = L.Layer.extend({
+            onAdd(map) {
+                this._canvas = L.DomUtil.create('canvas', 'wrc-ov-heat-canvas');
+                map.getPane('ovHeatPane').appendChild(this._canvas);
+                map.on('moveend resize', this._redraw, this);
+                map.on('zoomstart', this._hide, this);
+                map.on('zoomend', this._redraw, this);
+                this._redraw();
+            },
+            onRemove(map) {
+                map.off('moveend resize', this._redraw, this);
+                map.off('zoomstart', this._hide, this);
+                map.off('zoomend', this._redraw, this);
+                L.DomUtil.remove(this._canvas);
+                this._canvas = null;
+            },
+            setData(data) { this.data = data; if (this._map) this._redraw(); },
+            _hide() { if (this._canvas) this._canvas.style.visibility = 'hidden'; },
+            _redraw() {
+                const map = this._map;
+                const canvas = this._canvas;
+                if (!map || !canvas) return;
+                const size = map.getSize();
+                canvas.width = size.x;
+                canvas.height = size.y;
+                L.DomUtil.setPosition(canvas, map.containerPointToLayerPoint([0, 0]));
+                canvas.style.visibility = '';
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, size.x, size.y);
+                const data = this.data;
+                if (!data || !data.cells || !data.cells.length) return;
+                const zoom = map.getZoom();
+                const px = Math.max(3, wrcOvHeatCellPx(data.cell_m, data.cells[0][0], zoom));
+                const half = px * 0.75;       // a little over a cell: neighbours run into each other, and the blur does the rest
+                // The busiest cells come first in the answer: the faint ones are painted first, so the hot ones stay on top.
+                for (let i = data.cells.length - 1; i >= 0; i--) {
+                    const cell = data.cells[i];
+                    const p = map.latLngToContainerPoint([cell[0], cell[1]]);
+                    if (p.x < -px || p.y < -px || p.x > size.x + px || p.y > size.y + px) continue;
+                    const c = wrcOvHeatColor(wrcOvHeatT(cell[2], data.p95));
+                    ctx.fillStyle = `rgba(${c.r},${c.g},${c.b},${c.a})`;
+                    ctx.fillRect(p.x - half, p.y - half, half * 2, half * 2);
+                }
+                canvas.style.filter = `blur(${Math.max(1.5, Math.min(14, px * 0.45)).toFixed(1)}px)`;
+            },
+        });
+        heat.layer = new Heat();
+        return heat.layer;
+    }
+
+    function paintHeatLegend(state) {
+        const msg = $('.wrc-ov-heat-msg', heatLegend);
+        const hi = $('.wrc-ov-heat-hi', heatLegend);
+        heatLegend.hidden = !heat.on || !engaged;
+        heatLegend.classList.toggle('empty', state === 'none' || state === 'failed');
+        msg.textContent = state === 'failed' ? t('console.ov_heat_failed') : (state === 'none' ? t('console.ov_heat_none') : '');
+        hi.textContent = state === 'ok' && heat.data ? t('console.ov_heat_high', {n: wrcOvHeatMinutes(heat.data.p95)}) : '';
+        heatLegend.title = state === 'ok' && heat.data
+            ? t('console.ov_heat_info', {fixes: heat.data.fixes, people: heat.data.people, cell: heat.data.cell_m}) : '';
+    }
+
+    function heatLoad() {
+        if (!engaged || !heat.on || heat.busy) return;
+        const layer = heatLayer();
+        if (!layer) return;
+        heat.busy = true;
+        fetch('mission-coverage-heat.php?mission_id=' + encodeURIComponent(root.dataset.mission) + '&sig=' + encodeURIComponent(heat.sig), {credentials: 'same-origin'})
+            .then(r => r.ok ? r.json() : null)
+            .then(res => {
+                if (!heat.on || !engaged) return;
+                if (!res || !res.ok) { if (!heat.data) paintHeatLegend('failed'); return; }
+                if (res.unchanged) return;
+                heat.sig = res.sig;
+                heat.data = res;
+                layer.setData(res);
+                paintHeatLegend(res.cells && res.cells.length ? 'ok' : 'none');
+            })
+            .catch(() => { if (!heat.data) paintHeatLegend('failed'); })
+            .finally(() => { heat.busy = false; });
+    }
+    function heatStart() {
+        const m = mapNow();
+        const layer = heatLayer();
+        if (!m || !layer) return;
+        if (!m.hasLayer(layer)) layer.addTo(m);
+        paintHeatLegend(heat.data ? (heat.data.cells.length ? 'ok' : 'none') : 'loading');
+        heatLoad();
+        clearInterval(heat.timer);
+        heat.timer = setInterval(() => { if (!document.hidden) heatLoad(); }, HEAT_EVERY_MS);
+    }
+    function heatStop() {
+        clearInterval(heat.timer);
+        heat.timer = 0;
+        const m = mapNow();
+        if (heat.layer && m && m.hasLayer(heat.layer)) m.removeLayer(heat.layer);
+        heatLegend.hidden = true;
+    }
+    heatBtn.addEventListener('click', () => {
+        heat.on = !heat.on;
+        try { localStorage.setItem(HEAT_KEY, heat.on ? 'on' : 'off'); } catch (e) { /* not remembered */ }
+        paintHeatBtn();
+        if (heat.on) heatStart(); else heatStop();
+    });
+
     // ── moving the real controls in, and back ────────────────────────────────
     const moved = [];
     let engaged = false;
@@ -515,6 +688,9 @@ if (typeof module !== 'undefined' && module.exports) {
         take($('#mapFullscreenToggle'), tools);
         if (canHover) tools.appendChild(ptrBtn);
         bindPointer();
+        // The heat layer's button goes first in the bottom-right pair, so the command post and the map points keep their places.
+        pair.insertBefore(heatBtn, pair.firstChild);
+        if (heat.on) heatStart();
         // The acknowledgement panel floats over the map like the rest: inside the board, under its menus.
         take($('#ackTracker'), root);
         take($('#trailFilterBar'), root);
@@ -544,6 +720,7 @@ if (typeof module !== 'undefined' && module.exports) {
         engaged = false;
         html.removeAttribute('data-wrc-ov');
         hidePtr();
+        heatStop();
         syncTile();
         giveBack();
         top.contains(op) && op.remove();
