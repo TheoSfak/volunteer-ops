@@ -84,4 +84,29 @@ final class ArFieldViewTest extends TestCase
             $this->assertSame(2, $counts[$key] ?? 0, "$key must be defined in both languages");
         }
     }
+
+    public function testTheAROpensFromTheCompassScreenTheCardAndAOneTimeOffer(): void
+    {
+        // «Πυξίδα» screen: a button that hands the same order over to the camera.
+        $this->assertStringContainsString('data-arrow="ar" hidden', $this->warRoom);
+        $this->assertStringContainsString("if (btn.dataset.arrow === 'ar') { const m = arrowState && opEntries.get(arrowState.key); arrowClose(); if (m) arOpen(m); return; }", $this->warRoom);
+        // «Οι Εντολές μου» card: hidden until the phone can do it, wired by the module.
+        $this->assertStringContainsString('id="myTasksArBtn"', $this->warRoom);
+        $this->assertStringContainsString("document.getElementById('myTasksArBtn')", $this->module);
+        // The offer: once per order per session, switchable off for good, never while the arrow or AR is open.
+        $this->assertStringContainsString("const AR_OFFER_M = 150;", $this->module);
+        $this->assertStringContainsString("wrArOfferOff", $this->module);
+        $this->assertStringContainsString("sessionStorage.setItem(AR_OFFERED_KEY", $this->module);
+        $this->assertStringContainsString("if (arState || arOfferOff() || document.hidden || !arSupported()) return;", $this->module);
+        $this->assertStringContainsString("wr-arrow-open", $this->module);
+        // The offer sits over the order strip (1905) and under the full-screen alarms (2000).
+        $this->assertMatchesRegularExpression('~.wr-ar-offer {[^}]*z-index: 1906~', $this->warRoom);
+    }
+
+    public function testTheAROpensWithNoOrderAsAFreeView(): void
+    {
+        $this->assertStringContainsString('if (m && !(m.target && m.target.nav)) return;', $this->module);
+        $this->assertStringContainsString('key: m ? m.key : null', $this->module);
+        $this->assertStringContainsString('function arDrawLayers(S, me, info)', $this->module);
+    }
 }

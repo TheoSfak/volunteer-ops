@@ -260,12 +260,13 @@ function arElement() {
     return el;
 }
 
+// With no order it opens the free view: the other teams and the danger zones around the person, nothing to steer to.
 function arOpen(m) {
-    if (!m || !m.target || !m.target.nav) return;
+    if (m && !(m.target && m.target.nav)) return;
     arClose();
     const el = arElement();
     arState = {
-        key: m.key, layers: {bound: true, team: true, haz: true},
+        key: m ? m.key : null, layers: {bound: true, team: true, haz: true},
         pose: null, orientAt: 0, absolute: false, iosOffset: 0,
         fix: null, watchId: null, stream: null, wakeLock: null, raf: 0, onOrient: null, onKey: null, onResize: null,
         elev: new Map(), meElev: null, meElevAt: null, elevBusy: false, elevKey: '',
@@ -341,9 +342,14 @@ function arClose() {
 
 function arStep(dir) {
     const keys = arOrderKeys();
-    if (keys.length < 2) return;
-    const i = Math.max(0, keys.indexOf(arState.key));
-    arState.key = keys[(i + dir + keys.length) % keys.length];
+    if (!keys.length) return;
+    if (arState.key === null) {
+        arState.key = dir > 0 ? keys[0] : keys[keys.length - 1]; // from the free view into an order
+    } else {
+        if (keys.length < 2) return;
+        const i = Math.max(0, keys.indexOf(arState.key));
+        arState.key = keys[(i + dir + keys.length) % keys.length];
+    }
     arState.elevKey = '';
     arLoadElevations(true);
 }
@@ -677,9 +683,9 @@ function arFrame(now) {
     if (!arState) return;
     arState.raf = requestAnimationFrame(arFrame);
     const el = document.getElementById('wrAr');
-    const m = opEntries.get(arState.key);
+    const m = arState.key === null ? null : opEntries.get(arState.key);
     // Finished or withdrawn while open: the next open order, or the way out.
-    if (!m || !m.target || !m.target.nav) {
+    if (arState.key !== null && (!m || !m.target || !m.target.nav)) {
         const keys = arOrderKeys();
         if (keys.length) { arState.key = keys[0]; arState.elevKey = ''; } else { arClose(); }
         return;
@@ -722,6 +728,11 @@ function arFrame(now) {
 // The order's own things, then the layers around it. Returns what the HUD
 // needs to say: distance, height difference, whether «Έφτασα» is in reach.
 function arDrawWorld(S, m, me) {
+    if (!m) {
+        const free = {free: true, dist: 0, dz: 0, near: false, inside: false, out: false, hazard: null};
+        arDrawLayers(S, me, free);
+        return free;
+    }
     const ctx = S.ctx, t0 = m.target;
     const nav = t0.nav;
     const navV = arVec(me, nav.lat, nav.lng);
@@ -796,6 +807,14 @@ function arDrawWorld(S, m, me) {
     pushMark(navAngles.az, AR_COL.green, 'tri');
     if (t0.kind !== 'line') S.radar.push({poly: null, lat: nav.lat, lng: nav.lng, col: AR_COL.green, size: 4});
 
+    arDrawLayers(S, me, info);
+    return info;
+}
+
+// Danger zones and the other teams: the same around any order, and on their own with none open.
+function arDrawLayers(S, me, info) {
+    const ctx = S.ctx;
+    const pushMark = (az, col, shape) => S.marks.push({az: az, col: col, shape: shape});
     // Danger zones: red fences, always on the order's side of the screen when near.
     info.hazard = null;
     if (arState.layers.haz) {
@@ -829,7 +848,6 @@ function arDrawWorld(S, m, me) {
             pushMark(arBearingElevation([v.x, v.y, 0]).az, tm.is_stale ? AR_COL.grey : AR_COL.cyan, 'dia');
         });
     }
-    return info;
 }
 
 function arSignedMetres(v) {
@@ -839,11 +857,11 @@ function arSignedMetres(v) {
 // The parts of the HUD that only change with the order, not with the frame.
 function arUpdateStaticHud(el, m) {
     const steps = el.querySelector('.wr-ar-steps');
-    const sig = m.key + '|' + (m.steps || []).join('/') + '|' + m.step;
+    const sig = m ? m.key + '|' + (m.steps || []).join('/') + '|' + m.step : 'free';
     if (steps.dataset.sig !== sig) {
         steps.dataset.sig = sig;
         steps.replaceChildren();
-        (m.steps || []).forEach((label, i) => {
+        (m ? m.steps || [] : []).forEach((label, i) => {
             const s = document.createElement('div');
             s.className = 'wr-ar-step' + (i < m.step ? ' is-done' : (i === m.step ? ' is-cur' : ''));
             s.textContent = (i < m.step ? '✓ ' : '') + label;
@@ -852,10 +870,12 @@ function arUpdateStaticHud(el, m) {
     }
     const keys = arOrderKeys();
     const pager = el.querySelector('.wr-ar-pager');
-    pager.hidden = keys.length < 2;
-    if (keys.length > 1) pager.querySelector('.wr-ar-pagerlabel').textContent = t('popup.pager', {i: Math.max(0, keys.indexOf(arState.key)) + 1, n: keys.length});
-    el.querySelector('[data-ar="decline"]').hidden = !(m.canDecline && m.outstanding);
-    el.querySelector('[data-ar-k="title"]').textContent = m.text ? String(m.text).split('\n')[0] : m.title;
+    pager.hidden = m ? keys.length < 2 : keys.length < 1;
+    if (!m) pager.querySelector('.wr-ar-pagerlabel').textContent = t('ar.free_label');
+    else if (keys.length > 1) pager.querySelector('.wr-ar-pagerlabel').textContent = t('popup.pager', {i: Math.max(0, keys.indexOf(arState.key)) + 1, n: keys.length});
+    el.querySelector('[data-ar="decline"]').hidden = !(m && m.canDecline && m.outstanding);
+    el.querySelector('[data-ar="compass"]').hidden = !m;
+    el.querySelector('[data-ar-k="title"]').textContent = m ? (m.text ? String(m.text).split('\n')[0] : m.title) : t('ar.free_title');
 }
 
 function arUpdateDynamicHud(el, m, S) {
@@ -867,6 +887,13 @@ function arUpdateDynamicHud(el, m, S) {
     if (!S || !info) {
         go.hidden = true;
         set('dist', '—'); set('dz', '—'); set('eta', '—'); set('hint', '');
+        return;
+    }
+    if (!m) {
+        go.hidden = true;
+        set('dist', '\u2014'); set('dz', '\u2014'); set('eta', '\u2014'); set('hint', '');
+        el.querySelector('.wr-ar-banner').textContent = arOrderKeys().length ? t('ar.free_banner_orders') : t('ar.free_banner');
+        arUpdateWarning(el, S, info);
         return;
     }
     const polygon = m.target.kind === 'polygon';
@@ -889,7 +916,11 @@ function arUpdateDynamicHud(el, m, S) {
     else if (act.needNear) banner = arGuideText(S, m, info);
     else banner = t('ar.banner_finish');
     el.querySelector('.wr-ar-banner').textContent = banner;
-    // Danger and sector warnings above everything else.
+    arUpdateWarning(el, S, info);
+}
+
+// Danger and sector warnings above everything else, a buzz when one appears, and the lowered-phone cover.
+function arUpdateWarning(el, S, info) {
     const warn = el.querySelector('.wr-ar-warn');
     let text = '';
     if (info.out) text = t('ar.sector_out');
@@ -924,6 +955,94 @@ function arGuideText(S, m, info) {
     return t('ar.go_ahead', {dist: dist});
 }
 
+// ── «Δες τον με AR»: offered once per order, when its place comes within reach ──
+const AR_OFFER_M = 150;
+const AR_OFFER_OFF_KEY = 'wrArOfferOff';
+const AR_OFFERED_KEY = 'wrArOffered';
+
+// The first open order with a place that this person has received, is within
+// radius metres of, and has not been offered yet. Pure: entries is opEntries.
+function arOfferCandidate(me, entries, offered, radius) {
+    for (const [key, m] of entries) {
+        if (!m.outstanding || !m.acked || !m.target || !m.target.nav || offered.includes(key)) continue;
+        const l = arLocal(me, m.target.nav);
+        if (Math.hypot(l.x, l.y) <= radius) return m;
+    }
+    return null;
+}
+function arOfferOff() { try { return localStorage.getItem(AR_OFFER_OFF_KEY) === '1'; } catch (e) { return false; } }
+function arOffered() { try { return JSON.parse(sessionStorage.getItem(AR_OFFERED_KEY) || '[]'); } catch (e) { return []; } }
+function arMarkOffered(key) {
+    const list = arOffered();
+    if (!list.includes(key)) list.push(key);
+    try { sessionStorage.setItem(AR_OFFERED_KEY, JSON.stringify(list)); } catch (e) { /* private window: may ask again after a reload */ }
+}
+let arOfferTimer = 0;
+function arHideOffer() {
+    clearTimeout(arOfferTimer);
+    const el = document.getElementById('wrArOffer');
+    if (el) el.hidden = true;
+}
+function arShowOffer(m) {
+    let el = document.getElementById('wrArOffer');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'wrArOffer';
+        el.className = 'wr-ar-offer';
+        el.setAttribute('role', 'status');
+        el.innerHTML = `<div class="wr-ar-offer-text"></div>
+            <div class="wr-ar-offer-row">
+                <button type="button" class="btn btn-sm btn-success" data-ar-offer="open"></button>
+                <button type="button" class="btn btn-sm btn-link text-white" data-ar-offer="never"></button>
+                <button type="button" class="wr-ar-offer-x" data-ar-offer="later" aria-label="${escapeHtml(t('arrow.close'))}"><i class="bi bi-x-lg"></i></button>
+            </div>`;
+        el.querySelector('[data-ar-offer="open"]').textContent = t('ar.offer_open');
+        el.querySelector('[data-ar-offer="never"]').textContent = t('ar.offer_never');
+        document.body.appendChild(el);
+        el.addEventListener('click', e => {
+            const btn = e.target.closest('[data-ar-offer]');
+            if (!btn) return;
+            const target = el._order;
+            arHideOffer();
+            if (btn.dataset.arOffer === 'never') { try { localStorage.setItem(AR_OFFER_OFF_KEY, '1'); } catch (err) { /* ignore */ } }
+            if (btn.dataset.arOffer === 'open' && target && opEntries.get(target.key)) arOpen(opEntries.get(target.key));
+        });
+    }
+    el._order = m;
+    el.querySelector('.wr-ar-offer-text').textContent = t('ar.offer_text', {title: String(m.text || m.title).split('\n')[0]});
+    el.hidden = false;
+    clearTimeout(arOfferTimer);
+    arOfferTimer = setTimeout(arHideOffer, 15000);
+}
+function arOfferTick() {
+    try {
+        if (arState || arOfferOff() || document.hidden || !arSupported()) return;
+        if (document.body.classList.contains('wr-arrow-open')) return;
+        const me = typeof opMyPosition === 'function' ? opMyPosition() : null;
+        if (!me) return;
+        const m = arOfferCandidate(me, opEntries, arOffered(), AR_OFFER_M);
+        if (!m) return;
+        arMarkOffered(m.key);
+        arShowOffer(m);
+    } catch (e) { /* the page's own state is not ready yet */ }
+}
+
+// The «Οι Εντολές μου» card's button: the first order with a place, or the free view.
+function arWireCardButton() {
+    const btn = document.getElementById('myTasksArBtn');
+    if (!btn) return;
+    if (arSupported()) btn.classList.remove('d-none');
+    btn.addEventListener('click', () => {
+        const keys = arOrderKeys();
+        arOpen(keys.length ? opEntries.get(keys[0]) : null);
+    });
+}
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    setInterval(arOfferTick, 5000);
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', arWireCardButton);
+    else arWireCardButton();
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         AR_EYE_HEIGHT_M,
@@ -938,5 +1057,6 @@ if (typeof module !== 'undefined' && module.exports) {
         arTurnTo,
         arSubdivide,
         arNearestOnPolygon,
+        arOfferCandidate,
     };
 }

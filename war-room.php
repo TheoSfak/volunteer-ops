@@ -2861,6 +2861,11 @@ include __DIR__ . '/includes/header.php';
     .wr-ar-msg { position: absolute; inset: 0; z-index: 3; background: rgba(0, 0, 0, .72); display: flex; align-items: center; justify-content: center; padding: 24px; }
     .wr-ar-msg[hidden] { display: none; }
     .wr-ar-msgbox { max-width: 360px; background: #1b2420; border: 1px solid rgba(255, 255, 255, .2); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 14px; font-size: 15px; }
+    /* The one-time «Δες τον με AR» offer, over the order strip (1905) and under the full-screen alarms (2000). */
+    .wr-ar-offer { position: fixed; left: 10px; right: 10px; bottom: calc(env(safe-area-inset-bottom, 0px) + 140px); z-index: 1906; padding: 10px 12px; border-radius: 12px; background: rgba(8, 12, 10, .92); color: #f2f6f3; border: 1px solid rgba(255, 255, 255, .2); display: flex; flex-direction: column; gap: 8px; font-size: 14px; }
+    .wr-ar-offer[hidden] { display: none; }
+    .wr-ar-offer-row { display: flex; align-items: center; gap: 6px; }
+    .wr-ar-offer-x { margin-left: auto; width: 36px; height: 36px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .14); color: #fff; }
     .wr-ar-dim .wr-ar-world, .wr-ar-dim .wr-ar-top, .wr-ar-dim .wr-ar-rail, .wr-ar-dim .wr-ar-radar, .wr-ar-dim .wr-ar-bottom, .wr-ar-dim .wr-ar-warn { opacity: .08; }
     .wr-ar-dim::after, .wr-ar-lowered::before { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; font-size: 26px; font-weight: 700; pointer-events: none; text-shadow: 0 2px 12px #000; }
     .wr-ar-dim::after { content: attr(data-look); }
@@ -5613,7 +5618,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         <?php endif; ?>
         <?php if ($showPersonalCards): ?>
         <div class="card shadow-sm mb-4 border-primary" data-card-id="myTasksCard">
-            <div class="card-header bg-primary text-white"><h5 class="mb-0"><i class="bi bi-clipboard-check me-1"></i><?= t('mytasks.panel_title') ?></h5></div>
+            <div class="card-header bg-primary text-white d-flex align-items-center gap-2"><h5 class="mb-0 flex-grow-1"><i class="bi bi-clipboard-check me-1"></i><?= t('mytasks.panel_title') ?></h5><button type="button" class="btn btn-sm btn-light d-none" id="myTasksArBtn"><i class="bi bi-badge-ar me-1"></i><?= t('ar.open_btn') ?></button></div>
             <div class="card-body">
                 <div id="myTasksList"></div>
             </div>
@@ -15999,13 +16004,17 @@ function arrowElement() {
         <div class="wr-arrow-dist" aria-live="polite"></div>
         <div class="wr-arrow-sub"></div>
         <div class="wr-arrow-actions">
+            <button type="button" class="btn btn-outline-light btn-lg" data-arrow="ar" hidden><i class="bi bi-badge-ar me-1"></i>${escapeHtml(t('ar.open_btn'))}</button>
             <a class="btn btn-light btn-lg" data-arrow="walk" target="_blank" rel="noopener"><i class="bi bi-person-walking me-1"></i>${escapeHtml(t('arrow.walk_btn'))}</a>
             <button type="button" class="btn btn-success btn-lg" data-arrow="arrive" hidden><i class="bi bi-geo-alt-fill me-1"></i>${escapeHtml(t('popup.btn.arrived'))}</button>
         </div>`;
     document.body.appendChild(el);
+    // «AR» (war-room-ar.js) on a phone that can do it: the same order, through the camera.
+    el.querySelector('[data-arrow="ar"]').hidden = !(typeof arSupported === 'function' && arSupported());
     el.addEventListener('click', e => {
         const btn = e.target.closest('[data-arrow]');
         if (!btn) return;
+        if (btn.dataset.arrow === 'ar') { const m = arrowState && opEntries.get(arrowState.key); arrowClose(); if (m) arOpen(m); return; }
         if (btn.dataset.arrow === 'close') arrowClose();
         if (btn.dataset.arrow === 'arrive') arrowArrive(btn);
     });

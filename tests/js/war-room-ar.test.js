@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 
 const {
     arLocal, arFromLocal, arBasis, arHeading, arPitch, arFocalPx, arProject,
-    arBearingElevation, arTurnTo, arSubdivide, arNearestOnPolygon,
+    arBearingElevation, arTurnTo, arSubdivide, arNearestOnPolygon, arOfferCandidate,
 } = require('../../assets/js/war-room-ar.js');
 
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) <= eps, `${a} is not within ${eps} of ${b}`);
@@ -137,4 +137,29 @@ test('focal length makes the long side of the screen span the field of view', ()
     const f = arFocalPx(400, 800, 64);
     near(2 * Math.atan(400 / f) * 180 / Math.PI, 64, 1e-6);
     assert.equal(arFocalPx(800, 400, 64), f); // landscape: same camera, same long side
+});
+
+// ── the one-time «Δες τον με AR» offer ──
+const offerMe = {lat: 35.2, lng: 24.9};
+const at = (metres) => ({lat: 35.2 + metres / 111190, lng: 24.9});
+const order = (over) => Object.assign({outstanding: true, acked: true, target: {kind: 'point', nav: at(120)}}, over);
+
+test('an offer goes to the first received open order within reach', () => {
+    const entries = new Map([['dispatch:1', order({})], ['sector:2', order({target: {kind: 'point', nav: at(60)}})]]);
+    assert.equal(arOfferCandidate(offerMe, entries, [], 150), entries.get('dispatch:1'));
+});
+
+test('nothing is offered for an order that is too far, not yet received, finished, without a place, or already offered', () => {
+    const far = order({target: {kind: 'point', nav: at(400)}});
+    const fresh = order({acked: false});
+    const done = order({outstanding: false});
+    const noPlace = order({target: null});
+    const again = order({});
+    const entries = new Map([['a', far], ['b', fresh], ['c', done], ['d', noPlace], ['e', again]]);
+    assert.equal(arOfferCandidate(offerMe, entries, ['e'], 150), null);
+});
+
+test('the offer is for an order not yet offered, so an order already offered gives way to the next', () => {
+    const entries = new Map([['one', order({})], ['two', order({})]]);
+    assert.equal(arOfferCandidate(offerMe, entries, ['one'], 150), entries.get('two'));
 });
