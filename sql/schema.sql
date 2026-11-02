@@ -2702,6 +2702,16 @@ ALTER TABLE `mission_photos`
 ALTER TABLE `mission_photos`
     ADD COLUMN `file_purged_at` TIMESTAMP NULL DEFAULT NULL;
 
+-- An id the phone makes for each photo/video before sending it (migration
+-- v197). A file kept on the phone while there is no signal is sent again
+-- later, and a reply that never arrived can mean the server already has it:
+-- a second upload with the same id is answered with the first row instead of
+-- being stored twice. NULL for older rows; the unique key ignores NULLs.
+ALTER TABLE `mission_photos`
+    ADD COLUMN `client_uuid` VARCHAR(64) NULL AFTER `poi_note`;
+ALTER TABLE `mission_photos`
+    ADD UNIQUE KEY `uk_photo_client_uuid` (`mission_id`, `user_id`, `client_uuid`);
+
 -- =============================================
 -- MISSION MISSING PERSONS (War Room: one profile per mission — name, age,
 -- description, clothing, photo, last-seen location+time — backing the

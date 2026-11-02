@@ -1459,6 +1459,11 @@ return [
         'queue.pending' => 'Εκκρεμούν {count} ενέργειες πεδίου — θα σταλούν αυτόματα μόλις επανέλθει το δίκτυο.',
         'queue.failed' => 'Μια ενέργεια πεδίου απέτυχε οριστικά: {error}',
         'queue.sos_pending' => 'Το SOS σας ΔΕΝ έχει φτάσει ακόμα στο κέντρο επιχειρήσεων. Αν μπορείτε, ειδοποιήστε και τηλεφωνικά.',
+        // Photos/videos kept on the phone while there is no signal (assets/js/media-queue.js)
+        'queue.media_pending' => 'Φωτογραφίες/βίντεο που περιμένουν σήμα: {count}. Είναι αποθηκευμένα στο κινητό και θα σταλούν αυτόματα.',
+        'queue.media_failed' => 'Η φωτογραφία ή το βίντεο δεν στάλθηκε: {error}',
+        'queue.media_missing' => 'το αρχείο δεν υπάρχει πια στη μνήμη του κινητού',
+        'queue.media_rejected' => 'ο διακομιστής δεν το δέχτηκε',
         'shortage.empty_list' => 'Δεν υπάρχουν ανοιχτές αναφορές έλλειψης.',
         'shortage.seen_at_prefix' => ' · Είδατε: {time}',
         'shortage.resolve_btn' => 'Λύθηκε',
@@ -1488,6 +1493,9 @@ return [
         'media.photo_label' => 'Η φωτογραφία',
         'media.video_label' => 'Το βίντεο',
         'media.sent_suffix' => ' εστάλη.',
+        'media.saved_offline' => 'Δεν υπάρχει σήμα. Αποθηκεύτηκε στο κινητό και θα σταλεί αυτόματα μόλις επανέλθει.',
+        'media.save_failed' => 'Δεν υπάρχει σήμα και το αρχείο ΔΕΝ αποθηκεύτηκε στο κινητό. Δεν στάλθηκε, δοκιμάστε ξανά.',
+        'route.media_queued' => 'αναμονή αποστολής',
         'sos.marquee_text' => '🆘 {team} ΣΕ SOS — {name} χρειάζεται άμεση βοήθεια!',
         // Local-only siren mute — audio only, never touches the alert itself
         'sos.mute_btn' => 'Σίγαση ήχου (5λ)',
@@ -4545,6 +4553,11 @@ return [
         'queue.pending' => '{count} field actions pending — will send automatically once the connection returns.',
         'queue.failed' => 'A field action permanently failed: {error}',
         'queue.sos_pending' => 'Your SOS has NOT reached the operations centre yet. If you can, call them as well.',
+        // Photos/videos kept on the phone while there is no signal (assets/js/media-queue.js)
+        'queue.media_pending' => 'Photos/videos waiting for a signal: {count}. They are saved on this phone and will be sent automatically.',
+        'queue.media_failed' => 'A photo or video was not sent: {error}',
+        'queue.media_missing' => 'the file is no longer on this phone',
+        'queue.media_rejected' => 'the server did not accept it',
         'shortage.empty_list' => 'There are no open shortage reports.',
         'shortage.seen_at_prefix' => ' · Seen: {time}',
         'shortage.resolve_btn' => 'Resolved',
@@ -4574,6 +4587,9 @@ return [
         'media.photo_label' => 'The photo',
         'media.video_label' => 'The video',
         'media.sent_suffix' => ' was sent.',
+        'media.saved_offline' => 'No signal. Saved on this phone, it will be sent automatically as soon as the connection returns.',
+        'media.save_failed' => 'No signal, and the file could NOT be saved on this phone. It was not sent, please try again.',
+        'route.media_queued' => 'waiting to send',
         'sos.marquee_text' => '🆘 {team} IS IN SOS — {name} needs immediate help!',
         // Local-only siren mute — audio only, never touches the alert itself
         'sos.mute_btn' => 'Mute sound (5m)',

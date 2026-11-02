@@ -803,10 +803,16 @@ function unwrapRotation(previous, angle) {
     return previous + diff;
 }
 
-function missingRouteDeliverablesClientSide(wp, noteValue) {
+// `queued` is what the phone is holding for this point and has not been able to
+// send yet ({photo, video}, from VoMediaQueue.queuedMediaFor): a file kept on
+// the phone counts as taken, otherwise the person who photographed the point
+// in a dead zone could not press «Ολοκληρώθηκε». The queue sends the file
+// first and the completion after it.
+function missingRouteDeliverablesClientSide(wp, noteValue, queued) {
     const missing = [];
-    if (wp.require_photo && !wp.photo) missing.push(t('route.deliverable_photo'));
-    if (wp.require_video && !wp.video) missing.push(t('route.deliverable_video'));
+    const waiting = queued || {};
+    if (wp.require_photo && !wp.photo && !waiting.photo) missing.push(t('route.deliverable_photo'));
+    if (wp.require_video && !wp.video && !waiting.video) missing.push(t('route.deliverable_video'));
     if (wp.require_note && !(noteValue || wp.note || '').trim()) missing.push(t('route.deliverable_note'));
     return missing;
 }

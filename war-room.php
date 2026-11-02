@@ -5290,39 +5290,53 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             <div class="card-header"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i><?= t('media.panel_title') ?></h5></div>
             <div class="card-body d-flex flex-column" style="height:520px;">
                 <?php if ($isApprovedParticipant): ?>
-                <!-- The two solid-blue capture buttons are d-lg-none on purpose.
-                     capture="environment" is a mobile-only attribute: it opens the
-                     camera straight away on a phone, and is silently ignored by every
-                     desktop browser, which falls back to an ordinary file picker. So on
-                     a laptop "Photo" and "Gallery" sitting side by side are two buttons
-                     that do the exact same thing - four blue buttons doing two jobs.
-                     Hidden from lg up; the Gallery button beside each one is already
-                     w-100 and simply takes the full width once its twin is gone. -->
+                <!-- The two solid-blue buttons are the direct-camera shortcuts, and
+                     they carry NO capture= here on purpose (v3.423.0):
+                     applyMediaPickerMode() (beside wireMediaInput) adds
+                     capture="environment" on every device EXCEPT an iPhone/iPad.
+                     On an iPhone capture= takes the picture inside the browser,
+                     and as reported from the field it never reaches the Photos
+                     library, so a file that failed to upload was gone for good;
+                     without it iOS opens its own sheet (Take Photo / Photo
+                     Library) and the person chooses. There the twin is hidden and
+                     the one remaining button is named "Photo" / "Video". (Not
+                     verified on a real iPhone: the queue below is what keeps a
+                     file safe, this only stops steering the person into the
+                     capture-only path.)
+                     Android keeps capture=: its camera app saves to the gallery
+                     anyway, and the Android app's file chooser has NO camera entry
+                     without it.
+                     Also d-lg-none: a desktop browser ignores capture= and opens an
+                     ordinary file picker, so there "Photo" and "Gallery" side by
+                     side would be two buttons that do the exact same thing. The
+                     button beside each one is already w-100 and simply takes the
+                     full width once its twin is gone. -->
                 <div class="d-flex gap-2 mb-2">
-                    <label class="btn btn-primary w-100 mb-0 d-lg-none">
+                    <label class="btn btn-primary w-100 mb-0 d-lg-none wr-camera-twin">
                         <i class="bi bi-camera-fill me-1"></i><?= t('media.photo_btn') ?>
-                        <input type="file" id="photoCaptureInput" accept="image/*" capture="environment" class="d-none">
+                        <input type="file" id="photoCaptureInput" accept="image/*" class="d-none" data-direct-camera>
                     </label>
                     <!-- Two labels, one per breakpoint. On a phone this button sits
                          next to its capture twin, so "Gallery" is the meaningful
                          distinction. On a desktop the twin is hidden, leaving this as
                          the ONLY photo button - and a second identical "Gallery" for
                          video right under it - so there it names the media type
-                         instead. Reuses the existing keys; no new strings. -->
+                         instead (and so it does on an iPhone, see above).
+                         Reuses the existing keys; no new strings. -->
                     <label class="btn btn-outline-primary w-100 mb-0">
-                        <span class="d-lg-none"><i class="bi bi-images me-1"></i><?= t('media.gallery_btn') ?></span>
-                        <span class="d-none d-lg-inline"><i class="bi bi-camera-fill me-1"></i><?= t('media.photo_btn') ?></span>
+                        <span class="d-lg-none wr-gallery-label"><i class="bi bi-images me-1"></i><?= t('media.gallery_btn') ?></span>
+                        <span class="d-none d-lg-inline wr-type-label"><i class="bi bi-camera-fill me-1"></i><?= t('media.photo_btn') ?></span>
                         <input type="file" id="photoGalleryInput" accept="image/*" class="d-none">
                     </label>
                 </div>
                 <div class="d-flex gap-2 mb-2">
-                    <label class="btn btn-primary w-100 mb-0 d-lg-none">
+                    <label class="btn btn-primary w-100 mb-0 d-lg-none wr-camera-twin">
                         <i class="bi bi-camera-reels-fill me-1"></i><?= t('media.video_btn') ?>
-                        <input type="file" id="videoCaptureInput" accept="video/*" capture="environment" class="d-none">
+                        <input type="file" id="videoCaptureInput" accept="video/*" class="d-none" data-direct-camera>
                     </label>
                     <label class="btn btn-outline-primary w-100 mb-0">
-                        <span class="d-lg-none"><i class="bi bi-images me-1"></i><?= t('media.gallery_btn') ?></span>
-                        <span class="d-none d-lg-inline"><i class="bi bi-camera-reels-fill me-1"></i><?= t('media.video_btn') ?></span>
+                        <span class="d-lg-none wr-gallery-label"><i class="bi bi-images me-1"></i><?= t('media.gallery_btn') ?></span>
+                        <span class="d-none d-lg-inline wr-type-label"><i class="bi bi-camera-reels-fill me-1"></i><?= t('media.video_btn') ?></span>
                         <input type="file" id="videoGalleryInput" accept="video/*" class="d-none">
                     </label>
                 </div>
@@ -6684,6 +6698,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg==" crossorigin="anonymous"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/esri-imagery.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-utils.js?v=<?= APP_VERSION ?>"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/media-queue.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/trail-display.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-ar.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-ar.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/triage.js?v=<?= APP_VERSION ?>"></script>
@@ -16528,6 +16543,16 @@ function postRouteAction(action, id, extra) {
 const OFFLINE_QUEUE_KEY = 'wr_offline_queue_<?= $missionId ?>';
 const LEGACY_ROUTE_QUEUE_KEY = 'wr_route_queue_<?= $missionId ?>';
 
+// A sixth kind (v3.423.0), the only one that is not small JSON:
+//   kind:'media' → mission-photo.php  (a photo/video taken with no signal)
+// The file itself is in IndexedDB (assets/js/media-queue.js); the queue holds
+// {kind:'media', mediaId, mediaType, waypointId, poi} and nothing else, so a
+// 200 MB clip never goes near localStorage's 5 MB.
+//
+// An iPhone/iPad: the camera pickers there are not capture= (see
+// applyMediaPickerMode() beside wireMediaInput).
+const WR_IS_IOS = VoMediaQueue.isIosDevice(navigator);
+
 function loadQueue() {
     try {
         const parsed = JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || '[]');
@@ -16582,8 +16607,14 @@ function renderQueueStatus() {
     // arrival and gets said out loud, not folded into a generic count.
     const sosPending = queue.some(item => item.kind === 'status' && item.status === 'needs_help');
     el.className = 'alert py-1 px-2 small mb-2 ' + (sosPending ? 'alert-danger' : 'alert-warning');
-    const pendingText = queue.length === 1 ? t('queue.pending_one') : t('queue.pending', {count: queue.length});
-    el.innerHTML = `<i class="bi bi-wifi-off me-1"></i>${pendingText}` +
+    // Files are counted on their own line: "3 field actions" would hide that
+    // two of them are a video each, which is what decides how long they take.
+    const mediaCount = VoMediaQueue.countQueuedMedia(queue);
+    const actionCount = queue.length - mediaCount;
+    const pendingText = actionCount === 1 ? t('queue.pending_one') : t('queue.pending', {count: actionCount});
+    const mediaLine = `<i class="bi bi-camera-fill me-1"></i>${t('queue.media_pending', {count: mediaCount})}`;
+    el.innerHTML = (actionCount ? `<i class="bi bi-wifi-off me-1"></i>${pendingText}` : '') +
+        (mediaCount ? (actionCount ? `<div class="mt-1">${mediaLine}</div>` : mediaLine) : '') +
         (sosPending ? `<div class="fw-bold mt-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>${t('queue.sos_pending')}</div>` : '');
 }
 
@@ -16616,6 +16647,16 @@ function renderQueueFailures() {
 // postRouteAction call.
 function postRouteActionQueueable(action, id, extra) {
     const payload = Object.assign({}, extra || {}, {reported_at: new Date().toISOString()});
+    // The server refuses to complete a point whose required photo/video it
+    // does not have yet. With that file still waiting on this phone, sending
+    // the completion now - signal or not - would only be refused, so it joins
+    // the queue behind the file instead (VoMediaQueue.nextQueueIndex holds it
+    // until the file has gone).
+    if (action === 'complete' && VoMediaQueue.queuedMediaFor(loadQueue(), id).any) {
+        enqueueAction({kind: 'route', action, id: String(id), extra: payload});
+        flushQueue();
+        return Promise.resolve({ok: true, queued: true});
+    }
     return postRouteAction(action, id, payload).then(result => {
         if (!result || result.networkError) {
             enqueueAction({kind: 'route', action, id: String(id), extra: payload});
@@ -16639,7 +16680,101 @@ function postQueuedForm(url, params) {
     }).catch(() => ({ok: false, error: t('common.network_error'), networkError: true}));
 }
 
+// ── Photos and videos (v3.423.0) ────────────────────────────────────────────
+// One captured file: sent now, or - when no valid answer comes back - kept on
+// the phone and sent later. Resolves one of:
+//   {result}           the server answered (ok or not; the caller shows it)
+//   {queued: true}     saved on the phone, the queue sends it when it can
+//   {saveFailed: true} no answer AND it could not be saved: the file is lost
+//   {failed: true}     no answer and never will be (over the server's size limit)
+// Used by all three places a file is sent: the media panel, a route point's
+// photo/video, and a Point of Interest.
+function sendMediaOrQueue(spec, onProgress) {
+    // Not even trying when the phone knows it is offline: the progress window
+    // would sit at 0% until the stall timer gave up on a dead connection.
+    if (navigator.onLine === false) return keepMediaForLater(spec);
+    return postFormDataWithProgress('mission-photo.php', VoMediaQueue.buildFormData(spec, csrfToken, false), onProgress).then(
+        result => ({result}),
+        err => VoMediaQueue.classifyFailure(err) === 'reject' ? {failed: true} : keepMediaForLater(spec)
+    );
+}
+
+// The file goes into IndexedDB FIRST and the pointer into the text queue only
+// once the write is durable: a pointer with no file behind it is a report of
+// something that was not kept.
+function keepMediaForLater(spec) {
+    return VoMediaQueue.put(spec).then(() => {
+        VoMediaQueue.requestPersistence();
+        enqueueAction({kind: 'media', mediaId: spec.id, mediaType: spec.kind, waypointId: spec.waypointId, poi: spec.isPoi});
+        return {queued: true};
+    }, () => ({saveFailed: true}));
+}
+
+// Unparsable replies counted against one queued file, this page session only.
+const mediaCountedTries = {};
+// The login was renewed in another tab, so this page's csrf token is stale and
+// the server refuses every upload only after its whole body has arrived. Keep
+// the files, stop sending them (a retry every 15 s would be a few MB each
+// time for nothing), and let the reload the session-expired bar offers send
+// them with a fresh token.
+let mediaLaneNeedsReload = false;
+
+// Sends one queued file. Same contract as every other sendQueuedItem() branch:
+// the server's JSON, {networkError:true} to try again later, null when the
+// login has to be renewed first. Anything else removes the item, so a file
+// leaves IndexedDB only when the server has it or has refused it for good.
+function sendQueuedMedia(item) {
+    const discard = reason => VoMediaQueue.remove(item.mediaId).catch(() => {})
+        .then(() => ({ok: false, error: t('queue.media_failed', {error: reason})}));
+    if (mediaLaneNeedsReload) return Promise.resolve(null);
+    return VoMediaQueue.get(item.mediaId).then(spec => {
+        if (!spec) return {ok: false, error: t('queue.media_failed', {error: t('queue.media_missing')})};
+        return postFormDataWithProgress('mission-photo.php', VoMediaQueue.buildFormData(spec, csrfToken, true), () => touchQueueLock('media')).then(
+            result => {
+                if (result && result.csrf) { mediaLaneNeedsReload = true; return null; }
+                if (!result || !result.ok) return discard((result && result.error) || t('queue.media_rejected'));
+                delete mediaCountedTries[item.mediaId];
+                return VoMediaQueue.remove(item.mediaId).catch(() => {}).then(() => {
+                    afterQueuedMediaSent(item, result.media);
+                    return result;
+                });
+            },
+            err => {
+                switch (VoMediaQueue.classifyFailure(err)) {
+                    case 'network': return {ok: false, networkError: true};
+                    case 'retry': return null; // login expired / server busy: wait, do not count
+                    case 'reject': return discard(t('queue.media_rejected'));
+                    default:
+                        mediaCountedTries[item.mediaId] = (mediaCountedTries[item.mediaId] || 0) + 1;
+                        return mediaCountedTries[item.mediaId] >= VoMediaQueue.MAX_COUNTED_TRIES
+                            ? discard(t('queue.media_rejected')) : null;
+                }
+            }
+        );
+    // The browser's storage not answering is a reason to wait, not to drop.
+    }, () => ({ok: false, networkError: true}));
+}
+
+// A queued file has just reached the server: show it where it belongs, exactly
+// as the live upload would have.
+function afterQueuedMediaSent(item, uploaded) {
+    if (item.waypointId !== null && item.waypointId !== undefined) {
+        markWaypointMediaSent(item.waypointId, uploaded);
+        return;
+    }
+    const status = document.getElementById('mediaUploadStatus');
+    if (status) {
+        status.textContent = '✓ ' + (item.poi ? t('poi.sent_confirmation')
+            : (item.mediaType === 'video' ? t('media.video_label') : t('media.photo_label')) + t('media.sent_suffix'));
+        status.className = 'small mb-2 text-success';
+    }
+    if (item.poi) { pollWarRoomData(); return; }
+    renderMedia(media = [uploaded, ...media.filter(m => m.id !== uploaded.id)]);
+    mediaSignature = JSON.stringify(media);
+}
+
 function sendQueuedItem(item) {
+    if (item.kind === 'media') return sendQueuedMedia(item);
     // Triage writes carry their own ids (victim / assessment / bulk uuid), so
     // a replay that already landed is recognised server-side and ignored.
     if (item.kind === 'triage') {
@@ -16689,28 +16824,62 @@ function sendQueuedItem(item) {
 const QUEUE_LOCK_KEY = 'wr_queue_lock_<?= $missionId ?>';
 const QUEUE_LOCK_TTL_MS = 30000;
 
-function acquireQueueLock() {
+// One lock per lane (see flushQueue): a clip on its way up for minutes must not
+// make the other tab, or this tab's own text lane, think the queue is busy. A
+// duplicate that slips through anyway is answered by the server's client_uuid
+// guard for files, and by the replay guards the text items already have.
+function queueLockKey(lane) {
+    return lane === 'media' ? QUEUE_LOCK_KEY + '_media' : QUEUE_LOCK_KEY;
+}
+function acquireQueueLock(lane) {
     try {
-        const held = parseInt(localStorage.getItem(QUEUE_LOCK_KEY) || '0', 10);
+        const held = parseInt(localStorage.getItem(queueLockKey(lane)) || '0', 10);
         if (held && Date.now() - held < QUEUE_LOCK_TTL_MS) return false;
-        localStorage.setItem(QUEUE_LOCK_KEY, String(Date.now()));
+        localStorage.setItem(queueLockKey(lane), String(Date.now()));
         return true;
     } catch (e) {
         return true; // storage unavailable — better to send twice than never
     }
 }
-function releaseQueueLock() {
-    try { localStorage.removeItem(QUEUE_LOCK_KEY); } catch (e) {}
+function releaseQueueLock(lane) {
+    try { localStorage.removeItem(queueLockKey(lane)); } catch (e) {}
+}
+// An upload outlives the 30 s lock; every progress tick renews it.
+function touchQueueLock(lane) {
+    try { localStorage.setItem(queueLockKey(lane), String(Date.now())); } catch (e) {}
 }
 
-let queueFlushInFlight = false;
-function flushQueue() {
-    if (queueFlushInFlight) return;
+// Takes `item` out of the queue wherever it now sits. With two lanes the item
+// being sent is no longer always the head, and the queue is re-read from
+// storage each time (another tab, or an enqueue, may have changed it).
+function removeQueueItem(item) {
     const queue = loadQueue();
-    if (!queue.length) return;
-    if (!acquireQueueLock()) return; // another tab is already sending this
-    queueFlushInFlight = true;
-    const item = queue[0];
+    const wanted = JSON.stringify(item);
+    const at = queue.findIndex(q => JSON.stringify(q) === wanted);
+    if (at === -1) return;
+    queue.splice(at, 1);
+    saveQueue(queue);
+}
+
+// Two lanes over the one queue, so a clip crawling up a weak uplink never holds
+// an SOS behind it: 'fast' sends everything that is not a file, in order;
+// 'media' sends the files, in order. Which item each lane takes next, and the
+// one rule that makes a route point's completion wait for its own file, is
+// VoMediaQueue.nextQueueIndex(). With no files queued the fast lane is exactly
+// the old single queue: head first, stop at the first one that cannot be sent.
+const queueFlushInFlight = {fast: false, media: false};
+function flushQueue() {
+    flushQueueLane('fast');
+    flushQueueLane('media');
+}
+function flushQueueLane(lane) {
+    if (queueFlushInFlight[lane]) return;
+    const queue = loadQueue();
+    const at = VoMediaQueue.nextQueueIndex(queue, lane);
+    if (at === -1) return;
+    if (!acquireQueueLock(lane)) return; // another tab is already sending this
+    queueFlushInFlight[lane] = true;
+    const item = queue[at];
     let progressed = false;
     let networkFailed = false;
     const flushStartedAt = Date.now();
@@ -16730,18 +16899,20 @@ function flushQueue() {
         // error (e.g. the route was cancelled while this volunteer was
         // offline) — retrying won't fix the latter either, so either way this
         // item is done: drop it and move to the next queued one.
-        saveQueue(loadQueue().slice(1));
+        removeQueueItem(item);
         renderQueueStatus();
         if (!result.ok) {
             showQueueFailureNotice(result.error);
         }
     }).finally(() => {
-        queueFlushInFlight = false;
-        releaseQueueLock();
+        queueFlushInFlight[lane] = false;
+        releaseQueueLock(lane);
         // Only chain straight into the next item when this one actually
         // cleared. Without that guard a stuck head (offline, or an expired
         // session) would re-fire every 500ms forever instead of waiting for
-        // the 15s timer / the next `online` event.
+        // the 15s timer / the next `online` event. Both lanes are woken: a
+        // file that has just gone is what releases a route point's completion
+        // waiting in the other one.
         if (progressed && loadQueue().length) setTimeout(flushQueue, 500);
         // One exception, still bounded: this attempt died on the network, but
         // a poll has got through since it was sent — it was stuck in an outage
@@ -16997,7 +17168,7 @@ function routeComplete(waypointId, confirmed, scopeEl) {
     const noteValue = noteInput ? noteInput.value.trim() : '';
     const wp = findRouteWaypointById(waypointId);
     if (wp) {
-        const missing = missingRouteDeliverablesClientSide(wp, noteValue);
+        const missing = missingRouteDeliverablesClientSide(wp, noteValue, VoMediaQueue.queuedMediaFor(loadQueue(), wp.id));
         if (missing.length) {
             alert(t('route.missing_deliverables', {items: missing.join(', ')}));
             const group = scope.querySelector(`.route-complete-btn[data-id="${waypointId}"]`);
@@ -17014,6 +17185,8 @@ function routeComplete(waypointId, confirmed, scopeEl) {
 
 function uploadWaypointMedia(waypointId, file, mediaType, statusEl) {
     const isVideo = mediaType === 'video';
+    // When the person took it, not when (or whether) the network lets it go.
+    const capturedAt = new Date().toISOString();
     if (statusEl) { statusEl.textContent = isVideo ? t('media.compressing') : t('media.uploading'); statusEl.className = 'small text-muted'; }
     showMediaProgressModal(isVideo ? t('media.compressing') : t('media.uploading'));
 
@@ -17035,39 +17208,49 @@ function uploadWaypointMedia(waypointId, file, mediaType, statusEl) {
         if (statusEl) statusEl.textContent = t('media.uploading');
         setMediaProgress(0, t('media.uploading'));
         geoPromise.then(fix => {
-            const data = new FormData();
-            data.append('csrf_token', csrfToken);
-            data.append('action', 'upload');
-            data.append('mission_id', '<?= $missionId ?>');
-            data.append('media', finalFile);
-            data.append('route_waypoint_id', String(waypointId));
-            if (fix) { data.append('lat', fix.lat); data.append('lng', fix.lng); if (fix.acc !== null) data.append('accuracy', fix.acc); }
-            postFormDataWithProgress('mission-photo.php', data, pct => setMediaProgress(pct)).then(result => {
+            const spec = VoMediaQueue.makeSpec({missionId: <?= (int) $missionId ?>, file: finalFile, fix, waypointId, capturedAt});
+            sendMediaOrQueue(spec, pct => setMediaProgress(pct)).then(outcome => {
                 hideMediaProgressModal();
-                if (result.ok) {
-                    for (const r of routes) {
-                        const wp = r.waypoints.find(w => w.id === waypointId);
-                        if (wp) {
-                            const entry = {id: result.media.id, time: result.media.time};
-                            if (result.media.media_type === 'video') wp.video = entry; else wp.photo = entry;
-                            break;
-                        }
-                    }
+                if (outcome.result && outcome.result.ok) {
+                    markWaypointMediaSent(waypointId, outcome.result.media);
+                } else if (outcome.queued) {
+                    // Redrawn from the queue: the point now shows the file as
+                    // taken and waiting, and «Ολοκληρώθηκε» is allowed.
                     renderMyRoutes(routes);
                     renderRouteLayer(routes);
-                } else {
-                    if (statusEl) { statusEl.textContent = result.error || t('common.send_failed'); statusEl.className = 'small text-danger'; }
+                } else if (statusEl) {
+                    statusEl.textContent = outcome.saveFailed ? t('media.save_failed')
+                        : ((outcome.result && outcome.result.error) || t('common.send_failed'));
+                    statusEl.className = 'small text-danger';
                 }
-            }).catch(() => { hideMediaProgressModal(); if (statusEl) { statusEl.textContent = t('common.send_failed'); statusEl.className = 'small text-danger'; } });
+            });
         });
     });
+}
+
+// A route point's photo/video is on the server: record it on the point
+// without waiting for the next poll, so the badge turns green at once. Shared
+// by the live upload above and the queue sending it later.
+function markWaypointMediaSent(waypointId, media) {
+    for (const r of routes) {
+        const wp = r.waypoints.find(w => String(w.id) === String(waypointId));
+        if (wp) {
+            const entry = {id: media.id, time: media.time};
+            if (media.media_type === 'video') wp.video = entry; else wp.photo = entry;
+            break;
+        }
+    }
+    renderMyRoutes(routes);
+    renderRouteLayer(routes);
 }
 
 function triggerWaypointUpload(waypointId, mediaType, statusEl) {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = mediaType === 'video' ? 'video/*' : 'image/*';
-    input.setAttribute('capture', 'environment');
+    // Not on an iPhone, where capture= is the path that was losing files
+    // (see applyMediaPickerMode()); iOS opens its own Take Photo / Library sheet.
+    if (!WR_IS_IOS) input.setAttribute('capture', 'environment');
     input.addEventListener('change', () => { if (input.files[0]) uploadWaypointMedia(waypointId, input.files[0], mediaType, statusEl); });
     input.click();
 }
@@ -17100,7 +17283,7 @@ const ROUTE_CANT_REASONS = ['unsafe', 'device', 'not_allowed', 'other'];
 let routeCantUi = {wpId: null, reason: null, note: ''};
 
 function routeWaypointMissing(wp) {
-    return missingRouteDeliverablesClientSide(wp, '');
+    return missingRouteDeliverablesClientSide(wp, '', VoMediaQueue.queuedMediaFor(loadQueue(), wp.id));
 }
 // "2 «Γέφυρα»", or "2" for a point with no name — the server's
 // routeWaypointRef(), so both sides name a point the same way.
@@ -17272,14 +17455,21 @@ function renderRouteWaypointCurrent(wp) {
             + (distanceHtml ? `<div class="small mt-1">${distanceHtml}</div>` : '')
             + routeDwellCountdownHtml(wp);
         const deliverables = [];
+        // A file the phone is holding for this point (no signal yet) is shown
+        // as taken-and-waiting, not as a button to press again.
+        const waitingMedia = VoMediaQueue.queuedMediaFor(loadQueue(), wp.id);
         if (wp.require_photo) {
             deliverables.push(wp.photo
                 ? `<span class="badge bg-success"><i class="bi bi-camera-fill me-1"></i>${t('route.photo_btn')} ✓</span>`
+                : waitingMedia.photo
+                ? `<span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>${t('route.photo_btn')} · ${t('route.media_queued')}</span>`
                 : `<button type="button" class="btn btn-sm wr-touch-btn btn-outline-primary route-media-btn" data-id="${wp.id}" data-media-type="photo"><i class="bi bi-camera-fill me-1"></i>${t('route.photo_btn')}</button>`);
         }
         if (wp.require_video) {
             deliverables.push(wp.video
                 ? `<span class="badge bg-success"><i class="bi bi-camera-reels-fill me-1"></i>${t('route.video_btn')} ✓</span>`
+                : waitingMedia.video
+                ? `<span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split me-1"></i>${t('route.video_btn')} · ${t('route.media_queued')}</span>`
                 : `<button type="button" class="btn btn-sm wr-touch-btn btn-outline-primary route-media-btn" data-id="${wp.id}" data-media-type="video"><i class="bi bi-camera-reels-fill me-1"></i>${t('route.video_btn')}</button>`);
         }
         const deliverablesHtml = deliverables.length
@@ -19610,9 +19800,32 @@ function renderSosAlerts(items) {
 // #mediaProgressModal helpers — one shared popup used by every place a
 // photo/video gets sent (see the modal's own HTML comment for why it's a
 // single global instance rather than one per card).
+//
+// Bootstrap ignores hide() while the fade-in is still running (300 ms). A file
+// that is saved to the offline queue, or refused, within that window used to
+// leave this window on screen over the whole page with nothing to close it -
+// now that "no signal" ends in a save on the phone within a few ms, that is the
+// normal case, not a rare one. A hide asked for too early is therefore held
+// until the window has finished appearing.
+let mediaProgressWired = false;
+let mediaProgressFullyShown = false;
+let mediaProgressHideWanted = false;
 function showMediaProgressModal(labelText) {
+    const modalEl = document.getElementById('mediaProgressModal');
+    if (!mediaProgressWired) {
+        mediaProgressWired = true;
+        modalEl.addEventListener('shown.bs.modal', () => {
+            mediaProgressFullyShown = true;
+            if (mediaProgressHideWanted) {
+                mediaProgressHideWanted = false;
+                bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+            }
+        });
+        modalEl.addEventListener('hidden.bs.modal', () => { mediaProgressFullyShown = false; });
+    }
+    mediaProgressHideWanted = false;
     setMediaProgress(0, labelText);
-    bootstrap.Modal.getOrCreateInstance(document.getElementById('mediaProgressModal')).show();
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
 function setMediaProgress(percent, labelText) {
     const bar = document.getElementById('mediaProgressBar');
@@ -19623,7 +19836,9 @@ function setMediaProgress(percent, labelText) {
 }
 function hideMediaProgressModal() {
     const instance = bootstrap.Modal.getInstance(document.getElementById('mediaProgressModal'));
-    if (instance) instance.hide();
+    if (!instance) return;
+    if (!mediaProgressFullyShown) { mediaProgressHideWanted = true; return; }
+    instance.hide();
 }
 
 // fetch() has no reliable cross-browser API for upload progress (only
@@ -19663,7 +19878,11 @@ function postFormDataWithProgress(url, formData, onProgress) {
             try {
                 resolve(JSON.parse(xhr.responseText));
             } catch (e) {
-                reject(e);
+                // Not JSON. Say what DID come back, so the offline queue can
+                // tell a login page (the request was redirected) or a busy
+                // server from a genuine fault - VoMediaQueue.classifyFailure().
+                const landedOn = String(xhr.responseURL || '');
+                reject(Object.assign(e, {wrStatus: xhr.status, wrRedirected: landedOn !== '' && landedOn.indexOf(url) === -1}));
             }
         });
         xhr.addEventListener('error', () => {
@@ -20017,6 +20236,8 @@ function wireMediaInput(inputId, sentLabel) {
     input.addEventListener('change', () => {
         const file = input.files[0];
         if (!file) return;
+        // When the person took it, not when (or whether) the network lets it go.
+        const capturedAt = new Date().toISOString();
         const status = document.getElementById('mediaUploadStatus');
         const isVideo = file.type.startsWith('video/');
         status.textContent = isVideo ? t('media.compressing') : t('media.uploading');
@@ -20044,30 +20265,46 @@ function wireMediaInput(inputId, sentLabel) {
             setMediaProgress(0, t('media.uploading'));
             const thumbPromise = finalFile.type.startsWith('video/') ? captureVideoThumbnail(finalFile) : Promise.resolve(null);
             Promise.all([geoPromise, thumbPromise]).then(([fix, thumbBlob]) => {
-                const data = new FormData();
-                data.append('csrf_token', csrfToken);
-                data.append('action', 'upload');
-                data.append('mission_id', '<?= $missionId ?>');
-                data.append('media', finalFile);
-                if (thumbBlob) data.append('thumb', thumbBlob, 'thumb.jpg');
-                if (fix) { data.append('lat', fix.lat); data.append('lng', fix.lng); if (fix.acc !== null) data.append('accuracy', fix.acc); }
-                postFormDataWithProgress('mission-photo.php', data, pct => setMediaProgress(pct)).then(result => {
+                const spec = VoMediaQueue.makeSpec({missionId: <?= (int) $missionId ?>, file: finalFile, thumb: thumbBlob, fix, capturedAt});
+                sendMediaOrQueue(spec, pct => setMediaProgress(pct)).then(outcome => {
                     hideMediaProgressModal();
-                    if (result.ok) {
+                    const result = outcome.result;
+                    if (result && result.ok) {
                         status.textContent = '✓ ' + sentLabel + t('media.sent_suffix');
                         status.className = 'small mb-2 text-success';
                         renderMedia(media = [result.media, ...media]);
                         mediaSignature = JSON.stringify(media);
+                    } else if (outcome.queued) {
+                        // Safe on the phone; the banner above counts it and the
+                        // queue sends it the moment there is a connection.
+                        status.textContent = t('media.saved_offline');
+                        status.className = 'small mb-2 text-warning';
                     } else {
-                        status.textContent = result.error || t('common.send_failed');
+                        status.textContent = outcome.saveFailed ? t('media.save_failed') : ((result && result.error) || t('common.send_failed'));
                         status.className = 'small mb-2 text-danger';
                     }
                     input.value = '';
-                }).catch(() => { hideMediaProgressModal(); status.textContent = t('common.send_failed'); status.className = 'small mb-2 text-danger'; input.value = ''; });
+                });
             });
         });
     });
 }
+// Photo/video buttons by device (v3.423.0); the reasoning is on the media
+// panel's markup. iPhone/iPad: the blue direct-camera twins are hidden and the
+// remaining button is named after the media type, so the person gets iOS's own
+// Take Photo / Photo Library sheet. Everywhere else the twins get
+// capture="environment" (the Android app's file chooser has no camera entry
+// without it). The Point of Interest button keeps capture= on every device: a
+// find is "here, now", and a library photo would pin an old picture to today's
+// position.
+(function applyMediaPickerMode() {
+    if (WR_IS_IOS) {
+        document.querySelectorAll('.wr-camera-twin, .wr-gallery-label').forEach(el => el.classList.add('d-none'));
+        document.querySelectorAll('.wr-type-label').forEach(el => el.classList.remove('d-none', 'd-lg-inline'));
+        return;
+    }
+    document.querySelectorAll('input[data-direct-camera]').forEach(el => el.setAttribute('capture', 'environment'));
+})();
 wireMediaInput('photoCaptureInput', t('media.photo_label'));
 wireMediaInput('photoGalleryInput', t('media.photo_label'));
 wireMediaInput('videoCaptureInput', t('media.video_label'));
@@ -20097,10 +20334,12 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
     const status = document.getElementById('mediaUploadStatus');
     let stagedFile = null;
     let stagedCoords = null;
+    let stagedAt = null;
 
     function resetStage() {
         stagedFile = null;
         stagedCoords = null;
+        stagedAt = null;
         sendBtn.classList.add('d-none');
         sendBtn.disabled = false;
         input.value = '';
@@ -20111,6 +20350,9 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
         if (!file) return;
         stagedFile = file;
         stagedCoords = null;
+        // The find is dated when it was photographed, not when «Αποστολή» is
+        // pressed (or when the signal comes back).
+        stagedAt = new Date().toISOString();
         status.textContent = '';
         status.className = 'small mb-2';
         sendBtn.classList.remove('d-none');
@@ -20153,34 +20395,30 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
         // POI capture is photo-only (input's own accept="image/*"), so this
         // is always compressPhotoForUpload — no isVideo branch needed here.
         compressPhotoForUpload(stagedFile).then(finalFile => {
-            const data = new FormData();
-            data.append('csrf_token', csrfToken);
-            data.append('action', 'upload');
-            data.append('mission_id', '<?= $missionId ?>');
-            data.append('media', finalFile);
-            data.append('is_poi', '1');
-            data.append('note', note);
-            data.append('lat', stagedCoords.lat);
-            data.append('lng', stagedCoords.lng);
-            if (stagedCoords.acc !== null) data.append('accuracy', stagedCoords.acc);
-            postFormDataWithProgress('mission-photo.php', data, pct => setMediaProgress(pct)).then(result => {
+            const spec = VoMediaQueue.makeSpec({
+                missionId: <?= (int) $missionId ?>, file: finalFile, fix: stagedCoords,
+                isPoi: true, note, capturedAt: stagedAt
+            });
+            sendMediaOrQueue(spec, pct => setMediaProgress(pct)).then(outcome => {
                 hideMediaProgressModal();
-                if (result.ok) {
+                const result = outcome.result;
+                if (result && result.ok) {
                     status.textContent = '✓ ' + t('poi.sent_confirmation');
                     status.className = 'small mb-2 text-success';
                     renderMedia(media = [result.media, ...media]);
                     mediaSignature = JSON.stringify(media);
                     if (noteInput) noteInput.value = '';
                     pollWarRoomData();
+                } else if (outcome.queued) {
+                    // The position and the note are kept with the photo. The
+                    // note field is cleared: what was typed now travels with it.
+                    status.textContent = t('media.saved_offline');
+                    status.className = 'small mb-2 text-warning';
+                    if (noteInput) noteInput.value = '';
                 } else {
-                    status.textContent = result.error || t('common.send_failed');
+                    status.textContent = outcome.saveFailed ? t('media.save_failed') : ((result && result.error) || t('common.send_failed'));
                     status.className = 'small mb-2 text-danger';
                 }
-                resetStage();
-            }).catch(() => {
-                hideMediaProgressModal();
-                status.textContent = t('common.send_failed');
-                status.className = 'small mb-2 text-danger';
                 resetStage();
             });
         });

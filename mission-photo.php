@@ -125,7 +125,10 @@ if (!$canManageWarRoom && !$isApprovedParticipant) {
 }
 
 if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', (string) $_POST['csrf_token'])) {
-    echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
+    // `csrf` tells the offline queue this is a page that needs reloading (the
+    // login was renewed elsewhere), not a file the server refuses: the queue
+    // keeps the file instead of discarding it.
+    echo json_encode(['ok' => false, 'csrf' => true, 'error' => t('common.invalid_request')]);
     exit;
 }
 
@@ -136,6 +139,61 @@ if ($action === 'upload') {
         echo json_encode(['ok' => false, 'error' => t('photo.only_approved_can_send')]);
         exit;
     }
+
+    // What the page draws a just-uploaded item from. One builder for the row
+    // stored below and for the duplicate answered just under it, so the two
+    // replies can never drift apart.
+    $uploadPayload = function (array $row) use ($user, $userId, $missionId): array {
+        $teamLabel = null;
+        $myTeamId = getUserTeamIdForMission($missionId, $userId);
+        if ($myTeamId) {
+            $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$myTeamId]);
+            if ($teamRow) {
+                $teamLabel = teamLabel($teamRow['codename'], $teamRow['team_number']);
+            }
+        }
+        [$homeBg, $homeFg] = teamBadgeColors($user['home_team_color'] ?? null);
+        return [
+            'id'                 => (int) $row['id'],
+            'media_type'         => $row['media_type'],
+            'has_thumb'          => $row['thumb_stored_name'] !== null,
+            'user_name'          => $user['name'],
+            'is_external'        => (bool) $user['is_external'],
+            'guest_org_name'     => $user['guest_org_name'],
+            'home_team_name'     => $user['home_team_name'] ?? null,
+            'home_team_color_bg' => $homeBg,
+            'home_team_color_fg' => $homeFg,
+            'guest_country_code' => $user['guest_country_code'] ?? null,
+            'team_label'         => $teamLabel,
+            'time'               => date('d/m H:i', strtotime((string) $row['created_at'])),
+            'lat'                => $row['lat'] !== null ? (float) $row['lat'] : null,
+            'lng'                => $row['lng'] !== null ? (float) $row['lng'] : null,
+            'accuracy_m'         => $row['accuracy_m'] !== null ? (int) round((float) $row['accuracy_m']) : null,
+            'can_delete'         => true,
+            'poi_id'             => $row['poi_id'] !== null ? (int) $row['poi_id'] : null,
+        ];
+    };
+
+    // A phone that kept this file while it had no signal sends it again with
+    // the id it made for it. A reply that never arrived does not mean the
+    // server never got the file (a long video: every byte in, the answer lost
+    // on the way back), so the same id is answered with the row already
+    // stored instead of storing the file a second time, and without notifying
+    // command staff of it a second time.
+    $clientUuid = trim((string) post('client_uuid'));
+    if ($clientUuid !== '' && !preg_match('/^[A-Za-z0-9-]{8,64}$/', $clientUuid)) {
+        $clientUuid = '';
+    }
+    $storedByUuid = "SELECT id, media_type, thumb_stored_name, lat, lng, accuracy_m, poi_id, created_at
+                     FROM mission_photos WHERE mission_id = ? AND user_id = ? AND client_uuid = ?";
+    if ($clientUuid !== '') {
+        $already = dbFetchOne($storedByUuid, [$missionId, $userId, $clientUuid]);
+        if ($already) {
+            echo json_encode(['ok' => true, 'media' => $uploadPayload($already)]);
+            exit;
+        }
+    }
+
     if (empty($_FILES['media']['name']) || $_FILES['media']['error'] !== UPLOAD_ERR_OK) {
         echo json_encode(['ok' => false, 'error' => t('photo.select_file')]);
         exit;
@@ -287,12 +345,37 @@ if ($action === 'upload') {
         }
     }
 
-    $photoId = dbInsert(
-        "INSERT INTO mission_photos (mission_id, user_id, media_type, stored_name, thumb_stored_name, original_name, mime_type, file_size, lat, lng, accuracy_m, route_waypoint_id, poi_id, poi_note, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
-        [$missionId, $userId, $mediaType, $storedName, $thumbStoredName, $origName, $mime, (int) $file['size'], $lat, $lng, $accuracy,
-         $routeWaypointId, $poiId, $poiNote]
-    );
+    // The moment it was taken. A file sent straight away has no reported_at
+    // and gets "now"; one that waited on the phone for a signal carries the
+    // time the person took it, so the gallery shows when it was found rather
+    // than when the network came back (same rule as every other replayed
+    // field report - see resolveEventTimestamp()).
+    [$createdAt] = resolveEventTimestamp();
+
+    try {
+        $photoId = dbInsert(
+            "INSERT INTO mission_photos (mission_id, user_id, media_type, stored_name, thumb_stored_name, original_name, mime_type, file_size, lat, lng, accuracy_m, route_waypoint_id, poi_id, poi_note, client_uuid, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [$missionId, $userId, $mediaType, $storedName, $thumbStoredName, $origName, $mime, (int) $file['size'], $lat, $lng, $accuracy,
+             $routeWaypointId, $poiId, $poiNote, $clientUuid !== '' ? $clientUuid : null, $createdAt]
+        );
+    } catch (PDOException $e) {
+        // Two copies of the same upload arrived together (a replay in a second
+        // tab) and the other one was stored first: 1062 on uk_photo_client_uuid.
+        // Drop this copy's files and answer with the stored row.
+        if ($clientUuid !== '' && (int) ($e->errorInfo[1] ?? 0) === 1062) {
+            @unlink($destDir . $storedName);
+            if ($thumbStoredName !== null) {
+                @unlink($destDir . $thumbStoredName);
+            }
+            $already = dbFetchOne($storedByUuid, [$missionId, $userId, $clientUuid]);
+            if ($already) {
+                echo json_encode(['ok' => true, 'media' => $uploadPayload($already)]);
+                exit;
+            }
+        }
+        throw $e;
+    }
     logAudit('upload_mission_photo', 'mission_photos', $photoId, null, ['mission_id' => $missionId, 'media_type' => $mediaType, 'route_waypoint_id' => $routeWaypointId, 'poi_id' => $poiId]);
 
     // Auto-fulfill any outstanding War Room "send a photo/video" orders of this type for this user.
@@ -314,35 +397,16 @@ if ($action === 'upload') {
         notifyPhotoReceived($missionId, $mission['title'], $mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $user['name'], $userId, $mediaType);
     }
 
-    $teamLabel = null;
-    $myTeamId = getUserTeamIdForMission($missionId, $userId);
-    if ($myTeamId) {
-        $teamRow = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ?", [$myTeamId]);
-        if ($teamRow) {
-            $teamLabel = teamLabel($teamRow['codename'], $teamRow['team_number']);
-        }
-    }
-
-    [$homeBg, $homeFg] = teamBadgeColors($user['home_team_color'] ?? null);
-    echo json_encode(['ok' => true, 'media' => [
-        'id'                 => (int) $photoId,
-        'media_type'         => $mediaType,
-        'has_thumb'          => $thumbStoredName !== null,
-        'user_name'          => $user['name'],
-        'is_external'        => (bool) $user['is_external'],
-        'guest_org_name'     => $user['guest_org_name'],
-        'home_team_name'     => $user['home_team_name'] ?? null,
-        'home_team_color_bg' => $homeBg,
-        'home_team_color_fg' => $homeFg,
-        'guest_country_code' => $user['guest_country_code'] ?? null,
-        'team_label'         => $teamLabel,
-        'time'               => date('d/m H:i'),
-        'lat'                => $lat,
-        'lng'                => $lng,
-        'accuracy_m'         => $accuracy !== null ? (int) round($accuracy) : null,
-        'can_delete'         => true,
-        'poi_id'             => $poiId,
-    ]]);
+    echo json_encode(['ok' => true, 'media' => $uploadPayload([
+        'id'                => $photoId,
+        'media_type'        => $mediaType,
+        'thumb_stored_name' => $thumbStoredName,
+        'lat'               => $lat,
+        'lng'               => $lng,
+        'accuracy_m'        => $accuracy,
+        'poi_id'            => $poiId,
+        'created_at'        => $createdAt,
+    ])]);
     exit;
 }
 

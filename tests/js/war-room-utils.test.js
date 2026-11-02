@@ -438,6 +438,16 @@ test('missingRouteDeliverablesClientSide() flags a missing required photo', () =
     assert.deepEqual(missingRouteDeliverablesClientSide(wp, ''), ['φωτογραφία']);
 });
 
+test('missingRouteDeliverablesClientSide() counts a file the phone is still holding as taken', () => {
+    const wp = { require_photo: true, photo: null, require_video: true, video: null, require_note: false };
+    // Only the photo is waiting on the phone: the video is still missing.
+    assert.deepEqual(missingRouteDeliverablesClientSide(wp, '', { photo: true, video: false }), ['βίντεο']);
+    assert.deepEqual(missingRouteDeliverablesClientSide(wp, '', { photo: true, video: true }), []);
+    // No third argument, or an empty one: exactly the old answer.
+    assert.deepEqual(missingRouteDeliverablesClientSide(wp, ''), ['φωτογραφία', 'βίντεο']);
+    assert.deepEqual(missingRouteDeliverablesClientSide(wp, '', {}), ['φωτογραφία', 'βίντεο']);
+});
+
 test('missingRouteDeliverablesClientSide() accepts a note typed in the field even if wp.note is empty', () => {
     const wp = { require_photo: false, require_video: false, require_note: true, note: '' };
     assert.deepEqual(missingRouteDeliverablesClientSide(wp, 'typed just now'), []);

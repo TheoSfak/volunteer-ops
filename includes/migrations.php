@@ -7835,6 +7835,30 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 197,
+            'description' => "Add mission_photos.client_uuid (v3.423.0): an id the phone makes for each photo/video before it is sent. A file kept on the phone while there is no signal is sent again later, and a reply that never arrived can mean the server already has it - a second upload with the same id is answered with the first row instead of storing it twice. NULL for everything uploaded before; the unique key ignores NULLs.",
+            'up' => function () {
+                // information_schema, not dbColumnExists(): that helper caches its
+                // answer for the whole PHP process, and a stale "no" turns a
+                // re-run of this migration into "Duplicate column name".
+                $hasColumn = (int) dbFetchValue(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_photos' AND COLUMN_NAME = 'client_uuid'"
+                );
+                if ($hasColumn === 0) {
+                    dbExecute("ALTER TABLE mission_photos ADD COLUMN client_uuid VARCHAR(64) NULL AFTER poi_note");
+                }
+                $hasKey = (int) dbFetchValue(
+                    "SELECT COUNT(*) FROM information_schema.STATISTICS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_photos' AND INDEX_NAME = 'uk_photo_client_uuid'"
+                );
+                if ($hasKey === 0) {
+                    dbExecute("ALTER TABLE mission_photos ADD UNIQUE KEY uk_photo_client_uuid (mission_id, user_id, client_uuid)");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
