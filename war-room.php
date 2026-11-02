@@ -1168,7 +1168,7 @@ if (!in_array($wrTickerMode, ['scroll', 'static', 'hidden'], true)) $wrTickerMod
 // is one more stylesheet (assets/css/war-room-console-<skin>.css) over the very same markup. The
 // name goes into a file path below, so it is only ever one of these.
 $wrConsoleSkin = getSetting('war_room_console_skin', 'classic');
-if (!in_array($wrConsoleSkin, ['classic', 'nocturne', 'aurora'], true)) $wrConsoleSkin = 'classic';
+if (!in_array($wrConsoleSkin, ['classic', 'nocturne', 'aurora', 'overlay'], true)) $wrConsoleSkin = 'classic';
 // last_ping_at was a correlated MAX(vp.created_at) per participant. created_at
 // is not in any index that also covers user_id+shift_id, so each participant
 // meant reading every one of their own ping rows off the table: 147ms on a
@@ -3917,7 +3917,7 @@ include __DIR__ . '/includes/header.php';
     .wr-cp-pick-hint { position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 1000; text-align: center; max-width: calc(100% - 16px); background: #fffbeb; color: #1f2937; border: 2px solid #f59e0b; box-shadow: 0 2px 8px rgba(0,0,0,.35); animation: none; }
 </style>
 
-<div class="war-room-hero p-4 mb-4 shadow-sm">
+<div class="war-room-hero p-4 mb-4 shadow-sm" data-started="<?= (int) (strtotime((string) $firstShift) ?: 0) ?>">
     <div class="d-flex flex-wrap justify-content-between align-items-start gap-2 mb-2">
         <div>
             <div class="text-uppercase small fw-semibold opacity-75 mb-1"><i class="bi bi-broadcast-pin me-1"></i><?= t('hero.eyebrow') ?></div>
@@ -4373,10 +4373,10 @@ include __DIR__ . '/includes/header.php';
 <?php if ($wrConsoleSkin !== 'classic'): ?>
 <?php /* A skin is loaded after the console's own sheet and every rule in it sits behind
          html[data-wrc-skin]; the attribute is set below, before the first paint. */ ?>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=<?= $wrConsoleSkin === 'nocturne' ? 'JetBrains+Mono:wght@400..700&amp;family=Tektur:wght@400..800' : 'Manrope:wght@200..800' ?>&amp;display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=<?= $wrConsoleSkin === 'nocturne' ? 'JetBrains+Mono:wght@400..700&amp;family=Tektur:wght@400..800' : ($wrConsoleSkin === 'overlay' ? 'Fira+Sans+Condensed:wght@400;500;600;700&amp;family=Roboto+Mono:wght@400;500;600' : 'Manrope:wght@200..800') ?>&amp;display=swap">
 <link rel="stylesheet" href="<?= rtrim(BASE_URL, '/') ?>/assets/css/war-room-console-<?= $wrConsoleSkin ?>.css?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/css/war-room-console-' . $wrConsoleSkin . '.css') ?>">
 <?php endif; ?>
-<script>document.body.classList.add('wr-console-view');<?php if ($wrConsoleSkin !== 'classic'): ?>document.documentElement.setAttribute('data-wrc-skin','<?= $wrConsoleSkin ?>');<?php endif; ?><?php if ($wrConsoleSkin === 'nocturne'): /* a dark skin: the light/dark choice does not apply, and is left as it was for the other looks */ ?>document.documentElement.setAttribute('data-bs-theme','dark');<?php else: ?>try{if(localStorage.getItem('wr-console-theme')==='dark')document.documentElement.setAttribute('data-bs-theme','dark');}catch(e){}<?php endif; ?></script>
+<script>document.body.classList.add('wr-console-view');<?php if ($wrConsoleSkin !== 'classic'): ?>document.documentElement.setAttribute('data-wrc-skin','<?= $wrConsoleSkin ?>');<?php endif; ?><?php if ($wrConsoleSkin === 'overlay'): /* the layout is on from the first paint; the companion script confirms it ('on') once it has moved the controls */ ?>try{if(matchMedia('(min-width:1200px)').matches)document.documentElement.setAttribute('data-wrc-ov','pre');}catch(e){}<?php endif; ?><?php if (in_array($wrConsoleSkin, ['nocturne', 'overlay'], true)): /* a dark skin: the light/dark choice does not apply, and is left as it was for the other looks */ ?>document.documentElement.setAttribute('data-bs-theme','dark');<?php else: ?>try{if(localStorage.getItem('wr-console-theme')==='dark')document.documentElement.setAttribute('data-bs-theme','dark');}catch(e){}<?php endif; ?></script>
 <div id="wrConsole" class="wrc" data-mission="<?= (int) $missionId ?>" data-live="<?= !empty($liveEnabled) ? '1' : '0' ?>">
     <div id="offlineQueueBanner" class="alert alert-warning py-1 px-2 small mb-2 d-none"></div>
     <div id="offlineQueueFailures"></div>
@@ -6808,6 +6808,12 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <?php /* defer: it reads the page's own state (the poll's arrays, the render
          functions), all of which are defined by the inline script further down. */ ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-console.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-console.js') ?>" defer></script>
+<?php if ($wrConsoleSkin === 'overlay'): ?>
+<?php /* The «Πίνακας» look is a layout, so it has a small script of its own: it builds the rails and the
+         bottom bar out of the console's real controls (it moves or clicks them, never copies them).
+         Deferred scripts run in order, so the console has built its regions by then. */ ?>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-console-overlay.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-console-overlay.js') ?>" defer></script>
+<?php endif; ?>
 <?php endif; ?>
 <?php if (vitalsEnabled()): ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/vitals-sensor.js?v=<?= APP_VERSION ?>"></script>

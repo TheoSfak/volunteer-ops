@@ -42,7 +42,7 @@ final class WarRoomConsoleTest extends TestCase
         $strings = require $this->root . '/includes/lang/war-room.php';
 
         $used = [];
-        foreach (['assets/js/war-room-console.js', 'war-room.php'] as $file) {
+        foreach (['assets/js/war-room-console.js', 'assets/js/war-room-console-overlay.js', 'war-room.php'] as $file) {
             preg_match_all("/'(console\\.[a-z0-9_]+)'/", $this->source($file), $m);
             $used = array_merge($used, $m[1]);
         }

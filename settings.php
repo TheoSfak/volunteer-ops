@@ -677,7 +677,7 @@ if (isPost()) {
                     }
                     // The Κονσόλα's look: war-room.php loads a stylesheet named after this value,
                     // so only a skin that exists is ever stored; anything else is today's console.
-                    if ($field === 'war_room_console_skin' && !in_array($value, ['classic', 'nocturne', 'aurora'], true)) {
+                    if ($field === 'war_room_console_skin' && !in_array($value, ['classic', 'nocturne', 'aurora', 'overlay'], true)) {
                         $value = 'classic';
                     }
 
@@ -2529,6 +2529,12 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                             .skin-prev.p-aurora { background: linear-gradient(135deg, #cfc9ff, #ffd0e4 48%, #bdeee0); }
                             .skin-prev.p-aurora i { background: rgba(255, 255, 255, .72); border: 1px solid rgba(255, 255, 255, .9); border-radius: 9px; }
                             .skin-prev.p-aurora i:nth-child(2) { background: rgba(255, 255, 255, .45); }
+                            .skin-prev.p-overlay { position: relative; display: block; padding: 0; background: linear-gradient(135deg, #3d4a2f, #6f7a4a 55%, #8d7a55); overflow: hidden; }
+                            .skin-prev.p-overlay i { position: absolute; background: rgba(20, 26, 31, .82); border-radius: 3px; }
+                            .skin-prev.p-overlay i:nth-child(1) { left: 0; right: 0; top: 0; height: 9px; border-radius: 0; }
+                            .skin-prev.p-overlay i:nth-child(2) { left: 5px; top: 15px; width: 9px; height: 30px; }
+                            .skin-prev.p-overlay i:nth-child(3) { right: 5px; top: 15px; width: 9px; height: 30px; }
+                            .skin-prev.p-overlay i:nth-child(4) { left: 28%; right: 28%; bottom: 5px; height: 9px; background: rgba(242, 160, 61, .9); }
                         </style>
                         <div class="skin-pick" role="radiogroup" aria-label="Εμφάνιση Κονσόλας">
                             <label class="skin-card"><input type="radio" name="war_room_console_skin" value="classic" <?= $consoleSkin === 'classic' ? 'checked' : '' ?>>
@@ -2540,8 +2546,11 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                             <label class="skin-card"><input type="radio" name="war_room_console_skin" value="aurora" <?= $consoleSkin === 'aurora' ? 'checked' : '' ?>>
                                 <div class="skin-prev p-aurora" aria-hidden="true"><i></i><i></i><i></i></div>
                                 <div><strong class="d-block small">Aurora</strong><small class="text-muted">Φωτεινό γυαλί με αυγή από χρώματα, και σκούρο θέμα με το κουμπί της Κονσόλας.</small></div></label>
+                            <label class="skin-card"><input type="radio" name="war_room_console_skin" value="overlay" <?= $consoleSkin === 'overlay' ? 'checked' : '' ?>>
+                                <div class="skin-prev p-overlay" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+                                <div><strong class="d-block small">Πίνακας (επικάλυψη)</strong><small class="text-muted">Σκούρος πίνακας τοίχου: ο χάρτης σε όλο το παράθυρο και πάνω του διάφανα κουμπιά. Αλλάζει και τη διάταξη, από 1200 px πλάτος και πάνω.</small></div></label>
                         </div>
-                        <small class="text-muted d-block mt-2">Αλλάζει μόνο το πώς φαίνεται η Κονσόλα (χρώματα, γράμματα, υλικά και κινήσεις) — όλα τα πάνελ, τα κουμπιά και οι λειτουργίες μένουν ίδια και στο ίδιο σημείο. Ισχύει για όλους τους διαχειριστές με την επόμενη φόρτωση της Κονσόλας· η «Κλασική όψη» του Action Room δεν αλλάζει.</small>
+                        <small class="text-muted d-block mt-2">Οι Nocturne και Aurora αλλάζουν μόνο το πώς φαίνεται η Κονσόλα (χρώματα, γράμματα, υλικά και κινήσεις) — όλα τα πάνελ, τα κουμπιά και οι λειτουργίες μένουν ίδια και στο ίδιο σημείο. Ο Πίνακας αλλάζει και τη διάταξη, αλλά κάθε λειτουργία παραμένει διαθέσιμη. Ισχύει για όλους τους διαχειριστές με την επόμενη φόρτωση της Κονσόλας· η «Κλασική όψη» του Action Room δεν αλλάζει.</small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Μέγιστο Μέγεθος Τομέα Αυτόματου Πλέγματος (μ.)</label>

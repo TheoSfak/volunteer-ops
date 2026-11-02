@@ -817,6 +817,7 @@ if (typeof module !== 'undefined' && module.exports) {
         }
         phaseSig = '';
         renderPhase();
+        announce();
         // The order form comes and goes with the phase: the map takes the room.
         if (typeof map !== 'undefined' && map) setTimeout(() => map.invalidateSize(), 60);
     }
@@ -1362,6 +1363,18 @@ if (typeof module !== 'undefined' && module.exports) {
     function selectionChanged() {
         syncSelection();
         renderComposerTo();
+        announce();
+    }
+
+    /**
+     * Tells a look that re-draws from the console's state (the «Πίνακας» companion,
+     * assets/js/war-room-console-overlay.js) that something it shows may have changed.
+     * One event per burst: a timer, because a tab in the background never fires a frame.
+     */
+    let announced = 0;
+    function announce() {
+        if (announced) return;
+        announced = setTimeout(() => { announced = 0; document.dispatchEvent(new CustomEvent('wr-console-changed')); }, 0);
     }
 
     // ── the order form: who, what, where ─────────────────────────────────────
@@ -1406,7 +1419,7 @@ if (typeof module !== 'undefined' && module.exports) {
     cmp.addEventListener('click', e => {
         if (e.target.closest('#wrcCmpClear')) { state.selected.clear(); selectionChanged(); return; }
         const verb = e.target.closest('[data-verb]');
-        if (verb) { state.verb = verb.dataset.verb; save('verb', state.verb); renderComposerBody(false); }
+        if (verb) { state.verb = verb.dataset.verb; save('verb', state.verb); renderComposerBody(false); announce(); }
     });
 
     function toast(text, kind) {
@@ -1856,6 +1869,7 @@ if (typeof module !== 'undefined' && module.exports) {
             sectorSig = sig;
             if (state.verb === 'sector') renderComposerBody(true);
         }
+        announce();
     }
 
     // The page's own renderers run the moment something is acknowledged, sent or
@@ -1878,8 +1892,49 @@ if (typeof module !== 'undefined' && module.exports) {
         };
     });
 
+    /**
+     * What the «Πίνακας» look shows beside the console's own regions: the teams as the team rows
+     * read them (their first order, the progress ring, who can be reached), who is picked and the
+     * phase. Plain copies - the look changes the console only through pickTeam() and clearSelection().
+     */
+    function view() {
+        const board = (typeof teamBoardItems === 'function') ? teamBoardItems : () => [];
+        return {
+            phase: state.phase,
+            verb: state.verb,
+            gps: wrcContactOf(state.teams.flatMap(tm => tm.members || []), isStale),
+            teams: state.teams.map(team => {
+                const items = board({id: team.id, label: team.label, color: team.color});
+                const members = team.members || [];
+                const vm = avatarModel(team, items, members);
+                const ids = members.map(m => Number(m.user_id));
+                const picked = ids.filter(id => state.selected.has(id)).length;
+                return {
+                    id: team.id, label: team.label, color: team.color, number: Number(team.team_number) || 0,
+                    members: ids, picked, all: ids.length,
+                    orders: items.map(i => ({kind: i.kind, detail: i.detail, state: i.state, tone: i.tone})),
+                    ring: vm.ring, contact: vm.contact, badge: vm.badge,
+                };
+            }),
+        };
+    }
+    /** One team into the order's recipients: 'toggle' adds it or takes it out, 'only' makes it the only one. */
+    function pickTeam(id, mode) {
+        const team = state.teams.find(tm => tm.id === Number(id));
+        if (!team) return;
+        const ids = (team.members || []).map(m => Number(m.user_id));
+        const whole = ids.length > 0 && ids.every(uid => state.selected.has(uid));
+        if (mode === 'only') state.selected.clear();
+        if (mode === 'only' || !whole) ids.forEach(uid => state.selected.add(uid)); else ids.forEach(uid => state.selected.delete(uid));
+        selectionChanged();
+    }
+    function clearSelection() { state.selected.clear(); selectionChanged(); }
+
     window.wrConsole = {
         reveal,
+        view,
+        pickTeam,
+        clearSelection,
         onPoll(data) {
             if (data.teams) setTeams(data.teams);
             if (data.pingStaleness) state.stale = data.pingStaleness;
