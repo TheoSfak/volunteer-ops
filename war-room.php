@@ -6682,6 +6682,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg==" crossorigin="anonymous"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/esri-imagery.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-utils.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/trail-display.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-ar.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-ar.js') ?>"></script>
@@ -7577,6 +7578,13 @@ const MAP_BASE_LAYER_KEYS = ['street', 'topo', 'satellite', 'hybrid'];
 // back as 500. One extra pixel of blur beats a shape that cannot be traced.
 const MAP_MAX_ZOOM = 21;
 //
+// The satellite layer needs more than that, because Esri has photographs only
+// down to z18 over most Cretan towns (z19 in Heraklion) and answers a deeper
+// request with a flat grey "Map data not yet available" tile, not a 404 -
+// which maxNativeZoom cannot guard against, so the map went grey from zoom 19
+// in the middle of a city. voEsriImagery() (assets/js/esri-imagery.js) spots
+// that tile and paints the shallower photograph enlarged instead.
+//
 // The aerial photo carries no text at all — no street, no village, no
 // address — so zoomed in on a hillside or a town it answered "what is
 // there" but never "where is this". The fourth view lays Esri's two free
@@ -7591,7 +7599,7 @@ const MAP_MAX_ZOOM = 21;
 // all. The street map is the fuller source there, house numbers included
 // where OpenStreetMap has them, which is why it stays a separate view.
 function addMapBaseLayers(targetMap, toggleBtnId) {
-    const satelliteTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    const satelliteTiles = voEsriImagery({
         attribution: 'Tiles © Esri',
         maxNativeZoom: 19,
         maxZoom: MAP_MAX_ZOOM,

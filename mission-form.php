@@ -870,6 +870,7 @@ include __DIR__ . '/includes/header.php';
 <!-- Map point picker (opened from the Google Maps link field) -->
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/esri-imagery.js?v=<?= APP_VERSION ?>"></script>
 <style>
     /* z-index:0 makes the map its own stacking context, so Leaflet's panes and
        controls (z-index up to 1000) can never paint over the search results list. */
@@ -1005,7 +1006,7 @@ include __DIR__ . '/includes/header.php';
             // address gets turned into a point — so the satellite view carries
             // Esri's road-name and place-name layers over the photo.
             satellite: L.layerGroup([
-                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                voEsriImagery({
                     attribution: 'Tiles &copy; Esri',
                     maxNativeZoom: 19, maxZoom: 21
                 }),

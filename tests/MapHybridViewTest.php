@@ -86,6 +86,6 @@ final class MapHybridViewTest extends TestCase
         // The picker turns an address into a point, so its two-state toggle
         // (street / satellite) keeps two states and the satellite one has names.
         $form = (string) file_get_contents(__DIR__ . '/../mission-form.php');
-        $this->assertMatchesRegularExpression('~satellite: L\.layerGroup\(\[.*?World_Imagery.*?World_Transportation.*?World_Boundaries_and_Places.*?\]\)~s', $form);
+        $this->assertMatchesRegularExpression('~satellite: L\.layerGroup\(\[.*?voEsriImagery\(.*?World_Transportation.*?World_Boundaries_and_Places.*?\]\)~s', $form);
     }
 }

@@ -342,6 +342,7 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/esri-imagery.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/trail-display.js?v=<?= APP_VERSION ?>"></script>
 <script>
 (function () {
@@ -354,7 +355,7 @@ include __DIR__ . '/includes/header.php';
     const map = L.map('archiveMap', {maxZoom: 21});
     // The aerial photo has no text on it; the hybrid view lays Esri's road-name
     // and place-name layers over it so a hillside can be told from a village.
-    const satelliteTiles = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {attribution: 'Tiles © Esri', maxNativeZoom: 19, maxZoom: 21});
+    const satelliteTiles = voEsriImagery({attribution: 'Tiles © Esri', maxNativeZoom: 19, maxZoom: 21});
     const esriReference = 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/';
     const base = {
         [STR['archive.view_street']]: L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {attribution: '© OpenStreetMap', maxNativeZoom: 19, maxZoom: 21}),
