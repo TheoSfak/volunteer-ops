@@ -203,6 +203,17 @@ function wrcOvNorm(s) {
         .replace(/ς/g, 'σ').replace(/\s+/g, ' ').trim();
 }
 
+/**
+ * The one button of the drawing column: folding it while it is open; the icon of the armed tool, lit, while it
+ * is folded and a tool is on (so a pen that is armed behind a folded column is seen); the pen and square otherwise.
+ * `toolIcon` is the armed tool's own icon class (bi-pencil, ...) or ''. -> {icon, on, label}
+ */
+function wrcOvDrawFace(open, toolIcon) {
+    if (open) return {icon: 'bi-chevron-up', on: false, label: 'fold'};
+    if (toolIcon) return {icon: toolIcon, on: true, label: 'armed'};
+    return {icon: 'bi-pencil-square', on: false, label: 'open'};
+}
+
 const WRC_OV_FIND_GROUPS = ['teams', 'people', 'places'];
 
 /**
@@ -237,7 +248,7 @@ function wrcOvFind(entries, query, max) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes, wrcOvNorm, wrcOvFind};
+    module.exports = {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes, wrcOvNorm, wrcOvFind, wrcOvDrawFace};
 }
 
 // ── the view ─────────────────────────────────────────────────────────────────
@@ -292,7 +303,7 @@ if (typeof module !== 'undefined' && module.exports) {
             <span class="wrc-ov-slot" id="wrcOvExport"></span>
             <button type="button" class="wrc-ov-sq" data-ov="teams" data-label="${esc(t('console.ov_teams_toggle'))}" title="${esc(t('console.ov_teams_toggle'))}" aria-label="${esc(t('console.ov_teams_toggle'))}"><i class="bi bi-people-fill"></i></button>
         </div>`;
-    stack.innerHTML = '<div class="wrc-ov-col" data-g="nav"></div><div class="wrc-ov-col" data-g="draw"></div><div class="wrc-ov-col" data-g="extra"></div>';
+    stack.innerHTML = '<div class="wrc-ov-col" data-g="nav"></div><div class="wrc-ov-col" data-g="extra"></div>';
 
     // The bottom bar and the readouts are repainted from the console's state; the tool panel is filled when engaged.
     const dock = $('.wrc-dock', root);
@@ -690,7 +701,8 @@ if (typeof module !== 'undefined' && module.exports) {
     ruler.title = t('console.ov_ruler');
     ruler.setAttribute('aria-label', t('console.ov_ruler'));
     ruler.setAttribute('aria-pressed', 'false');
-    $('[data-g="draw"]', stack).appendChild(ruler);
+    // With the search rings' switch (added when engaged, after it): the map's own tools, apart from the drawing column.
+    $('[data-g="extra"]', stack).appendChild(ruler);
     const measureTool = () => window.wrMeasure || null;
     function paintRuler() {
         const m = measureTool();
@@ -875,6 +887,57 @@ if (typeof module !== 'undefined' && module.exports) {
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && find.open) closeFind(true); });
     window.addEventListener('resize', () => { if (find.open) placeFind(); });
 
+    // ── the drawing column: the pen, the arrow, the text, the eraser and clear-all, at the right edge ─────
+    // The page's own toolbar (#annotationToolbar) is moved here whole - the annotation code keeps finding it by
+    // its id, and the ruler's «one tool at a time» keeps working through its buttons - and the column folds to one
+    // button: the tools when it is open, the icon of the armed tool (lit) when it is folded and a tool is on, so a
+    // pen that is armed behind a folded column is seen. Folded by default, remembered per browser; a tool switched
+    // on by another route opens it for as long as the page stays (not remembered: it is not a choice).
+    const DRAW_KEY = 'wr-console-ov-draw';
+    const drawCol = mk('div', 'wrc-ov-draw', 'wrcOvDraw');
+    const drawBtn = mk('button', 'wrc-ov-sq wrc-ov-draw-btn');
+    drawBtn.type = 'button';
+    drawBtn.setAttribute('aria-controls', 'annotationToolbar');
+    drawCol.hidden = true;
+    drawCol.appendChild(drawBtn);
+    root.appendChild(drawCol);
+    const draw = {open: false, observer: null};
+    try { draw.open = localStorage.getItem(DRAW_KEY) === 'open'; } catch (e) { /* storage blocked: it starts folded */ }
+    function armedTool() {
+        const bar = $('#annotationToolbar');
+        return bar ? $('button[data-tool].active', bar) : null;
+    }
+    function paintDraw() {
+        const tool = armedTool();
+        const glyph = tool ? $('i', tool) : null;
+        const icon = glyph ? (Array.from(glyph.classList).find(c => c !== 'bi' && c.indexOf('bi-') === 0) || '') : '';
+        const face = wrcOvDrawFace(draw.open, icon);
+        drawCol.dataset.open = draw.open ? 'open' : 'closed';
+        drawBtn.innerHTML = `<i class="bi ${face.icon}"></i>`;
+        drawBtn.classList.toggle('on', face.on);
+        const label = face.label === 'fold' ? t('console.ov_draw_fold')
+            : (face.label === 'armed' ? t('console.ov_draw_armed', {tool: (tool.title || '').trim()}) : t('console.ov_draw'));
+        drawBtn.title = label;
+        drawBtn.setAttribute('aria-label', label);
+        drawBtn.setAttribute('aria-expanded', draw.open ? 'true' : 'false');
+    }
+    function setDraw(open, remember) {
+        draw.open = open;
+        if (remember) { try { localStorage.setItem(DRAW_KEY, open ? 'open' : 'closed'); } catch (e) { /* not remembered */ } }
+        paintDraw();
+    }
+    function watchDraw() {
+        const bar = $('#annotationToolbar');
+        if (!bar || draw.observer || !window.MutationObserver) return;
+        draw.observer = new MutationObserver(() => { if (armedTool() && !draw.open) draw.open = true; paintDraw(); });
+        draw.observer.observe(bar, {attributes: true, attributeFilter: ['class'], subtree: true});
+    }
+    drawBtn.addEventListener('click', () => setDraw(!draw.open, true));
+    // Esc folds the column from inside it (the focus on its button or a tool): anywhere else Esc keeps its other meanings.
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape' && engaged && draw.open && !e.defaultPrevented && drawCol.contains(document.activeElement)) { setDraw(false, true); drawBtn.focus(); }
+    });
+
     // ── moving the real controls in, and back ────────────────────────────────
     const moved = [];
     let engaged = false;
@@ -937,7 +1000,10 @@ if (typeof module !== 'undefined' && module.exports) {
         const layers = $('#mapSatelliteToggle');
         take(layers && layers.parentNode, nav);
         take($('#mapFollowBtn'), nav);
-        take($('#annotationToolbar'), $('[data-g="draw"]', stack));
+        // The drawing tools go to the right edge as a column of their own, folded to one button.
+        if (take($('#annotationToolbar'), drawCol)) { watchDraw(); }
+        drawCol.hidden = !$('#annotationToolbar');
+        paintDraw();
         take($('#mapRingsToggle'), $('[data-g="extra"]', stack));
         // The export menu opens to the right of the rail, not off the left edge of the window.
         const exportMenu = $$('#mapCard .card-header .dropdown').find(d => d !== (layers && layers.parentNode));

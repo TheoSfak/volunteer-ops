@@ -225,8 +225,8 @@ final class ConsoleFindMeasureTest extends TestCase
         // The stack's own «active» orange is what the ruler uses; the search button has its own, in the bar.
         $this->assertMatchesRegularExpression('~\.wrc-ov-stack \.btn\.active \{ background: var\(--ov-org\)~', $css);
         $this->assertMatchesRegularExpression('~\.wrc-ov-find-btn\.active \{ background: var\(--ov-org\)~', $css);
-        // In the stack's draw column, under the pen, the arrow, the text and the eraser.
-        $this->assertStringContainsString("\$('[data-g=\"draw\"]', stack).appendChild(ruler);", $js);
+        // In the stack, with the search rings' switch: the drawing tools have a column of their own at the right edge (ConsoleDrawColumnTest).
+        $this->assertStringContainsString("\$('[data-g=\"extra\"]', stack).appendChild(ruler);", $js);
     }
 
     // ── layout, both languages ───────────────────────────────────────────────

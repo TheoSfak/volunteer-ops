@@ -3211,6 +3211,9 @@ return [
         'console.ov_find_incident' => 'Περιστατικό',
         'console.ov_find_poi' => 'Σημείο ενδιαφέροντος',
         'console.ov_find_close' => 'Κλείσιμο αναζήτησης',
+        'console.ov_draw' => 'Σχέδιο στον χάρτη: άνοιγμα των εργαλείων (μολύβι, βέλος, κείμενο, γόμα)',
+        'console.ov_draw_fold' => 'Κλείσιμο των εργαλείων σχεδίου',
+        'console.ov_draw_armed' => 'Σχέδιο: ενεργό το «{tool}» - πάτα για τα εργαλεία',
         // checkin.php — the page the shift's attendance QR opens
         'checkin.page_title' => 'Check-in παρουσίας',
         'checkin.disabled_title' => 'Το QR check-in είναι απενεργοποιημένο',
@@ -6395,6 +6398,9 @@ return [
         'console.ov_find_incident' => 'Incident',
         'console.ov_find_poi' => 'Point of interest',
         'console.ov_find_close' => 'Close search',
+        'console.ov_draw' => 'Draw on the map: open the tools (pencil, arrow, text, eraser)',
+        'console.ov_draw_fold' => 'Fold the drawing tools',
+        'console.ov_draw_armed' => 'Drawing: “{tool}” is on - press for the tools',
         // checkin.php — the page the shift's attendance QR opens
         'checkin.page_title' => 'Attendance check-in',
         'checkin.disabled_title' => 'QR check-in is switched off',

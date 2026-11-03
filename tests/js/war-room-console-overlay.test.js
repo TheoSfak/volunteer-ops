@@ -11,7 +11,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes, wrcOvNorm, wrcOvFind} = require('../../assets/js/war-room-console-overlay.js');
+const {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes, wrcOvNorm, wrcOvFind, wrcOvDrawFace} = require('../../assets/js/war-room-console-overlay.js');
 
 test('the team window shows all the teams when they fit', () => {
     assert.deepEqual(wrcOvWindow(4, -1, 0, 6), {start: 0, size: 4, more: false});
@@ -313,4 +313,23 @@ test('an entry can keep its line under the name out of the search, so a count is
     assert.deepEqual(wrcOvFind(teams, 'ατομα', 8), [], 'the count itself is not searchable');
     const searchable = [{group: 'people', kind: 'person', id: 3, title: 'Μαρία', sub: 'Alpha 1'}];
     assert.equal(wrcOvFind(searchable, 'alpha', 8).length, 1, 'without it the line under the name is searched, as before');
+});
+
+// ── the drawing column's one button ──────────────────────────────────────────
+
+test("the drawing column's button folds the column while it is open, whatever tool is armed", () => {
+    assert.deepEqual(wrcOvDrawFace(true, ''), {icon: 'bi-chevron-up', on: false, label: 'fold'});
+    assert.deepEqual(wrcOvDrawFace(true, 'bi-pencil'), {icon: 'bi-chevron-up', on: false, label: 'fold'}, 'the tools are in view, and the lit one is lit there');
+});
+
+test("a folded column with a tool on shows that tool's own icon, lit, so an armed pen is never out of sight", () => {
+    assert.deepEqual(wrcOvDrawFace(false, 'bi-pencil'), {icon: 'bi-pencil', on: true, label: 'armed'});
+    assert.deepEqual(wrcOvDrawFace(false, 'bi-arrow-up-right'), {icon: 'bi-arrow-up-right', on: true, label: 'armed'});
+    assert.deepEqual(wrcOvDrawFace(false, 'bi-eraser'), {icon: 'bi-eraser', on: true, label: 'armed'});
+});
+
+test('a folded column with no tool on is the pen and square, not lit', () => {
+    assert.deepEqual(wrcOvDrawFace(false, ''), {icon: 'bi-pencil-square', on: false, label: 'open'});
+    assert.deepEqual(wrcOvDrawFace(false, undefined), {icon: 'bi-pencil-square', on: false, label: 'open'});
+    assert.deepEqual(wrcOvDrawFace(false, null), {icon: 'bi-pencil-square', on: false, label: 'open'});
 });
