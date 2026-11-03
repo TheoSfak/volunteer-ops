@@ -165,6 +165,7 @@ function clockPlaceName(string $osmName, string $lang, string $osmNameEn = ''): 
 function clockPlaceLookup(float $lat, float $lng): ?array
 {
     if (!function_exists('curl_init')) return null;
+    $startedAt = microtime(true);
     $ch = curl_init('https://nominatim.openstreetmap.org/reverse?' . http_build_query([
         'format'          => 'jsonv2',
         'lat'             => $lat,
@@ -184,7 +185,9 @@ function clockPlaceLookup(float $lat, float $lng): ?array
     ]);
     $body = curl_exec($ch);
     $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
     curl_close($ch);
+    externalCallLog('nominatim', 'nominatim.openstreetmap.org', $status, $startedAt, 3, $curlError);
     if ($body === false || $status !== 200) return null;
 
     $data = json_decode((string) $body, true);

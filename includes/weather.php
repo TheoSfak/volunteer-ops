@@ -43,6 +43,58 @@
 // below) as a mission actually progresses through the day.
 define('WEATHER_CACHE_TTL', 3600);  // 1 hour
 
+// How long "OpenWeatherMap did not answer" is remembered, in seconds. Without it
+// every Action Room page load (and every 5 s poll, when the wind compass is on)
+// made a new request that waited out its full timeout while the service was down,
+// holding a PHP worker and a database connection each time.
+define('WEATHER_ERROR_TTL', 180);
+
+/** Seconds one request to OpenWeatherMap may take (connecting included). */
+define('WEATHER_HTTP_TIMEOUT', 5);
+
+/**
+ * What a stored weather_cache row may still be used for: a good forecast for
+ * WEATHER_CACHE_TTL, and the plain fact that the service did not answer for
+ * WEATHER_ERROR_TTL. $age is in seconds. Null = ask the service again.
+ */
+function _owmCacheUsable(?string $json, int $age): ?array
+{
+    $data = json_decode((string) $json, true);
+    if (!is_array($data)) {
+        return null;
+    }
+    $status = $data['status'] ?? '';
+    if ($status === 'ok' && $age < WEATHER_CACHE_TTL) {
+        return $data;
+    }
+    // A little tolerance for a database clock that runs ahead of this one, none for a stuck failure.
+    if ($status === 'api_error' && $age > -60 && $age < WEATHER_ERROR_TTL) {
+        return $data;
+    }
+    return null;
+}
+
+/** Keeps $data as the mission's weather_cache row (replacing the previous one). */
+function _owmCacheStore($missionId, array $data): void
+{
+    $json = json_encode($data);
+    $exists = dbFetchValue(
+        "SELECT COUNT(*) FROM weather_cache WHERE mission_id = ?",
+        [$missionId]
+    );
+    if ($exists) {
+        dbExecute(
+            "UPDATE weather_cache SET weather_json = ?, fetched_at = NOW() WHERE mission_id = ?",
+            [$json, $missionId]
+        );
+    } else {
+        dbInsert(
+            "INSERT INTO weather_cache (mission_id, weather_json, fetched_at) VALUES (?, ?, NOW())",
+            [$missionId, $json]
+        );
+    }
+}
+
 // ─── Main entry point ────────────────────────────────────────────────────────
 
 /**
@@ -84,12 +136,9 @@ function getWeatherForMission(array $mission): ?array
         [$mission['id']]
     );
     if ($cached) {
-        $age = time() - strtotime($cached['fetched_at']);
-        if ($age < WEATHER_CACHE_TTL) {
-            $data = json_decode($cached['weather_json'], true);
-            if (is_array($data) && ($data['status'] ?? '') === 'ok') {
-                return $data;
-            }
+        $usable = _owmCacheUsable($cached['weather_json'], time() - strtotime($cached['fetched_at']));
+        if ($usable !== null) {
+            return $usable;
         }
     }
 
@@ -121,7 +170,9 @@ function getWeatherForMission(array $mission): ?array
     $fetchError = '';
     $data = _owmFetchForecast($lat, $lon, $targetTs, $apiKey, $fetchError);
     if ($data === null) {
-        return ['status' => 'api_error', 'message' => $fetchError ?: 'Αποτυχία ανάκτησης δεδομένων καιρού'];
+        $failure = ['status' => 'api_error', 'message' => $fetchError ?: 'Αποτυχία ανάκτησης δεδομένων καιρού'];
+        _owmCacheStore($mission['id'], $failure);
+        return $failure;
     }
 
     // Add warnings + severity
@@ -133,22 +184,7 @@ function getWeatherForMission(array $mission): ?array
     }
 
     // Persist to cache (upsert)
-    $json = json_encode($data);
-    $exists = dbFetchValue(
-        "SELECT COUNT(*) FROM weather_cache WHERE mission_id = ?",
-        [$mission['id']]
-    );
-    if ($exists) {
-        dbExecute(
-            "UPDATE weather_cache SET weather_json = ?, fetched_at = NOW() WHERE mission_id = ?",
-            [$json, $mission['id']]
-        );
-    } else {
-        dbInsert(
-            "INSERT INTO weather_cache (mission_id, weather_json, fetched_at) VALUES (?, ?, NOW())",
-            [$mission['id'], $json]
-        );
-    }
+    _owmCacheStore($mission['id'], $data);
 
     return $data;
 }
@@ -401,10 +437,12 @@ function _owmCurlGet(string $url, ?int &$httpCode = null, ?string &$curlError = 
         return null;
     }
 
+    $startedAt = microtime(true);
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT        => 8,
+        CURLOPT_CONNECTTIMEOUT => 3,
+        CURLOPT_TIMEOUT        => WEATHER_HTTP_TIMEOUT,
         CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_USERAGENT      => 'VolunteerOps/' . APP_VERSION,
         CURLOPT_FOLLOWLOCATION => false,
@@ -414,6 +452,8 @@ function _owmCurlGet(string $url, ?int &$httpCode = null, ?string &$curlError = 
     $httpCode  = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     $curlError = curl_error($ch);
     curl_close($ch);
+    // The host only: this URL carries the API key in its query string.
+    externalCallLog('openweathermap', (string) parse_url($url, PHP_URL_HOST), (int) $httpCode, $startedAt, WEATHER_HTTP_TIMEOUT, $curlError);
 
     if ($response === false || $httpCode !== 200) {
         return null;

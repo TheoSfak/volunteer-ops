@@ -84,16 +84,17 @@ if (count($calls) >= OSM_RATE_MAX) {
 $calls[] = $now;
 $_SESSION[$key] = $calls;
 
-// Overpass can take half a minute; the session file stays locked for the whole
-// request otherwise and the 5s poll queues behind it.
+// Overpass can be slow; the session file stays locked for the whole request
+// otherwise and the 5s poll queues behind it.
 session_write_close();
 
 // Whatever the page does, finish and cache what Overpass was asked for: a call
 // abandoned halfway is a tile that never fills. Each Overpass call keeps to
-// OSM_REQUEST_DEADLINE seconds by itself, so a host that cannot raise PHP's
-// time limit (set_time_limit is often disabled) still fits.
+// OSM_WEB_DEADLINE seconds by itself (and the whole site makes one at a time,
+// pausing after a failure: see osmChunkBundle()), so a host that cannot raise
+// PHP's time limit (set_time_limit is often disabled) still fits.
 ignore_user_abort(true);
-@set_time_limit(OSM_FETCHES_PER_REQUEST * OSM_REQUEST_DEADLINE + 15);
+@set_time_limit(OSM_FETCHES_PER_REQUEST * OSM_WEB_DEADLINE + 7);
 
 $budget = OSM_FETCHES_PER_REQUEST;
 $why = null;
@@ -155,6 +156,9 @@ echo json_encode([
     // console, or an admin asked "what does it say?", can tell Overpass being
     // busy from this server being unable to reach it at all.
     'diag'        => $failed || $why !== null ? $why : null,
+    // True when some tiles could not be had just now (Overpass did not answer or
+    // is paused after a failure): the page says so plainly and tries again later.
+    'unavailable' => (bool) $failed,
     'truncated'   => $truncated,
     'attribution' => '© OpenStreetMap contributors',
 ], JSON_UNESCAPED_UNICODE);

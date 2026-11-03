@@ -183,13 +183,18 @@ function sendWebPush(string $endpoint, string $userPublicKey, string $userAuthTo
             'Urgency: normal',
         ];
 
+        // 8 s, not 30: sendBulkNotifications() sends to one subscription after
+        // another while holding a PHP worker and a database connection, and a
+        // dead push endpoint would otherwise cost half a minute each.
+        $startedAt = microtime(true);
         $ch = curl_init($endpoint);
         curl_setopt_array($ch, [
             CURLOPT_POST           => true,
             CURLOPT_POSTFIELDS     => $body,
             CURLOPT_HTTPHEADER     => $headers,
             CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT        => 30,
+            CURLOPT_CONNECTTIMEOUT => 4,
+            CURLOPT_TIMEOUT        => 8,
             CURLOPT_SSL_VERIFYPEER => true,
         ]);
 
@@ -197,6 +202,7 @@ function sendWebPush(string $endpoint, string $userPublicKey, string $userAuthTo
         $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $curlErr  = curl_error($ch);
         curl_close($ch);
+        externalCallLog('webpush', (string) parse_url($endpoint, PHP_URL_HOST), (int) $httpCode, $startedAt, 8, $curlErr);
 
         if ($httpCode >= 200 && $httpCode < 300) {
             return true;

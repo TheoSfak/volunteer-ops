@@ -528,6 +528,41 @@ function getSetting($key, $default = null) {
     return $cache[$key] ?? $default;
 }
 
+/** An answer from another server slower than this is worth a log line even when it succeeded. */
+if (!defined('EXTERNAL_CALL_SLOW_MS')) define('EXTERNAL_CALL_SLOW_MS', 3000);
+
+/**
+ * One diagnostic line for a request this server sent to somebody else (a map
+ * server, a weather service, GitHub, a push service): what kind it was, who
+ * answered, with which status, how long it took and the limit it was given. A
+ * hang that ends at the limit then reads as "ms equals timeout", which is how
+ * a stuck dependency is told from a slow page in the host's error log.
+ *
+ * Only failures and slow answers are written, so a healthy site stays quiet.
+ * It takes the HOST, never the URL, and the note is stripped of anything that
+ * looks like a key or a token: the URLs of these services carry API keys in
+ * their query strings, and cURL's own error text can repeat them. No cookie,
+ * header, body or user data is ever passed in.
+ *
+ * @param int $status HTTP status, or 0 when there was no answer at all
+ */
+function externalCallLog(string $type, string $host, int $status, float $startedAt, int $timeoutSeconds, string $note = ''): void {
+    $ms = (int) round((microtime(true) - $startedAt) * 1000);
+    if ($status >= 200 && $status < 300 && $ms < EXTERNAL_CALL_SLOW_MS) return;
+
+    $note = preg_replace('/([?&](?:appid|api_?key|key|token|access_token|secret)=)[^&\s]+/i', '$1[hidden]', $note);
+    $note = trim((string) preg_replace('/\s+/', ' ', (string) $note));
+    error_log(sprintf(
+        '[ext] type=%s host=%s status=%d ms=%d timeout=%ds%s',
+        preg_replace('/[^a-z0-9_-]/i', '', $type),
+        preg_replace('/[^a-z0-9.\-]/i', '', $host),
+        $status,
+        $ms,
+        $timeoutSeconds,
+        $note !== '' ? ' note=' . mb_substr($note, 0, 120) : ''
+    ));
+}
+
 /**
  * Column order for the "latest ping per volunteer" GROUP BY.
  *

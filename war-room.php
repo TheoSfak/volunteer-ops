@@ -8370,6 +8370,7 @@ let osmBusy = false, osmAgain = false, osmTimer = null, osmPartial = false, osmT
 let osmSettled = false; // the last load of this view finished cleanly
 let osmLater = false;   // something is still being fetched and will be asked for again shortly
 let osmDiag = '';       // the server's short reason for the last failure
+let osmUnavailable = false; // the server said OpenStreetMap's data could not be had just now (it is paused or did not answer)
 let osmRetryTimer = null;
 let osmProgress = {done: 0, total: 0};
 const OSM_BUNDLE_OF = {points: 'core', paths: 'core', cliffs: 'core', tracks: 'tracks'}; // as OSM_BUNDLES in includes/osm.php
@@ -8538,7 +8539,7 @@ function osmUpdateChip() {
         if (osmTooWide || (far.length && far.length === ticked)) lines.push(t('osm.zoom_in_all'));
         else if (far.length) lines.push(t('osm.zoom_in', {list: far.join(', ')}));
         if (osmBusy || osmLater) lines.push(osmProgress.total ? t('osm.loading_n', {done: osmProgress.done, total: osmProgress.total}) : t('osm.loading'));
-        else if (osmPartial) lines.push(osmDiag ? t('osm.partial_why', {why: osmDiag}) : t('osm.partial'));
+        else if (osmPartial) lines.push(osmUnavailable ? t('osm.unavailable') : (osmDiag ? t('osm.partial_why', {why: osmDiag}) : t('osm.partial')));
         // Loaded cleanly and still nothing in sight: say so, or "nothing
         // appeared" reads as "it is broken". Often it only means nobody has
         // mapped this stretch of ground.
@@ -8561,14 +8562,17 @@ function osmUpdateChip() {
         osmChip = new Chip().addTo(map);
     }
     osmChip.getContainer().textContent = text;
+    // The technical reason stays one hover away, for whoever has to find out why.
+    osmChip.getContainer().title = osmUnavailable && osmDiag ? osmDiag : '';
 }
 
 function osmRequest(body) {
     const ctrl = new AbortController();
-    // Overpass can take half a minute or more and the server makes up to two
-    // calls per request: longer than the page's own default for a POST, so this
-    // one says so.
-    const timer = setTimeout(() => ctrl.abort(), 120000);
+    // The server gives Overpass 8 s and makes one call per request, and answers
+    // from its cache without waiting for anybody when Overpass is paused, so 30 s
+    // is generous. It used to be 120 s, which let a stuck request sit open for
+    // two minutes.
+    const timer = setTimeout(() => ctrl.abort(), 30000);
     const form = new URLSearchParams({
         csrf_token: csrfToken, mission_id: '<?= $missionId ?>',
         south: body.south.toFixed(6), north: body.north.toFixed(6),
@@ -8607,6 +8611,7 @@ async function osmRunJob(job) {
         if ((data.failed || []).length) {
             data.failed.forEach(id => osmRetryAt.set(id, Date.now() + OSM_RETRY_MS));
             osmPartial = true;
+            osmUnavailable = !!data.unavailable;
             osmDiag = data.diag || '';
             console.warn('[osm] Overpass did not answer for', data.failed, '-', data.diag || 'no reason given');
         }
@@ -8617,7 +8622,10 @@ async function osmRunJob(job) {
         pending = data.pending || [];
         if (!pending.length) return true;
         osmUpdateChip();
-        await new Promise(resolve => setTimeout(resolve, 300));
+        // Pending = another request holds the one slot at Overpass, or this is the
+        // first look at the tile. A second is plenty: a faster ask only costs the
+        // server a worker for nothing.
+        await new Promise(resolve => setTimeout(resolve, 1000));
     }
     // Still being fetched after a dozen asks (another visitor's request holds
     // the tile, or Overpass is slow): look again shortly, by itself.
@@ -8637,6 +8645,7 @@ async function osmLoadView() {
         do {
             osmAgain = false;
             osmPartial = false;
+            osmUnavailable = false;
             osmLater = false;
             const z = map.getZoom();
             const groups = new Set(OSM_CATEGORIES.filter(c => osmCatsOn.has(c.key) && c.minZoom <= z).map(c => c.group));

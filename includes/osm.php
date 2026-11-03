@@ -66,6 +66,24 @@ const OSM_CONNECT_TIMEOUT = 6;
 /** The pause before the one retry after a 429 or 504, in seconds. */
 const OSM_BUSY_PAUSE = 3;
 
+/**
+ * What a call may cost while a PERSON is waiting for the map (mission-osm.php).
+ * Every such call holds a PHP worker and a database connection for as long as
+ * Overpass takes, and the host has only a handful of each: a public server that
+ * stops answering, with a few tabs asking, used to fill them all for 25 s at a
+ * time and every other page of the site queued behind. So: one try, one server,
+ * 8 s at the most. The long deadline above is for the bulk download and the
+ * cron prewarm, where nobody waits and a second try is affordable.
+ */
+const OSM_WEB_DEADLINE = 8;
+const OSM_WEB_CONNECT_TIMEOUT = 3;
+/** How long a failed call keeps every web request away from Overpass (it serves the cache only). */
+const OSM_BREAKER_SECONDS = 180;
+/** The settings row that holds "do not ask Overpass until" (a Unix time); no table of its own. */
+const OSM_BREAKER_KEY = 'osm_overpass_down_until';
+/** How long a background job waits for its turn at Overpass, in seconds. */
+const OSM_BACKGROUND_WAIT = 10;
+
 /** Most features one response carries; a guard, not a tuned figure. */
 const OSM_MAX_ITEMS = 6000;
 
@@ -84,6 +102,54 @@ const OSM_OVERPASS_URLS = [
     // from overpass-api.de (yphresies.gr was: "Could not connect") may reach it.
     'https://overpass.private.coffee/api/interpreter',
 ];
+
+/**
+ * The servers to ask. Normally OSM_OVERPASS_URLS; the tests (and an operator
+ * with an Overpass of their own) can replace them for the rest of the request by
+ * passing a list, and put the default back with an empty one.
+ */
+function osmEndpoints(?array $override = null): array {
+    static $replacement = null;
+    if ($override !== null) $replacement = $override ?: null;
+    return $replacement ?? OSM_OVERPASS_URLS;
+}
+
+/**
+ * Until when Overpass is left alone (a Unix time), or 0 when it is not. Read
+ * straight from the database on purpose: every request must see a pause set by
+ * another one a moment ago, and getSetting() keeps its answer for the request.
+ */
+function osmOverpassPausedUntil(): int {
+    $until = (int) dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = ?", [OSM_BREAKER_KEY]);
+    return $until > time() ? $until : 0;
+}
+
+/**
+ * The MySQL lock that is the one slot at Overpass for the whole site. Its name
+ * carries the database's, because MySQL locks are shared by every database on
+ * the server and two sites on one host must not queue behind each other.
+ */
+function osmGlobalLockName(): string {
+    return 'vo_osm_' . substr(md5((defined('DB_NAME') ? DB_NAME : '') . '|global'), 0, 24);
+}
+
+/** A call failed: for OSM_BREAKER_SECONDS the web path answers from the cache and asks nobody. */
+function osmOverpassPause(): void {
+    $until = time() + OSM_BREAKER_SECONDS;
+    dbExecute(
+        "INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES (?, ?, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()",
+        [OSM_BREAKER_KEY, (string) $until]
+    );
+}
+
+/** A call got an answer: Overpass is back, so lift the pause (only touches the table when there is one). */
+function osmOverpassResume(): void {
+    $row = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = ?", [OSM_BREAKER_KEY]);
+    if ($row !== false && $row !== null && (int) $row > 0) {
+        dbExecute("UPDATE settings SET setting_value = '0', updated_at = NOW() WHERE setting_key = ?", [OSM_BREAKER_KEY]);
+    }
+}
 
 /**
  * The tiles a bounding box covers, as [key, south, west, north, east] each, or
@@ -164,11 +230,15 @@ function osmGroupQuery(string $group, float $south, float $west, float $north, f
     return $parts === null ? null : '[out:json][timeout:' . OSM_QUERY_TIMEOUT . '];' . $parts[0] . ';' . $parts[1];
 }
 
-/** One query for every group of a bundle in one tile. */
-function osmBundleQuery(string $bundle, float $south, float $west, float $north, float $east): ?string {
+/**
+ * One query for every group of a bundle in one tile. $timeout is what Overpass is
+ * told it may spend (it gives up on a query that takes longer, which frees its
+ * side too); it defaults to OSM_QUERY_TIMEOUT.
+ */
+function osmBundleQuery(string $bundle, float $south, float $west, float $north, float $east, ?int $timeout = null): ?string {
     if (!isset(OSM_BUNDLES[$bundle])) return null;
     $bb = sprintf('(%.5F,%.5F,%.5F,%.5F)', $south, $west, $north, $east);
-    $query = '[out:json][timeout:' . OSM_QUERY_TIMEOUT . '];';
+    $query = '[out:json][timeout:' . ($timeout ?? OSM_QUERY_TIMEOUT) . '];';
     $outputs = '';
     foreach (OSM_BUNDLES[$bundle] as $i => $group) {
         [$select, $output] = osmGroupStatements($group, $bb);
@@ -313,35 +383,47 @@ function osmParseAll(?string $body): ?array {
 }
 
 /**
- * Asks Overpass for a bundle of groups in one tile, trying each public server in
- * turn. [group => items] for every group of the bundle, or null when none of the
- * servers gave a usable answer.
+ * Asks Overpass for a bundle of groups in one tile. [group => items] for every
+ * group of the bundle, or null when no server gave a usable answer.
+ *
+ * $background says nobody is waiting (the bulk download, the cron prewarm): it
+ * tries every server, retries a "busy" answer once and takes up to
+ * OSM_REQUEST_DEADLINE. Without it — a person looking at the map — it is ONE try
+ * at the first server, OSM_WEB_DEADLINE seconds at the most, and no sleeping:
+ * the worker it holds is needed by every other page of the site.
  */
-function osmFetchBundle(string $bundle, float $south, float $west, float $north, float $east, ?string &$why = null): ?array {
-    $query = osmBundleQuery($bundle, $south, $west, $north, $east);
+function osmFetchBundle(string $bundle, float $south, float $west, float $north, float $east, ?string &$why = null, bool $background = false): ?array {
+    $webLimit = $background ? OSM_REQUEST_DEADLINE : OSM_WEB_DEADLINE;
+    $query = osmBundleQuery($bundle, $south, $west, $north, $east, $background ? null : max(1, OSM_WEB_DEADLINE - 1));
     if ($query === null) { $why = 'unknown bundle'; return null; }
     if (!function_exists('curl_init')) { $why = 'curl is not available on this server'; return null; }
 
     // The whole call, retry included, must fit what a shared host lets one
     // request run (often 30 s, and a request killed halfway caches nothing, so
     // the tile would fail for ever): each attempt gets only what is left.
-    $deadline = microtime(true) + OSM_REQUEST_DEADLINE;
+    $deadline = microtime(true) + $webLimit;
     $notes = []; // what each server said, for $why
 
-    foreach (OSM_OVERPASS_URLS as $url) {
+    $urls = osmEndpoints();
+    if (!$background) $urls = array_slice($urls, 0, 1);
+    $attempts = $background ? 2 : 1;
+
+    foreach ($urls as $url) {
         $host = (string) parse_url($url, PHP_URL_HOST);
         // "Too many requests" and "gateway timeout" are Overpass saying it is
         // busy for a moment: it asks to be left alone briefly and then tried once more.
-        for ($attempt = 0; $attempt < 2; $attempt++) {
+        for ($attempt = 0; $attempt < $attempts; $attempt++) {
             $left = (int) floor($deadline - microtime(true));
-            if ($left < 4) { $notes[] = $host . ' (out of time)'; break 2; }
+            if ($left < ($background ? 4 : 2)) { $notes[] = $host . ' (out of time)'; break 2; }
+            $limit = min($background ? OSM_CURL_TIMEOUT : OSM_WEB_DEADLINE, $left);
+            $startedAt = microtime(true);
             $ch = curl_init($url);
             curl_setopt_array($ch, [
                 CURLOPT_POST           => true,
                 CURLOPT_POSTFIELDS     => http_build_query(['data' => $query]),
                 CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_CONNECTTIMEOUT => min(OSM_CONNECT_TIMEOUT, $left),
-                CURLOPT_TIMEOUT        => min(OSM_CURL_TIMEOUT, $left),
+                CURLOPT_CONNECTTIMEOUT => min($background ? OSM_CONNECT_TIMEOUT : OSM_WEB_CONNECT_TIMEOUT, $left),
+                CURLOPT_TIMEOUT        => $limit,
                 CURLOPT_SSL_VERIFYPEER => true,
                 CURLOPT_USERAGENT      => 'VolunteerOps/' . APP_VERSION . ' (search and rescue volunteer coordination)',
             ]);
@@ -349,18 +431,18 @@ function osmFetchBundle(string $bundle, float $south, float $west, float $north,
             $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $curlError = curl_error($ch);
             curl_close($ch);
+            externalCallLog('overpass', $host, $code, $startedAt, $limit, $curlError);
 
             if ($code === 200) {
                 $all = osmParseAll($body === false ? null : $body);
                 if ($all !== null) return array_intersect_key($all, array_flip(OSM_BUNDLES[$bundle]));
                 $notes[] = $host . ': unusable answer';
-                error_log('[osm] unusable answer from ' . $url . ' for ' . $bundle);
+                error_log('[osm] unusable answer from ' . $host . ' for ' . $bundle);
                 break;
             }
             // HTTP 0 is no answer at all: the reason is cURL's own.
             $notes[] = $host . ($code === 0 ? ': ' . ($curlError !== '' ? $curlError : 'no answer') : ' HTTP ' . $code);
-            error_log('[osm] ' . $url . ' HTTP ' . $code . ($curlError !== '' ? ' (' . $curlError . ')' : '') . ' for ' . $bundle);
-            if ($attempt === 0 && ($code === 429 || $code === 504)) {
+            if ($background && $attempt === 0 && ($code === 429 || $code === 504)) {
                 sleep(OSM_BUSY_PAUSE);
                 continue;
             }
@@ -497,8 +579,21 @@ function osmTileRead(string $tileKey, string $bundle, ?int $maxAge = null): arra
  * given, is set to a short plain reason whenever a tile is 'failed' or a refresh
  * failed. $maxAge, when given, makes any tile whose rows are older than that many
  * seconds (or missing) need a fetch — the "update everything" of osm-bulk.php.
+ * $background is for those two jobs and the cron prewarm, where nobody waits:
+ * they may wait their turn at Overpass and take the long deadline, and they
+ * ignore the pause that keeps people's requests away after a failure (see
+ * osmFetchBundle()).
+ *
+ * Three things keep a struggling Overpass from taking the rest of the site down
+ * with it, because a call in flight holds a PHP worker and a database connection:
+ *  - after a failed call every web request answers from the cache only, for
+ *    OSM_BREAKER_SECONDS, without asking anybody;
+ *  - at most ONE call is in flight on the whole site (not one per set of tiles),
+ *    so ten people on ten different views cannot hold ten workers;
+ *  - a request that had to wait for that slot looks at the cache again before
+ *    asking, because whoever held it has usually just filled it.
  */
-function osmChunkBundle(array $tiles, string $bundle, int &$budget, ?string &$why = null, ?int $maxAge = null): array {
+function osmChunkBundle(array $tiles, string $bundle, int &$budget, ?string &$why = null, ?int $maxAge = null, bool $background = false): array {
     $groups = OSM_BUNDLES[$bundle];
     $byTile = [];
     $states = [];
@@ -513,26 +608,46 @@ function osmChunkBundle(array $tiles, string $bundle, int &$budget, ?string &$wh
     }
     if (!$want || $budget <= 0) return [$byTile, $states];
 
-    // One caller at a time for the same tiles, so ten volunteers opening the
-    // same hillside do not send Overpass ten identical queries.
-    $lock = 'osm_' . substr(md5($bundle . implode(',', array_keys($want))), 0, 24);
-    $got = (int) dbFetchValue("SELECT GET_LOCK(?, 0)", [$lock]) === 1;
+    // Paused after a failure a moment ago: say so and serve what is cached. The
+    // tiles are 'failed' (or 'stale' when there is something old to draw), so the
+    // page waits its couple of minutes instead of asking again straight away.
+    if (!$background && osmOverpassPausedUntil() > 0) {
+        $why = $why ?? 'Overpass did not answer a moment ago; the map will ask again shortly';
+        foreach ($want as $key => $_) $states[$key] = array_filter($byTile[$key]) ? 'stale' : 'failed';
+        return [$byTile, $states];
+    }
+
+    // One call at a time on the whole site.
+    $lock = osmGlobalLockName();
+    $got = (int) dbFetchValue("SELECT GET_LOCK(?, ?)", [$lock, $background ? OSM_BACKGROUND_WAIT : 0]) === 1;
     if (!$got) return [$byTile, $states];
     try {
+        // Whoever held the slot may have filled these very tiles: look again.
+        foreach ($want as $key => $_) {
+            [$held, $needsFetch, $state] = osmTileRead($key, $bundle, $maxAge);
+            if ($needsFetch) continue;
+            $byTile[$key] = $held;
+            $states[$key] = $state;
+            unset($want[$key]);
+        }
+        if (!$want) return [$byTile, $states];
+
         $budget--;
         // The smallest box that holds every tile that needs asking for.
         $south = min(array_column($want, 1));
         $west = min(array_column($want, 2));
         $north = max(array_column($want, 3));
         $east = max(array_column($want, 4));
-        $fetched = osmFetchBundle($bundle, (float) $south, (float) $west, (float) $north, (float) $east, $why);
+        $fetched = osmFetchBundle($bundle, (float) $south, (float) $west, (float) $north, (float) $east, $why, $background);
         if ($fetched === null) {
+            osmOverpassPause();
             foreach ($want as $key => $_) {
                 foreach ($groups as $group) osmCacheRetryLater($key, $group);
                 $states[$key] = array_filter($byTile[$key]) ? 'stale' : 'failed';
             }
             return [$byTile, $states];
         }
+        osmOverpassResume();
         $split = osmSplitIntoTiles($fetched, array_keys($want));
         foreach ($want as $key => $_) {
             foreach ($groups as $group) osmCacheWrite($key, $group, $split[$key][$group] ?? []);

@@ -20,6 +20,7 @@ define('SSL_VERIFY', file_exists($sslCaFile));
 define('SSL_CA_FILE', $sslCaFile);
 define('BACKUP_DIR', __DIR__ . '/backups');
 define('UPDATE_LOG_FILE', __DIR__ . '/update.log');
+require_once __DIR__ . '/includes/update-check.php';
 
 // Error logging for update process
 error_reporting(E_ALL);
@@ -42,7 +43,11 @@ function updateLog($message, $type = 'info') {
 
 function getLatestRelease() {
     $url = GITHUB_API_URL . '/releases/latest';
-    
+
+    // Short on purpose: this runs while the administrator's page is loading
+    // (and holds their session file), and the answer is stored for hours by
+    // updateCheckCached(), so a slow or blocked GitHub costs one page view in a
+    // while a few seconds, not every view a minute.
     $context = stream_context_create([
         'http' => [
             'method' => 'GET',
@@ -50,7 +55,7 @@ function getLatestRelease() {
                 'User-Agent: VolunteerOps-Updater',
                 'Accept: application/vnd.github.v3+json'
             ],
-            'timeout' => 30
+            'timeout' => UPDATE_CHECK_TIMEOUT
         ],
         'ssl' => [
             'verify_peer' => SSL_VERIFY,
@@ -58,14 +63,24 @@ function getLatestRelease() {
             'cafile' => SSL_CA_FILE
         ]
     ]);
-    
+
+    $startedAt = microtime(true);
     $response = @file_get_contents($url, false, $context);
-    
+    $status = updateCheckHttpStatus($http_response_header ?? []);
+    externalCallLog('github', 'api.github.com', $status, $startedAt, UPDATE_CHECK_TIMEOUT);
+
     if ($response === false) {
+        // No answer at all (blocked, unresolvable, too slow): the same host
+        // would only make us wait the same time again for the tags.
+        if ($status === 0) {
+            return ['error' => 'Αδυναμία σύνδεσης με GitHub. Ελέγξτε τη σύνδεση internet.'];
+        }
         // Try alternative - get tags
         $tagsUrl = GITHUB_API_URL . '/tags';
+        $startedAt = microtime(true);
         $response = @file_get_contents($tagsUrl, false, $context);
-        
+        externalCallLog('github', 'api.github.com', updateCheckHttpStatus($http_response_header ?? []), $startedAt, UPDATE_CHECK_TIMEOUT);
+
         if ($response === false) {
             return ['error' => 'Αδυναμία σύνδεσης με GitHub. Ελέγξτε τη σύνδεση internet.'];
         }
@@ -875,15 +890,17 @@ $latestRelease = null;
 $updateAvailable = false;
 $checkError = null;
 $actionResult = null;
+$forceCheck = false; // «Έλεγχος Τώρα» asks GitHub again instead of using the stored answer
 
 if (isPost()) {
     verifyCsrf();
     $action = post('action', '');
-    
+
     try {
         switch ($action) {
             case 'check_update':
-                // Just refresh page to check
+                // Re-check now: skip the stored answer (see updateCheckCached())
+                $forceCheck = true;
                 break;
                 
             case 'create_backup':
@@ -1190,8 +1207,8 @@ if (isPost()) {
 
 // Check for updates
 try {
-    $latestRelease = getLatestRelease();
-    
+    $latestRelease = updateCheckCached($forceCheck, 'getLatestRelease');
+
     if (isset($latestRelease['error'])) {
         $checkError = $latestRelease['error'];
     } else {

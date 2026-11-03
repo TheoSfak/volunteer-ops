@@ -230,7 +230,7 @@ function osmBulkStep(int $after): array {
 
     $budget = 1;
     $why = null;
-    [, $states] = osmChunkBundle($chunks[$next]['tiles'], 'core', $budget, $why, $maxAge);
+    [, $states] = osmChunkBundle($chunks[$next]['tiles'], 'core', $budget, $why, $maxAge, true);
     $failed = count(array_filter($states, fn($s) => $s !== 'fresh')) > 0;
     return [
         'ok'        => true,

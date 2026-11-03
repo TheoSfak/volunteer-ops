@@ -94,7 +94,7 @@ foreach ($chunks as [, $chunk]) {
     if ($queries >= OSM_PREWARM_MAX_QUERIES) break;
     $budget = 1;
     $why = null;
-    [, $states] = osmChunkBundle(array_map(fn($t) => array_slice($t, 0, 5), $chunk), 'core', $budget, $why);
+    [, $states] = osmChunkBundle(array_map(fn($t) => array_slice($t, 0, 5), $chunk), 'core', $budget, $why, null, true);
     if ($budget === 1) { // nothing needed fetching: already cached
         $already += count($chunk);
         continue;

@@ -8176,6 +8176,7 @@ function fetchOsrmEtaMinutes(float $lat1, float $lng1, float $lat2, float $lng2)
         'https://router.project-osrm.org/route/v1/driving/%s,%s;%s,%s?overview=false',
         sprintf('%.6f', $lng1), sprintf('%.6f', $lat1), sprintf('%.6f', $lng2), sprintf('%.6f', $lat2)
     );
+    $startedAt = microtime(true);
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
@@ -8185,7 +8186,9 @@ function fetchOsrmEtaMinutes(float $lat1, float $lng1, float $lat2, float $lng2)
     ]);
     $response = curl_exec($ch);
     $error = curl_error($ch);
+    $httpStatus = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
+    externalCallLog('osrm', 'router.project-osrm.org', $httpStatus, $startedAt, 3, $error);
     if ($error || empty($response)) {
         return null;
     }
