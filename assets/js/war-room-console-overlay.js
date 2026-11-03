@@ -193,8 +193,51 @@ function wrcOvHeatMinutes(seconds) {
     return Math.max(1, Math.ceil((seconds || 0) / 60));
 }
 
+/**
+ * A name the way somebody types it to look for it: lower case, no accents (ά → α, ΐ → ι), the final sigma
+ * as an ordinary one, one space between words. Greek only needs this - nobody has to type a Latin
+ * transliteration.
+ */
+function wrcOvNorm(s) {
+    return String(s === null || s === undefined ? '' : s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+        .replace(/ς/g, 'σ').replace(/\s+/g, ' ').trim();
+}
+
+const WRC_OV_FIND_GROUPS = ['teams', 'people', 'places'];
+
+/**
+ * What the search shows for `query`: [{key, items, more}] for the groups that have a match, in the order
+ * teams, people, places, `max` items of each (`more` = how many matched beyond them). `entries` are
+ * {group, title, sub, ...}. Every word typed has to be somewhere in the title or the line under it, in any
+ * order; the best come first - a title that starts with what was typed, then one with a word that does,
+ * then one that has it inside, then a match only in the line under the title - and equals by name, with
+ * numbers counted as numbers («Ομάδα 2» before «Ομάδα 10»).
+ */
+function wrcOvFind(entries, query, max) {
+    const words = wrcOvNorm(query).split(' ').filter(Boolean);
+    if (!words.length) return [];
+    const first = words[0];
+    const by = {teams: [], people: [], places: []};
+    (entries || []).forEach(e => {
+        if (!by[e.group]) return;
+        const title = wrcOvNorm(e.title);
+        // What else is searched besides the title: the line under it, unless the entry says otherwise (`find`).
+        const hay = title + ' ' + wrcOvNorm(e.find !== undefined ? e.find : e.sub);
+        if (!words.every(w => hay.includes(w))) return;
+        let rank = 3;
+        if (title.startsWith(first)) rank = 0;
+        else if (title.split(' ').some(w => w.startsWith(first))) rank = 1;
+        else if (title.includes(first)) rank = 2;
+        by[e.group].push({e, rank, title});
+    });
+    return WRC_OV_FIND_GROUPS.filter(key => by[key].length).map(key => {
+        const sorted = by[key].sort((a, b) => a.rank - b.rank || a.title.localeCompare(b.title, 'en', {numeric: true}));
+        return {key, items: sorted.slice(0, max).map(x => x.e), more: Math.max(0, sorted.length - max)};
+    });
+}
+
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes};
+    module.exports = {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes, wrcOvNorm, wrcOvFind};
 }
 
 // ── the view ─────────────────────────────────────────────────────────────────
@@ -637,6 +680,201 @@ if (typeof module !== 'undefined' && module.exports) {
         if (heat.on) heatStart(); else heatStop();
     });
 
+    // ── the ruler: the page's measuring tool, started from the stack ─────────
+    // Two clicks on the map measure a distance, with everything the right-click menu's measuring has (the
+    // card, the routes, the heights, Esc to cancel). The page owns the tool and says when it changes
+    // (window.wrMeasure, the wr-measure-changed event); this is only its button, orange while it is on.
+    const ruler = mk('button', 'btn wrc-ov-ruler');
+    ruler.type = 'button';
+    ruler.innerHTML = '<i class="bi bi-rulers"></i>';
+    ruler.title = t('console.ov_ruler');
+    ruler.setAttribute('aria-label', t('console.ov_ruler'));
+    ruler.setAttribute('aria-pressed', 'false');
+    $('[data-g="draw"]', stack).appendChild(ruler);
+    const measureTool = () => window.wrMeasure || null;
+    function paintRuler() {
+        const m = measureTool();
+        const on = !!(m && m.active());
+        ruler.classList.toggle('active', on);
+        ruler.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+    ruler.addEventListener('click', () => {
+        const m = measureTool();
+        if (!m) return;
+        if (m.active()) m.clear(); else m.arm();
+        paintRuler();
+    });
+    document.addEventListener('wr-measure-changed', () => setTimeout(paintRuler, 0));
+
+    // ── the search: teams, people and places, from what the page already holds ─
+    // The magnifier opens one input under the bar. Nothing is asked of the server: the teams come from the
+    // console, the people from the positions on the map and the places from the lists the map is drawn
+    // from. A result takes the map there through the page's own ways in (window.wrMapGo), so a shape opens
+    // exactly as it does from «Τι υπάρχει εδώ;».
+    const FIND_MAX = 8;
+    const FIND_HEADS = {teams: t('console.ov_find_teams'), people: t('console.ov_find_people'), places: t('console.ov_find_places')};
+    const FIND_ICONS = {team: 'bi-people-fill', person: 'bi-person-fill', area: 'bi-bounding-box', sector: 'bi-grid-3x3-gap-fill',
+        restricted: 'bi-exclamation-triangle-fill', point: 'bi-geo-alt-fill', incident: 'bi-heart-pulse-fill', poi: 'bi-eye-fill'};
+    const find = {open: false, q: '', idx: 0, flat: []};
+    const findBtn = mk('button', 'btn wrc-ov-find-btn');
+    findBtn.type = 'button';
+    findBtn.innerHTML = '<i class="bi bi-search"></i>';
+    findBtn.title = t('console.ov_find');
+    findBtn.setAttribute('aria-label', t('console.ov_find'));
+    findBtn.setAttribute('aria-haspopup', 'dialog');
+    findBtn.setAttribute('aria-expanded', 'false');
+    op.appendChild(findBtn);
+    const findPn = mk('div', 'wrc-ov-find', 'wrcOvFind');
+    findPn.hidden = true;
+    findPn.setAttribute('role', 'dialog');
+    findPn.setAttribute('aria-label', t('console.ov_find'));
+    findPn.innerHTML = `<div class="wrc-ov-fin"><i class="bi bi-search"></i>`
+        + `<input type="text" class="wrc-ov-fi" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="true" aria-controls="wrcOvFindList" aria-autocomplete="list" placeholder="${esc(t('console.ov_find_ph'))}" aria-label="${esc(t('console.ov_find'))}">`
+        + `<button type="button" class="wrc-ov-fx" data-find-close title="${esc(t('console.ov_find_close'))}" aria-label="${esc(t('console.ov_find_close'))}"><i class="bi bi-x-lg"></i></button></div>`
+        + '<div class="wrc-ov-fl" id="wrcOvFindList" role="listbox"></div>';
+    root.appendChild(findPn);
+    const findIn = $('.wrc-ov-fi', findPn);
+    const findList = $('.wrc-ov-fl', findPn);
+
+    /** Everything that can be looked for, read off what the page holds right now (each list may not exist for this viewer). */
+    function findEntries() {
+        const out = [];
+        const v = api.view();
+        // The count under a team's name is not something to search for («α» is in «άτομα»).
+        (v.teams || []).forEach(tm => out.push({group: 'teams', kind: 'team', id: tm.id, title: tm.label, sub: t('console.ov_find_members', {n: (tm.members || []).length}), find: '', members: tm.members || []}));
+        const seen = new Set();
+        pinsNow().forEach(p => {
+            if (p.lat === null || p.lat === undefined || seen.has(Number(p.user_id))) return;
+            seen.add(Number(p.user_id));
+            out.push({group: 'people', kind: 'person', id: p.user_id, title: p.name, sub: p.team_label || ''});
+        });
+        const areaList = typeof areas !== 'undefined' && Array.isArray(areas) ? areas : [];
+        areaList.forEach(a => out.push({group: 'places', kind: 'area', id: a.id, title: a.label, sub: t('map_pick.kind_area')}));
+        (typeof sectors !== 'undefined' && Array.isArray(sectors) ? sectors : []).forEach(s => {
+            const area = areaList.find(a => a.id === s.area_id);
+            out.push({group: 'places', kind: 'sector', id: s.id, title: s.label, sub: t('map_pick.kind_sector') + (area ? ' · ' + area.label : '')});
+        });
+        (typeof restrictedAreas !== 'undefined' && Array.isArray(restrictedAreas) ? restrictedAreas : [])
+            .forEach(r => out.push({group: 'places', kind: 'restricted', id: r.id, title: r.label, sub: t('map_pick.kind_restricted')}));
+        (typeof mapPoints !== 'undefined' && Array.isArray(mapPoints) ? mapPoints : [])
+            .forEach(p => out.push({group: 'places', kind: 'point', id: p.id, title: p.name, sub: t('console.ov_find_point')}));
+        (typeof missionIncidents !== 'undefined' && Array.isArray(missionIncidents) ? missionIncidents : []).forEach(r => {
+            if (r.lat === null || r.lat === undefined) return;
+            out.push({group: 'places', kind: 'incident', id: r.id, title: typeof incidentShortText === 'function' ? incidentShortText(r) : t('console.ov_find_incident'),
+                sub: [t('console.ov_find_incident'), r.is_unknown_patient ? '' : r.patient_name, r.team_label].filter(Boolean).join(' · ')});
+        });
+        (typeof pointsOfInterest !== 'undefined' && Array.isArray(pointsOfInterest) ? pointsOfInterest : []).forEach(p => {
+            if (p.lat === null || p.lat === undefined) return;
+            out.push({group: 'places', kind: 'poi', id: p.id, title: t('console.ov_find_poi'), sub: (p.reporter_names || []).join(', ')});
+        });
+        return out;
+    }
+
+    function paintFind() {
+        const q = find.q.trim();
+        const groups = wrcOvFind(findEntries(), q, FIND_MAX);
+        find.flat = groups.reduce((all, g) => all.concat(g.items), []);
+        if (find.idx >= find.flat.length) find.idx = 0;
+        let out = '';
+        if (!q) out = `<div class="wrc-ov-fm">${esc(t('console.ov_find_hint'))}</div>`;
+        else if (!groups.length) out = `<div class="wrc-ov-fm">${esc(t('console.ov_find_none', {q}))}</div>`;
+        let n = 0;
+        groups.forEach(g => {
+            out += `<div class="wrc-ov-fh">${esc(FIND_HEADS[g.key])}</div>`;
+            g.items.forEach(e => {
+                const i = n++;
+                out += `<button type="button" class="wrc-ov-fr${i === find.idx ? ' on' : ''}" role="option" id="wrcOvFr${i}" aria-selected="${i === find.idx ? 'true' : 'false'}" data-find="${i}">`
+                    + `<i class="bi ${FIND_ICONS[e.kind] || 'bi-dot'}"></i><span class="wrc-ov-ft"><b>${esc(e.title)}</b>${e.sub ? `<small>${esc(e.sub)}</small>` : ''}</span></button>`;
+            });
+            if (g.more) out += `<div class="wrc-ov-fmore">${esc(t('console.ov_find_more', {n: g.more}))}</div>`;
+        });
+        findList.innerHTML = out;
+        findIn.setAttribute('aria-activedescendant', find.flat.length ? 'wrcOvFr' + find.idx : '');
+    }
+    /** The highlighted row moved: no repaint, so a click in progress is not lost under the pointer. */
+    function markFind(scroll) {
+        $$('.wrc-ov-fr', findList).forEach((b, i) => { b.classList.toggle('on', i === find.idx); b.setAttribute('aria-selected', i === find.idx ? 'true' : 'false'); });
+        findIn.setAttribute('aria-activedescendant', find.flat.length ? 'wrcOvFr' + find.idx : '');
+        const row = $('#wrcOvFr' + find.idx, findList);
+        if (scroll && row && row.scrollIntoView) row.scrollIntoView({block: 'nearest'});
+    }
+    function placeFind() {
+        const r = root.getBoundingClientRect();
+        const b = findBtn.getBoundingClientRect();
+        const w = Math.min(380, window.innerWidth - 24);
+        findPn.style.width = w + 'px';
+        findPn.style.left = Math.max(12, Math.min(b.left - r.left, window.innerWidth - w - 12)) + 'px';
+        findPn.style.top = (top.getBoundingClientRect().bottom - r.top + 6) + 'px';
+    }
+    function openFind() {
+        if (!engaged) return;
+        find.open = true;
+        find.q = '';
+        find.idx = 0;
+        findIn.value = '';
+        findPn.hidden = false;
+        findBtn.classList.add('active');
+        findBtn.setAttribute('aria-expanded', 'true');
+        placeFind();
+        paintFind();
+        setTimeout(() => findIn.focus(), 0);
+    }
+    function closeFind(refocus) {
+        if (!find.open) return;
+        find.open = false;
+        findPn.hidden = true;
+        findBtn.classList.remove('active');
+        findBtn.setAttribute('aria-expanded', 'false');
+        if (refocus) findBtn.focus();
+    }
+    /** Takes the map to a result. A team is picked as the team bar picks it, alone, and framed. */
+    function goTo(e) {
+        const door = window.wrMapGo;
+        if (e.kind === 'team') {
+            api.pickTeam(e.id, 'only');
+            ui.focus = e.id;
+            frame(new Set(e.members.map(Number)));
+            update();
+        } else if (door) {
+            if (e.kind === 'person') door.person(e.id);
+            else if (e.kind === 'point') door.point(e.id);
+            else if (e.kind === 'incident') door.incident(e.id);
+            else if (e.kind === 'poi') door.poi(e.id);
+            else door.shape(e.kind, e.id);
+        }
+    }
+    findBtn.addEventListener('click', e => { e.stopPropagation(); if (find.open) closeFind(); else openFind(); });
+    findIn.addEventListener('input', () => { find.q = findIn.value; find.idx = 0; paintFind(); });
+    findIn.addEventListener('keydown', e => {
+        if (e.isComposing) return;
+        if (e.key === 'Escape') {
+            // Only the search closes: the page's own Esc (it cancels a measurement) must not also hear it.
+            e.preventDefault();
+            e.stopPropagation();
+            closeFind(true);
+        } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (find.flat.length) { find.idx = wrcOvStep(find.flat.length, find.idx, e.key === 'ArrowDown' ? 1 : -1); markFind(true); }
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            const hit = find.flat[find.idx];
+            if (hit) { closeFind(); goTo(hit); }
+        }
+    });
+    findList.addEventListener('click', e => {
+        const row = e.target.closest('[data-find]');
+        const hit = row && find.flat[Number(row.dataset.find)];
+        if (hit) { closeFind(); goTo(hit); }
+    });
+    findList.addEventListener('mousemove', e => {
+        const row = e.target.closest('[data-find]');
+        if (row && Number(row.dataset.find) !== find.idx) { find.idx = Number(row.dataset.find); markFind(false); }
+    });
+    findPn.addEventListener('click', e => { if (e.target.closest('[data-find-close]')) closeFind(true); });
+    document.addEventListener('mousedown', e => { if (find.open && !findPn.contains(e.target) && !findBtn.contains(e.target)) closeFind(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && find.open) closeFind(true); });
+    window.addEventListener('resize', () => { if (find.open) placeFind(); });
+
     // ── moving the real controls in, and back ────────────────────────────────
     const moved = [];
     let engaged = false;
@@ -721,6 +959,9 @@ if (typeof module !== 'undefined' && module.exports) {
         html.removeAttribute('data-wrc-ov');
         hidePtr();
         heatStop();
+        closeFind();
+        // A ruler waiting for its clicks would leave the console's own map with a crosshair and nothing to say why.
+        if (measureTool() && measureTool().armed()) measureTool().clear();
         syncTile();
         giveBack();
         top.contains(op) && op.remove();

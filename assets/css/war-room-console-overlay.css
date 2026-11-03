@@ -51,6 +51,7 @@ html[data-wrc-skin="overlay"] .wrc-ov-tile,
 html[data-wrc-skin="overlay"] .wrc-ov-ptr-ring,
 html[data-wrc-skin="overlay"] .wrc-ov-ptr-tip,
 html[data-wrc-skin="overlay"] .wrc-ov-heat-legend,
+html[data-wrc-skin="overlay"] .wrc-ov-find,
 html[data-wrc-skin="overlay"] .wrc-ov-ti { display: none; }
 
 /* ══ the window: one screen, the map is the ground ═══════════════════════════ */
@@ -66,6 +67,11 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .content-wrapper > .alert { position:
 /* The acknowledgement panel floats at the top right: beside the map's tools, not over the feed. */
 html[data-wrc-skin="overlay"][data-wrc-ov] { --wr-acktracker-top: calc(var(--wrc-ov-top, 0px) + 86px) !important; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc > .ack-tracker { right: calc(var(--ov-dock-w) + 96px); max-height: calc(100vh - var(--wr-acktracker-top) - 340px); z-index: 20; }
+/* While the order form is open its tallest kind (the sector one, about 300 px) reaches up under the panel's foot at 768 px high: the panel is
+   shorter then, and scrolls, so none of its checkboxes is under the form's header. */
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc[data-ov-composer="open"] > .ack-tracker { max-height: calc(100vh - var(--wr-acktracker-top) - 410px); }
+/* The same for the measuring card, which stands on the same spot and is taller with the heights and the walking time in it (about 330 px). */
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc:has(.wr-measure-card) > .ack-tracker { max-height: calc(100vh - var(--wr-acktracker-top) - 440px); }
 
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc {
     position: fixed; left: 0; right: 0; top: var(--wrc-ov-top, 0px); bottom: var(--wrc-ov-bottom, 0px); z-index: 900;
@@ -430,6 +436,50 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-ptr-tip {
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-ptr-ring[hidden],
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-ptr-tip[hidden] { display: none; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-ptr-h { color: var(--ov-mut); }
+
+/* ══ the search: the magnifier in the bar, and a small panel under it ═══════ */
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-op .wrc-ov-find-btn.active { background: var(--ov-org); }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-op .wrc-ov-find-btn.active,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-op .wrc-ov-find-btn.active .bi { color: #1b1000 !important; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-find {
+    display: flex; flex-direction: column; position: absolute; z-index: 55; top: 76px; left: 420px; width: 380px; max-width: calc(100% - 24px);
+    max-height: min(520px, calc(100% - 100px)); overflow: hidden; background: var(--ov-panel); border-radius: 6px; box-shadow: 0 8px 26px rgba(0, 0, 0, .5);
+    color: #fff; font-family: var(--ov-font); pointer-events: auto;
+}
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-find[hidden] { display: none; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-fin { flex: none; display: flex; align-items: center; gap: 9px; height: 44px; padding: 0 6px 0 13px; border-bottom: 1px solid var(--ov-line); }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-fin > .bi { color: var(--ov-mut); font-size: 16px; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-fi { flex: 1 1 auto; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; color: #fff; font: 600 15px var(--ov-font); }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-fi::placeholder { color: var(--ov-mut); font-weight: 500; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-fx { flex: none; width: 30px; height: 30px; border: 0; border-radius: 6px; background: transparent; color: var(--ov-mut); font-size: 14px; display: grid; place-items: center; cursor: pointer; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-fx:hover { background: var(--ov-seg); color: #fff; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-fl { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-fh { height: 30px; display: flex; align-items: center; padding: 0 12px; background: var(--ov-panelh); font: 700 12.5px var(--ov-font); letter-spacing: .09em; color: var(--ov-mut); text-transform: uppercase; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-fr {
+    display: flex; align-items: center; gap: 10px; width: 100%; min-height: 42px; padding: 5px 12px 5px 9px; border: 0; border-bottom: 1px solid var(--ov-line); border-left: 3px solid transparent;
+    background: transparent; color: #fff; text-align: left; cursor: pointer; font: 600 14px var(--ov-font);
+}
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-fr > .bi { flex: none; width: 18px; text-align: center; color: var(--ov-mut); font-size: 16px; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-fr.on { background: rgba(242, 160, 61, .14); border-left-color: var(--ov-org); }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-fr.on > .bi { color: var(--ov-org); }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-fr:focus-visible { outline: 2px solid var(--ov-org); outline-offset: -2px; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-ft { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-ft b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-ft small { color: var(--ov-mut); font: 500 12px var(--ov-font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-fm { padding: 13px 14px; color: var(--ov-mut); font: 500 13.5px/1.35 var(--ov-font); }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-fmore { padding: 6px 12px 8px 14px; color: var(--ov-mut); font: 500 12px var(--ov-font); border-bottom: 1px solid var(--ov-line); }
+
+/* The measuring card of the page (a white Leaflet control) in the board's dark slate. Its own corner of the map is where the
+   acknowledgement panel floats, and a panel outside the map ranks above anything inside it: the card would be out of sight.
+   It stands above the bottom bar instead, left of the middle, where nothing else is - the order form, which opens on the
+   same spot, ranks above it for as long as it is open. */
+html[data-wrc-skin="overlay"][data-wrc-ov] .wr-measure-card {
+    position: fixed; left: 452px; right: auto; top: auto; bottom: calc(var(--wrc-ov-bottom, 0px) + 98px); margin: 0;
+    background: var(--ov-panel); color: #fff; border-radius: 6px; box-shadow: 0 8px 26px rgba(0, 0, 0, .5); font-family: var(--ov-font);
+}
+html[data-wrc-skin="overlay"][data-wrc-ov] .wr-measure-card .text-muted { color: var(--ov-mut) !important; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wr-measure-card .btn-close { filter: invert(1) grayscale(1) brightness(1.6); opacity: .8; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wr-measure-card .btn-outline-success { color: var(--ov-green); border-color: var(--ov-green); }
 
 /* ══ the heat layer: its canvas (blurred, under the shapes) and its legend above the bottom-right pair ══ */
 html[data-wrc-skin="overlay"] .wrc-ov-heat-canvas { position: absolute; left: 0; top: 0; pointer-events: none; }

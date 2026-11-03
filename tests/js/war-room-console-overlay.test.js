@@ -4,13 +4,14 @@
 // bottom bar shows and how the previous / next buttons move through them, the mission clock, the GPS
 // readout, what the selected-team card says, which live stream the floating video tile shows and the pointer's
 // label (the position as degrees, minutes and seconds, the height cell, the allowance and where the label goes)
-// and the heat layer's colour scale and cell size on the screen. The part that needs a page (moving the controls into the
+// the heat layer's colour scale and cell size on the screen, and what the search finds (a name as it is typed,
+// the groups, the order). The part that needs a page (moving the controls into the
 // rails, the clicks) is exercised in the browser.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes} = require('../../assets/js/war-room-console-overlay.js');
+const {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes, wrcOvNorm, wrcOvFind} = require('../../assets/js/war-room-console-overlay.js');
 
 test('the team window shows all the teams when they fit', () => {
     assert.deepEqual(wrcOvWindow(4, -1, 0, 6), {start: 0, size: 4, more: false});
@@ -218,4 +219,98 @@ test('the busiest cell is stated in whole minutes, at least one', () => {
     assert.equal(wrcOvHeatMinutes(5), 1);
     assert.equal(wrcOvHeatMinutes(0), 1);
     assert.equal(wrcOvHeatMinutes(undefined), 1);
+});
+
+// ── the search ───────────────────────────────────────────────────────────────
+
+const SEARCH = [
+    {group: 'teams', kind: 'team', id: 2, title: 'Bravo 2', sub: '8 άτομα'},
+    {group: 'teams', kind: 'team', id: 10, title: 'Ομάδα 10', sub: '4 άτομα'},
+    {group: 'teams', kind: 'team', id: 9, title: 'Ομάδα 2', sub: '5 άτομα'},
+    {group: 'people', kind: 'person', id: 7, title: 'Αναστασία Πετράκη', sub: 'Alpha 1'},
+    {group: 'people', kind: 'person', id: 8, title: 'Μαρία Πετράκη', sub: 'Bravo 2'},
+    {group: 'people', kind: 'person', id: 9, title: 'Πέτρος Αναστασίου', sub: 'Alpha 1'},
+    {group: 'places', kind: 'area', id: 1, title: 'Περιοχή αναζήτησης — Γιούχτας', sub: 'Περιοχή έρευνας'},
+    {group: 'places', kind: 'sector', id: 4, title: 'Τομέας Α', sub: 'Τομέας · Περιοχή αναζήτησης — Γιούχτας'},
+    {group: 'places', kind: 'point', id: 3, title: 'Πηγή Αγίου Νικολάου', sub: 'Σημείο χάρτη'},
+];
+
+test('a name is typed without accents or capitals and still finds itself', () => {
+    assert.equal(wrcOvNorm('Αναστασία'), 'αναστασια');
+    assert.equal(wrcOvNorm('ΑΝΑΣΤΑΣΙΑ'), 'αναστασια');
+    assert.equal(wrcOvNorm('ΐ ΰ ή ώ'), 'ι υ η ω', 'the dialytika and the tonos both go');
+    assert.equal(wrcOvNorm('ΟΔΟΣ'), wrcOvNorm('οδος'), 'the final sigma is a sigma');
+    assert.equal(wrcOvNorm('οδός'), wrcOvNorm('ΟΔΟΣ'));
+    assert.equal(wrcOvNorm('  Γιώργος   Κωνσταντίνου '), 'γιωργοσ κωνσταντινου', 'one space between words, none at the ends (and every final sigma is σ)');
+    assert.equal(wrcOvNorm(null), '');
+    assert.equal(wrcOvNorm(undefined), '');
+    assert.equal(wrcOvNorm(12), '12');
+});
+
+test('nothing typed finds nothing, and a miss is an empty list', () => {
+    assert.deepEqual(wrcOvFind(SEARCH, '', 8), []);
+    assert.deepEqual(wrcOvFind(SEARCH, '   ', 8), []);
+    assert.deepEqual(wrcOvFind(SEARCH, 'ζζζζ', 8), []);
+    assert.deepEqual(wrcOvFind([], 'alpha', 8), []);
+    assert.deepEqual(wrcOvFind(null, 'alpha', 8), []);
+});
+
+test('the result is grouped teams, people, places - and only the groups that have a match', () => {
+    const all = wrcOvFind(SEARCH, 'α', 8);
+    assert.deepEqual(all.map(g => g.key), ['teams', 'people', 'places']);
+    const placesOnly = wrcOvFind(SEARCH, 'γιουχτ', 8);
+    assert.deepEqual(placesOnly.map(g => g.key), ['places']);
+    assert.deepEqual(wrcOvFind(SEARCH, 'bravo', 8).map(g => g.key), ['teams', 'people'], 'the team, and the person whose line under the name says Bravo 2');
+});
+
+test('every word typed has to be there, in any order, in the title or the line under it', () => {
+    assert.deepEqual(wrcOvFind(SEARCH, 'πετρακη αναστασια', 8)[0].items.map(e => e.id), [7]);
+    assert.deepEqual(wrcOvFind(SEARCH, 'αναστασια πετρακη', 8)[0].items.map(e => e.id), [7]);
+    assert.deepEqual(wrcOvFind(SEARCH, 'αναστασια bravo', 8), [], 'one word that is nowhere is no match');
+    assert.deepEqual(wrcOvFind(SEARCH, 'ΑΛΦΑ', 8), [], 'Latin and Greek are not the same letters here: no transliteration');
+    // The sector is found through the line under its name, the area it lies in.
+    assert.deepEqual(wrcOvFind(SEARCH, 'τομεας γιουχτας', 8)[0].items.map(e => e.id), [4]);
+});
+
+test('a title that starts with what was typed comes first, a match only in the line under the title last', () => {
+    const rows = wrcOvFind(SEARCH, 'αναστασ', 8).find(g => g.key === 'people').items.map(e => e.id);
+    assert.deepEqual(rows, [7, 9], 'Αναστασία… starts with it, Πέτρος Αναστασίου only has it in a later word');
+    const places = wrcOvFind(SEARCH, 'γιουχτας', 8)[0].items.map(e => e.id);
+    assert.deepEqual(places, [1, 4], 'the area has it in its name; the sector only in the line under its name');
+    const word = wrcOvFind(SEARCH, 'νικολαου', 8)[0].items.map(e => e.id);
+    assert.deepEqual(word, [3], 'a word in the middle of a title is a match');
+});
+
+test('equal matches come in name order with numbers counted as numbers', () => {
+    const teams = wrcOvFind(SEARCH, 'ομαδα', 8)[0].items.map(e => e.title);
+    assert.deepEqual(teams, ['Ομάδα 2', 'Ομάδα 10'], '2 before 10, not after it');
+});
+
+test('only as many of a group as asked for are shown, and how many were left out is said', () => {
+    const many = [];
+    for (let i = 1; i <= 12; i++) many.push({group: 'people', kind: 'person', id: i, title: 'Εθελοντής ' + i, sub: ''});
+    const [group] = wrcOvFind(many, 'εθελοντης', 8);
+    assert.equal(group.items.length, 8);
+    assert.equal(group.more, 4);
+    assert.deepEqual(group.items.map(e => e.id), [1, 2, 3, 4, 5, 6, 7, 8], 'the first eight by name, numbers as numbers');
+    assert.equal(wrcOvFind(many, 'εθελοντης', 20)[0].more, 0);
+});
+
+test('an entry of a group the search does not know is ignored, and the entries are not changed', () => {
+    const before = JSON.stringify(SEARCH);
+    const odd = SEARCH.concat([{group: 'elsewhere', kind: 'x', id: 99, title: 'Αναστασία', sub: ''}]);
+    assert.equal(wrcOvFind(odd, 'αναστασια', 8).flatMap(g => g.items).some(e => e.id === 99), false);
+    wrcOvFind(SEARCH, 'α', 8);
+    assert.equal(JSON.stringify(SEARCH), before);
+});
+
+test('an entry can keep its line under the name out of the search, so a count is not matched by a letter', () => {
+    const teams = [
+        {group: 'teams', kind: 'team', id: 1, title: 'Alpha 1', sub: '8 άτομα', find: ''},
+        {group: 'teams', kind: 'team', id: 2, title: 'Ομάδα Άλφα', sub: '5 άτομα', find: ''},
+    ];
+    assert.deepEqual(wrcOvFind(teams, 'α', 8)[0].items.map(e => e.id), [2], 'only the name that has the letter, not «άτομα»');
+    assert.deepEqual(wrcOvFind(teams, 'ατομα', 8), [], 'the count itself is not searchable');
+    const searchable = [{group: 'people', kind: 'person', id: 3, title: 'Μαρία', sub: 'Alpha 1'}];
+    assert.equal(wrcOvFind(searchable, 'alpha', 8).length, 1, 'without it the line under the name is searched, as before');
 });

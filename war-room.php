@@ -8823,6 +8823,8 @@ function setActiveTool(tool) {
     cancelActiveDrawing();
     if (map) map.closePopup();
     activeTool = (activeTool === tool) ? null : tool;
+    // One tool at a time: a ruler waiting for its two clicks gives way to the pen (measureDisarm()).
+    if (activeTool) measureDisarm();
     // Sketching onto hidden sketches would draw nothing anyone can see.
     if (activeTool) mapOverlayEnsureShown('annotations');
     document.querySelectorAll('#annotationToolbar button').forEach(b => b.classList.toggle('active', b.dataset.tool === activeTool));
@@ -10797,6 +10799,7 @@ sectorLayer?.on('popupopen', event => {
         // below) — mirrors the annotation toolbar's own click-to-place
         // tools (arrow/text) rather than a native prompt(), which this
         // file's own convention deliberately avoids for real data entry.
+        measureDisarm();
         addingBuildingToSectorId = parseInt(addBuildingBtn.dataset.id, 10);
         map.closePopup();
         document.getElementById('mapCard')?.classList.add('wr-draw-active');
@@ -11068,6 +11071,7 @@ let measureControl = null;  // the card; a Leaflet control, so it stays in fulls
 let measureSeq = 0;         // a slow answer must never land on a newer measurement
 let measureNearestState = null; // «Ποια ομάδα είναι πιο κοντά», while its card is open
 let measurePairsState = null;   // «Αποστάσεις μεταξύ ομάδων», while its card is open
+let measureArmed = false;       // the ruler button of the «Πίνακας» look was pressed: the next map clicks are the two points
 // Pixels, not metres, so reaching for a person or a point feels the same at
 // every zoom.
 const MEASURE_SNAP_PX = 18;
@@ -11266,6 +11270,13 @@ function measureShowCard(html, wide = false) {
     }
     measureControl.getContainer().classList.toggle('wr-measure-wide', wide);
     measureControl.getContainer().innerHTML = html;
+    measureAnnounce();
+}
+
+// The ruler button of the «Πίνακας» look shows «on» from these: every state of the tool goes through
+// measureShowCard() or measureClear(), so those two say so.
+function measureAnnounce() {
+    document.dispatchEvent(new CustomEvent('wr-measure-changed'));
 }
 
 function measureCardHead(title, icon = 'bi-rulers') {
@@ -11278,20 +11289,22 @@ function measureCardHead(title, icon = 'bi-rulers') {
 function measureClear() {
     measureSeq++;
     measureFrom = null;
+    measureHold(false);
     measureNearestState = null;
     measurePairsState = null;
     if (measureLayer) measureLayer.clearLayers();
     if (measureControl) { measureControl.remove(); measureControl = null; }
+    measureAnnounce();
 }
 
-function measureStart(point, touch) {
+function measureStart(point, touch, byClick) {
     measureClear();
     measureFrom = point;
     measureEnsureLayer();
     measurePin(point, t('measure.pin_a')).addTo(measureLayer);
     measureShowCard(measureCardHead(t('measure.title'))
         + `<div class="small">${escapeHtml(t('measure.from_label', {place: mapPointText(point)}))}</div>`
-        + `<div class="small text-muted mt-1">${escapeHtml(t(touch ? 'measure.pick_hint_touch' : 'measure.pick_hint_mouse'))}</div>`);
+        + `<div class="small text-muted mt-1">${escapeHtml(t(byClick ? 'measure.pick_second_hint' : (touch ? 'measure.pick_hint_touch' : 'measure.pick_hint_mouse')))}</div>`);
 }
 
 function measureFinish(to) {
@@ -11300,6 +11313,109 @@ function measureFinish(to) {
     measureFrom = null;
     measureDraw(from, to);
 }
+
+// ── The ruler button of the «Πίνακας» look ───────────────────────────────────
+// The tool above starts from a right-click. The button starts the SAME tool from two left clicks: it
+// arms the map (crosshair, shapes and pins let the click through, exactly as for the drawing tools and
+// the other one-shot picks), the first click is measureStart() and the second measureFinish(), and
+// everything after that - the card, the routes, the heights - is the existing tool, with its Esc and its
+// close button. No second tool and no new request: the heights it asks for are the ones the card
+// always asked for, counted in the same allowance of the server.
+function measureHold(on) {
+    if (on === measureArmed) return;
+    measureArmed = on;
+    document.getElementById('mapCard')?.classList.toggle('wr-draw-active', on);
+    if (map) { if (on) map.doubleClickZoom.disable(); else map.doubleClickZoom.enable(); }
+}
+// What else was waiting for a click gives way: one tool at a time on the map.
+function measureArm() {
+    if (!map) return;
+    if (activeTool) setActiveTool(activeTool);
+    if (typeof cpStopPick === 'function') cpStopPick();
+    if (typeof triageStopPick === 'function') triageStopPick();
+    addingBuildingToSectorId = null;
+    measureClear();
+    map.closePopup();
+    measureHold(true);
+    measureShowCard(measureCardHead(t('measure.title'))
+        + `<div class="small text-muted">${escapeHtml(t('measure.pick_first_hint'))}</div>`);
+}
+// A tool that starts waiting for its own click switches the ruler off (and only a ruler that is
+// waiting: a finished measurement stays on the map, as it always has beside a drawing).
+function measureDisarm() {
+    if (measureArmed) measureClear();
+}
+map?.on('click', e => {
+    if (!measureArmed) return;
+    const point = mapGesturePoint(e);
+    if (!measureFrom) {
+        measureStart(point, false, true);
+        measureHold(true);
+        return;
+    }
+    measureFinish(point);
+    measureHold(false);
+    measureAnnounce();
+});
+window.wrMeasure = {
+    arm: measureArm,
+    clear: measureClear,
+    armed: () => measureArmed,
+    active: () => measureArmed || !!measureFrom || !!measureControl,
+};
+
+// ── Where a search result of the «Πίνακας» look takes the map ────────────────
+// One door, and each kind goes through the way into it that already exists: a shape through
+// mapPickFind() and openPopup() - what «Τι υπάρχει εδώ;» does when a row is picked - a map point
+// through mpOpenPopupFor(), and a position, an incident or a point of interest through the marker the
+// page drew for it, found again at the moment it opens (the 5 s poll may have rebuilt it).
+function mapGoMarker(lat, lng, find) {
+    if (!map || lat === null || lat === undefined || lng === null || lng === undefined) return false;
+    // A map that follows the pins would put itself back at the next position.
+    if (typeof setFollowPins === 'function' && typeof followPins !== 'undefined' && followPins) setFollowPins(false);
+    map.invalidateSize();
+    map.setView([Number(lat), Number(lng)], Math.max(map.getZoom(), 17));
+    setTimeout(() => {
+        const marker = find();
+        if (marker && sharedMarkerCluster) sharedMarkerCluster.zoomToShowLayer(marker, () => marker.openPopup());
+    }, 350);
+    return true;
+}
+window.wrMapGo = {
+    person: userId => {
+        const pin = (pins || []).find(p => Number(p.user_id) === Number(userId) && p.lat !== null && p.lat !== undefined);
+        return !!pin && mapGoMarker(pin.lat, pin.lng, () => currentPinMarkers.find(m => m._wrUser === Number(userId)));
+    },
+    incident: id => {
+        const r = (missionIncidents || []).find(x => String(x.id) === String(id));
+        return !!r && mapGoMarker(r.lat, r.lng, () => currentIncidentMarkers.find(m => String(m._wrIncident) === String(id)));
+    },
+    poi: id => {
+        const p = (pointsOfInterest || []).find(x => String(x.id) === String(id));
+        return !!p && mapGoMarker(p.lat, p.lng, () => currentPoiMarkers.find(m => String(m._wrPoi) === String(id)));
+    },
+    point: id => {
+        const p = (mapPoints || []).find(x => String(x.id) === String(id));
+        if (!p || !map) return false;
+        map.invalidateSize();
+        map.setView([Number(p.lat), Number(p.lng)], Math.max(map.getZoom(), 16));
+        setTimeout(() => mpOpenPopupFor(p.id), 350);
+        return true;
+    },
+    shape: (kind, id) => {
+        const overlay = {area: 'areas', sector: 'sectors', restricted: 'restricted'}[kind];
+        if (!map || !overlay) return false;
+        // A kind the viewer has switched off is switched on again: nobody searches for what they cannot see.
+        mapOverlayEnsureShown(overlay);
+        const layer = mapPickFind({kind, id});
+        if (!layer || typeof layer.getBounds !== 'function') return false;
+        map.closePopup();
+        map.invalidateSize();
+        map.fitBounds(layer.getBounds(), {padding: [70, 70], maxZoom: 18});
+        layer.openPopup(layer.getBounds().getCenter());
+        return true;
+    },
+};
 
 // «Απόσταση από εμένα»: a fix the GPS tick took in the last minute is used as
 // it is; otherwise the phone is asked once, and only if it cannot answer does
@@ -12272,6 +12388,7 @@ function cpStopPick() {
 }
 function cpStartPick(mode) {
     if (!map) return;
+    measureDisarm();
     if (typeof triageStopPick === 'function') triageStopPick();
     cpStopPick();
     cpPickMode = mode;
@@ -13696,6 +13813,8 @@ function buildPinMarker(pin, interactive = true) {
     // addPinTeamLabelToggle()), a class on the map element, never a rebuild.
     // The offset clears the heading arrow, which orbits the dot at ~21px.
     marker._wrTeam = pin.team_label ? {label: pin.team_label, color: pin.team_color || null} : null;
+    // Which person it is, for the «Πίνακας» look's search (wrMapGo.person()).
+    marker._wrUser = Number(pin.user_id);
     if (interactive && pin.team_label) {
         marker.bindTooltip(
             `<span style="display:inline-block;background:#fff;color:#1f2937;border:2px solid ${escapeHtml(pin.team_color || '#6c757d')};padding:0 6px;border-radius:10px;font-weight:700;font-size:.72rem;line-height:1.35;white-space:nowrap;box-shadow:0 1px 3px #0006;${opacity}">${escapeHtml(pin.team_label)}</span>`,
@@ -18323,7 +18442,9 @@ function renderIncidentLayer(items) {
             `<br><span class="small text-muted">${escapeHtml(r.team_label)} · ${r.created_at}</span>` +
             accuracyLineHtml(r.accuracy_m) +
             '<br>' + navigationBtnHtml(r.lat, r.lng);
-        return L.marker([r.lat, r.lng], {icon}).bindPopup(popupHtml);
+        const marker = L.marker([r.lat, r.lng], {icon}).bindPopup(popupHtml);
+        marker._wrIncident = r.id;   // for the «Πίνακας» look's search (wrMapGo.incident())
+        return marker;
     });
     sharedMarkerCluster.addLayers(currentIncidentMarkers);
 }
@@ -18995,6 +19116,7 @@ function triageStopPick() {
 }
 function triageStartPick(kind) {
     if (!map) return;
+    measureDisarm();
     triageStopPick();
     triagePickKind = kind;
     document.dispatchEvent(new CustomEvent('wr-goto-tab', {detail: {tab: 'map'}}));
@@ -19692,7 +19814,9 @@ function renderPoiLayer(items) {
             accuracyLineHtml(p.accuracy_m) +
             (p.checked_at ? `<br><span class="small text-success">${t('poi.checked_at_prefix', {time: p.checked_at, name: escapeHtml(p.checked_by_name || '')})}</span>` : '') +
             '<br>' + navigationBtnHtml(p.lat, p.lng);
-        return L.marker([p.lat, p.lng], {icon}).bindPopup(popupHtml);
+        const marker = L.marker([p.lat, p.lng], {icon}).bindPopup(popupHtml);
+        marker._wrPoi = p.id;   // for the «Πίνακας» look's search (wrMapGo.poi())
+        return marker;
     });
     sharedMarkerCluster.addLayers(currentPoiMarkers);
 }
