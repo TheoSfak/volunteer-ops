@@ -43,6 +43,7 @@ html[data-wrc-skin="overlay"] .wrc-phase[aria-selected="true"] { background: var
 /* What the companion script adds is only for the board layout; narrower than 1200 px it stays out of the console's own columns. */
 html[data-wrc-skin="overlay"] .wrc-ov-top,
 html[data-wrc-skin="overlay"] .wrc-ov-rail,
+html[data-wrc-skin="overlay"] .wrc-ov-edge,
 html[data-wrc-skin="overlay"] .wrc-ov-stack,
 html[data-wrc-skin="overlay"] .wrc-ov-pair,
 html[data-wrc-skin="overlay"] .wrc-ov-bottom,
@@ -70,7 +71,7 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .main-content .content-wrapper { padd
 html[data-wrc-skin="overlay"][data-wrc-ov] .content-wrapper > .alert { position: fixed; top: calc(var(--app-clock-h, 0px) + 84px); left: 50%; transform: translateX(-50%); z-index: 1200; min-width: 320px; max-width: 70vw; box-shadow: 0 8px 26px rgba(0, 0, 0, .5); }
 /* The acknowledgement panel floats at the top right: beside the map's tools, not over the feed. */
 html[data-wrc-skin="overlay"][data-wrc-ov] { --wr-acktracker-top: calc(var(--wrc-ov-top, 0px) + 86px) !important; }
-html[data-wrc-skin="overlay"][data-wrc-ov] .wrc > .ack-tracker { right: calc(var(--ov-dock-w) + 96px); max-height: calc(100vh - var(--wr-acktracker-top) - 340px); z-index: 20; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc > .ack-tracker { right: calc(var(--ov-dock-w) + 36px); max-height: calc(100vh - var(--wr-acktracker-top) - 340px); z-index: 20; }
 /* While the order form is open its tallest kind (the sector one, about 300 px) reaches up under the panel's foot at 768 px high: the panel is
    shorter then, and scrolls, so none of its checkboxes is under the form's header. */
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc[data-ov-composer="open"] > .ack-tracker { max-height: calc(100vh - var(--wr-acktracker-top) - 410px); }
@@ -93,7 +94,7 @@ html[data-wrc-skin="overlay"][data-wrc-ov] #mapCard > .card-header:first-child {
 /* The team trail's filters (a tool in the gear) float under the bar; the script has moved them out of the map's card,
    so they rank with the other panels instead of inside the map. */
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc > #trailFilterBar {
-    position: absolute; z-index: 26; top: 86px; left: 456px; width: min(660px, calc(100% - 456px - var(--ov-dock-w) - 110px));
+    position: absolute; z-index: 26; top: 86px; left: 456px; width: min(660px, calc(100% - 456px - var(--ov-dock-w) - 50px));
     border: 1px solid var(--ov-line); border-radius: 6px; background: var(--ov-panel) !important; box-shadow: 0 8px 26px rgba(0, 0, 0, .42);
 }
 html[data-wrc-skin="overlay"][data-wrc-ov] .leaflet-container { background: #0d1114; font-family: var(--ov-font); }
@@ -266,9 +267,19 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-stack .dropdown-menu { z-inde
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-slot .dropdown,
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-stack .dropdown { pointer-events: auto; }
 
-/* ══ the right stack: layers, follow, zoom, the ruler, the search rings ══════ */
+/* ══ the right edge: the drawing tools, then the map's tools - each folds to one button ══ */
+/* One column at the window's own edge (the dock stands --ov-draw-w further in). The drawing tools come first, the map's tools under them. */
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge {
+    display: flex; flex-direction: column; align-items: flex-end; gap: 14px; position: absolute; z-index: 35; top: 86px; right: 14px; pointer-events: none;
+}
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-mapg { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; pointer-events: none; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-mapg-body { display: flex; flex-direction: column; align-items: flex-end; gap: 12px; pointer-events: none; }
+/* Folded: the map's controls are hidden by the column's own state, nothing else is. */
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-mapg[data-open="closed"] .wrc-ov-mapg-body { display: none; }
+
+/* ── the map's tools: map view, follow, zoom, the ruler, the search rings ── */
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-stack {
-    position: absolute; z-index: 35; top: 86px; right: calc(var(--ov-dock-w) + 36px); display: flex; flex-direction: column; gap: 18px; align-items: flex-end; pointer-events: none;
+    display: flex; flex-direction: column; gap: 12px; align-items: flex-end; pointer-events: none;
 }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-stack .wrc-ov-col { align-items: flex-end; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-stack .wrc-ov-col:empty { display: none; }
@@ -282,10 +293,10 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-stack .leaflet-control-zoom a
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-stack .leaflet-control-zoom a:hover { background: rgba(48, 58, 66, .92); }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-stack .leaflet-control-zoom a.leaflet-disabled { opacity: .45; }
 
-/* ══ the drawing column: the right edge of the window, folded to one button ══ */
-/* It is the window's own edge, with the dock a column's width further in (--ov-draw-w). Its buttons are the page's own annotation toolbar. */
+/* ══ the drawing tools: the first group of the right edge, folded to one button ══ */
+/* Its buttons are the page's own annotation toolbar. */
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-draw {
-    display: flex; flex-direction: column; gap: 8px; align-items: flex-end; position: absolute; z-index: 35; top: 86px; right: 14px; pointer-events: none;
+    display: flex; flex-direction: column; gap: 8px; align-items: flex-end; pointer-events: none;
 }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-draw[hidden] { display: none; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-draw #annotationToolbar { display: flex; flex-direction: column; gap: 8px; }
@@ -295,8 +306,8 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-draw #annotationToolbar > .bt
 /* the armed tool, lit like the other buttons that are on (the page's own rule for it is darker and an id more specific) */
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-draw #annotationToolbar > .btn.active { background: var(--ov-org); color: #1b1000; border: 0; }
 
-/* ══ bottom right: the command post and the map points ═══════════════════════ */
-html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-pair { position: absolute; z-index: 30; right: 20px; bottom: 26px; display: flex; gap: 8px; pointer-events: none; }
+/* ══ the pair, last in the map's tools: the heat layer, the command post and the map points ══ */
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-pair { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; pointer-events: none; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-pair .leaflet-control { margin: 0; border: 0; box-shadow: none; background: none; pointer-events: auto; float: none; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-pair .leaflet-bar a,
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-pair .leaflet-touch .leaflet-bar a {
@@ -307,6 +318,37 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-pair .leaflet-bar a:hover { b
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-pair .leaflet-bar a .bi { font-size: 22px; color: #fff; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-pair .wr-mp-count { position: absolute; top: -5px; right: -5px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 10px; display: grid; place-items: center; font: 700 11px var(--ov-mono); background: var(--ov-org); color: #1b1000; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-pair .wr-cp-control.is-unset a .bi { color: var(--ov-org); }
+
+/* The assistant's round button is the page's own fixed button at the bottom right (16 px from the edge, 96 px up). The column of tools now runs down
+   that edge, so it would sit on the last of them: it stands beside the column instead, at the bottom - under the panel, clear of the heat legend above it. */
+html[data-wrc-skin="overlay"][data-wrc-ov] .assistant-fab { right: calc(14px + 52px + 14px); bottom: 20px; }
+
+/* The site eases every property of a button (transition: all .3s). Here only the colours may ease: the fit measures the column the moment
+   it changes, and a width that is still on its way from 52 to 42 px would be measured as 52 (and, on every re-measure, start over). */
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge * { transition: color .15s, background-color .15s, box-shadow .15s; }
+
+/* ── a window too short for the whole column: the same buttons, smaller and closer (the script sets data-dense, see fitEdge) ── */
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] { gap: 10px; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-mapg,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-draw,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-draw #annotationToolbar,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-pair,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-stack .wrc-ov-col,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-stack .leaflet-control-zoom { gap: 6px; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-mapg-body,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-stack { gap: 8px; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-sq,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-draw .btn,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-stack .btn,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-stack .leaflet-control-zoom a,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-pair .leaflet-bar a,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-pair .leaflet-touch .leaflet-bar a { width: 42px; height: 42px; min-width: 42px; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-stack .leaflet-control-zoom a { font-size: 26px; line-height: 40px; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-sq,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-draw .btn .bi,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-stack .btn .bi,
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-edge[data-dense="on"] .wrc-ov-pair .leaflet-bar a .bi { font-size: 19px; }
 
 /* ══ the bottom bar: zoom, frame, previous, the teams, next, clear, full screen ══ */
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-bottom {
@@ -387,8 +429,8 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-link { color: var(--ov-org); fon
 
 /* ══ the order form, over the bottom bar ═════════════════════════════════════ */
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-composer {
-    /* Between the left column and the map's tools, so it never sits under either. */
-    position: absolute; z-index: 25; left: 452px; right: calc(var(--ov-dock-w) + 100px); bottom: 98px; width: auto; padding: 0; gap: 0; overflow: visible;
+    /* Between the left column and the right panel (the map's tools are at the window's edge, beyond it), so it never sits under either. */
+    position: absolute; z-index: 25; left: 452px; right: calc(var(--ov-dock-w) + 36px); bottom: 98px; width: auto; padding: 0; gap: 0; overflow: visible;
 }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-cmp-h {
     display: flex; align-items: center; gap: 9px; height: 40px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--ov-line); font: 700 15px var(--ov-font); letter-spacing: .07em; text-transform: uppercase;
@@ -498,7 +540,7 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .wr-measure-card .text-muted { color:
 html[data-wrc-skin="overlay"][data-wrc-ov] .wr-measure-card .btn-close { filter: invert(1) grayscale(1) brightness(1.6); opacity: .8; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wr-measure-card .btn-outline-success { color: var(--ov-green); border-color: var(--ov-green); }
 
-/* ══ the heat layer: its canvas (blurred, under the shapes) and its legend above the bottom-right pair ══ */
+/* ══ the heat layer: its canvas (blurred, under the shapes) and its legend at the bottom right, under the panel ══ */
 html[data-wrc-skin="overlay"] .wrc-ov-heat-canvas { position: absolute; left: 0; top: 0; pointer-events: none; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-heat-legend {
     display: block; position: absolute; z-index: 30; right: 84px; bottom: 82px; width: 172px; box-sizing: border-box; padding: 6px 10px 6px; line-height: 1.25;
@@ -588,7 +630,7 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tools #mapFullscreenToggle { 
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tools #mapFullscreenToggle::after { content: attr(title); font: 600 13.5px var(--ov-font); }
 
 /* ══ what the map keeps of its own controls ══════════════════════════════════ */
-html[data-wrc-skin="overlay"][data-wrc-ov] .leaflet-top.leaflet-right { top: 86px; right: calc(var(--ov-dock-w) + 100px); }
+html[data-wrc-skin="overlay"][data-wrc-ov] .leaflet-top.leaflet-right { top: 86px; right: calc(var(--ov-dock-w) + 36px); }
 html[data-wrc-skin="overlay"][data-wrc-ov] .leaflet-top.leaflet-left { top: 86px; left: 100px; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .leaflet-bottom.leaflet-left { left: 100px; bottom: 12px; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .leaflet-bottom.leaflet-right { right: 0; bottom: 0; }

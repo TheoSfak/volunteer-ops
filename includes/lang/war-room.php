@@ -3215,6 +3215,9 @@ return [
         'console.ov_draw' => 'Σχέδιο στον χάρτη: άνοιγμα των εργαλείων (μολύβι, βέλος, κείμενο, γόμα)',
         'console.ov_draw_fold' => 'Κλείσιμο των εργαλείων σχεδίου',
         'console.ov_draw_armed' => 'Σχέδιο: ενεργό το «{tool}» - πάτα για τα εργαλεία',
+        'console.ov_map' => 'Εργαλεία χάρτη: άνοιγμα (προβολή χάρτη, ζουμ, μέτρηση, θερμικός χάρτης, συντονιστικό, σημεία)',
+        'console.ov_map_fold' => 'Κλείσιμο των εργαλείων του χάρτη',
+        'console.ov_map_lit' => 'Εργαλεία χάρτη: κάτι είναι ενεργό (μέτρηση ή θερμικός χάρτης) - πάτα για τα εργαλεία',
         // checkin.php — the page the shift's attendance QR opens
         'checkin.page_title' => 'Check-in παρουσίας',
         'checkin.disabled_title' => 'Το QR check-in είναι απενεργοποιημένο',
@@ -6403,6 +6406,9 @@ return [
         'console.ov_draw' => 'Draw on the map: open the tools (pencil, arrow, text, eraser)',
         'console.ov_draw_fold' => 'Fold the drawing tools',
         'console.ov_draw_armed' => 'Drawing: “{tool}” is on - press for the tools',
+        'console.ov_map' => 'Map tools: open (map view, zoom, measure, heat map, command post, points)',
+        'console.ov_map_fold' => 'Fold the map tools',
+        'console.ov_map_lit' => 'Map tools: something is on (measuring or the heat map) - press for the tools',
         // checkin.php — the page the shift's attendance QR opens
         'checkin.page_title' => 'Attendance check-in',
         'checkin.disabled_title' => 'QR check-in is switched off',

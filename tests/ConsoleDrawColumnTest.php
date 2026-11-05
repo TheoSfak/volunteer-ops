@@ -37,7 +37,7 @@ final class ConsoleDrawColumnTest extends TestCase
 
     private static function module(): string
     {
-        return self::between(self::source('assets/js/war-room-console-overlay.js'), '// ── the drawing column:', '// ── moving the real controls in, and back');
+        return self::between(self::source('assets/js/war-room-console-overlay.js'), '// ── the drawing column:', '// ── the map tools column:');
     }
 
     public function testTheRealToolbarIsMovedAndNeverCopied(): void
@@ -77,7 +77,9 @@ final class ConsoleDrawColumnTest extends TestCase
         $this->assertStringContainsString("attributeFilter: ['class']", $watch, 'the page marks its armed tool with a class: nothing else is watched');
         $this->assertStringContainsString('subtree: true', $watch);
         $callback = self::between($watch, 'new MutationObserver(', ');');
-        $this->assertStringContainsString('if (armedTool() && !draw.open) draw.open = true;', $callback);
+        $this->assertStringContainsString('const opened = !!armedTool() && !draw.open;', $callback);
+        $this->assertStringContainsString('if (opened) draw.open = true;', $callback);
+        $this->assertStringContainsString("if (opened) fitEdge('draw');", $watch, 'a column opened by a tool makes room for itself (the map tools column folds if the window is too short)');
         $this->assertStringNotContainsString('localStorage', $callback, 'it is not a choice: not remembered');
         $this->assertStringNotContainsString('setDraw(', $callback);
         $this->assertStringContainsString('if (!bar || draw.observer ||', $watch, 'watched once, however often the board is engaged');
@@ -113,13 +115,14 @@ final class ConsoleDrawColumnTest extends TestCase
         // The panel is as wide as it was and stands the column's width further in...
         $this->assertMatchesRegularExpression('~\.wrc-dock \{[^}]*right: calc\(20px \+ var\(--ov-draw-w\)\); width: var\(--ov-dock-pw\);~', $css);
         // ...and everything that hung off its left edge follows by the sum.
-        foreach (['.ack-tracker', '.wrc-composer', '.wrc-ov-stack', 'leaflet-top.leaflet-right', '#trailFilterBar'] as $follower) {
+        // (The map's tools used to be one of them; they are at the window's edge now, in the column beside the drawing tools.)
+        foreach (['.ack-tracker', '.wrc-composer', 'leaflet-top.leaflet-right', '#trailFilterBar'] as $follower) {
             $this->assertMatchesRegularExpression('~' . preg_quote($follower, '~') . '[^{]*\{[^}]*var\(--ov-dock-w\)~', $css, "$follower follows the dock");
         }
         $this->assertDoesNotMatchRegularExpression('~width: var\(--ov-dock-w\)~', $css, 'the panel is never sized by the sum');
         // The column stands at the window's edge and clears the panel by a real gap.
         preg_match('~--ov-draw-w: (\d+)px~', $css, $draw);
-        preg_match('~\.wrc-ov-draw \{[^}]*right: (\d+)px;~', $css, $right);
+        preg_match('~\.wrc-ov-edge \{[^}]*right: (\d+)px;~', $css, $right);
         $this->assertNotEmpty($draw);
         $this->assertNotEmpty($right);
         $gap = (20 + (int) $draw[1]) - ((int) $right[1] + 52);
@@ -131,7 +134,9 @@ final class ConsoleDrawColumnTest extends TestCase
         $css = (string) preg_replace('~/\*.*?\*/~s', '', self::source('assets/css/war-room-console-overlay.css'));
         // Hidden outside the layout with the other elements the script adds (ConsoleSkinTest checks the pair), shown inside it.
         $this->assertMatchesRegularExpression('~html\[data-wrc-skin="overlay"\] \.wrc-ov-draw,~', $css);
-        $this->assertMatchesRegularExpression('~\[data-wrc-ov\] \.wrc-ov-draw \{[^}]*display: flex;[^}]*position: absolute;[^}]*pointer-events: none;~', $css);
+        // It is the first group of the right edge (ConsoleMapToolsColumnTest): the edge is placed, the column only lays its buttons out.
+        $this->assertMatchesRegularExpression('~\[data-wrc-ov\] \.wrc-ov-draw \{[^}]*display: flex;[^}]*pointer-events: none;~', $css);
+        $this->assertDoesNotMatchRegularExpression('~\[data-wrc-ov\] \.wrc-ov-draw \{[^}]*position: absolute;~', $css, 'placed once, by the edge: a second absolute column would sit on the map\'s tools');
         $this->assertMatchesRegularExpression('~\[data-wrc-ov\] \.wrc-ov-draw\[hidden\] \{ display: none; \}~', $css);
         // Folded: the page's toolbar is hidden by the column's own state, nothing else is.
         $this->assertMatchesRegularExpression('~\[data-wrc-ov\] \.wrc-ov-draw\[data-open="closed"\] #annotationToolbar \{ display: none; \}~', $css);

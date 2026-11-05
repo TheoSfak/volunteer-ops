@@ -11,7 +11,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvHeightGate, wrcOvHeightPausedUntil, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes, wrcOvNorm, wrcOvFind, wrcOvDrawFace} = require('../../assets/js/war-room-console-overlay.js');
+const {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvHeightGate, wrcOvHeightPausedUntil, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes, wrcOvNorm, wrcOvFind, wrcOvDrawFace, wrcOvMapFace} = require('../../assets/js/war-room-console-overlay.js');
 
 test('the team window shows all the teams when they fit', () => {
     assert.deepEqual(wrcOvWindow(4, -1, 0, 6), {start: 0, size: 4, more: false});
@@ -368,4 +368,17 @@ test('a folded column with no tool on is the pen and square, not lit', () => {
     assert.deepEqual(wrcOvDrawFace(false, ''), {icon: 'bi-pencil-square', on: false, label: 'open'});
     assert.deepEqual(wrcOvDrawFace(false, undefined), {icon: 'bi-pencil-square', on: false, label: 'open'});
     assert.deepEqual(wrcOvDrawFace(false, null), {icon: 'bi-pencil-square', on: false, label: 'open'});
+});
+
+// ── the map tools column's one button ────────────────────────────────────────
+
+test("the map tools column's button folds the column while it is open, lit or not", () => {
+    assert.deepEqual(wrcOvMapFace(true, false), {icon: 'bi-chevron-up', on: false, label: 'fold'});
+    assert.deepEqual(wrcOvMapFace(true, true), {icon: 'bi-chevron-up', on: false, label: 'fold'}, 'the tool that is on is in view, lit there');
+});
+
+test('a folded column is the map icon, lit when the ruler or the heat layer is on behind the fold', () => {
+    assert.deepEqual(wrcOvMapFace(false, false), {icon: 'bi-map', on: false, label: 'open'});
+    assert.deepEqual(wrcOvMapFace(false, true), {icon: 'bi-map', on: true, label: 'lit'});
+    assert.deepEqual(wrcOvMapFace(false, undefined), {icon: 'bi-map', on: false, label: 'open'});
 });

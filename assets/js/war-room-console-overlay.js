@@ -4,8 +4,10 @@
  *
  * The other looks are colours over the same three columns. This one is a LAYOUT: the map takes the
  * whole window and everything else floats over it as dark translucent squares and panels - a top
- * bar, a rail of the six kinds of order on the left, the map's tools in a stack on the right, a
- * segmented bar with the teams at the bottom, the queue and the feed as floating cards.
+ * bar, a rail of the six kinds of order on the left, the drawing tools and then the map's tools
+ * (map view, follow, zoom, ruler, heat, command post, map points) in one column at the right edge -
+ * each folding to a single button - a segmented bar with the teams at the bottom, the queue and
+ * the feed as floating cards.
  *
  * Nothing is copied. The controls that already exist are MOVED into those places (the map's
  * buttons, the zoom, the export menu, the hero's tools, the phase switch, the counters) and the
@@ -231,6 +233,16 @@ function wrcOvDrawFace(open, toolIcon) {
     return {icon: 'bi-pencil-square', on: false, label: 'open'};
 }
 
+/**
+ * The one button of the map tools column: folding it while it is open; the map icon while it is folded, lit when
+ * something behind the fold is on (the ruler waiting for its clicks, the heat layer) so it is not forgotten there.
+ * -> {icon, on, label}
+ */
+function wrcOvMapFace(open, lit) {
+    if (open) return {icon: 'bi-chevron-up', on: false, label: 'fold'};
+    return lit ? {icon: 'bi-map', on: true, label: 'lit'} : {icon: 'bi-map', on: false, label: 'open'};
+}
+
 const WRC_OV_FIND_GROUPS = ['teams', 'people', 'places'];
 
 /**
@@ -265,7 +277,7 @@ function wrcOvFind(entries, query, max) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvHeightGate, wrcOvHeightPausedUntil, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes, wrcOvNorm, wrcOvFind, wrcOvDrawFace};
+    module.exports = {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvHeightGate, wrcOvHeightPausedUntil, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes, wrcOvNorm, wrcOvFind, wrcOvDrawFace, wrcOvMapFace};
 }
 
 // ── the view ─────────────────────────────────────────────────────────────────
@@ -291,6 +303,13 @@ if (typeof module !== 'undefined' && module.exports) {
     // ── the places ───────────────────────────────────────────────────────────
     const top = mk('div', 'wrc-ov-top', 'wrcOvTop');
     const rail = mk('div', 'wrc-ov-rail', 'wrcOvRail');
+    // The right edge: one column holding the drawing tools (added further down) and the map's tools, in that order.
+    // The map's tools are the stack (map view, follow, zoom, ruler, rings) and the pair (heat, command post, map points).
+    const edge = mk('div', 'wrc-ov-edge', 'wrcOvEdge');
+    const mapCol = mk('div', 'wrc-ov-mapg', 'wrcOvMapG');
+    const mapBtn = mk('button', 'wrc-ov-sq wrc-ov-mapg-btn');
+    const mapBody = mk('div', 'wrc-ov-mapg-body', 'wrcOvMapBody');
+    const maptools = {open: true};
     const stack = mk('div', 'wrc-ov-stack', 'wrcOvStack');
     const pair = mk('div', 'wrc-ov-pair', 'wrcOvPair');
     const bottom = mk('div', 'wrc-ov-bottom', 'wrcOvBottom');
@@ -303,7 +322,12 @@ if (typeof module !== 'undefined' && module.exports) {
     gear.title = t('console.ov_tools');
     gear.setAttribute('aria-label', t('console.ov_tools'));
     gear.setAttribute('aria-expanded', 'false');
-    root.append(top, rail, stack, pair, bottom, tools);
+    mapBtn.type = 'button';
+    mapBtn.setAttribute('aria-controls', 'wrcOvMapBody');
+    mapBody.append(stack, pair);
+    mapCol.append(mapBtn, mapBody);
+    edge.appendChild(mapCol);
+    root.append(top, rail, edge, bottom, tools);
 
     const VERBS = [
         ['point', 'bi-geo-alt-fill', t('console.verb_point')],
@@ -717,10 +741,11 @@ if (typeof module !== 'undefined' && module.exports) {
         heat.on = !heat.on;
         try { localStorage.setItem(HEAT_KEY, heat.on ? 'on' : 'off'); } catch (e) { /* not remembered */ }
         paintHeatBtn();
+        paintMapTools();
         if (heat.on) heatStart(); else heatStop();
     });
 
-    // ── the ruler: the page's measuring tool, started from the stack ─────────
+    // ── the ruler: the page's measuring tool, started from the map tools column ──
     // Two clicks on the map measure a distance, with everything the right-click menu's measuring has (the
     // card, the routes, the heights, Esc to cancel). The page owns the tool and says when it changes
     // (window.wrMeasure, the wr-measure-changed event); this is only its button, orange while it is on.
@@ -730,7 +755,7 @@ if (typeof module !== 'undefined' && module.exports) {
     ruler.title = t('console.ov_ruler');
     ruler.setAttribute('aria-label', t('console.ov_ruler'));
     ruler.setAttribute('aria-pressed', 'false');
-    // With the search rings' switch (added when engaged, after it): the map's own tools, apart from the drawing column.
+    // With the search rings' switch (added when engaged, after it): the map's own tools, in the map tools column under the drawing tools.
     $('[data-g="extra"]', stack).appendChild(ruler);
     const measureTool = () => window.wrMeasure || null;
     function paintRuler() {
@@ -738,6 +763,7 @@ if (typeof module !== 'undefined' && module.exports) {
         const on = !!(m && m.active());
         ruler.classList.toggle('active', on);
         ruler.setAttribute('aria-pressed', on ? 'true' : 'false');
+        paintMapTools();
     }
     ruler.addEventListener('click', () => {
         const m = measureTool();
@@ -929,7 +955,7 @@ if (typeof module !== 'undefined' && module.exports) {
     drawBtn.setAttribute('aria-controls', 'annotationToolbar');
     drawCol.hidden = true;
     drawCol.appendChild(drawBtn);
-    root.appendChild(drawCol);
+    edge.insertBefore(drawCol, mapCol);
     const draw = {open: false, observer: null};
     try { draw.open = localStorage.getItem(DRAW_KEY) === 'open'; } catch (e) { /* storage blocked: it starts folded */ }
     function armedTool() {
@@ -954,11 +980,17 @@ if (typeof module !== 'undefined' && module.exports) {
         draw.open = open;
         if (remember) { try { localStorage.setItem(DRAW_KEY, open ? 'open' : 'closed'); } catch (e) { /* not remembered */ } }
         paintDraw();
+        fitEdge(open ? 'draw' : '');
     }
     function watchDraw() {
         const bar = $('#annotationToolbar');
         if (!bar || draw.observer || !window.MutationObserver) return;
-        draw.observer = new MutationObserver(() => { if (armedTool() && !draw.open) draw.open = true; paintDraw(); });
+        draw.observer = new MutationObserver(() => {
+            const opened = !!armedTool() && !draw.open;
+            if (opened) draw.open = true;
+            paintDraw();
+            if (opened) fitEdge('draw');
+        });
         draw.observer.observe(bar, {attributes: true, attributeFilter: ['class'], subtree: true});
     }
     drawBtn.addEventListener('click', () => setDraw(!draw.open, true));
@@ -966,6 +998,63 @@ if (typeof module !== 'undefined' && module.exports) {
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape' && engaged && draw.open && !e.defaultPrevented && drawCol.contains(document.activeElement)) { setDraw(false, true); drawBtn.focus(); }
     });
+
+    // ── the map tools column: under the drawing tools, folding to one button the same way ─────────
+    // The map view, follow, zoom, the ruler, the search rings, the heat layer, the command post and the map points are
+    // the controls that already existed (the stack and the pair); only their place is new. The column is open by
+    // default - they are used all the time - and remembered per browser. The button is the map icon when it is
+    // folded, lit when the ruler is waiting for its clicks or the heat layer is on behind the fold.
+    const MAPG_KEY = 'wr-console-ov-mapg';
+    try { maptools.open = localStorage.getItem(MAPG_KEY) !== 'closed'; } catch (e) { /* storage blocked: it starts open */ }
+    function paintMapTools() {
+        const m = measureTool();
+        const face = wrcOvMapFace(maptools.open, !!(m && m.active()) || heat.on);
+        mapCol.dataset.open = maptools.open ? 'open' : 'closed';
+        mapBtn.innerHTML = `<i class="bi ${face.icon}"></i>`;
+        mapBtn.classList.toggle('on', face.on);
+        const label = face.label === 'fold' ? t('console.ov_map_fold') : (face.label === 'lit' ? t('console.ov_map_lit') : t('console.ov_map'));
+        mapBtn.title = label;
+        mapBtn.setAttribute('aria-label', label);
+        mapBtn.setAttribute('aria-expanded', maptools.open ? 'true' : 'false');
+    }
+    function setMapTools(open, remember) {
+        maptools.open = open;
+        if (remember) { try { localStorage.setItem(MAPG_KEY, open ? 'open' : 'closed'); } catch (e) { /* not remembered */ } }
+        paintMapTools();
+        fitEdge(open ? 'map' : '');
+    }
+    mapBtn.addEventListener('click', () => setMapTools(!maptools.open, true));
+
+    // ── making the two columns fit the window's height ───────────────────────
+    // Both open they are about 900 px tall, which a laptop does not have. In order: the buttons shrink (dense), then the
+    // column that was not just opened folds - and with it folded the buttons get their full size again if they fit. Only
+    // in the page - what was chosen stays what is remembered, so a taller window next time shows both again. Called
+    // when either opens or closes, when the window is resized and whenever the column's own height changes (the
+    // search rings' switch comes and goes with the mission).
+    let fitting = false;
+    function edgeFits() { return edge.offsetTop + edge.offsetHeight <= root.clientHeight - 10; }
+    function fitEdge(keep) {
+        if (!engaged || fitting || !edge.offsetHeight) return;
+        fitting = true;
+        try {
+            // Full size if that fits, else dense; true when either does.
+            const fits = () => {
+                delete edge.dataset.dense;
+                if (edgeFits()) return true;
+                edge.dataset.dense = 'on';
+                return edgeFits();
+            };
+            if (!fits()) {
+                const folds = keep === 'map' ? ['draw'] : (keep === 'draw' ? ['map'] : ['draw', 'map']);
+                for (const g of folds) {
+                    if (g === 'draw' && draw.open) { draw.open = false; paintDraw(); } else if (g === 'map' && maptools.open) { maptools.open = false; paintMapTools(); } else continue;
+                    if (fits()) break;
+                }
+            }
+        } finally { fitting = false; }
+    }
+    window.addEventListener('resize', () => fitEdge(''));
+    if (window.ResizeObserver) new ResizeObserver(() => fitEdge('')).observe(edge);
 
     // ── moving the real controls in, and back ────────────────────────────────
     const moved = [];
@@ -1018,7 +1107,7 @@ if (typeof module !== 'undefined' && module.exports) {
         take($('#mapFullscreenToggle'), tools);
         if (canHover) tools.appendChild(ptrBtn);
         bindPointer();
-        // The heat layer's button goes first in the bottom-right pair, so the command post and the map points keep their places.
+        // The heat layer's button goes first in the pair (the last group of the map tools column), so the command post and the map points keep their places.
         pair.insertBefore(heatBtn, pair.firstChild);
         if (heat.on) heatStart();
         // The acknowledgement panel floats over the map like the rest: inside the board, under its menus.
@@ -1045,6 +1134,8 @@ if (typeof module !== 'undefined' && module.exports) {
         adopt();
         applyChrome();
         update();
+        paintMapTools();
+        fitEdge('');
         window.dispatchEvent(new Event('resize'));
     }
 
