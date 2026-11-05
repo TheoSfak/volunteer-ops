@@ -2583,6 +2583,7 @@ include __DIR__ . '/includes/header.php';
     .wr-arc-pill { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); white-space: nowrap; font-size: 12px; padding: 3px 9px 3px 7px; }
     .wr-arc-pill span { font-size: 10px; font-weight: 700; color: #e6ecd9; }
     .wr-arc-pill i { width: 1px; height: 12px; background: rgba(255,255,255,.35); }
+    .wr-arc-straight { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); white-space: nowrap; padding: 1px 8px; border-radius: 8px; background: rgba(14,20,12,.88); border: 1px dashed rgba(255,255,255,.55); color: #fff; font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; pointer-events: none; }
     .wr-arc-chip { padding: 2px 9px; border-radius: 8px; background: rgba(14,20,12,.9); border: 1px solid rgba(255,255,255,.22); color: #f1d9a0; font-size: 11px; font-weight: 600; }
     .dispatch-team-label::before { display: none !important; }
     /* Team name above a live position dot (buildPinMarker()). White pill with a
@@ -6402,6 +6403,18 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                         <?php endforeach; ?>
                         <option value="all"><?= t('common.all_teams') ?></option>
                     </select>
+                    <?php
+                    // On foot or with a vehicle (v3.438.0): asked here, with the
+                    // team's own way as the starting answer. It decides which
+                    // router works out the distance and the time, and the picture
+                    // on the arc. Left on its starting answer it follows the team
+                    // picked above; touched, it stays as chosen.
+                    ?>
+                    <label class="small fw-semibold mb-0" for="dispatchTravelSelect"><?= t('travel.label') ?></label>
+                    <select class="form-select form-select-sm" id="dispatchTravelSelect" style="max-width:150px;">
+                        <option value="foot"><?= t('travel.foot') ?></option>
+                        <option value="vehicle"><?= t('travel.vehicle') ?></option>
+                    </select>
                     <span class="small text-danger fw-semibold d-none" id="dispatchIncidentLine"><i class="bi bi-heart-pulse-fill me-1"></i><span></span></span>
                 </div>
                 <div class="p-2 border-bottom d-flex flex-wrap gap-2 align-items-center bg-light">
@@ -6641,6 +6654,12 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                                 <?php if (count($teams) >= 2): ?>
                                 <option value=""><?= t('route.cross_team_option') ?></option>
                                 <?php endif; ?>
+                            </select>
+                            <?php // On foot or with a vehicle (v3.438.0): the team's own way until chosen. Nothing to choose for a route assembled from people of several teams. ?>
+                            <label class="form-label small fw-semibold mb-1" for="routeTravelSelect"><?= t('travel.label') ?></label>
+                            <select class="form-select form-select-sm mb-2" id="routeTravelSelect">
+                                <option value="foot"><?= t('travel.foot') ?></option>
+                                <option value="vehicle"><?= t('travel.vehicle') ?></option>
                             </select>
                             <label class="form-label small fw-semibold mb-1"><?= t('route.members_label') ?></label>
                             <div id="routeMemberPicker" class="d-flex flex-wrap gap-2 small mb-1"></div>
@@ -7187,7 +7206,19 @@ let pendingAreaSeed = null;
 // below) — needs the team roster available client-side for that <select>'s
 // options, same id+label shape mission-history.php/etc. already compute
 // server-side via teamLabel().
-let teams = <?= json_encode(array_values(array_map(fn($t) => ['id' => $t['id'], 'label' => teamLabel($t['codename'], $t['team_number'])], $teams))) ?>;
+let teams = <?= json_encode(array_values(array_map(fn($t) => ['id' => $t['id'], 'label' => teamLabel($t['codename'], $t['team_number']), 'transport' => normalizeTeamTransport($t['transport'] ?? 'foot')], $teams))) ?>;
+// Foot or vehicle for an order (v3.438.0): the team's own way is the starting
+// answer in every window that asks, and the person giving the order changes it
+// with one choice. "vehicle" for a team on a motorbike or in a car.
+function travelDefaultFor(teamId) {
+    const tm = teams.find(x => String(x.id) === String(teamId));
+    return tm && tm.transport && tm.transport !== 'foot' ? 'vehicle' : 'foot';
+}
+function travelSelectHtml(cssClass, selected, attrs = '') {
+    return `<select class="form-select form-select-sm ${cssClass}" aria-label="${escapeHtml(t('travel.label'))}" title="${escapeHtml(t('travel.label'))}" ${attrs}>`
+        + ['foot', 'vehicle'].map(mode => `<option value="${mode}"${mode === selected ? ' selected' : ''}>${escapeHtml(t('travel.' + mode))}</option>`).join('')
+        + '</select>';
+}
 let sectors = <?= json_encode($sectors) ?>;
 // Verified Coverage — populated only once an admin toggles the layer on
 // (mission-sector-coverage.php), keyed by sector id: {percent, gap_cells}.
@@ -9719,6 +9750,14 @@ function sectorAdminSetStatus(id, status, selectEl) {
         else { alert(result.error || t('common.send_failed')); if (selectEl) selectEl.disabled = false; }
     }).catch(e => actionRequestFailed(selectEl, e));
 }
+// The foot / vehicle choice next to a sector's team (v3.438.0): choosing it
+// marks it as chosen, and on a sector that already has a team it takes effect
+// at once, the same way picking the team does.
+function sectorTravelChanged(sel) {
+    sel.dataset.touched = '1';
+    const teamSel = sel.parentElement ? sel.parentElement.querySelector('.sector-team-select') : null;
+    if (teamSel && teamSel.value) sectorAdminSetTeam(teamSel.dataset.id, teamSel.value, teamSel);
+}
 // Only client-side entry point to the `assign` action — sectors created by
 // the divide tool start unassigned on purpose (team choice is per-wedge,
 // made here rather than duplicated into that tool), so this is the sole way
@@ -9726,6 +9765,11 @@ function sectorAdminSetStatus(id, status, selectEl) {
 function sectorAdminSetTeam(id, teamId, selectEl) {
     if (selectEl) selectEl.disabled = true;
     const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'assign', id, team_id: teamId});
+    // On foot or with a vehicle (v3.438.0), asked next to the team: what was
+    // chosen if it was chosen, otherwise the way the new team itself moves.
+    // Nothing goes with «—» (no team): there is nobody to travel.
+    const travelSel = selectEl && selectEl.parentElement ? selectEl.parentElement.querySelector('.sector-travel-select') : null;
+    if (teamId) data.append('travel_mode', travelSel && travelSel.dataset.touched === '1' ? travelSel.value : travelDefaultFor(teamId));
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors, result.areas); }
         else { alert(result.error || t('common.send_failed')); if (selectEl) selectEl.disabled = false; }
@@ -10885,6 +10929,7 @@ function renderSectorLayer(items) {
                         <option value="">${escapeHtml(t('sector.unassigned_option'))}</option>
                         ${teams.map(tm => `<option value="${tm.id}" ${String(tm.id) === String(item.team_id) ? 'selected' : ''}>${escapeHtml(tm.label)}</option>`).join('')}
                     </select>
+                    ${travelSelectHtml('sector-travel-select mb-1', item.travel_mode || travelDefaultFor(item.team_id), `onchange="sectorTravelChanged(this)"`)}
                     <select class="form-select form-select-sm sector-status-select" data-id="${item.id}">
                         ${['not_started','en_route','in_progress','completed','needs_recheck'].map(s => `<option value="${s}" ${s === item.status ? 'selected' : ''}>${escapeHtml(t('sector.status.' + s))}</option>`).join('')}
                     </select>
@@ -10990,6 +11035,7 @@ function sectorListRowHtml(item) {
             <option value="">${escapeHtml(t('sector.unassigned_option'))}</option>
             ${teams.map(tm => `<option value="${tm.id}" ${String(tm.id) === String(item.team_id) ? 'selected' : ''}>${escapeHtml(tm.label)}</option>`).join('')}
         </select>
+        ${travelSelectHtml('sector-travel-select mt-1', item.travel_mode || travelDefaultFor(item.team_id), `onchange="sectorTravelChanged(this)"`)}
         <select class="form-select form-select-sm mt-1 sector-status-select" data-id="${item.id}">
             ${['not_started','en_route','in_progress','completed','needs_recheck'].map(s => `<option value="${s}" ${s === item.status ? 'selected' : ''}>${escapeHtml(t('sector.status.' + s))}</option>`).join('')}
         </select>
@@ -27659,6 +27705,16 @@ document.querySelectorAll('.team-form').forEach(form => {
     if (!modalEl) return;
 
     const teamSelect = document.getElementById('dispatchTeamSelect');
+    // On foot or with a vehicle: follows the team picked until somebody picks it.
+    const travelSelect = document.getElementById('dispatchTravelSelect');
+    let travelTouched = false;
+    function syncTravelSelect() {
+        if (!travelTouched) travelSelect.value = travelDefaultFor(teamSelect.value);
+        // An order to every team has no one team to travel: there is nothing to choose.
+        travelSelect.disabled = teamSelect.value === 'all';
+    }
+    teamSelect.addEventListener('change', syncTravelSelect);
+    travelSelect.addEventListener('change', () => { travelTouched = true; });
     const addressInput = document.getElementById('dispatchAddressInput');
     const addressSearchBtn = document.getElementById('dispatchAddressSearch');
     const addressStatus = document.getElementById('dispatchAddressStatus');
@@ -27804,7 +27860,7 @@ document.querySelectorAll('.team-form').forEach(form => {
             // same dropdown the normal "New Dispatch" sidebar card flow
             // already uses at send time — no other change needed for the
             // send handler to pick it up correctly.
-            if (pendingDispatchSeed.teamId) teamSelect.value = pendingDispatchSeed.teamId;
+            if (pendingDispatchSeed.teamId) { teamSelect.value = pendingDispatchSeed.teamId; syncTravelSelect(); }
             pendingRingIndex = pendingDispatchSeed.ringIndex ?? null;
             pendingIncidentId = pendingDispatchSeed.incidentId || null;
             if (incidentLine && pendingDispatchSeed.incidentText) {
@@ -27832,6 +27888,8 @@ document.querySelectorAll('.team-form').forEach(form => {
         if (incidentLine) incidentLine.classList.add('d-none');
         // Back to «— Διάλεξε ομάδα —»: the next dispatch is chosen afresh.
         teamSelect.value = '';
+        travelTouched = false;
+        syncTravelSelect();
     });
 
     clearBtn.addEventListener('click', () => { resetDrawing(); updateSendState(); });
@@ -27863,6 +27921,7 @@ document.querySelectorAll('.team-form').forEach(form => {
             team_id: teamSelect.value === 'all' ? '' : teamSelect.value, type: type, geo: JSON.stringify(geo), label: combinedLabel,
             ring_index: pendingRingIndex ?? '',
             incident_id: pendingIncidentId ?? '',
+            travel_mode: teamSelect.value === 'all' ? '' : travelSelect.value,
         });
         sendBtn.disabled = true;
         fetch('mission-dispatch.php', {method:'POST', body:data}).then(response => response.json()).then(result => {
@@ -29745,6 +29804,16 @@ function renderWaypointPanel() {
     const sendBtn = document.getElementById('routeSendBtn');
     const teamSelect = document.getElementById('routeTeamSelect');
     const memberPicker = document.getElementById('routeMemberPicker');
+    // On foot or with a vehicle (v3.438.0): follows the team picked until somebody picks it.
+    const routeTravelSelect = document.getElementById('routeTravelSelect');
+    let routeTravelTouched = false;
+    function syncRouteTravel() {
+        if (!routeTravelSelect || !teamSelect) return;
+        if (!routeTravelTouched) routeTravelSelect.value = travelDefaultFor(teamSelect.value);
+        // A route made from people of several teams has no one team to travel.
+        routeTravelSelect.disabled = teamSelect.value === '';
+    }
+    if (routeTravelSelect) routeTravelSelect.addEventListener('change', () => { routeTravelTouched = true; });
     // routeTeamSelect/routeMemberPicker are rendered only inside a server-side
     // "teams non-empty" guard — on routeOrderCard until v3.344.0, in this
     // modal's own side panel since. On a zero-team mission neither element
@@ -29779,6 +29848,7 @@ function renderWaypointPanel() {
         // only honors it when team_id is set).
         const returnWrap = document.getElementById('routeReturnToStartWrap');
         const returnCheck = document.getElementById('routeReturnToStartCheck');
+        syncRouteTravel();
         updateRouteSendState();
         // Nothing chosen yet (v3.344.0: the composer opens on «— Διάλεξε
         // ομάδα —») — nobody to list, and nothing to return to.
@@ -29976,6 +30046,7 @@ function renderWaypointPanel() {
         coordsInput.value = '';
         pendingRouteRingIndex = null;
         // The next route's team is chosen afresh.
+        routeTravelTouched = false;
         if (teamSelect) {
             teamSelect.value = 'pick';
             renderRouteMemberPicker();
@@ -30023,6 +30094,7 @@ function renderWaypointPanel() {
             is_closed_loop: routeClosed ? '1' : '0', member_ids: JSON.stringify(memberIds),
             add_return_waypoint: document.getElementById('routeReturnToStartCheck').checked ? '1' : '0',
             ring_index: pendingRouteRingIndex ?? '',
+            travel_mode: teamSelect.value === '' || !routeTravelSelect ? '' : routeTravelSelect.value,
         });
         sendBtn.disabled = true;
         fetch('mission-route.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {

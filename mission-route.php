@@ -280,9 +280,13 @@ if ($action === 'create') {
     // that happened to send it (e.g. a stale composer click before points were added).
     $isClosedLoop = (post('is_closed_loop') === '1' && count($waypoints) >= 3) ? 1 : 0;
 
+    // On foot or with a vehicle, as the person giving the order chose in the
+    // composer (v3.438.0). Absent or anything else = the team's own transport.
+    $travelMode = normalizeTravelMode(post('travel_mode'));
+
     $routeId = dbInsert(
-        "INSERT INTO mission_routes (mission_id, team_id, title, is_closed_loop, ring_index, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
-        [$missionId, $teamId, $title, $isClosedLoop, $ringIndex, $userId]
+        "INSERT INTO mission_routes (mission_id, team_id, title, is_closed_loop, ring_index, travel_mode, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
+        [$missionId, $teamId, $title, $isClosedLoop, $ringIndex, $teamId !== null ? $travelMode : null, $userId]
     );
     foreach ($recipientIds as $memberId) {
         dbInsert("INSERT INTO mission_route_members (route_id, user_id, added_at) VALUES (?, ?, NOW())", [$routeId, $memberId]);

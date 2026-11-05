@@ -1464,6 +1464,9 @@ if (typeof module !== 'undefined' && module.exports) {
         const sec = page.sectors().find(s => String(s.id) === String(sectorId));
         const team = state.teams.find(tm => tm.id === Number(teamId));
         const body = new URLSearchParams({csrf_token: csrfToken, mission_id: MISSION_ID, action: 'assign', id: sectorId, team_id: teamId});
+        // On foot or with a vehicle, as chosen next to «Αποστολή» (v3.438.0).
+        const travel = $('#wrcSectorTravel', root);
+        if (travel) body.append('travel_mode', travel.value);
         go.disabled = true;
         fetch('mission-sector.php', {method: 'POST', body, credentials: 'same-origin'}).then(r => r.json()).then(res => {
             if (res && res.ok) {
@@ -1472,6 +1475,7 @@ if (typeof module !== 'undefined' && module.exports) {
                 // The team's row opens its orders, so the one that was just sent is in view.
                 if (team) state.ordersOpen.add(team.id);
                 teamsSig = '';
+                state.sectorTravel = null;
                 toast(t('console.sector_sent', {sector: sec ? sec.label : '', team: team ? team.label : ''}), 'ok');
                 if (typeof retryPollNow === 'function') retryPollNow();
                 refreshSoon();
@@ -1542,6 +1546,9 @@ if (typeof module !== 'undefined' && module.exports) {
             const area = wrcPickArea(allAreas, state.areaId);
             state.areaId = area ? String(area.id) : '';
             const one = plan.mode === 'team';
+            // On foot or with a vehicle (v3.438.0): the way the chosen team moves until somebody chooses.
+            const pickedTeam = one ? state.teams.find(tm => tm.id === plan.teamId) : null;
+            const sectorTravel = state.sectorTravel || (pickedTeam && pickedTeam.transport && pickedTeam.transport !== 'foot' ? 'vehicle' : 'foot');
             const newArea = `<button type="button" class="wrc-go wrc-go-alt" id="wrcGoNewArea"><i class="bi bi-bounding-box-circles"></i>${esc(t('console.area_new_btn'))}</button>`;
             if (!area) {
                 html = `<div class="wrc-line">${newArea}<span class="wrc-mut">${esc(t('console.area_none'))}</span></div>`;
@@ -1559,6 +1566,7 @@ if (typeof module !== 'undefined' && module.exports) {
                     <div class="wrc-line"><span class="wrc-sub">${esc(t('console.verb_sector'))}</span>
                         ${inArea.length
                             ? `<select class="wrc-in" id="wrcSectorPick" aria-label="${esc(t('console.verb_sector'))}">${free.map(opt).join('')}${rest.length ? '<option disabled>──────────</option>' + rest.map(opt).join('') : ''}</select>
+                               <select class="wrc-in" id="wrcSectorTravel" aria-label="${esc(t('travel.label'))}" title="${esc(t('travel.label'))}">${['foot', 'vehicle'].map(m => `<option value="${m}"${m === sectorTravel ? ' selected' : ''}>${esc(t('travel.' + m))}</option>`).join('')}</select>
                                <button type="button" class="wrc-go" id="wrcGoSector"${one ? '' : ' disabled'} title="${esc(one ? '' : t('console.sector_needs_team'))}"><i class="bi bi-send-fill"></i>${esc(t('console.send'))}</button>`
                             : `<span class="wrc-mut">${esc(t('console.sector_none'))}</span>`}
                         <button type="button" class="wrc-go wrc-go-alt" id="wrcGoDrawSector"><i class="bi bi-bounding-box"></i>${esc(t('console.sector_draw_btn'))}</button></div>
@@ -1592,6 +1600,10 @@ if (typeof module !== 'undefined' && module.exports) {
         if (e.target.id === 'wrcAreaPick') {
             state.areaId = e.target.value;
             renderComposerBody(true);
+            return;
+        }
+        if (e.target.id === 'wrcSectorTravel') {
+            state.sectorTravel = e.target.value;
             return;
         }
         if (e.target.id !== 'wrcSayPhoto') return;

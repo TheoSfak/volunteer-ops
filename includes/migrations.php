@@ -7981,6 +7981,32 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 202,
+            'description' => "Foot or vehicle chosen per order, and the routed distance kept beside the routed time (v3.438.0): mission_dispatch_points, mission_search_sectors and mission_routes get travel_mode ('foot' | 'vehicle', NULL = whatever the team's own transport says, which is every order made before this); dispatch_eta_cache.route_m and team_arc_state.route_m hold the metres of the routed path, team_arc_state.ping_ts the fix the figure was worked out from (the router is not asked again while the team has not moved).",
+            'up' => function () {
+                $columns = [
+                    ['mission_dispatch_points', 'travel_mode', "ENUM('foot','vehicle') NULL DEFAULT NULL COMMENT 'How the team was told to go; NULL = its own transport'"],
+                    ['mission_search_sectors',  'travel_mode', "ENUM('foot','vehicle') NULL DEFAULT NULL COMMENT 'How the team was told to go; NULL = its own transport'"],
+                    ['mission_routes',          'travel_mode', "ENUM('foot','vehicle') NULL DEFAULT NULL COMMENT 'How the team was told to go; NULL = its own transport'"],
+                    ['dispatch_eta_cache',      'route_m',     "INT UNSIGNED NULL DEFAULT NULL COMMENT 'Metres of the routed path (not the straight line)'"],
+                    ['team_arc_state',          'route_m',     "INT UNSIGNED NULL DEFAULT NULL COMMENT 'Metres of the routed path when minutes was worked out'"],
+                    ['team_arc_state',          'ping_ts',     "INT UNSIGNED NULL DEFAULT NULL COMMENT 'Unix time of the team fix minutes was worked out from'"],
+                ];
+                foreach ($columns as [$table, $column, $definition]) {
+                    // information_schema, not dbColumnExists(): see migration 197.
+                    $has = (int) dbFetchValue(
+                        "SELECT COUNT(*) FROM information_schema.COLUMNS
+                         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+                        [$table, $column]
+                    );
+                    if ($has === 0) {
+                        dbExecute("ALTER TABLE `$table` ADD COLUMN `$column` $definition");
+                    }
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

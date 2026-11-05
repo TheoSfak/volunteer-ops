@@ -4,8 +4,12 @@
  * Every team that has been sent somewhere and has not got there yet is drawn
  * as an arch from where it is now to where it was sent, in its own colour,
  * fading in from the team's side. At the top of the arch a dial says how long
- * it will take (ETA) and a pill under it the metres still to go. What the arc
- * says is worked out by includes/functions-team-arcs.php; this only draws it.
+ * it will take (ETA) and a pill under it the metres still to go: the ROUTED
+ * path, on foot or by vehicle as the order was given (v3.438.0), with a thin
+ * dashed straight line under the arch carrying the straight-line distance.
+ * Where no router found a path the pill says the straight line and is dashed.
+ * What the arc says is worked out by includes/functions-team-arcs.php; this
+ * only draws it.
  *
  * Loaded before the page's own script, so it only DECLARES things here and
  * reaches for the page's globals (map, t(), transportGlyphSvg(), teamArcs)
@@ -109,16 +113,31 @@ function teamArcAgeText(ts) {
         : t('arc.stale_hours', {n: Math.round(minutes / 60)});
 }
 
+/**
+ * The metres the pill says: the ROUTED path when a router found one, the
+ * straight line when none did (a ridge with no mapped path, no key, a service
+ * that is down). The straight line is then the only distance there is, and the
+ * pill is dashed and the chip says so, rather than passing it off as a route.
+ */
+function teamArcRouted(arc) {
+    return arc.route_m !== null && arc.route_m !== undefined;
+}
+
 function teamArcLabelHtml(arc, color, compact) {
     const eta = arc.eta || null;
     const stale = !!(arc.from && arc.from.stale);
-    const estimate = !!eta && eta.source === 'straight_line';
-    const dist = teamArcFormatDistance(arc.distance_m);
+    const routed = teamArcRouted(arc);
+    const estimate = !routed || (!!eta && eta.source === 'straight_line');
+    const dist = teamArcFormatDistance(routed ? arc.route_m : arc.distance_m);
     const parts = eta ? teamArcEtaParts(eta.minutes) : null;
     const icon = transportGlyphSvg(arc.transport, 15, '#fff');
-    const aria = escapeHtml(t('arc.aria', {team: arc.label || '', eta: parts ? parts.n.replace('~', '') + ' ' + parts.unit : '-', dist}));
+    const etaWords = parts ? parts.n.replace('~', '') + ' ' + parts.unit : '-';
+    const aria = escapeHtml(routed
+        ? t('arc.aria_straight', {team: arc.label || '', eta: etaWords, dist, straight: teamArcFormatDistance(arc.distance_m)})
+        : t('arc.aria', {team: arc.label || '', eta: etaWords, dist}));
     const notes = [];
     if (stale) notes.push(teamArcAgeText(arc.from.ts));
+    if (arc.detour) notes.push(t('arc.detour'));
     if (estimate) notes.push(t('arc.straight'));
     const chips = notes.map(n => `<span class="wr-arc-chip">${escapeHtml(n)}</span>`).join('');
 
@@ -173,10 +192,28 @@ function drawTeamArc(arc) {
     }
 
     const chordPx = map.latLngToContainerPoint([arc.from.lat, arc.from.lng]).distanceTo(map.latLngToContainerPoint([arc.to.lat, arc.to.lng]));
+    const compact = chordPx < TEAM_ARC_COMPACT_PX;
     L.marker(geo.apex, {
         pane: 'teamArcLabelPane', interactive: false, keyboard: false,
-        icon: L.divIcon({className: 'wr-arc-label', iconSize: [0, 0], html: teamArcLabelHtml(arc, color, chordPx < TEAM_ARC_COMPACT_PX)}),
+        icon: L.divIcon({className: 'wr-arc-label', iconSize: [0, 0], html: teamArcLabelHtml(arc, color, compact)}),
     }).addTo(teamArcLabelLayer);
+
+    // The straight line under the arch, with its own length written on it: how
+    // far the way really is next to how far the team is as the crow flies. Only
+    // where the pill says the ROUTED distance (otherwise the two would be the
+    // same number twice), and not on an arc too short to hold a label.
+    if (teamArcRouted(arc) && !compact) {
+        const line = [[arc.from.lat, arc.from.lng], [arc.to.lat, arc.to.lng]];
+        L.polyline(line, {...base, color: '#0b1007', opacity: 0.4, weight: 4, lineCap: 'round'}).addTo(teamArcLayer);
+        L.polyline(line, {...base, color: '#ffffff', opacity: stale ? 0.45 : 0.8, weight: 2, lineCap: 'round', dashArray: '2 7'}).addTo(teamArcLayer);
+        L.marker([(arc.from.lat + arc.to.lat) / 2, (arc.from.lng + arc.to.lng) / 2], {
+            pane: 'teamArcLabelPane', interactive: false, keyboard: false,
+            icon: L.divIcon({
+                className: 'wr-arc-label', iconSize: [0, 0],
+                html: `<div class="wr-arc-straight">${escapeHtml(t('arc.straight_line', {dist: teamArcFormatDistance(arc.distance_m)}))}</div>`,
+            }),
+        }).addTo(teamArcLabelLayer);
+    }
 }
 
 function renderTeamArcs(arcs) {

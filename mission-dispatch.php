@@ -178,11 +178,16 @@ if ($action === 'create') {
         exit;
     }
 
+    // On foot or with a vehicle, as the person giving the order chose in the
+    // window (v3.438.0). Absent or anything else = the team's own transport,
+    // and an order to every team has no one team to travel, so none.
+    $travelMode = $teamId ? normalizeTravelMode(post('travel_mode')) : null;
+
     $dispatchId = dbInsert(
-        "INSERT INTO mission_dispatch_points (mission_id, team_id, type, geo, label, ring_index, incident_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())",
-        [$missionId, $teamId, $type, json_encode($geo), $label, $ringIndex, $incident ? (int) $incident['id'] : null, $userId]
+        "INSERT INTO mission_dispatch_points (mission_id, team_id, type, geo, label, ring_index, incident_id, travel_mode, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+        [$missionId, $teamId, $type, json_encode($geo), $label, $ringIndex, $incident ? (int) $incident['id'] : null, $travelMode, $userId]
     );
-    logAudit('create_mission_dispatch', 'mission_dispatch_points', $dispatchId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'type' => $type, 'ring_index' => $ringIndex, 'incident_id' => $incident ? (int) $incident['id'] : null]);
+    logAudit('create_mission_dispatch', 'mission_dispatch_points', $dispatchId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'type' => $type, 'ring_index' => $ringIndex, 'incident_id' => $incident ? (int) $incident['id'] : null, 'travel_mode' => $travelMode]);
     if ($incident) {
         markIncidentSeen($incident, (int) $userId);
     }

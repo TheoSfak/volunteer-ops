@@ -27,18 +27,28 @@
  * own team's: where another team has been sent is not theirs to know, the same
  * rule loadMissionDispatchesForUser() applies to the orders themselves.
  *
- * THE FIGURES.
- *   · metres = straight line from the team's latest fix, free arithmetic that
- *     never fails (the routed distance would need a service call per poll);
- *   · minutes = the routed time when there is one (OSRM by road for a team in a
- *     vehicle, Google on foot when the organisation stored a key), the straight
- *     line at an assumed speed otherwise, and the arc says which ('source').
- *     For a dispatch POINT it is the very figure the pin's popup shows
+ * ON FOOT OR WITH A VEHICLE (v3.438.0). The person giving the order says which,
+ * in the window that sends it (travel_mode on the order; NULL = the team's own
+ * transport, which is how every older order reads). It picks the router's mode
+ * and the icon; nothing about the team changes.
+ *
+ * THE FIGURES. Three, and they are not the same thing:
+ *   · distance_m = the STRAIGHT LINE from the team's latest fix to the target.
+ *     Free arithmetic that never fails. The arc itself and the thin dashed line
+ *     under it are this;
+ *   · route_m and minutes = the ROUTED path and time (teamRouteLeg(): Google
+ *     walking or driving with the organisation's key, the free OSRM for a
+ *     vehicle without one), or null / the straight line at an assumed speed when
+ *     no router could say, and 'source' says which. Where the walking router
+ *     finds no path (a ridge) there is no route_m, and the page shows the
+ *     straight line as the distance and says that is what it is.
+ *     For a dispatch POINT these are the very figures the pin's popup shows
  *     (computeDispatchEta(), one routing call per new fix, shared). For a sector
- *     or a route it is asked of the router at most once per
- *     TEAM_ARC_ETA_REFRESH_SECONDS and, in between, scaled by the distance
- *     still to go — which is what makes it move continuously with the team
- *     without hitting a free public router on every 5-second poll of every tab.
+ *     or a route they are asked of the router when the team has moved AND at
+ *     least TEAM_ARC_ETA_REFRESH_SECONDS have passed and, in between, scaled by
+ *     the distance still to go — which is what makes them move continuously with
+ *     the team without paying for a routing call on every 5-second poll of
+ *     every tab, and without asking at all while the team stands still.
  *
  * NOTHING IN THE PAYLOAD MAY SLIDE WITH THE CLOCK. The poll's response is
  * hashed so a quiet mission costs no bandwidth; an "age in seconds" here would
@@ -52,13 +62,10 @@ if (!defined('VOLUNTEEROPS')) {
 
 /** Closer than this the team is AT the target: GPS noise, not a journey, and the arc would be a blob. */
 const TEAM_ARC_AT_TARGET_METERS = 20;
-/** How often a sector's or route's time is asked of a router again. In between it is scaled by distance. */
+/** How often a sector's or route's time is asked of a router again (once the team has moved). In between it is scaled by distance. */
 const TEAM_ARC_ETA_REFRESH_SECONDS = 45;
 /** A trip shorter than this has no «how much is done»: the first fix already was the arrival. */
 const TEAM_ARC_MIN_TRIP_METERS = 60;
-/** After a road-router failure, every request answers with the straight line for this long (see externalBreakerTrip). */
-const TEAM_ARC_ROAD_BREAKER_KEY = 'team_arc_road_eta_paused_until';
-const TEAM_ARC_ROAD_BREAKER_SECONDS = 180;
 
 /**
  * The one place each team is being sent now.
@@ -75,7 +82,7 @@ function teamArcActiveTargets(int $missionId): array {
 
     // ── dispatch points and areas ────────────────────────────────────────
     $rows = dbFetchAll(
-        "SELECT id, team_id, type, geo, label, UNIX_TIMESTAMP(created_at) AS ts
+        "SELECT id, team_id, type, geo, label, travel_mode, UNIX_TIMESTAMP(created_at) AS ts
          FROM mission_dispatch_points
          WHERE mission_id = ? AND team_id IS NOT NULL",
         [$missionId]
@@ -110,6 +117,7 @@ function teamArcActiveTargets(int $missionId): array {
                 'team_id' => $teamId, 'kind' => 'dispatch', 'id' => $id,
                 'type'    => $row['type'] === 'point' ? 'point' : 'area',
                 'label'   => trim((string) $row['label']),
+                'travel_mode' => normalizeTravelMode($row['travel_mode']),
                 'lat'     => $point['lat'], 'lng' => $point['lng'], 'ts' => (int) $row['ts'],
             ];
         }
@@ -120,7 +128,7 @@ function teamArcActiveTargets(int $missionId): array {
     // (in_progress) it has arrived; a finished or not-yet-given one is no
     // order to be somewhere.
     foreach (dbFetchAll(
-        "SELECT id, team_id, label, geo, UNIX_TIMESTAMP(COALESCE(status_updated_at, created_at)) AS ts
+        "SELECT id, team_id, label, geo, travel_mode, UNIX_TIMESTAMP(COALESCE(status_updated_at, created_at)) AS ts
          FROM mission_search_sectors
          WHERE mission_id = ? AND team_id IS NOT NULL AND status IN ('assigned', 'en_route')",
         [$missionId]
@@ -137,13 +145,14 @@ function teamArcActiveTargets(int $missionId): array {
         $candidates[] = [
             'team_id' => $teamId, 'kind' => 'sector', 'id' => $id, 'type' => 'sector',
             'label'   => trim((string) $row['label']),
+            'travel_mode' => normalizeTravelMode($row['travel_mode']),
             'lat'     => $point['lat'], 'lng' => $point['lng'], 'ts' => (int) $row['ts'],
         ];
     }
 
     // ── routes: the next waypoint not yet reached ────────────────────────
     $routes = dbFetchAll(
-        "SELECT id, team_id, title, UNIX_TIMESTAMP(created_at) AS ts
+        "SELECT id, team_id, title, travel_mode, UNIX_TIMESTAMP(created_at) AS ts
          FROM mission_routes
          WHERE mission_id = ? AND team_id IS NOT NULL AND completed_at IS NULL AND cancelled_at IS NULL",
         [$missionId]
@@ -174,6 +183,7 @@ function teamArcActiveTargets(int $missionId): array {
             $candidates[] = [
                 'team_id' => $teamId, 'kind' => 'route', 'id' => $id, 'type' => 'route',
                 'label'   => $label !== '' ? $label : trim((string) ($route['title'] ?? '')),
+                'travel_mode' => normalizeTravelMode($route['travel_mode']),
                 'lat'     => (float) $wp['lat'], 'lng' => (float) $wp['lng'], 'ts' => (int) $route['ts'],
             ];
         }
@@ -200,65 +210,61 @@ function teamArcState(int $teamId, array $target, int $distance): array {
         return $row;
     }
     dbExecute(
-        "INSERT INTO team_arc_state (team_id, target_kind, target_id, first_distance_m, minutes, source, mode, eta_distance_m, eta_at)
-         VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL)
+        "INSERT INTO team_arc_state (team_id, target_kind, target_id, first_distance_m, minutes, source, mode, eta_distance_m, eta_at, route_m, ping_ts)
+         VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL)
          ON DUPLICATE KEY UPDATE target_kind = VALUES(target_kind), target_id = VALUES(target_id),
             first_distance_m = VALUES(first_distance_m), minutes = NULL, source = NULL, mode = NULL,
-            eta_distance_m = NULL, eta_at = NULL",
+            eta_distance_m = NULL, eta_at = NULL, route_m = NULL, ping_ts = NULL",
         [$teamId, $target['kind'], (int) $target['id'], $distance]
     );
     return [
         'team_id' => $teamId, 'target_kind' => $target['kind'], 'target_id' => (int) $target['id'],
         'first_distance_m' => $distance, 'minutes' => null, 'source' => null, 'mode' => null,
-        'eta_distance_m' => null, 'eta_at' => null,
+        'eta_distance_m' => null, 'eta_at' => null, 'route_m' => null, 'ping_ts' => null,
     ];
 }
 
 /**
- * The time to the target, as [minutes, source, mode] keyed array.
+ * The routed time and distance to the target: ['minutes', 'source', 'mode',
+ * 'route_m' (null when no router found a path)].
  *
- * Pure arithmetic when the remembered figure is still fresh (see the file
- * comment); otherwise one routing attempt, falling back to the straight line.
- * A road router that failed is left alone for TEAM_ARC_ROAD_BREAKER_SECONDS
- * for the whole site. The walking router (Google, only with a stored key)
- * answers "no path" with a plain empty result on a ridge, which is not an
- * outage, so it is never put on that pause.
+ * Worked out by arithmetic alone while the remembered figure still stands (see
+ * the file comment): the team has not moved since it was worked out, or it was
+ * worked out less than TEAM_ARC_ETA_REFRESH_SECONDS ago and the team is not
+ * farther than before. Otherwise one routing attempt (teamRouteLeg(), with its
+ * own pause for a service that did not answer), falling back to the straight
+ * line at an assumed speed. Whatever came out is remembered, a fallback too, so
+ * a router that is down is retried at the refresh interval and not on every poll.
  */
-function teamArcEstimate(array $state, int $teamId, string $mode, float $fromLat, float $fromLng, float $toLat, float $toLng, int $distance): array {
+function teamArcEstimate(array $state, int $teamId, string $mode, float $fromLat, float $fromLng, float $toLat, float $toLng, int $distance, int $pingTs): array {
     $remembered = (int) ($state['eta_distance_m'] ?? 0);
-    $fresh = $state['minutes'] !== null
-        && $state['mode'] === $mode
-        && $remembered > 0
-        && (time() - (int) $state['eta_at']) < TEAM_ARC_ETA_REFRESH_SECONDS
-        && $distance <= $remembered * 1.5;
-    if ($fresh) {
+    $known = $state['minutes'] !== null && $state['mode'] === $mode && $remembered > 0;
+    $sameFix = $known && (int) ($state['ping_ts'] ?? 0) === $pingTs;
+    $young = $known && (time() - (int) $state['eta_at']) < TEAM_ARC_ETA_REFRESH_SECONDS;
+    if ($known && ($sameFix || $young) && $distance <= $remembered * 1.5) {
+        $ratio = $distance / $remembered;
         return [
-            'minutes' => max(1, (int) round((int) $state['minutes'] * $distance / $remembered)),
+            'minutes' => max(1, (int) round((int) $state['minutes'] * $ratio)),
             'source'  => (string) $state['source'],
             'mode'    => $mode,
+            'route_m' => ($state['route_m'] ?? null) !== null ? (int) round((int) $state['route_m'] * $ratio) : null,
         ];
     }
 
-    if ($mode === 'vehicle') {
-        $routed = null;
-        if (externalBreakerPausedUntil(TEAM_ARC_ROAD_BREAKER_KEY) === 0) {
-            $routed = fetchOsrmEtaMinutes($fromLat, $fromLng, $toLat, $toLng);
-            if ($routed === null) {
-                externalBreakerTrip(TEAM_ARC_ROAD_BREAKER_KEY, TEAM_ARC_ROAD_BREAKER_SECONDS);
-            } else {
-                externalBreakerClear(TEAM_ARC_ROAD_BREAKER_KEY);
-            }
-        }
-        [$minutes, $source] = $routed ?? [straightLineEtaMinutes($fromLat, $fromLng, $toLat, $toLng), 'straight_line'];
+    $leg = teamRouteLeg($mode, $fromLat, $fromLng, $toLat, $toLng);
+    if ($leg !== null) {
+        [$minutes, $source, $routeM] = [$leg['minutes'], $leg['source'], $leg['meters']];
     } else {
-        $routed = fetchWalkingEtaMinutes($fromLat, $fromLng, $toLat, $toLng);
-        [$minutes, $source] = $routed ?? [straightLineWalkingEtaMinutes($fromLat, $fromLng, $toLat, $toLng), 'straight_line'];
+        $minutes = $mode === 'vehicle'
+            ? straightLineEtaMinutes($fromLat, $fromLng, $toLat, $toLng)
+            : straightLineWalkingEtaMinutes($fromLat, $fromLng, $toLat, $toLng);
+        [$source, $routeM] = ['straight_line', null];
     }
     dbExecute(
-        "UPDATE team_arc_state SET minutes = ?, source = ?, mode = ?, eta_distance_m = ?, eta_at = ? WHERE team_id = ?",
-        [$minutes, $source, $mode, max(1, $distance), time(), $teamId]
+        "UPDATE team_arc_state SET minutes = ?, source = ?, mode = ?, route_m = ?, eta_distance_m = ?, eta_at = ?, ping_ts = ? WHERE team_id = ?",
+        [$minutes, $source, $mode, $routeM, max(1, $distance), time(), $pingTs, $teamId]
     );
-    return ['minutes' => (int) $minutes, 'source' => (string) $source, 'mode' => $mode];
+    return ['minutes' => (int) $minutes, 'source' => (string) $source, 'mode' => $mode, 'route_m' => $routeM];
 }
 
 /**
@@ -274,6 +280,8 @@ function teamArcsForMission(int $missionId, array $teamPositions, bool $canManag
         return [];
     }
     try {
+        // routeDistanceIsDetour(); not part of the bootstrap chain.
+        require_once __DIR__ . '/route-distance.php';
         $targets = teamArcActiveTargets($missionId);
         if (!$targets) {
             return [];
@@ -299,25 +307,33 @@ function teamArcsForMission(int $missionId, array $teamPositions, bool $canManag
             }
 
             $transport = $transports[$teamId] ?? 'foot';
-            $mode = teamTransportIsVehicle($transport) ? 'vehicle' : 'foot';
+            // How the order said to go; the team's own transport when it did not say.
+            $mode = travelModeFor($target['travel_mode'] ?? null, $transport);
             $state = teamArcState($teamId, $target, $distance);
 
             $eta = null;
             if ($target['kind'] === 'dispatch' && $target['type'] === 'point') {
-                // The pin's popup shows this same figure.
-                $shared = computeDispatchEta((int) $target['id'], $teamId, $target['lat'], $target['lng']);
+                // The pin's popup shows these same figures.
+                $shared = computeDispatchEta((int) $target['id'], $teamId, $target['lat'], $target['lng'], $target['travel_mode'] ?? null);
                 if ($shared) {
-                    $eta = ['minutes' => (int) $shared['minutes'], 'source' => (string) $shared['source'], 'mode' => (string) $shared['mode']];
+                    $eta = [
+                        'minutes' => (int) $shared['minutes'], 'source' => (string) $shared['source'],
+                        'mode' => (string) $shared['mode'], 'route_m' => $shared['route_m'] ?? null,
+                    ];
                 }
             }
-            $eta ??= teamArcEstimate($state, $teamId, $mode, (float) $pos['lat'], (float) $pos['lng'], $target['lat'], $target['lng'], $distance);
+            $eta ??= teamArcEstimate($state, $teamId, $mode, (float) $pos['lat'], (float) $pos['lng'], $target['lat'], $target['lng'], $distance, (int) $pos['ts']);
 
+            $routeM = isset($eta['route_m']) ? (int) $eta['route_m'] : null;
             $first = (int) $state['first_distance_m'];
             $arcs[] = [
                 'team_id'      => $teamId,
                 'label'        => $pos['label'],
                 'color'        => $pos['color'] ?: '#8a94a6',
-                'transport'    => $transport,
+                // The picture on the arc: on foot, or the team's own vehicle
+                // (a car for a team that is on foot but was told to go by vehicle).
+                'transport'    => $mode === 'foot' ? 'foot' : (teamTransportIsVehicle($transport) ? $transport : 'car'),
+                'mode'         => $mode,
                 'from'         => [
                     'lat'   => round((float) $pos['lat'], 6),
                     'lng'   => round((float) $pos['lng'], 6),
@@ -327,7 +343,14 @@ function teamArcsForMission(int $missionId, array $teamPositions, bool $canManag
                 'to'           => ['lat' => round($target['lat'], 6), 'lng' => round($target['lng'], 6)],
                 'kind'         => $target['type'],
                 'target_label' => $target['label'],
+                // The straight line, always: the arc and the dashed line under it.
                 'distance_m'   => $distance,
+                // The routed path, when a router found one (null otherwise: the
+                // page then shows the straight line as THE distance and says so).
+                'route_m'      => $routeM,
+                // The router went the long way round: past the same ratio the
+                // assistant and the measuring tool call a detour.
+                'detour'       => $routeM !== null && routeDistanceIsDetour((float) $distance, (float) $routeM),
                 // How much of the way is done: null on a trip too short to say.
                 'covered_pct'  => $first >= TEAM_ARC_MIN_TRIP_METERS
                     ? max(0, min(100, (int) round((1 - $distance / $first) * 100)))

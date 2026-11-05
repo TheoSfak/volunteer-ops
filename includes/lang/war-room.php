@@ -572,6 +572,14 @@ return [
         'arc.stale_hours' => 'στίγμα πριν {n} ώρες',
         'arc.straight' => 'κατ\' εκτίμηση · ευθεία',
         'arc.aria' => '{team}: ETA {eta}, απομένουν {dist}',
+        // v3.438.0: the way is the routed one, and the straight line is written on its own line.
+        'arc.straight_line' => 'ευθεία {dist}',
+        'arc.detour' => 'μεγάλος γύρος από δρόμο',
+        'arc.aria_straight' => '{team}: ETA {eta}, διαδρομή {dist}, ευθεία {straight}',
+        // On foot or with a vehicle, asked by the window that gives the order.
+        'travel.label' => 'Μετακίνηση',
+        'travel.foot' => 'Πεζή',
+        'travel.vehicle' => 'Με όχημα',
         'map.overlay_annotations' => 'Σχέδια στον χάρτη',
         'map.pin_team_labels' => 'Όνομα ομάδας πάνω από τα στίγματα',
         // Στρώμα OpenStreetMap στον χάρτη (v3.352.0)
@@ -3857,6 +3865,14 @@ return [
         'arc.stale_hours' => 'fix {n} h ago',
         'arc.straight' => 'estimate · straight line',
         'arc.aria' => '{team}: ETA {eta}, {dist} to go',
+        // v3.438.0: the way is the routed one, and the straight line is written on its own line.
+        'arc.straight_line' => 'straight {dist}',
+        'arc.detour' => 'long way round by road',
+        'arc.aria_straight' => '{team}: ETA {eta}, route {dist}, straight line {straight}',
+        // On foot or with a vehicle, asked by the window that gives the order.
+        'travel.label' => 'How they go',
+        'travel.foot' => 'On foot',
+        'travel.vehicle' => 'By vehicle',
         'map.overlay_annotations' => 'Map sketches',
         'map.pin_team_labels' => 'Team name above positions',
         // OpenStreetMap layer on the map (v3.352.0)

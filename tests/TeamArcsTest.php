@@ -41,6 +41,11 @@ final class TeamArcsTest extends TestCase
         );
         $this->teamA = $this->makeTeam('ΑΛΦΑ', 1, '#e34948');
         $this->teamB = $this->makeTeam('ΒΗΤΑ', 2, '#2a78d6');
+        // No test may reach a real router: the free one is paused for the
+        // length of the test (rolled back with the rest), so a vehicle falls
+        // to the straight line exactly as it does when OSRM is down.
+        externalBreakerTrip(TEAM_ROUTE_OSRM_BREAKER_KEY, 600);
+        externalBreakerTrip(TEAM_ROUTE_GOOGLE_BREAKER_KEY, 600);
     }
 
     protected function tearDown(): void
@@ -409,7 +414,202 @@ final class TeamArcsTest extends TestCase
     {
         $this->assertMatchesRegularExpression("/'version'\s*=>\s*201,.*?CREATE TABLE IF NOT EXISTS team_arc_state/s", $this->source('includes/migrations.php'));
         $this->assertStringContainsString('CREATE TABLE IF NOT EXISTS `team_arc_state`', $this->source('sql/schema.sql'));
-        $this->assertStringContainsString("define('DB_SCHEMA_VERSION', 201);", $this->source('config.php'));
+        preg_match("/define\('DB_SCHEMA_VERSION', (\d+)\);/", $this->source('config.php'), $m);
+        $this->assertGreaterThanOrEqual(201, (int) ($m[1] ?? 0));
+    }
+
+    // ── On foot or with a vehicle, chosen per order (v3.438.0) ──────────────
+
+    public function testATravelModeIsOnlyEverFootOrVehicleAndTheTeamFillsInWhenItIsNone(): void
+    {
+        $this->assertSame('foot', normalizeTravelMode('foot'));
+        $this->assertSame('vehicle', normalizeTravelMode('vehicle'));
+        $this->assertNull(normalizeTravelMode(''));
+        $this->assertNull(normalizeTravelMode('car'), 'the router knows walking and driving, not makes of vehicle');
+        $this->assertNull(normalizeTravelMode(null));
+
+        $this->assertSame('vehicle', travelModeFor('vehicle', 'foot'), 'the order wins over the team');
+        $this->assertSame('foot', travelModeFor('foot', 'car'));
+        $this->assertSame('vehicle', travelModeFor(null, 'motorbike'), 'no choice: the team\'s own way');
+        $this->assertSame('foot', travelModeFor(null, 'foot'));
+        $this->assertSame('foot', travelModeFor('junk', null));
+    }
+
+    public function testAnOrderToGoByVehicleBeatsATeamThatIsOnFootAndTheArcWearsAVehicle(): void
+    {
+        $this->sector($this->teamA);
+        dbExecute("UPDATE mission_search_sectors SET travel_mode = 'vehicle' WHERE mission_id = ?", [$this->missionId]);
+        $arc = $this->arcs([$this->position($this->teamA, 1000)])[0];
+
+        $this->assertSame('vehicle', $arc['mode']);
+        $this->assertSame('vehicle', $arc['eta']['mode']);
+        $this->assertSame('car', $arc['transport'], 'a team on foot told to go by vehicle gets a car, not a walking figure');
+    }
+
+    public function testAnOrderToGoOnFootBeatsATeamInACar(): void
+    {
+        dbExecute("UPDATE mission_teams SET transport = 'motorbike' WHERE id = ?", [$this->teamA]);
+        $this->dispatchPoint($this->teamA);
+        dbExecute("UPDATE mission_dispatch_points SET travel_mode = 'foot' WHERE mission_id = ?", [$this->missionId]);
+        $arc = $this->arcs([$this->position($this->teamA, 1000)])[0];
+
+        $this->assertSame('foot', $arc['mode']);
+        $this->assertSame('foot', $arc['transport']);
+    }
+
+    public function testWithNoChoiceTheTeamsOwnTransportDecidesLikeEveryOrderFromBefore(): void
+    {
+        dbExecute("UPDATE mission_teams SET transport = 'motorbike' WHERE id = ?", [$this->teamA]);
+        $this->sector($this->teamA);
+        $arc = $this->arcs([$this->position($this->teamA, 1000)])[0];
+
+        $this->assertSame('vehicle', $arc['mode']);
+        $this->assertSame('motorbike', $arc['transport'], 'the team\'s own vehicle is the picture');
+    }
+
+    /** Remembered router answer for team A, as if worked out for a sector at $distance metres. */
+    private function rememberAnswer(array $position, array $overrides = []): void
+    {
+        $state = array_merge([
+            'minutes' => 30, 'source' => 'google', 'mode' => 'foot', 'route_m' => 2000,
+            'eta_distance_m' => 1000, 'eta_at' => time(), 'ping_ts' => $position['ts'],
+        ], $overrides);
+        dbExecute(
+            "UPDATE team_arc_state SET minutes = ?, source = ?, mode = ?, route_m = ?, eta_distance_m = ?, eta_at = ?, ping_ts = ? WHERE team_id = ?",
+            [$state['minutes'], $state['source'], $state['mode'], $state['route_m'], $state['eta_distance_m'], $state['eta_at'], $state['ping_ts'], $this->teamA]
+        );
+    }
+
+    public function testTheRoutedDistanceAndTimeFollowTheTeamBetweenAsksOfTheRouter(): void
+    {
+        $this->sector($this->teamA);
+        $southOfSector = fn(float $metres, int $ts) => array_merge($this->position($this->teamA, 0), [
+            'lat' => 35.31 - $metres / 111320.0, 'lng' => 25.11, 'ts' => $ts,
+        ]);
+        $first = $southOfSector(1000, time() - 20);
+        $this->arcs([$first]);                         // creates the state row
+        $this->rememberAnswer($first);                 // as if Google said 30 min and 2.000 m
+
+        // The team moves to half way: a new fix, but the answer is only seconds old.
+        $arc = $this->arcs([$southOfSector(500, time())])[0];
+        $this->assertSame('google', $arc['eta']['source'], 'not asked again: the remembered answer is scaled');
+        $this->assertEqualsWithDelta(15, $arc['eta']['minutes'], 1);
+        $this->assertEqualsWithDelta(1000, $arc['route_m'], 15);
+        $this->assertEqualsWithDelta(500, $arc['distance_m'], 10, 'the straight line is its own figure');
+        $this->assertGreaterThan($arc['distance_m'], $arc['route_m']);
+    }
+
+    public function testARouterIsNotAskedAgainWhileTheTeamHasNotMoved(): void
+    {
+        $this->sector($this->teamA);
+        $position = array_merge($this->position($this->teamA, 0), ['lat' => 35.31 - 1000 / 111320.0, 'lng' => 25.11, 'ts' => time() - 600]);
+        $this->arcs([$position]);
+        // An answer an hour old: far past the refresh interval, but the same fix.
+        $this->rememberAnswer($position, ['eta_at' => time() - 3600]);
+
+        $arc = $this->arcs([$position])[0];
+        $this->assertSame('google', $arc['eta']['source'], 'the same fix is never worth another paid call');
+        $this->assertSame(30, $arc['eta']['minutes']);
+        $this->assertEqualsWithDelta(2000, $arc['route_m'], 15);
+    }
+
+    public function testAnOldAnswerAboutAnotherModeIsNotReused(): void
+    {
+        $this->sector($this->teamA);
+        $position = array_merge($this->position($this->teamA, 0), ['lat' => 35.31 - 1000 / 111320.0, 'lng' => 25.11]);
+        $this->arcs([$position]);
+        $this->rememberAnswer($position, ['mode' => 'vehicle']);           // worked out for a vehicle...
+
+        $arc = $this->arcs([$position])[0];                                // ...but the team is on foot
+        $this->assertSame('foot', $arc['eta']['mode']);
+        $this->assertSame('straight_line', $arc['eta']['source'], 'the vehicle figure is no figure for a team on foot');
+        $this->assertNull($arc['route_m']);
+    }
+
+    public function testNoRoutedDistanceMeansTheStraightLineIsTheOnlyOneAndTheArcSaysNoRoute(): void
+    {
+        $this->dispatchPoint($this->teamA);
+        $arc = $this->arcs([$this->position($this->teamA, 1000)])[0];
+
+        $this->assertNull($arc['route_m'], 'no key, no walking router: nothing routed');
+        $this->assertFalse($arc['detour']);
+    }
+
+    public function testARouteMuchLongerThanTheStraightLineIsFlaggedAsADetour(): void
+    {
+        $this->sector($this->teamA);
+        $position = array_merge($this->position($this->teamA, 0), ['lat' => 35.31 - 1500 / 111320.0, 'lng' => 25.11]);
+        $this->arcs([$position]);
+        $this->rememberAnswer($position, ['route_m' => 12000, 'eta_distance_m' => 1500, 'minutes' => 25, 'mode' => 'foot']);
+        $this->assertTrue($this->arcs([$position])[0]['detour'], '12 km of road for 1,5 km as the crow flies');
+
+        $this->rememberAnswer($position, ['route_m' => 2400, 'eta_distance_m' => 1500]);
+        $this->assertFalse($this->arcs([$position])[0]['detour'], 'a genuine valley detour is not a warning');
+    }
+
+    public function testTheRoutersAnswerIsKeptWithTheModeItWasGivenFor(): void
+    {
+        $dispatchId = $this->dispatchPoint($this->teamA);
+        $volunteer = $this->makeUser('Mode V.');
+        dbInsert("INSERT INTO mission_team_members (team_id, mission_id, user_id) VALUES (?, ?, ?)", [$this->teamA, $this->missionId, $volunteer]);
+        dbExecute(
+            "INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, accuracy_meters, source, via, created_at)
+             VALUES (?, ?, ?, ?, 6, 'auto', 'native', DATE_SUB(NOW(), INTERVAL 10 SECOND))",
+            [$volunteer, $this->shiftId, self::LAT - 0.01, self::LNG]
+        );
+
+        $byCar = computeDispatchEta($dispatchId, $this->teamA, self::LAT, self::LNG, 'vehicle');
+        $this->assertSame('vehicle', $byCar['mode'], 'the order says vehicle, the team is on foot');
+        $this->assertSame('vehicle', dbFetchValue("SELECT mode FROM dispatch_eta_cache WHERE dispatch_id = ?", [$dispatchId]));
+
+        $onFoot = computeDispatchEta($dispatchId, $this->teamA, self::LAT, self::LNG, 'foot');
+        $this->assertSame('foot', $onFoot['mode'], 'a figure worked out for the other way is not reused');
+        $this->assertArrayHasKey('route_m', $onFoot);
+    }
+
+    public function testThePayloadsGiveTheWindowsTheModeEachOrderWasGivenIn(): void
+    {
+        $dispatchId = $this->dispatchPoint($this->teamA);
+        dbExecute("UPDATE mission_dispatch_points SET travel_mode = 'vehicle' WHERE id = ?", [$dispatchId]);
+        $sectorId = $this->sector($this->teamB);
+        dbExecute("UPDATE mission_search_sectors SET travel_mode = 'foot' WHERE id = ?", [$sectorId]);
+
+        $dispatches = loadMissionDispatchesForUser($this->missionId, $this->adminId, true, false);
+        $this->assertSame('vehicle', $dispatches[0]['travel_mode']);
+        $sectors = loadMissionSectorsForUser($this->missionId, $this->adminId, true, false);
+        $this->assertSame('foot', $sectors[0]['travel_mode']);
+    }
+
+    public function testEveryWindowThatGivesTheOrderAsksAndSendsTheChoice(): void
+    {
+        $page = $this->source('war-room.php');
+        // The dispatch window (points, areas, a casualty, a right-click on the map).
+        $this->assertStringContainsString('id="dispatchTravelSelect"', $page);
+        $this->assertStringContainsString("travel_mode: teamSelect.value === 'all' ? '' : travelSelect.value", $page);
+        // The route composer.
+        $this->assertStringContainsString('id="routeTravelSelect"', $page);
+        $this->assertStringContainsString("travel_mode: teamSelect.value === '' || !routeTravelSelect ? '' : routeTravelSelect.value", $page);
+        // A sector's team picker, in its popup and in the list.
+        $this->assertSame(2, substr_count($page, "travelSelectHtml('sector-travel-select"));
+        $this->assertStringContainsString("data.append('travel_mode'", $page);
+        // The console's «Αποστολή» for a sector.
+        $console = $this->source('assets/js/war-room-console.js');
+        $this->assertStringContainsString('id="wrcSectorTravel"', $console);
+        $this->assertStringContainsString("body.append('travel_mode', travel.value)", $console);
+
+        // And the three endpoints keep it, only ever as foot or vehicle.
+        foreach (['mission-dispatch.php', 'mission-route.php', 'mission-sector.php'] as $endpoint) {
+            $this->assertStringContainsString("normalizeTravelMode(post('travel_mode'))", $this->source($endpoint), $endpoint);
+        }
+    }
+
+    public function testTheArcShowsTheRoutedMetresAndTheStraightLineUnderIt(): void
+    {
+        $js = $this->source('assets/js/war-room-team-arcs.js');
+        $this->assertStringContainsString('teamArcFormatDistance(routed ? arc.route_m : arc.distance_m)', $js, 'the pill is the way, the line is the crow');
+        $this->assertStringContainsString("t('arc.straight_line'", $js);
+        $this->assertStringContainsString('if (teamArcRouted(arc) && !compact)', $js, 'the dashed line only where it says something the pill does not');
+        $this->assertStringContainsString("dashArray: '2 7'", $js);
     }
 
     /**

@@ -3429,8 +3429,19 @@ CREATE TABLE IF NOT EXISTS `team_arc_state` (
     `mode` VARCHAR(8) NULL,
     `eta_distance_m` INT UNSIGNED NULL,
     `eta_at` INT UNSIGNED NULL,
+    `route_m` INT UNSIGNED NULL COMMENT 'Metres of the routed path when minutes was worked out (migration 202)',
+    `ping_ts` INT UNSIGNED NULL COMMENT 'Unix time of the team fix minutes was worked out from (migration 202)',
     `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- FOOT OR VEHICLE PER ORDER — v3.438.0 (migration 202)
+-- NULL = the team's own transport (every order made before this).
+-- =============================================
+ALTER TABLE `mission_dispatch_points` ADD COLUMN `travel_mode` ENUM('foot','vehicle') NULL DEFAULT NULL COMMENT 'How the team was told to go; NULL = its own transport';
+ALTER TABLE `mission_search_sectors`  ADD COLUMN `travel_mode` ENUM('foot','vehicle') NULL DEFAULT NULL COMMENT 'How the team was told to go; NULL = its own transport';
+ALTER TABLE `mission_routes`          ADD COLUMN `travel_mode` ENUM('foot','vehicle') NULL DEFAULT NULL COMMENT 'How the team was told to go; NULL = its own transport';
+ALTER TABLE `dispatch_eta_cache`      ADD COLUMN `route_m` INT UNSIGNED NULL DEFAULT NULL COMMENT 'Metres of the routed path (not the straight line)';
 
 SET FOREIGN_KEY_CHECKS = 1;

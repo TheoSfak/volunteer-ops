@@ -73,6 +73,29 @@ function teamTransportForUser(int $missionId, int $userId): string {
     return normalizeTeamTransport($value);
 }
 
+/**
+ * How a team was told to go to one particular place (v3.438.0): on foot or
+ * with a vehicle. Chosen by whoever gives the order, in the window that sends
+ * it, and kept on that order (mission_dispatch_points / mission_search_sectors /
+ * mission_routes .travel_mode). It decides which router answers (walking or
+ * driving) and the icon on the destination arc; the team's own transport stays
+ * what it was and is only the starting suggestion in the form.
+ *
+ * Anything else, and NULL, means "whatever the team's transport says": that is
+ * every order made before this existed, and every one made through a window
+ * that does not ask.
+ */
+const TRAVEL_MODES = ['foot', 'vehicle'];
+
+function normalizeTravelMode($value): ?string {
+    return in_array($value, TRAVEL_MODES, true) ? $value : null;
+}
+
+/** The mode an order is worked out in: its own choice, else the team's transport. */
+function travelModeFor($orderMode, $teamTransport): string {
+    return normalizeTravelMode($orderMode) ?? (teamTransportIsVehicle($teamTransport) ? 'vehicle' : 'foot');
+}
+
 /** Same, for the team itself. */
 function teamTransportForTeam(int $teamId): string {
     try {
@@ -1308,7 +1331,7 @@ function loadDispatchProgress(array $dispatchIds): array {
  */
 function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canManageWarRoom, bool $isApprovedParticipant): array {
     $rows = dbFetchAll(
-        "SELECT d.id, d.team_id, d.type, d.geo, d.label, d.ring_index, d.incident_id, d.map_point_id, mt.codename, mt.team_number, mt.color
+        "SELECT d.id, d.team_id, d.type, d.geo, d.label, d.ring_index, d.incident_id, d.map_point_id, d.travel_mode, mt.codename, mt.team_number, mt.color
          FROM mission_dispatch_points d
          LEFT JOIN mission_teams mt ON mt.id = d.team_id
          WHERE d.mission_id = ?
@@ -1441,7 +1464,7 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
         // Nor for a team that said «Δεν μπορώ»: it is not on its way.
         $targetTeamDeclined = $teamId !== null && isset($declines['dispatch:' . $dispatchId]['t' . $teamId]);
         $eta = ($row['type'] === 'point' && $teamId !== null && !$targetTeamArrived && !$targetTeamDeclined)
-            ? computeDispatchEta($dispatchId, $teamId, (float) $geo['lat'], (float) $geo['lng'])
+            ? computeDispatchEta($dispatchId, $teamId, (float) $geo['lat'], (float) $geo['lng'], $row['travel_mode'])
             : null;
 
         return [
@@ -1449,6 +1472,8 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             'type'        => $row['type'],
             'geo'         => $geo,
             'eta'         => $eta,
+            // Foot or vehicle, as the order was given (null = the team's own transport).
+            'travel_mode' => normalizeTravelMode($row['travel_mode']),
             'label'       => $row['label'],
             'ring_index'  => $row['ring_index'] !== null ? (int) $row['ring_index'] : null,
             'incident'    => $row['incident_id'] !== null ? ($incidentsById[(int) $row['incident_id']] ?? null) : null,
@@ -1569,7 +1594,7 @@ function loadMissionSectorsForUser(int $missionId, int $userId, bool $canManageW
     $rows = dbFetchAll(
         "SELECT s.id, s.area_id, s.team_id, s.label, s.geo, s.status, s.status_updated_at,
                 su.name AS status_updated_by_name, s.acknowledged_at, au.name AS acknowledged_by_name,
-                s.created_at, cu.name AS created_by_name,
+                s.created_at, cu.name AS created_by_name, s.travel_mode,
                 mt.codename, mt.team_number, mt.color
          FROM mission_search_sectors s
          LEFT JOIN mission_teams mt ON mt.id = s.team_id
@@ -1709,6 +1734,8 @@ function loadMissionSectorsForUser(int $missionId, int $userId, bool $canManageW
             'acknowledged_at'        => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
             'acknowledged_by_name'   => $row['acknowledged_by_name'],
             'team_id'                => $teamId,
+            // Foot or vehicle, as the sector was given (null = the team's own transport).
+            'travel_mode'            => normalizeTravelMode($row['travel_mode']),
             'team_label'             => $teamId ? teamLabel($row['codename'], $row['team_number']) : t('sector.unassigned_option'),
             'team_color_bg'          => $teamColorBg,
             'team_color_fg'          => $teamColorFg,
@@ -1893,7 +1920,7 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
     }
 
     $routes = dbFetchAll(
-        "SELECT r.id, r.team_id, r.order_id, r.title, r.is_closed_loop, r.ring_index, r.created_at, r.completed_at, r.cancelled_at, r.cancel_reason,
+        "SELECT r.id, r.team_id, r.order_id, r.title, r.is_closed_loop, r.ring_index, r.travel_mode, r.created_at, r.completed_at, r.cancelled_at, r.cancel_reason,
                 mt.codename, mt.team_number, mt.color, cu.name AS created_by_name
          FROM mission_routes r
          LEFT JOIN mission_teams mt ON mt.id = r.team_id
@@ -2084,6 +2111,8 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
             'title'                 => $r['title'],
             'is_closed_loop'        => (bool) $r['is_closed_loop'],
             'ring_index'            => $r['ring_index'] !== null ? (int) $r['ring_index'] : null,
+            // Foot or vehicle, as the route was given (null = the team's own transport).
+            'travel_mode'           => normalizeTravelMode($r['travel_mode']),
             'status'                => $r['cancelled_at'] ? 'cancelled' : ($r['completed_at'] ? 'completed' : 'active'),
             'created_at_display'    => date('d/m H:i', strtotime($r['created_at'])),
             'created_by_name'       => $r['created_by_name'],
@@ -8137,7 +8166,7 @@ function routeMixedTeamLabel(int $routeId): string {
  *
  * Returns null if this team has sent no GPS ping at all yet.
  */
-function computeDispatchEta(int $dispatchId, int $teamId, float $destLat, float $destLng): ?array {
+function computeDispatchEta(int $dispatchId, int $teamId, float $destLat, float $destLng, ?string $travelMode = null): ?array {
     $ping = dbFetchOne(
         "SELECT vp.lat, vp.lng, vp.created_at
          FROM volunteer_pings vp
@@ -8161,40 +8190,116 @@ function computeDispatchEta(int $dispatchId, int $teamId, float $destLat, float 
     // the road time for everybody, so a team walking up a slope was told it
     // had «ETA ~4 λεπτά» to a point 3 km away because a road passes nearby.
     $transport = teamTransportForTeam($teamId);
-    $mode = teamTransportIsVehicle($transport) ? 'vehicle' : 'foot';
+    // The order's own choice (v3.438.0), else how the team moves.
+    $mode = travelModeFor($travelMode, $transport);
 
     $cached = dbFetchOne(
-        "SELECT minutes, source, mode, ping_created_at FROM dispatch_eta_cache WHERE dispatch_id = ?",
+        "SELECT minutes, source, mode, ping_created_at, route_m FROM dispatch_eta_cache WHERE dispatch_id = ?",
         [$dispatchId]
     );
-    // A cached time worked out the other way (the team was switched between
-    // foot and a vehicle since) is not a time for this team any more.
+    // A cached time worked out the other way (the order was changed between
+    // foot and a vehicle since) is not a time for this order any more.
     if ($cached && $cached['ping_created_at'] === $pingCreatedAt && $cached['mode'] === $mode) {
         return [
             'minutes' => (int) $cached['minutes'], 'source' => $cached['source'], 'mode' => $mode,
+            'route_m' => $cached['route_m'] !== null ? (int) $cached['route_m'] : null,
             'transport' => $transport,
             'ping_age_seconds' => $pingAgeSeconds, 'is_stale' => $isStale,
         ];
     }
 
-    [$minutes, $source] = $mode === 'vehicle'
-        ? (fetchOsrmEtaMinutes($pingLat, $pingLng, $destLat, $destLng)
-            ?? [straightLineEtaMinutes($pingLat, $pingLng, $destLat, $destLng), 'straight_line'])
-        : (fetchWalkingEtaMinutes($pingLat, $pingLng, $destLat, $destLng)
-            ?? [straightLineWalkingEtaMinutes($pingLat, $pingLng, $destLat, $destLng), 'straight_line']);
+    // Google (walking or driving) when the organisation stored a key, the free
+    // OSRM for a vehicle without one, the straight line when neither answers.
+    $leg = teamRouteLeg($mode, $pingLat, $pingLng, $destLat, $destLng);
+    if ($leg !== null) {
+        $minutes = $leg['minutes'];
+        $source  = $leg['source'];
+        $routeM  = $leg['meters'];
+    } else {
+        $minutes = $mode === 'vehicle'
+            ? straightLineEtaMinutes($pingLat, $pingLng, $destLat, $destLng)
+            : straightLineWalkingEtaMinutes($pingLat, $pingLng, $destLat, $destLng);
+        $source = 'straight_line';
+        $routeM = null;
+    }
 
     dbExecute(
-        "INSERT INTO dispatch_eta_cache (dispatch_id, minutes, source, mode, ping_lat, ping_lng, ping_created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE minutes = VALUES(minutes), source = VALUES(source), mode = VALUES(mode),
+        "INSERT INTO dispatch_eta_cache (dispatch_id, minutes, source, mode, route_m, ping_lat, ping_lng, ping_created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE minutes = VALUES(minutes), source = VALUES(source), mode = VALUES(mode), route_m = VALUES(route_m),
              ping_lat = VALUES(ping_lat), ping_lng = VALUES(ping_lng), ping_created_at = VALUES(ping_created_at)",
-        [$dispatchId, $minutes, $source, $mode, $pingLat, $pingLng, $pingCreatedAt]
+        [$dispatchId, $minutes, $source, $mode, $routeM, $pingLat, $pingLng, $pingCreatedAt]
     );
 
     return [
-        'minutes' => $minutes, 'source' => $source, 'mode' => $mode, 'transport' => $transport,
+        'minutes' => $minutes, 'source' => $source, 'mode' => $mode, 'route_m' => $routeM, 'transport' => $transport,
         'ping_age_seconds' => $pingAgeSeconds, 'is_stale' => $isStale,
     ];
+}
+
+/** After a router that answered nothing at all (not "no route"), the site leaves it alone this long. */
+const TEAM_ROUTE_BREAKER_SECONDS = 180;
+const TEAM_ROUTE_GOOGLE_BREAKER_KEY = 'team_route_google_paused_until';
+const TEAM_ROUTE_OSRM_BREAKER_KEY = 'team_route_osrm_paused_until';
+
+/**
+ * The way from one point to another as the order was given, on foot or with a
+ * vehicle (v3.438.0): ['minutes' => int, 'meters' => int, 'source' =>
+ * 'google'|'osrm'], or null when no router could say.
+ *
+ * With a Google key stored (Settings → Γενικά) Google answers both: WALK for a
+ * team on foot, DRIVE for a vehicle. A vehicle that Google did not answer falls
+ * to the free OSRM; a team on foot has no free fallback, because nothing free
+ * walks, and the caller's straight line takes over. "No route" is a plain empty
+ * answer and is NOT a failure: Google WALK finds nothing on a mountain where no
+ * path is mapped, and that must not pause the router for everybody. Only a
+ * request that got no 200 at all does (a refused key, a timeout, a 5xx), for
+ * TEAM_ROUTE_BREAKER_SECONDS, so a struggling service is not asked again on
+ * every 5-second poll of every open tab.
+ *
+ * The point is not to hand back a figure at any price: a route that goes round
+ * the whole mountain is still the route, and the caller marks it as a detour.
+ */
+function teamRouteLeg(string $mode, float $lat1, float $lng1, float $lat2, float $lng2): ?array {
+    // route-distance.php is not part of the bootstrap chain: see
+    // fetchWalkingEtaMinutes() for what happened the last time this was assumed.
+    require_once __DIR__ . '/route-distance.php';
+    if (!routeDistanceAvailable()) {
+        return null;
+    }
+    $leg = [$lat1, $lng1, $lat2, $lng2];
+    $key = trim((string) getSetting('google_maps_api_key', ''));
+
+    $ask = function (array $provider, string $breakerKey) use ($leg): ?array {
+        if (externalBreakerPausedUntil($breakerKey) > 0) {
+            return null;
+        }
+        $failed = [];
+        $out = routeDistanceRunJobs(['leg' => ['provider' => $provider, 'leg' => $leg, 'geometry' => false]], $failed);
+        if (isset($out['leg'])) {
+            externalBreakerClear($breakerKey);
+            return [
+                'minutes' => max(1, (int) $out['leg']['minutes']),
+                'meters'  => (int) $out['leg']['meters'],
+                'source'  => $provider['name'],
+            ];
+        }
+        if ($failed) {
+            externalBreakerTrip($breakerKey, TEAM_ROUTE_BREAKER_SECONDS);
+        }
+        return null;
+    };
+
+    if ($key !== '') {
+        $answer = $ask(
+            ['name' => 'google', 'mode' => $mode === 'vehicle' ? 'driving' : 'walking', 'key' => $key],
+            TEAM_ROUTE_GOOGLE_BREAKER_KEY
+        );
+        if ($answer !== null) {
+            return $answer;
+        }
+    }
+    return $mode === 'vehicle' ? $ask(routeDistanceProviderFor(''), TEAM_ROUTE_OSRM_BREAKER_KEY) : null;
 }
 
 /**

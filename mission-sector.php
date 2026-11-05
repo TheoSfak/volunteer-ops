@@ -570,9 +570,19 @@ if ($action === 'assign') {
     $withdrawn = ($oldTeamId && $newTeamId !== $oldTeamId)
         ? withdrawnSectorLines($missionId, [$sectorId], (int) $userId, true)
         : [];
-    dbExecute("UPDATE mission_search_sectors SET team_id = ? WHERE id = ?", [$newTeamId, $sectorId]);
+    // On foot or with a vehicle, as chosen next to the team (v3.438.0). A
+    // sector handed to ANOTHER team (or to none) is a new order and starts from
+    // that team's own transport, so a mode chosen for the last team never
+    // carries over; the same team asked again with nothing sent keeps its mode.
+    $modeSent = isset($_POST['travel_mode']);
+    $travelMode = ($newTeamId && $modeSent) ? normalizeTravelMode(post('travel_mode')) : null;
+    if ($newTeamId && $newTeamId === $oldTeamId && !$modeSent) {
+        dbExecute("UPDATE mission_search_sectors SET team_id = ? WHERE id = ?", [$newTeamId, $sectorId]);
+    } else {
+        dbExecute("UPDATE mission_search_sectors SET team_id = ?, travel_mode = ? WHERE id = ?", [$newTeamId, $travelMode, $sectorId]);
+    }
     logAudit('assign_mission_sector', 'mission_search_sectors', $sectorId, null, [
-        'mission_id' => $missionId, 'old_team_id' => $oldTeamId, 'new_team_id' => $newTeamId,
+        'mission_id' => $missionId, 'old_team_id' => $oldTeamId, 'new_team_id' => $newTeamId, 'travel_mode' => $travelMode,
     ]);
 
     // Attaching a team to a not_started sector auto-promotes it to assigned;
