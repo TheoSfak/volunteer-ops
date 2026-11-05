@@ -2825,8 +2825,23 @@ include __DIR__ . '/includes/header.php';
     }
     .wr-overlays-hidden { position: relative; }
     .wr-overlays-hidden::after { content: ''; position: absolute; top: 2px; right: 2px; width: 8px; height: 8px; border-radius: 50%; background: #dc3545; box-shadow: 0 0 0 2px #fff; }
-    .wr-hidden-chip { background: #fff8e1; border: 1px solid #f59e0b; border-radius: 6px; padding: 4px 8px; font-size: .78rem; max-width: 240px; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
+    .wr-hidden-chip { background: #fff8e1; color: #212529; border: 1px solid #f59e0b; border-radius: 6px; padding: 4px 8px; font-size: .78rem; max-width: 240px; box-shadow: 0 1px 4px rgba(0,0,0,.2); }
     .wr-hidden-chip button { border: 0; background: none; padding: 0; color: #0d6efd; text-decoration: underline; font-size: inherit; }
+    /* Finished orders (v3.439.0, assets/js/war-room-done-orders.js). Colours are spelled out, not taken
+       from the theme: a small tick dot, a ring round a pin that has just been finished, and the counter
+       with its list have to read the same on the map in every skin. */
+    .wr-done-dot { display: flex; align-items: center; justify-content: center; box-sizing: border-box; width: 18px; height: 18px; border-radius: 50%; background: #ddd6fe; border: 1.5px solid rgba(124,58,237,.8); color: #5b21b6; font-size: 12px; line-height: 1; }
+    .wr-done-dot .bi { -webkit-text-stroke: .5px; }
+    .wr-done-ring { box-sizing: border-box; border-radius: 50%; border: 3px solid rgba(28,200,138,.75); box-shadow: 0 0 0 7px rgba(28,200,138,.2); pointer-events: none; }
+    .wr-done-chip { background: #fff; color: #212529; border: 1px solid #ced4da; border-radius: 6px; box-shadow: 0 1px 4px rgba(0,0,0,.2); font-size: .78rem; max-width: 300px; overflow: hidden; }
+    .wr-done-btn { display: flex; align-items: center; gap: 6px; width: 100%; border: 0; background: none; color: #212529; padding: 5px 10px; font-weight: 600; font-size: inherit; cursor: pointer; }
+    .wr-done-btn .bi-check-circle { color: #198754; }
+    .wr-done-list { max-height: min(40vh, 280px); overflow-y: auto; border-bottom: 1px solid #dee2e6; }
+    .wr-done-row { display: flex; align-items: center; gap: 7px; width: 100%; border: 0; background: none; text-align: left; color: #212529; padding: 5px 10px; font-size: inherit; cursor: pointer; }
+    .wr-done-row:hover { background: #f1f3f5; }
+    .wr-done-row .bi { color: #7c3aed; }
+    .wr-done-row .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .wr-done-row .m { color: #6c757d; white-space: nowrap; font-variant-numeric: tabular-nums; }
     /* OpenStreetMap layer (v3.352.0): small round pins, one colour per kind. */
     .wr-osm-pin-wrap { background: none; border: 0; }
     .wr-osm-chip { white-space: pre-line; }
@@ -6965,6 +6980,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <?php endif; ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-ar.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-ar.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-team-arcs.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-team-arcs.js') ?>"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-done-orders.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-done-orders.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/triage.js?v=<?= APP_VERSION ?>"></script>
 <?php if ($consoleView): ?>
 <?php /* defer: it reads the page's own state (the poll's arrays, the render
@@ -6992,6 +7008,10 @@ const AREA_UNIT_PREFERENCE = '<?= areaUnitSetting() ?>';
 // rather than duplicated again because renderTeamRosters() now needs it too,
 // to keep marking "my team" after a live roster change.
 const WR_MY_USER_ID = <?= (int) $user['id'] ?>;
+// The server's clock as this page was built, against this browser's: how far the browser's own
+// clock is out. The minutes since an order was finished (assets/js/war-room-done-orders.js) are
+// counted with it, so a phone whose clock is wrong does not fade things early or late.
+const WR_CLOCK_OFFSET = <?= time() ?> - Date.now() / 1000;
 <?php $__wrStrings = loadLangStrings('war-room'); $__viewerLang = $user['language'] ?? DEFAULT_LANGUAGE; ?>
 const WR_STRINGS = <?= json_encode($__wrStrings[$__viewerLang] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 const WR_STRINGS_FALLBACK = <?= json_encode($__wrStrings[DEFAULT_LANGUAGE] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
@@ -8343,6 +8363,9 @@ function mapOverlayEnsureShown(key) {
 }
 function refreshMapOverlayUi() {
     const hidden = MAP_OVERLAYS.filter(o => mapOverlaysHidden.has(o.key)).map(o => t(o.label));
+    // «Ολοκληρωμένα → Κρυφά» is announced like any other hidden layer, with how many (assets/js/war-room-done-orders.js).
+    if (wrDoneMode === 'hidden' && wrDoneHiddenCount > 0) hidden.push(t('map.done_hidden_item', {n: wrDoneHiddenCount}));
+    document.querySelectorAll('[data-done-mode]').forEach(b => b.classList.toggle('active', b.dataset.doneMode === wrDoneMode));
     document.querySelectorAll('input[data-overlay]').forEach(input => { input.checked = !mapOverlaysHidden.has(input.dataset.overlay); });
     document.getElementById('mapSatelliteToggle')?.classList.toggle('wr-overlays-hidden', hidden.length > 0);
     const ringsBtn = document.getElementById('mapRingsToggle');
@@ -8363,7 +8386,10 @@ function refreshMapOverlayUi() {
                 const div = L.DomUtil.create('div', 'leaflet-control wr-hidden-chip');
                 L.DomEvent.disableClickPropagation(div);
                 div.addEventListener('click', ev => {
-                    if (ev.target.closest('[data-overlays-show-all]')) MAP_OVERLAYS.forEach(o => mapOverlayEnsureShown(o.key));
+                    if (ev.target.closest('[data-overlays-show-all]')) {
+                        MAP_OVERLAYS.forEach(o => mapOverlayEnsureShown(o.key));
+                        if (wrDoneMode === 'hidden') wrDoneSetMode('faded');
+                    }
                 });
                 return div;
             },
@@ -9307,7 +9333,9 @@ function dispatchIncidentHtml(inc) {
 let dispatchesRenderedSig = null;
 function renderDispatches(items) {
     refreshMyOrdersCard();
-    const sig = JSON.stringify(items);
+    // The phase of every order is part of the signature: a finished order fades with the clock, not
+    // with a new poll payload (assets/js/war-room-done-orders.js).
+    const sig = JSON.stringify(items) + '|' + wrDonePhaseSig(items);
     if (sig === dispatchesRenderedSig) return;
     dispatchesRenderedSig = sig;
 
@@ -9332,6 +9360,10 @@ function renderDispatches(items) {
         // (teal/amber/green, with the team's progress in its popup), not a
         // second purple one on top of it (v3.364.0).
         if (item.map_point_id) return;
+        // Finished: live, just finished (green ring), archived (a small tick, no label) or, when
+        // command chose «Κρυφά», not drawn at all.
+        const donePhase = wrDonePhase(item.completed_ts);
+        if (donePhase === 'hidden') return;
         const acksHtml = item.acks.length
             ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? escapeHtml(a.team_label) + ' — ' : ''}${guestNameHtml(a.user_name, a.is_external, a.home_team_name, a.home_team_color_bg, a.home_team_color_fg, a.guest_country_code)}${k9BadgeHtml(a.user_id, true)}${captainBadgeHtml(a.user_id, true)} (${a.time})`).join('<br>') + '</div>'
             : '';
@@ -9398,7 +9430,10 @@ function renderDispatches(items) {
         const popupHtml = `<strong>${escapeHtml(item.team_label)}</strong>${item.label ? '<br>' + escapeHtml(item.label) : ''}` + dispatchIncidentHtml(item.incident) + etaHtml + (progressHtml || acksHtml) + declinesHtml + receiveHtml + ackHtml + directionsHtml +
             (item.can_delete ? `<br><button type="button" class="btn btn-sm btn-outline-danger mt-1 dispatch-delete-btn" data-id="${item.id}">${t('common.delete')}</button>` : '');
         let layer = null;
-        if (item.type === 'point') {
+        if (donePhase === 'archived') {
+            layer = wrDoneDrawDispatch(item, popupHtml);
+        } else if (item.type === 'point') {
+            if (donePhase === 'fresh') wrDoneAddRing(item);
             const icon = L.divIcon({className:'', html:'<i class="bi bi-geo-alt-fill" style="font-size:28px;color:#7c3aed;filter:drop-shadow(0 1px 2px #0008);"></i>', iconSize:[28,28], iconAnchor:[14,26]});
             layer = L.marker([item.geo.lat, item.geo.lng], {icon}).addTo(dispatchLayer).bindPopup(popupHtml);
             layer.bindTooltip(dispatchTeamLabelHtml(item), {permanent:true, direction:'right', offset:[8,-8], className:'dispatch-team-label', interactive:false});
@@ -9419,6 +9454,7 @@ function renderDispatches(items) {
         }
     });
     if (reopenLayer) reopenLayer.openPopup();
+    wrDoneChipRefresh();
 }
 // Google Maps opened with no "origin" resolves directions from the device's
 // own current location — simpler and more reliable than us grabbing
@@ -10896,7 +10932,7 @@ function renderSectorLayer(items) {
     // every manage popup: every path that creates, renames or deletes a team
     // ends in location.reload(), so it cannot change under a live page.
     const sig = JSON.stringify(items) + '|' + coverageModeActive + '|' + JSON.stringify(sectorCoverageById)
-        + '|' + openSectorId + '|' + openBuildingId;
+        + '|' + openSectorId + '|' + openBuildingId + '|' + wrDonePhaseSig(items);
     if (sig === sectorsRenderedSig) return;
     sectorsRenderedSig = sig;
 
@@ -10904,6 +10940,11 @@ function renderSectorLayer(items) {
     sectorBuildingLayer.eachLayer(layer => { if (layer !== openBuildingLayer) sectorBuildingLayer.removeLayer(layer); });
 
     items.forEach(item => {
+        // A finished sector is a record of ground covered, never deleted: bright for a few minutes,
+        // then only its outline in its team's colour with no name, or nothing at all when command
+        // chose «Κρυφά» (assets/js/war-room-done-orders.js). An open popup is never pulled away.
+        const donePhase = wrDonePhase(item.completed_ts);
+        if (donePhase === 'hidden' && String(item.id) !== String(openSectorId)) return;
         if (String(item.id) !== String(openSectorId)) {
             const color = SECTOR_STATUS_HEX[item.status] || '#6c757d';
             const buildingsSummary = item.buildings.length
@@ -10948,7 +10989,9 @@ function renderSectorLayer(items) {
                 `<span class="badge bg-${item.status_color}">${escapeHtml(item.status_label)}</span> ${escapeHtml(item.team_label)}${sectorCoverageBadgeHtml(item)}` +
                 sizeLine + buildingsSummary + completePrompt + navBtn + ackBtn + selfReportBtn + manageHtml;
 
-            const layer = L.polygon(item.geo, {pane: 'sectorPane', color, fillColor: color, fillOpacity: 0.35, weight: 2}).addTo(sectorLayer).bindPopup(popupHtml);
+            const archived = donePhase === 'archived';
+            const outline = archived ? wrDoneSectorOutline(item, color) : color;
+            const layer = L.polygon(item.geo, {pane: 'sectorPane', color: outline, fillColor: outline, fillOpacity: archived ? 0.06 : 0.35, opacity: archived ? 0.8 : 1, weight: 2}).addTo(sectorLayer).bindPopup(popupHtml);
             // Named the way mapSectorsAt() names them: sector names repeat
             // across the rings of one mission.
             const pickArea = (areas || []).find(a => a.id === item.area_id);
@@ -10961,7 +11004,12 @@ function renderSectorLayer(items) {
             // Verified Coverage mode is active, so scanning the map answers
             // "which sectors still need walking" without opening every popup.
             const tooltipCoverage = coverageModeActive ? sectorCoverageBadgeHtml(item) : '';
-            bindTieredPolygonLabel(layer, item.label, item.geo, 'wr-polygon-label', {suffix: tooltipCoverage});
+            if (archived) {
+                // No name written on the ground any more: one hover away.
+                layer.bindTooltip(wrDoneSectorTip(item), {sticky: true});
+            } else {
+                bindTieredPolygonLabel(layer, item.label, item.geo, 'wr-polygon-label', {suffix: tooltipCoverage + (donePhase === 'fresh' ? ' ✓' : '')});
+            }
             layer.sectorId = item.id;
             // Verified Coverage gap-cell detail is only ever drawn for whichever
             // sector's popup is currently open (never all sectors at once — see
@@ -10973,11 +11021,14 @@ function renderSectorLayer(items) {
 
         item.buildings.forEach(b => {
             if (String(b.id) === String(openBuildingId)) return;
+            // The checked buildings of a sector that is over are in its popup; not pins on the map.
+            if (donePhase === 'archived' || donePhase === 'hidden') return;
             addSectorBuildingMarker(b, item);
         });
     });
 
     applyPolygonLabelTiers(sectorLayer);
+    wrDoneChipRefresh();
 }
 sectorLayer?.on('popupopen', event => {
     const popupEl = event.popup.getElement();
@@ -21178,6 +21229,8 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
 })();
 
 setTimeout(() => {
+    // Which finished orders are faded, before the first draw of any of them (assets/js/war-room-done-orders.js).
+    wrDoneInit(<?= (int) $missionId ?>, MAP_LAYER_TOOLS_ENABLED);
     renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreachHistory); renderMissingPersonMarker(missingPerson); renderSearchRingsLayer(missingPerson); renderWeatherControl(weather);
     renderMyTasks(myTasks);
     renderMySectors(sectors);
@@ -29218,7 +29271,7 @@ function routeWaypointColor(wp, isCurrent) {
 let routeLayerRenderedSig = null;
 function renderRouteLayer(allRoutes) {
     if (!routeLayer) return;
-    const sig = JSON.stringify(allRoutes);
+    const sig = JSON.stringify(allRoutes) + '|' + wrDoneRoutesSig(allRoutes);
     if (sig === routeLayerRenderedSig) return;
     routeLayerRenderedSig = sig;
 
@@ -29237,14 +29290,19 @@ function renderRouteLayer(allRoutes) {
 
     routeLayer.clearLayers();
     let reopenLayer = null;
-    // Live map only — a completed route (like a cancelled one) drops off
-    // here once done, so numbered waypoint pins/lines from finished patrols
-    // don't accumulate over a long multi-team mission. Nothing is lost: the
-    // full permanent record stays exactly as before in "Πορείες Ομάδων",
-    // each volunteer's own "Η Πορεία μου" card, the Activity feed, and the
-    // printed report — this is a live-map declutter, not a data change.
-    (allRoutes || []).filter(r => r.status === 'active').forEach(route => {
+    // Live map only — a completed route (like a cancelled one) used to drop
+    // off here once done, so numbered waypoint pins/lines from finished
+    // patrols don't accumulate over a long multi-team mission. Nothing is
+    // lost: the full permanent record stays exactly as before in "Πορείες
+    // Ομάδων", each volunteer's own "Η Πορεία μου" card, the Activity feed,
+    // and the printed report — this is a live-map declutter, not a data
+    // change. Since v3.439.0 a finished route stays as a record of the ground
+    // walked: bright for a few minutes, then a thin faint line with small dots
+    // (assets/js/war-room-done-orders.js). «Όπως πριν» in the layers menu
+    // brings back the old behaviour, and «Κρυφά» takes it off the map.
+    (allRoutes || []).filter(r => !['skip', 'hidden'].includes(wrDoneRoutePhase(r))).forEach(route => {
         if (!route.waypoints.length) return;
+        if (wrDoneRoutePhase(route) === 'archived') { wrDoneDrawRoute(route); return; }
         const currentSeq = (route.waypoints.find(w => !w.completed_at && !w.skipped_at) || {}).seq;
         route.waypoints.forEach(wp => {
             const color = routeWaypointColor(wp, wp.seq === currentSeq);
@@ -29314,6 +29372,7 @@ function renderRouteLayer(allRoutes) {
         }
     });
     if (reopenLayer) reopenLayer.openPopup();
+    wrDoneChipRefresh();
 }
 
 // Delegated the same way dispatchLayer's popup buttons are (see that block

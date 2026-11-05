@@ -1312,6 +1312,10 @@ function loadDispatchProgress(array $dispatchIds): array {
             'completed' => $hm($row['completed_at']),
             'note'      => $row['completed_note'] !== null && $row['completed_note'] !== '' ? $row['completed_note'] : null,
             'arrived_raw' => $row['arrived_at'],
+            // When the team finished, as a unix time: the live map fades an order a few
+            // minutes after this (v3.439.0), counted by the browser against its own clock,
+            // so nothing in the payload may slide with the time of the request.
+            'completed_ts' => $row['completed_at'] ? (int) strtotime($row['completed_at']) : null,
         ];
     }
     return $byDispatch;
@@ -1459,6 +1463,7 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
         // is the pin contradicting itself.
         $targetTeamArrived = $teamId !== null && (
             !empty($progress['t' . $teamId]['arrived'])
+            || !empty($progress['t' . $teamId]['completed'])   // finished is more than arrived: no time left to guess (v3.439.0)
             || in_array($teamId, array_column($acks, 'team_id'), true)
         );
         // Nor for a team that said «Δεν μπορώ»: it is not on its way.
@@ -1500,6 +1505,11 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             'my_ack'       => $teamArrived,
             'can_ack'      => $isApprovedParticipant && $eligible && !$teamArrived && !$mine['completed'],
             'my_completed' => $mine['completed'],
+            // When the team this was sent to finished it (v3.439.0): the map fades it a few minutes
+            // later. Always null for an order sent to every team, since no single team finishes that
+            // one, so it stays live; null too for a team that only said «Δεν μπορώ».
+            'completed_ts'      => $teamId !== null ? ($progress['t' . $teamId]['completed_ts'] ?? null) : null,
+            'completed_display' => $teamId !== null ? ($progress['t' . $teamId]['completed'] ?? null) : null,
             'can_complete' => $isApprovedParticipant && $eligible && !$mine['completed'],
             // «Δεν μπορώ» is my TEAM's answer too, like the three steps.
             'my_declined'  => $declines['dispatch:' . $dispatchId][$myScopeKey] ?? null,
@@ -1730,6 +1740,10 @@ function loadMissionSectorsForUser(int $missionId, int $userId, bool $canManageW
             'status_label'           => sectorStatusLabel($row['status']),
             'status_color'           => SECTOR_STATUS_COLORS[$row['status']] ?? 'secondary',
             'status_updated_at'      => $row['status_updated_at'] ? date('d/m H:i', strtotime($row['status_updated_at'])) : null,
+            // A finished sector's time as a unix time (v3.439.0): the live map keeps it bright for a
+            // few minutes and then only outlines it. Null for every other status, so a sector sent
+            // back for a recheck is a live one again at once.
+            'completed_ts'           => $row['status'] === 'completed' && $row['status_updated_at'] ? (int) strtotime($row['status_updated_at']) : null,
             'status_updated_by_name' => $row['status_updated_by_name'],
             'acknowledged_at'        => $row['acknowledged_at'] ? date('d/m H:i', strtotime($row['acknowledged_at'])) : null,
             'acknowledged_by_name'   => $row['acknowledged_by_name'],
@@ -2117,6 +2131,8 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
             'created_at_display'    => date('d/m H:i', strtotime($r['created_at'])),
             'created_by_name'       => $r['created_by_name'],
             'completed_at_display'  => $r['completed_at'] ? date('d/m H:i', strtotime($r['completed_at'])) : null,
+            // As a unix time (v3.439.0), for the live map's «ολοκληρωμένα» fade.
+            'completed_ts'          => $r['completed_at'] ? (int) strtotime($r['completed_at']) : null,
             'cancelled_at_display'  => $r['cancelled_at'] ? date('d/m H:i', strtotime($r['cancelled_at'])) : null,
             'cancel_reason'         => $r['cancel_reason'],
             'can_manage'            => $canManageWarRoom,

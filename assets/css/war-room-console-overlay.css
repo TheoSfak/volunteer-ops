@@ -720,5 +720,12 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .leaflet-top.leaflet-right { top: 86p
 html[data-wrc-skin="overlay"][data-wrc-ov] .leaflet-top.leaflet-left { top: 86px; left: 100px; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .leaflet-bottom.leaflet-left { left: 100px; bottom: 12px; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .leaflet-bottom.leaflet-right { right: 0; bottom: 0; }
+/* The list behind the «N ολοκληρωμένα» counter (assets/js/war-room-done-orders.js) normally opens upwards from the chip. Here the left panels stand over the
+   map's lower left, so it would open under them: it opens to the right of the chip instead, above the bottom bar, in the free middle of the map. */
+html[data-wrc-skin="overlay"][data-wrc-ov] .wr-done-chip { position: relative; overflow: visible; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wr-done-list {
+    position: absolute; left: 350px; bottom: 100px; width: 300px; /* the left panels end at 100px + 340px; the chip starts at 100px */
+    background: #fff; border: 1px solid #ced4da; border-radius: 6px; box-shadow: 0 1px 6px rgba(0, 0, 0, .35);
+}
 html[data-wrc-skin="overlay"][data-wrc-ov] .leaflet-control-attribution { background: rgba(20, 26, 31, .6); color: var(--ov-mut); }
 html[data-wrc-skin="overlay"][data-wrc-ov] .leaflet-control-attribution a { color: #9ecbff; }

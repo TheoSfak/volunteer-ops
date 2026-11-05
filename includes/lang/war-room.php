@@ -560,6 +560,15 @@ return [
         'map.overlay_dispatch' => 'Αποστολές στίγματος/περιοχής',
         'map.overlay_routes' => 'Εντολές πορείας',
         'map.overlay_team_arcs' => 'Τόξα προορισμού ομάδων',
+        // Finished orders on the live map (v3.439.0): faded after a few minutes, never deleted.
+        'map.done_header' => 'Ολοκληρωμένα',
+        'map.done_mode_normal' => 'Όπως πριν',
+        'map.done_mode_faded' => 'Ξεθωριασμένα',
+        'map.done_mode_hidden' => 'Κρυφά',
+        'map.done_hint' => 'Ό,τι ολοκληρώθηκε πριν από {min}′ ξεθωριάζει. Τα «Δεν μπορώ» και οι επανέλεγχοι δεν ξεθωριάζουν ποτέ.',
+        'map.done_chip' => '{n} ολοκληρωμένα',
+        'map.done_hidden_item' => 'Ολοκληρωμένα ({n})',
+        'map.done_list_title' => 'Ολοκληρωμένα στον χάρτη — πατήστε για τη λίστα',
         // Destination arcs (v3.437.0): the dial at the top of the arch from a team to where it was sent.
         'arc.eta' => 'ETA',
         'arc.minutes' => 'λεπτά',
@@ -3853,6 +3862,15 @@ return [
         'map.overlay_dispatch' => 'Point/area dispatches',
         'map.overlay_routes' => 'Route orders',
         'map.overlay_team_arcs' => 'Team destination arcs',
+        // Finished orders on the live map (v3.439.0): faded after a few minutes, never deleted.
+        'map.done_header' => 'Completed',
+        'map.done_mode_normal' => 'As before',
+        'map.done_mode_faded' => 'Faded',
+        'map.done_mode_hidden' => 'Hidden',
+        'map.done_hint' => 'Whatever finished more than {min}′ ago fades. «I can\'t» answers and rechecks never fade.',
+        'map.done_chip' => '{n} completed',
+        'map.done_hidden_item' => 'Completed ({n})',
+        'map.done_list_title' => 'Completed on the map — click for the list',
         // Destination arcs (v3.437.0): the dial at the top of the arch from a team to where it was sent.
         'arc.eta' => 'ETA',
         'arc.minutes' => 'min',
