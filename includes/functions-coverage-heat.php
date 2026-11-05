@@ -414,6 +414,76 @@ function coverageHeatSignature(int $missionId): string
     return ((int) ($pings['c'] ?? 0)) . '-' . ((int) ($pings['m'] ?? 0)) . '-' . dechex(crc32($ground));
 }
 
+/** The most cells one TEAM's answer carries: a few teams share one request that the page repeats every half minute. */
+const COVERAGE_TEAM_MAX_CELLS = 2500;
+
+/**
+ * What the per-team picture was made from: everything coverageHeatSignature() looks at, and who belongs to which
+ * team (moving a person to another team moves their ground with them) and how each team is named and coloured.
+ */
+function coverageTeamSignature(int $missionId): string
+{
+    $members = dbFetchOne(
+        "SELECT COUNT(*) AS c, COALESCE(SUM(CRC32(CONCAT(team_id, ':', user_id))), 0) AS h FROM mission_team_members WHERE mission_id = ?",
+        [$missionId]
+    );
+    $teams = dbFetchOne(
+        "SELECT COUNT(*) AS c, COALESCE(SUM(CRC32(CONCAT(id, ':', COALESCE(codename, ''), ':', COALESCE(team_number, ''), ':', COALESCE(color, '')))), 0) AS h
+         FROM mission_teams WHERE mission_id = ?",
+        [$missionId]
+    );
+    $who = implode(':', [$members['c'] ?? 0, $members['h'] ?? 0, $teams['c'] ?? 0, $teams['h'] ?? 0]);
+    return coverageHeatSignature($missionId) . '-t' . dechex(crc32($who));
+}
+
+/**
+ * Where each TEAM has been (v3.440.0): the same cells, judged by the same rules of the ground, as the heat layer
+ * (computeMissionCoverageHeat) and Verified Coverage - a cell is a team's when somebody of that team had it in
+ * sight - but kept apart per team, so the map can paint each team's ground in its own colour and show one team
+ * on its own. Only whether a cell was seen is kept, not for how long: the heat layer is the one that says how long.
+ *
+ * A person's whole history belongs to the team they are in NOW (mission_team_members has one row per person per
+ * mission), and a person in no team belongs to none: their ground is on the heat layer, not here.
+ *
+ * @return array{teams: list<array{id: int, label: string, color: string, cells: list<array{0: float, 1: float}>, cell_m: int, people: int, fixes: int}>, sig: string}
+ */
+function computeMissionTeamCoverage(int $missionId): array
+{
+    $sig = coverageTeamSignature($missionId);
+    $ground = coverageHeatGround($missionId);
+    $teams = dbFetchAll("SELECT id, codename, team_number, color FROM mission_teams WHERE mission_id = ? ORDER BY id", [$missionId]);
+    $rows = dbFetchAll(
+        "SELECT vp.user_id, mtm.team_id, vp.lat, vp.lng, vp.accuracy_meters, vp.created_at
+         FROM volunteer_pings vp
+         JOIN shifts s ON s.id = vp.shift_id
+         JOIN mission_team_members mtm ON mtm.mission_id = s.mission_id AND mtm.user_id = vp.user_id
+         WHERE s.mission_id = ? AND (vp.accuracy_meters IS NULL OR vp.accuracy_meters <= ?)
+         ORDER BY vp.user_id, vp.created_at, vp.id",
+        [$missionId, coverageHeatLoosestAccuracy($ground['terrains'])]
+    );
+    $byTeam = [];
+    foreach ($rows as $row) {
+        $byTeam[(int) $row['team_id']][] = $row;
+    }
+
+    $out = [];
+    foreach ($teams as $team) {
+        $id = (int) $team['id'];
+        $heat = isset($byTeam[$id]) ? coverageHeatCells($byTeam[$id], $ground, COVERAGE_HEAT_CELL_M, COVERAGE_TEAM_MAX_CELLS) : null;
+        $out[] = [
+            'id'     => $id,
+            'label'  => teamLabel($team['codename'], $team['team_number']),
+            'color'  => teamBadgeColors($team['color'])[0],
+            'cell_m' => $heat['cell_m'] ?? COVERAGE_HEAT_CELL_M,
+            // Five decimals is a metre: the cells are 20 m or more, and the answer is a quarter of the size.
+            'cells'  => $heat ? array_map(fn($c) => [round((float) $c[0], 5), round((float) $c[1], 5)], $heat['cells']) : [],
+            'people' => $heat['people'] ?? 0,
+            'fixes'  => $heat['fixes'] ?? 0,
+        ];
+    }
+    return ['teams' => $out, 'sig' => $sig];
+}
+
 /**
  * The heat of one mission, from its pings (the positions stored are the estimate the server kept, not the raw fix:
  * see recordVolunteerPing()) judged on the ground of its map. `sig` is coverageHeatSignature() of what it was made from.

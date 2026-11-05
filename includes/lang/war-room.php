@@ -569,6 +569,16 @@ return [
         'map.done_chip' => '{n} ολοκληρωμένα',
         'map.done_hidden_item' => 'Ολοκληρωμένα ({n})',
         'map.done_list_title' => 'Ολοκληρωμένα στον χάρτη — πατήστε για τη λίστα',
+        // Where each team has really been, and looking at one team only (v3.440.0).
+        'map.cov_header' => 'Κάλυψη ομάδων',
+        'map.cov_toggle' => 'Πού πέρασαν οι ομάδες (GPS)',
+        'map.cov_sum_gps' => 'GPS',
+        'map.cov_focus_label' => 'Εστίαση σε ομάδα',
+        'map.cov_focus_all' => 'Όλες',
+        'map.cov_hint' => 'Το έδαφος που είδε πραγματικά κάθε ομάδα, με τους ίδιους κανόνες με το 🛰️. Μια εστίαση κρύβει ό,τι ανήκει σε άλλες ομάδες.',
+        'map.cov_none' => 'Καμία ομάδα δεν έχει στίγματα ακόμη.',
+        'map.cov_failed' => 'Δεν φορτώθηκε η κάλυψη των ομάδων.',
+        'map.focus_hidden_item' => 'Μόνο η ομάδα {team}',
         // Destination arcs (v3.437.0): the dial at the top of the arch from a team to where it was sent.
         'arc.eta' => 'ETA',
         'arc.minutes' => 'λεπτά',
@@ -3871,6 +3881,16 @@ return [
         'map.done_chip' => '{n} completed',
         'map.done_hidden_item' => 'Completed ({n})',
         'map.done_list_title' => 'Completed on the map — click for the list',
+        // Where each team has really been, and looking at one team only (v3.440.0).
+        'map.cov_header' => 'Team coverage',
+        'map.cov_toggle' => 'Where the teams have been (GPS)',
+        'map.cov_sum_gps' => 'GPS',
+        'map.cov_focus_label' => 'Focus on a team',
+        'map.cov_focus_all' => 'All',
+        'map.cov_hint' => 'The ground each team has really had in sight, by the same rules as 🛰️. A focus hides whatever belongs to the other teams.',
+        'map.cov_none' => 'No team has any positions yet.',
+        'map.cov_failed' => 'The team coverage did not load.',
+        'map.focus_hidden_item' => 'Only team {team}',
         // Destination arcs (v3.437.0): the dial at the top of the arch from a team to where it was sent.
         'arc.eta' => 'ETA',
         'arc.minutes' => 'min',

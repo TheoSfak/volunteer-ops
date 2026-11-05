@@ -273,7 +273,8 @@ final class CompletedOrdersFadeTest extends TestCase
     {
         $js = $this->script();
         // Only a completion time puts an order into a phase at all.
-        $this->assertMatchesRegularExpression("/function wrDonePhase\\(ts\\) \\{\\s*if \\(!ts \\|\\| wrDoneMode === 'normal'\\) return 'live';/", $js);
+        // (Since v3.440.0 the first line looks at «Εστίαση σε ομάδα», which hides an order of another team; the rule is unchanged.)
+        $this->assertMatchesRegularExpression("/function wrDonePhase\\(ts, teamId\\) \\{\\s*if \\(wrDoneFocusHides\\(teamId\\)\\) return 'hidden';\\s*if \\(!ts \\|\\| wrDoneMode === 'normal'\\) return 'live';/", $js);
         // A route that is open is live; a cancelled one never was on the map.
         $this->assertStringContainsString("if (route.status === 'active') return 'live';", $js);
         $this->assertStringContainsString("if (route.status !== 'completed' || wrDoneMode === 'normal') return 'skip';", $js);

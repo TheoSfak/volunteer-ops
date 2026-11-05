@@ -222,6 +222,8 @@ function renderTeamArcs(arcs) {
     teamArcLabelLayer.clearLayers();
     if (teamArcSuspended) return;
     (arcs || []).forEach(arc => {
+        // Looking at one team only («Εστίαση σε ομάδα», assets/js/war-room-team-coverage.js): the others' arcs are out of the picture.
+        if (typeof wrFocusExcludes === 'function' && wrFocusExcludes(arc.team_id)) return;
         // One arc failing to draw must not take the others, or the poll, with it.
         try { drawTeamArc(arc); } catch (e) { console.error('team arc', e); }
     });

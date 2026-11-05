@@ -2842,6 +2842,16 @@ include __DIR__ . '/includes/header.php';
     .wr-done-row .bi { color: #7c3aed; }
     .wr-done-row .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .wr-done-row .m { color: #6c757d; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    /* «Κάλυψη ομάδων» / «Εστίαση σε ομάδα» (v3.440.0, assets/js/war-room-team-coverage.js): a team's chip wears its own colour. */
+    /* The two folded sections of the layers menu: a heading that opens, with what is on written on its own line. */
+    .wr-menu-sum { display: flex; align-items: baseline; gap: 6px; cursor: pointer; list-style: none; padding-top: .3rem; padding-bottom: .3rem; }
+    .wr-menu-sum::-webkit-details-marker { display: none; }
+    .wr-menu-sum::before { content: '\25B8'; font-size: .7rem; }
+    details[open] > .wr-menu-sum::before { content: '\25BE'; }
+    .wr-menu-sum .wr-sum-s { font-weight: 400; text-transform: none; }
+    .wr-focus-chip { padding: 1px 8px; font-size: .78rem; font-weight: 600; line-height: 1.5; }
+    .wr-focus-chip.active:not([data-bg]) { background: #6c757d; color: #fff; }
+    .wr-cov-canvas { pointer-events: none; }
     /* OpenStreetMap layer (v3.352.0): small round pins, one colour per kind. */
     .wr-osm-pin-wrap { background: none; border: 0; }
     .wr-osm-chip { white-space: pre-line; }
@@ -6980,6 +6990,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <?php endif; ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-ar.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-ar.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-team-arcs.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-team-arcs.js') ?>"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-team-coverage.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-team-coverage.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-done-orders.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-done-orders.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/triage.js?v=<?= APP_VERSION ?>"></script>
 <?php if ($consoleView): ?>
@@ -7226,7 +7237,7 @@ let pendingAreaSeed = null;
 // below) — needs the team roster available client-side for that <select>'s
 // options, same id+label shape mission-history.php/etc. already compute
 // server-side via teamLabel().
-let teams = <?= json_encode(array_values(array_map(fn($t) => ['id' => $t['id'], 'label' => teamLabel($t['codename'], $t['team_number']), 'transport' => normalizeTeamTransport($t['transport'] ?? 'foot')], $teams))) ?>;
+let teams = <?= json_encode(array_values(array_map(fn($t) => ['id' => $t['id'], 'label' => teamLabel($t['codename'], $t['team_number']), 'transport' => normalizeTeamTransport($t['transport'] ?? 'foot'), 'color_bg' => teamBadgeColors($t['color'] ?? null)[0], 'color_fg' => teamBadgeColors($t['color'] ?? null)[1]], $teams))) ?>;
 // Foot or vehicle for an order (v3.438.0): the team's own way is the starting
 // answer in every window that asks, and the person giving the order changes it
 // with one choice. "vehicle" for a team on a motorbike or in a car.
@@ -8365,7 +8376,9 @@ function refreshMapOverlayUi() {
     const hidden = MAP_OVERLAYS.filter(o => mapOverlaysHidden.has(o.key)).map(o => t(o.label));
     // «Ολοκληρωμένα → Κρυφά» is announced like any other hidden layer, with how many (assets/js/war-room-done-orders.js).
     if (wrDoneMode === 'hidden' && wrDoneHiddenCount > 0) hidden.push(t('map.done_hidden_item', {n: wrDoneHiddenCount}));
-    document.querySelectorAll('[data-done-mode]').forEach(b => b.classList.toggle('active', b.dataset.doneMode === wrDoneMode));
+    // So is looking at one team only («Εστίαση σε ομάδα», assets/js/war-room-team-coverage.js): never silent.
+    if (wrFocusTeam !== null) hidden.push(t('map.focus_hidden_item', {team: wrFocusLabel()}));
+    wrDoneUi();
     document.querySelectorAll('input[data-overlay]').forEach(input => { input.checked = !mapOverlaysHidden.has(input.dataset.overlay); });
     document.getElementById('mapSatelliteToggle')?.classList.toggle('wr-overlays-hidden', hidden.length > 0);
     const ringsBtn = document.getElementById('mapRingsToggle');
@@ -8389,6 +8402,7 @@ function refreshMapOverlayUi() {
                     if (ev.target.closest('[data-overlays-show-all]')) {
                         MAP_OVERLAYS.forEach(o => mapOverlayEnsureShown(o.key));
                         if (wrDoneMode === 'hidden') wrDoneSetMode('faded');
+                        wrFocusSet(null);
                     }
                 });
                 return div;
@@ -9362,7 +9376,7 @@ function renderDispatches(items) {
         if (item.map_point_id) return;
         // Finished: live, just finished (green ring), archived (a small tick, no label) or, when
         // command chose «Κρυφά», not drawn at all.
-        const donePhase = wrDonePhase(item.completed_ts);
+        const donePhase = wrDonePhase(item.completed_ts, item.team_id);
         if (donePhase === 'hidden') return;
         const acksHtml = item.acks.length
             ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? escapeHtml(a.team_label) + ' — ' : ''}${guestNameHtml(a.user_name, a.is_external, a.home_team_name, a.home_team_color_bg, a.home_team_color_fg, a.guest_country_code)}${k9BadgeHtml(a.user_id, true)}${captainBadgeHtml(a.user_id, true)} (${a.time})`).join('<br>') + '</div>'
@@ -10943,7 +10957,7 @@ function renderSectorLayer(items) {
         // A finished sector is a record of ground covered, never deleted: bright for a few minutes,
         // then only its outline in its team's colour with no name, or nothing at all when command
         // chose «Κρυφά» (assets/js/war-room-done-orders.js). An open popup is never pulled away.
-        const donePhase = wrDonePhase(item.completed_ts);
+        const donePhase = wrDonePhase(item.completed_ts, item.team_id);
         if (donePhase === 'hidden' && String(item.id) !== String(openSectorId)) return;
         if (String(item.id) !== String(openSectorId)) {
             const color = SECTOR_STATUS_HEX[item.status] || '#6c757d';
@@ -21231,6 +21245,8 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
 setTimeout(() => {
     // Which finished orders are faded, before the first draw of any of them (assets/js/war-room-done-orders.js).
     wrDoneInit(<?= (int) $missionId ?>, MAP_LAYER_TOOLS_ENABLED);
+    // And which team's orders, and where the teams have been (assets/js/war-room-team-coverage.js), for command.
+    wrCovInit(<?= (int) $missionId ?>, MAP_LAYER_TOOLS_ENABLED);
     renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreachHistory); renderMissingPersonMarker(missingPerson); renderSearchRingsLayer(missingPerson); renderWeatherControl(weather);
     renderMyTasks(myTasks);
     renderMySectors(sectors);

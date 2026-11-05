@@ -36,10 +36,13 @@ if (!canManageActionRoom($mission['responsible_user_id'] ? (int) $mission['respo
 // lock (every other request of this browser, the 5 s poll included, would queue behind it).
 session_write_close();
 
-$sig = coverageHeatSignature($missionId);
+// `by=team` (v3.440.0): the same ground kept apart per team, for the «Κάλυψη ομάδων» layer of the
+// layers menu, which every skin has. Same gate, same «anything new?» answer.
+$byTeam = (string) get('by') === 'team';
+$sig = $byTeam ? coverageTeamSignature($missionId) : coverageHeatSignature($missionId);
 if ($sig === (string) get('sig')) {
     echo json_encode(['ok' => true, 'unchanged' => true, 'sig' => $sig]);
     exit;
 }
 
-echo json_encode(['ok' => true] + computeMissionCoverageHeat($missionId));
+echo json_encode(['ok' => true] + ($byTeam ? computeMissionTeamCoverage($missionId) : computeMissionCoverageHeat($missionId)));

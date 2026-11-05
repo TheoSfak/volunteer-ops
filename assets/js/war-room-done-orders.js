@@ -48,8 +48,16 @@ function wrDoneNowSec() {
     return Date.now() / 1000 + (typeof WR_CLOCK_OFFSET === 'number' ? WR_CLOCK_OFFSET : 0);
 }
 
+// Is the team of this order out of the picture because command is looking at one other team?
+// (assets/js/war-room-team-coverage.js: «Εστίαση σε ομάδα»). Out of the picture is «hidden», the very
+// state «Κρυφά» uses, so a focus leaves an open popup alone, redraws only when it changed, and so on.
+function wrDoneFocusHides(teamId) {
+    return typeof wrFocusExcludes === 'function' && wrFocusExcludes(teamId);
+}
+
 // Which phase a dispatch or a sector is in, from the time its team finished it.
-function wrDonePhase(ts) {
+function wrDonePhase(ts, teamId) {
+    if (wrDoneFocusHides(teamId)) return 'hidden';
     if (!ts || wrDoneMode === 'normal') return 'live';
     if (wrDoneMode === 'hidden') return 'hidden';
     return wrDoneNowSec() - ts > WR_DONE_FRESH_SECONDS ? 'archived' : 'fresh';
@@ -58,6 +66,7 @@ function wrDonePhase(ts) {
 // Routes: an active one is live; a finished one is only on the map from
 // «Ξεθωριασμένα» on (it never was in «Όπως πριν»); a cancelled one never.
 function wrDoneRoutePhase(route) {
+    if (wrDoneFocusHides(route.team_id)) return 'hidden';
     if (route.status === 'active') return 'live';
     if (route.status !== 'completed' || wrDoneMode === 'normal') return 'skip';
     if (wrDoneMode === 'hidden') return 'hidden';
@@ -66,7 +75,7 @@ function wrDoneRoutePhase(route) {
 
 // One character per item, for the render functions' "nothing changed" signatures.
 function wrDonePhaseSig(items) {
-    return wrDoneMode + ':' + (items || []).map(i => wrDonePhase(i.completed_ts)[0]).join('');
+    return wrDoneMode + ':' + (items || []).map(i => wrDonePhase(i.completed_ts, i.team_id)[0]).join('');
 }
 function wrDoneRoutesSig(items) {
     return wrDoneMode + ':' + (items || []).map(r => wrDoneRoutePhase(r)[0]).join('');
@@ -133,15 +142,15 @@ function wrDoneDrawRoute(route) {
 function wrDoneEntries() {
     const out = [];
     (dispatches || []).forEach(d => {
-        if (!d.completed_ts || d.map_point_id) return;
+        if (!d.completed_ts || d.map_point_id || wrDoneFocusHides(d.team_id)) return;
         out.push({kind: 'dispatch', id: d.id, ts: d.completed_ts, team: d.team_label || '', label: d.label || '', time: d.completed_display || ''});
     });
     (sectors || []).forEach(s => {
-        if (!s.completed_ts) return;
+        if (!s.completed_ts || wrDoneFocusHides(s.team_id)) return;
         out.push({kind: 'sector', id: s.id, ts: s.completed_ts, team: s.team_label || '', label: s.label || '', time: s.status_updated_at || ''});
     });
     (routes || []).forEach(r => {
-        if (r.status !== 'completed') return;
+        if (r.status !== 'completed' || wrDoneFocusHides(r.team_id)) return;
         out.push({kind: 'route', id: r.id, ts: r.completed_ts || 0, team: r.team_label || '', label: r.title || '', time: r.completed_at_display || ''});
     });
     return out.sort((a, b) => b.ts - a.ts);
@@ -277,10 +286,11 @@ function wrDoneAddMenu() {
     const btn = document.getElementById('mapSatelliteToggle');
     const menu = btn?.parentNode.querySelector('.dropdown-menu');
     if (!menu) return;
+    // Folded: the menu is already as tall as a laptop's window, and its state is on the fold's own line.
     const li = document.createElement('li');
-    li.innerHTML = '<hr class="dropdown-divider"><h6 class="dropdown-header"></h6>'
-        + '<div class="px-3 pb-1"><div class="btn-group btn-group-sm w-100 wr-done-modes" role="group"></div><div class="small text-muted mt-1 wr-done-hint"></div></div>';
-    li.querySelector('h6').textContent = t('map.done_header');
+    li.innerHTML = '<hr class="dropdown-divider"><details class="wr-menu-sec"><summary class="dropdown-header wr-menu-sum"><span class="wr-sum-t"></span><span class="wr-sum-s wr-done-sum"></span></summary>'
+        + '<div class="px-3 pb-1"><div class="btn-group btn-group-sm w-100 wr-done-modes" role="group"></div><div class="small text-muted mt-1 wr-done-hint"></div></div></details>';
+    li.querySelector('.wr-sum-t').textContent = t('map.done_header');
     li.querySelector('.wr-done-hint').textContent = t('map.done_hint', {min: WR_DONE_FRESH_SECONDS / 60});
     const group = li.querySelector('.wr-done-modes');
     WR_DONE_MODES.forEach(mode => {
@@ -292,9 +302,15 @@ function wrDoneAddMenu() {
         b.addEventListener('click', () => wrDoneSetMode(mode));
         group.appendChild(b);
     });
-    // Right under the switches for the shapes it is a sibling of, not at the very end of the menu.
-    const after = [...menu.querySelectorAll('[data-pin-team-labels], [data-overlay]')].pop()?.closest('li');
-    if (after) after.after(li); else menu.appendChild(li);
+    // At the end: that is the menu's second column, which is the shorter one. In the first, under the shapes it
+    // goes with, it made the menu taller than a laptop's window.
+    menu.appendChild(li);
+}
+
+// The menu's buttons and the line of the fold, from the choice.
+function wrDoneUi() {
+    document.querySelectorAll('[data-done-mode]').forEach(b => b.classList.toggle('active', b.dataset.doneMode === wrDoneMode));
+    document.querySelectorAll('.wr-done-sum').forEach(e => { e.textContent = '· ' + t('map.done_mode_' + wrDoneMode); });
 }
 
 // «14:59», or «03/11 14:59» for something finished more than half a day ago: the
