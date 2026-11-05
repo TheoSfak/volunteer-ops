@@ -3813,6 +3813,86 @@ function teamsBlockedFromMemberMove(array $userIds, array $otherAssignments): ar
 }
 
 /**
+ * War Room: the «Μετακίνηση σε…» choices an edit-team form posts, reduced to
+ * the ones that can actually be carried out. $posted is the raw
+ * $_POST['move_to'] (user id => target team id).
+ *
+ * A move is only honoured for somebody who is on THIS team right now and
+ * towards a team of the same mission that is not this one — anything else is a
+ * stale tab or a hand-made request, and is dropped rather than half-applied.
+ *
+ * @param mixed $posted
+ * @return array<int,int> user id => target team id
+ */
+function resolveTeamMemberMoves($posted, array $currentMemberIds, array $validTargetTeamIds): array {
+    if (!is_array($posted)) {
+        return [];
+    }
+    $currentMemberIds = array_map('intval', $currentMemberIds);
+    $validTargetTeamIds = array_map('intval', $validTargetTeamIds);
+    $moves = [];
+    foreach ($posted as $userId => $toTeamId) {
+        if (is_array($toTeamId)) continue;
+        $userId = (int) $userId;
+        $toTeamId = (int) $toTeamId;
+        if ($userId <= 0 || $toTeamId <= 0) continue;
+        if (!in_array($userId, $currentMemberIds, true)) continue;
+        if (!in_array($toTeamId, $validTargetTeamIds, true)) continue;
+        $moves[$userId] = $toTeamId;
+    }
+    return $moves;
+}
+
+/**
+ * War Room: put each person of $moves (user id => target team id) on their new
+ * team, taking them off whichever team they are on in the same breath. The
+ * caller owns the transaction. Used by the edit-team save, where the source
+ * team's own member list is rewritten around it.
+ */
+function applyTeamMemberMoves(int $missionId, array $moves): void {
+    foreach ($moves as $userId => $toTeamId) {
+        dbExecute("DELETE FROM mission_team_members WHERE mission_id = ? AND user_id = ?", [$missionId, (int) $userId]);
+        dbInsert(
+            "INSERT INTO mission_team_members (team_id, mission_id, user_id, added_at) VALUES (?, ?, ?, NOW())",
+            [(int) $toTeamId, $missionId, (int) $userId]
+        );
+    }
+}
+
+/**
+ * War Room: what an edit-team save does about the team's NAME.
+ *
+ * A blank field, or the name the team already has, means "leave it" — so a form
+ * from an old tab that never carried the field changes nothing, and the random
+ * 2-digit number of an auto NATO name survives an edit that did not touch the
+ * name. A new name is used as typed (20 characters at most, like on create) and
+ * the caller then drops the number: an admin-chosen name is assumed distinct on
+ * its own, the same rule create_team applies.
+ *
+ * 'clash' is the label of another team of the mission that already reads the
+ * same, in which case nothing is renamed and the save must be refused — two
+ * teams answering to one name on the radio is worse than a refused edit.
+ *
+ * @param mixed $submitted
+ * @param array<int,array{codename:string,team_number:mixed}> $otherTeams
+ * @return array{renamed:bool,codename:string,clash:?string}
+ */
+function teamRenameDecision($submitted, string $currentCodename, array $otherTeams): array {
+    $name = is_scalar($submitted) ? trim((string) $submitted) : '';
+    $name = trim(mb_substr($name, 0, 20));
+    if ($name === '' || $name === $currentCodename) {
+        return ['renamed' => false, 'codename' => $currentCodename, 'clash' => null];
+    }
+    foreach ($otherTeams as $other) {
+        $label = teamLabel($other['codename'], $other['team_number']);
+        if (mb_strtolower($label) === mb_strtolower($name)) {
+            return ['renamed' => false, 'codename' => $currentCodename, 'clash' => $label];
+        }
+    }
+    return ['renamed' => true, 'codename' => $name, 'clash' => null];
+}
+
+/**
  * War Room: command-staff recipient set for admin-facing alerts (shortage
  * reports, and reusable for similar future cases) — system/dept admins +
  * this mission's shift leaders + the mission's responsible_user_id, MINUS
