@@ -18,6 +18,8 @@ html[data-wrc-skin="overlay"] {
     --ov-bar: rgba(20, 26, 31, .86); --ov-line: rgba(255, 255, 255, .15); --ov-seg: rgba(255, 255, 255, .1);
     --ov-ink: #fff; --ov-mut: #aebbc6;
     --ov-green: #35d36b; --ov-org: #f2a03d; --ov-red: #ff4a4a; --ov-blu: #4aa3ff;
+    /* the red that carries WHITE text (4.8:1; --ov-red itself is 3.3:1 under white, and is for strokes, stripes and red text on the dark panels) */
+    --ov-red-fill: #d92f2f;
     --ov-font: 'Fira Sans Condensed', 'Fira Sans', 'Segoe UI', system-ui, sans-serif;
     --ov-mono: 'Roboto Mono', ui-monospace, Consolas, monospace;
     /* What the right edge gives to the panel and to the drawing column beside it: the dock is --ov-dock-pw wide and stands
@@ -157,7 +159,7 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-op .btn .bi { color: #fff !im
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top a[href="ops-dashboard.php"] .bi { font-size: 26px; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top .wrc-ov-gear[aria-expanded="true"] { background: var(--ov-org); color: #1b1000; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top #mciHeroBtn.btn-danger,
-html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top #mciHeroBtn.active { background: var(--ov-red); color: #fff; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top #mciHeroBtn.active { background: var(--ov-red-fill); color: #fff; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top .assistant-badge { position: absolute; top: -3px; right: -3px; font-size: 11px; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-op { display: flex; align-items: center; gap: 2px; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-op .dropdown { margin: 0 !important; }
@@ -184,11 +186,11 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top .wrc-kpi {
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top .wrc-kpi-l { font: 700 11px var(--ov-font); letter-spacing: .05em; text-transform: uppercase; color: var(--ov-mut); display: inline-flex; align-items: center; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top .wrc-kpi b { font: 700 12.5px var(--ov-mono); }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top .wrc-kpi:hover { background: rgba(255, 255, 255, .18); }
-html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top .wrc-kpi-bad { background: var(--ov-red); color: #fff; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top .wrc-kpi-bad { background: var(--ov-red-fill); color: #fff; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top .wrc-kpi-bad .wrc-kpi-l { color: #fff; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top .wrc-kpi-warn { background: var(--ov-org); color: #1b1000; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top .wrc-kpi-warn .wrc-kpi-l { color: #1b1000; }
-html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top .wrc-kpi-bad:hover { background: #ff6262; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top .wrc-kpi-bad:hover { background: #e23b3b; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-top .wrc-kpi-warn:hover { background: #ffb257; }
 
 /* A 1366 px laptop: the same bar, tighter, so the counters stay in two rows */
@@ -235,7 +237,7 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-sq[data-ov-verb].on::after,
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-sq[data-label]:hover::after { display: block; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-nb {
     position: absolute; top: -5px; right: -5px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: 10px; display: grid; place-items: center;
-    font: 700 11px var(--ov-mono); background: var(--ov-red); color: #fff;
+    font: 700 11px var(--ov-mono); background: var(--ov-red-fill); color: #fff;
 }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-nb[hidden] { display: none; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-live.flash { animation: wrcOvFlash .7s ease-in-out infinite; }
@@ -393,7 +395,7 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-sec-h { height: 40px; padding: 0
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-h { font: 700 15px var(--ov-font); letter-spacing: .07em; text-transform: uppercase; color: #fff; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-sec-h > .bi { color: var(--ov-mut); }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-cnt { background: var(--ov-seg); color: #fff; font: 700 12px var(--ov-mono); }
-html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-cnt.bad { background: var(--ov-red); color: #fff; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-cnt.bad { background: var(--ov-red-fill); color: #fff; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-queue.wrc-hot { box-shadow: 0 0 0 2px var(--ov-red), 0 8px 26px rgba(0, 0, 0, .42); }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-queue-body,
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-teams-body { padding: 0; gap: 0; }
@@ -413,7 +415,7 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-q-m { font: 500 12px var(--ov-fo
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-q-critical .wrc-q-i { color: var(--ov-red); }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-q-high .wrc-q-i { color: var(--ov-org); }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-btn { background: var(--ov-seg); border: 0; color: #fff; border-radius: 4px; font: 700 12px var(--ov-font); letter-spacing: .03em; }
-html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-btn-warn { background: var(--ov-red); color: #fff; }
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-btn-warn { background: var(--ov-red-fill); color: #fff; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-btn-ok { background: var(--ov-green); color: #04230f; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-wait { margin: 8px; background: transparent; border-color: var(--ov-line); }
 
@@ -628,6 +630,90 @@ html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tools .btn.d-none { display: 
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tools .btn.active { background: var(--ov-org); color: #1b1000; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tools #mapFullscreenToggle { font-size: 0; }
 html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-tools #mapFullscreenToggle::after { content: attr(title); font: 600 13.5px var(--ov-font); }
+
+/* ══ the map's popups: the board's dark panel, not Leaflet's white card ═══════ */
+/* The board forces the dark colour scheme, so everything inside a popup (muted lines, outline buttons, badges, form fields) is written in
+   light colours - on Leaflet's white card they were 1.5:1 to 2:1 (a sector's «Διαχωρισμός», «Έκταση: ...», the status badge was white on white). */
+html[data-wrc-skin="overlay"] .leaflet-popup-content-wrapper,
+html[data-wrc-skin="overlay"] .leaflet-popup-tip { background: var(--ov-panel); color: var(--ov-ink); box-shadow: 0 8px 26px rgba(0, 0, 0, .5); }
+html[data-wrc-skin="overlay"] .leaflet-popup-content-wrapper { border-radius: 6px; }
+html[data-wrc-skin="overlay"] .leaflet-popup-content { color: var(--ov-ink); font-family: var(--ov-font, inherit); }
+html[data-wrc-skin="overlay"] .leaflet-popup-close-button { color: var(--ov-mut); }
+html[data-wrc-skin="overlay"] .leaflet-popup-close-button:hover { color: #fff; background: transparent; }
+/* Leaflet colours every link of the map its own blue (0078A8), which is 2.6:1 on this panel - and, one specificity above Bootstrap's, also the
+   text of every button that is a link. Plain links get a light blue; buttons get their own colour back. */
+html[data-wrc-skin="overlay"] .leaflet-popup-content a:not(.btn) { color: #7cc0ff; }
+html[data-wrc-skin="overlay"] .leaflet-popup-content a.btn { color: var(--bs-btn-color); }
+html[data-wrc-skin="overlay"] .leaflet-popup-content a.btn:hover { color: var(--bs-btn-hover-color); }
+html[data-wrc-skin="overlay"] .leaflet-popup-content a.btn.active,
+html[data-wrc-skin="overlay"] .leaflet-popup-content a.btn:active { color: var(--bs-btn-active-color); }
+/* The site paints outline buttons in its accent (#667eea) and Bootstrap's own blue and green: 3.3 to 4.1:1 on the dark panels. The dark scheme's lighter
+   tones instead, wherever they stand on the board (a popup, the dock, a menu, a dialog); the hover keeps the solid fill with white text. */
+html[data-wrc-skin="overlay"] .btn-outline-primary { --bs-btn-color: var(--bs-primary-text-emphasis); --bs-btn-border-color: var(--bs-primary-text-emphasis); }
+html[data-wrc-skin="overlay"] .btn-outline-primary:not(:hover):not(:active):not(.active) { color: var(--bs-primary-text-emphasis); border-color: var(--bs-primary-text-emphasis); }
+html[data-wrc-skin="overlay"] .btn-outline-success { --bs-btn-color: var(--bs-success-text-emphasis); --bs-btn-border-color: var(--bs-success-text-emphasis); }
+html[data-wrc-skin="overlay"] .btn-outline-dark { --bs-btn-color: var(--bs-dark-text-emphasis); --bs-btn-border-color: var(--bs-dark-text-emphasis); }
+html[data-wrc-skin="overlay"] .leaflet-popup-content .text-muted,
+html[data-wrc-skin="overlay"] .leaflet-popup-content .small.text-muted { color: var(--ov-mut) !important; }
+
+/* ══ the names written straight on the map ═════════════════════════════════ */
+/* «Τομέας Α» and the restricted areas' names have no box of their own, and the page paints them red (#dc3545) / orange for a light map. The board dims the
+   tiles (brightness .74) and draws the sector grey on top, so the red came out at about 2:1 - the name was the colour of the ground. Light tints of the
+   same two hues with a dark halo (no padding: the page decides from the text's width whether a name fits its shape, and that stays true). */
+html[data-wrc-skin="overlay"] .wr-polygon-label {
+    color: #ffb3ba;
+    text-shadow: -1px -1px 0 #0b0e10, 1px -1px 0 #0b0e10, -1px 1px 0 #0b0e10, 1px 1px 0 #0b0e10, 0 0 5px #0b0e10, 0 0 9px rgba(11, 14, 16, .85);
+}
+html[data-wrc-skin="overlay"] .wr-polygon-label.wr-polygon-label-restricted { color: #ffc58a; }
+
+/* ══ the map's own light chips: their text came from the dark scheme ══════════ */
+/* The «OpenStreetMap data not available» note is a cream chip; its text took the board's light ink (1.1:1). The cluster bubbles are green, gold and orange
+   discs whose count did the same (1.9:1 on the gold). Both get a dark ink; the team name above a cluster is a white pill with its own colour already. */
+html[data-wrc-skin="overlay"] .wr-hidden-chip { color: #3d2e00; }
+html[data-wrc-skin="overlay"] .marker-cluster > div > span { color: #161200; }
+
+/* ══ buttons and badges: the site's white text on its brand colours ═══════════ */
+/* The site paints primary / success / warning / info / danger as white text on #667eea, #10b981, #f59e0b, #06b6d4, #ef4444 gradients: 3.8, 2.5, 2.2, 2.4 and
+   3.8:1 (the «Υψηλή» badge, «Είδα», «Λύθηκε», «Εμφάνιση»). The board's own flat colours for the same roles, with the ink each of them reads under
+   (the same pairs the board's buttons already use). Hover is the same colour a step off. */
+html[data-wrc-skin="overlay"] .btn-primary { background: #4f5bd5; color: #fff; box-shadow: none; }
+html[data-wrc-skin="overlay"] .btn-primary:hover, html[data-wrc-skin="overlay"] .btn-primary:focus-visible, html[data-wrc-skin="overlay"] .btn-primary:active { background: #4350c2; color: #fff; }
+html[data-wrc-skin="overlay"] .btn-success { background: var(--ov-green); color: #04230f; box-shadow: none; }
+html[data-wrc-skin="overlay"] .btn-success:hover, html[data-wrc-skin="overlay"] .btn-success:focus-visible, html[data-wrc-skin="overlay"] .btn-success:active { background: #52e083; color: #04230f; }
+html[data-wrc-skin="overlay"] .btn-warning { background: var(--ov-org); color: #1b1000; box-shadow: none; }
+html[data-wrc-skin="overlay"] .btn-warning:hover, html[data-wrc-skin="overlay"] .btn-warning:focus-visible, html[data-wrc-skin="overlay"] .btn-warning:active { background: #ffb257; color: #1b1000; }
+html[data-wrc-skin="overlay"] .btn-info { background: #22c3e0; color: #032a33; box-shadow: none; }
+html[data-wrc-skin="overlay"] .btn-info:hover, html[data-wrc-skin="overlay"] .btn-info:focus-visible, html[data-wrc-skin="overlay"] .btn-info:active { background: #4bd3ea; color: #032a33; }
+html[data-wrc-skin="overlay"] .btn-danger { background: var(--ov-red-fill); color: #fff; box-shadow: none; }
+html[data-wrc-skin="overlay"] .btn-danger:hover, html[data-wrc-skin="overlay"] .btn-danger:focus-visible, html[data-wrc-skin="overlay"] .btn-danger:active { background: #e23b3b; color: #fff; }
+html[data-wrc-skin="overlay"] .badge.bg-primary { background: #4f5bd5 !important; color: #fff !important; }
+html[data-wrc-skin="overlay"] .badge.bg-success { background: var(--ov-green) !important; color: #04230f !important; }
+html[data-wrc-skin="overlay"] .badge.bg-warning { background: var(--ov-org) !important; color: #1b1000 !important; }
+html[data-wrc-skin="overlay"] .badge.bg-info { background: #22c3e0 !important; color: #032a33 !important; }
+html[data-wrc-skin="overlay"] .badge.bg-danger { background: var(--ov-red-fill) !important; color: #fff !important; }
+/* The white buttons stay readable but are the one light thing left on the panels (and a red text on them was 2.1:1): a pale chip on the dark panel instead. */
+html[data-wrc-skin="overlay"] .btn-light { --bs-btn-color: var(--ov-ink); --bs-btn-bg: rgba(255, 255, 255, .12); --bs-btn-border-color: transparent; --bs-btn-hover-color: #fff; --bs-btn-hover-bg: rgba(255, 255, 255, .22); --bs-btn-hover-border-color: transparent; --bs-btn-active-color: #fff; --bs-btn-active-bg: rgba(255, 255, 255, .28); --bs-btn-active-border-color: transparent; }
+/* Bootstrap's own blue and green, written as text (the user menu's name was 2.5:1). */
+html[data-wrc-skin="overlay"] .text-primary { color: var(--bs-primary-text-emphasis) !important; }
+html[data-wrc-skin="overlay"] .text-success { color: var(--bs-success-text-emphasis) !important; }
+
+/* ══ the lists of a <select> ══════════════════════════════════════════════════ */
+/* The options take the board's light ink (#e6ecf5) from the dark scheme and no background of their own, so what sits behind them in the open list is the
+   browser's choice - white in some. The option sets its own, so the pair is ours wherever the list opens (a sector's team and status, the order forms). */
+html[data-wrc-skin="overlay"] select option,
+html[data-wrc-skin="overlay"] select optgroup { background-color: #1b2228; color: var(--ov-ink); }
+
+/* ══ small text that was too faint on the dark panels ════════════════════════ */
+/* The ☰ menu's red entry («Άμεση Κινητοποίηση») is the dark scheme's #ff8f86 on the menu's navy: 3.5:1. */
+html[data-wrc-skin="overlay"] .sidebar .nav-link.text-danger { color: #ffc4bf !important; }
+/* Bootstrap leaves a menu's section headings at #6c757d even in the dark scheme: 3.7:1 on the menu (the map views, the layers, the export). */
+html[data-wrc-skin="overlay"] .dropdown-menu { --bs-dropdown-header-color: var(--ov-mut); }
+/* The acknowledgement panel's steps still to come and the team beside a name (#64748b, 3.6:1 at 10-11 px). */
+html[data-wrc-skin="overlay"] .ack-card-progress-row.ack-todo,
+html[data-wrc-skin="overlay"] .ack-card-team { color: #9fb0c6; }
+/* The bell's count: the site's red gradient under white 10 px text was 3.8:1. */
+html[data-wrc-skin="overlay"][data-wrc-ov] .wrc-ov-op .btn .notif-badge { background: var(--ov-red-fill) !important; }
+html[data-wrc-skin="overlay"] .wrc-tag-bad { color: #ffaaa2; }
 
 /* ══ what the map keeps of its own controls ══════════════════════════════════ */
 html[data-wrc-skin="overlay"][data-wrc-ov] .leaflet-top.leaflet-right { top: 86px; right: calc(var(--ov-dock-w) + 36px); }
