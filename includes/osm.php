@@ -120,8 +120,7 @@ function osmEndpoints(?array $override = null): array {
  * another one a moment ago, and getSetting() keeps its answer for the request.
  */
 function osmOverpassPausedUntil(): int {
-    $until = (int) dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = ?", [OSM_BREAKER_KEY]);
-    return $until > time() ? $until : 0;
+    return externalBreakerPausedUntil(OSM_BREAKER_KEY);
 }
 
 /**
@@ -135,20 +134,12 @@ function osmGlobalLockName(): string {
 
 /** A call failed: for OSM_BREAKER_SECONDS the web path answers from the cache and asks nobody. */
 function osmOverpassPause(): void {
-    $until = time() + OSM_BREAKER_SECONDS;
-    dbExecute(
-        "INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES (?, ?, NOW(), NOW())
-         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()",
-        [OSM_BREAKER_KEY, (string) $until]
-    );
+    externalBreakerTrip(OSM_BREAKER_KEY, OSM_BREAKER_SECONDS);
 }
 
 /** A call got an answer: Overpass is back, so lift the pause (only touches the table when there is one). */
 function osmOverpassResume(): void {
-    $row = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = ?", [OSM_BREAKER_KEY]);
-    if ($row !== false && $row !== null && (int) $row > 0) {
-        dbExecute("UPDATE settings SET setting_value = '0', updated_at = NOW() WHERE setting_key = ?", [OSM_BREAKER_KEY]);
-    }
+    externalBreakerClear(OSM_BREAKER_KEY);
 }
 
 /**

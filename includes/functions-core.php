@@ -564,6 +564,40 @@ function externalCallLog(string $type, string $host, int $status, float $started
 }
 
 /**
+ * The pause that keeps a struggling outside service from being asked again and
+ * again. A request that calls out holds a PHP worker and a database connection
+ * for as long as the other side takes, and a shared host has only a handful of
+ * each: when a call fails, every request on the site answers without asking for
+ * a while, instead of each one waiting out the same timeout.
+ *
+ * One settings row per service holds "do not ask until" (a Unix time). It is
+ * read straight from the database on purpose: a pause set by another request a
+ * moment ago must be seen at once, and getSetting() keeps its answer for the
+ * whole request.
+ */
+function externalBreakerPausedUntil(string $key): int {
+    $until = (int) dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = ?", [$key]);
+    return $until > time() ? $until : 0;
+}
+
+/** A call failed: leave the service alone for $seconds. */
+function externalBreakerTrip(string $key, int $seconds): void {
+    dbExecute(
+        "INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES (?, ?, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()",
+        [$key, (string) (time() + $seconds)]
+    );
+}
+
+/** The service answered: it is back, whatever the pause said. Writes nothing when there is no pause to lift. */
+function externalBreakerClear(string $key): void {
+    $row = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = ?", [$key]);
+    if ($row !== false && $row !== null && (int) $row > 0) {
+        dbExecute("UPDATE settings SET setting_value = '0', updated_at = NOW() WHERE setting_key = ?", [$key]);
+    }
+}
+
+/**
  * Column order for the "latest ping per volunteer" GROUP BY.
  *
  * `SELECT user_id, shift_id, MAX(id) FROM volunteer_pings WHERE shift_id IN (...)

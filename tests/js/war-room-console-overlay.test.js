@@ -11,7 +11,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes, wrcOvNorm, wrcOvFind, wrcOvDrawFace} = require('../../assets/js/war-room-console-overlay.js');
+const {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvHeightGate, wrcOvHeightPausedUntil, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes, wrcOvNorm, wrcOvFind, wrcOvDrawFace} = require('../../assets/js/war-room-console-overlay.js');
 
 test('the team window shows all the teams when they fit', () => {
     assert.deepEqual(wrcOvWindow(4, -1, 0, 6), {start: 0, size: 4, more: false});
@@ -171,6 +171,42 @@ test('the pointer may ask for heights only a few times in ten minutes', () => {
     assert.equal(later.ok, true, 'ten minutes after the first ask, that one has left the window');
     assert.equal(later.stamps.length, 3, 'the two that are left and the new one');
     assert.deepEqual(wrcOvBudget(undefined, 5, 1, win), {ok: true, stamps: [5]});
+});
+
+test('the pointer asks for one height at a time, so a service that does not answer cannot pile asks up', () => {
+    const win = 600000;
+    const idle = {stamps: [], busy: false, pausedUntil: 0};
+    const first = wrcOvHeightGate(idle, 1000, 40, win);
+    assert.deepEqual(first, {ok: true, stamps: [1000]}, 'an idle pointer with allowance left may ask');
+    const busy = wrcOvHeightGate({stamps: first.stamps, busy: true, pausedUntil: 0}, 1800, 40, win);
+    assert.equal(busy.ok, false, 'one ask is still out: no second');
+    assert.deepEqual(busy.stamps, [1000], 'and the refused ask is not counted');
+    assert.equal(wrcOvHeightGate({stamps: [], busy: false, pausedUntil: 0}, 1800, 40, win).ok, true, 'the answer came: the next rest may ask');
+});
+
+test('after an ask that brought no height the pointer leaves the server alone for a while', () => {
+    const win = 600000;
+    const pause = 300000;
+    const now = 50000;
+    const until = wrcOvHeightPausedUntil(now, false, pause);
+    assert.equal(until, now + pause, 'no height (no service, the quota, a failure) starts the pause');
+    assert.equal(wrcOvHeightPausedUntil(now, true, pause), 0, 'a height lifts it');
+    const ask = {stamps: [], busy: false, pausedUntil: until};
+    assert.equal(wrcOvHeightGate(ask, now + pause - 1, 40, win).ok, false, 'one ms before the pause is over');
+    assert.equal(wrcOvHeightGate(ask, now + pause, 40, win).ok, true, 'and at the moment it is over');
+});
+
+test('the gate still keeps to the allowance, and tolerates a pointer that has never asked', () => {
+    const win = 600000;
+    let ask = {stamps: [], busy: false, pausedUntil: 0};
+    for (let i = 0; i < 3; i++) {
+        const g = wrcOvHeightGate(ask, 1000 + i, 3, win);
+        assert.equal(g.ok, true);
+        ask = {...ask, stamps: g.stamps};
+    }
+    assert.equal(wrcOvHeightGate(ask, 2000, 3, win).ok, false, 'the allowance of ten minutes is used up');
+    assert.deepEqual(wrcOvHeightGate(undefined, 5, 1, win), {ok: true, stamps: [5]});
+    assert.deepEqual(wrcOvHeightGate({}, 5, 1, win), {ok: true, stamps: [5]});
 });
 
 test('the label goes to the lower right of the pointer, and to the other side where that has no room', () => {

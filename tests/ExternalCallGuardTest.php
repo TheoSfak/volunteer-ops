@@ -36,15 +36,17 @@ final class ExternalCallGuardTest extends TestCase
     protected function setUp(): void
     {
         require_once __DIR__ . '/../includes/osm.php';
+        require_once __DIR__ . '/../includes/elevation.php';
         require_once __DIR__ . '/../includes/weather.php';
         require_once __DIR__ . '/../includes/update-check.php';
         db()->beginTransaction();
-        dbExecute("DELETE FROM settings WHERE setting_key IN (?, ?)", [OSM_BREAKER_KEY, UPDATE_CHECK_KEY]);
+        dbExecute("DELETE FROM settings WHERE setting_key IN (?, ?, ?)", [OSM_BREAKER_KEY, ELEVATION_BREAKER_KEY, UPDATE_CHECK_KEY]);
     }
 
     protected function tearDown(): void
     {
         osmEndpoints([]);
+        elevationEndpoint('');
         if ($this->blackHole !== null) {
             fclose($this->blackHole);
             $this->blackHole = null;
@@ -244,6 +246,116 @@ final class ExternalCallGuardTest extends TestCase
         }
     }
 
+    // --- the heights of the ground ---------------------------------------------
+
+    /**
+     * A child process that answers ONE request with a canned reply, as a real service would.
+     * @return array{0: resource, 1: string, 2: string} the process, its script and the address to ask
+     */
+    private function serveOnce(int $status, string $body): array
+    {
+        $probe = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
+        $this->assertNotFalse($probe);
+        $port = (int) substr((string) strrchr((string) stream_socket_get_name($probe, false), ':'), 1);
+        fclose($probe);
+
+        $script = (string) tempnam(sys_get_temp_dir(), 'vo_srv_');
+        file_put_contents($script, '<?php $srv = stream_socket_server("tcp://127.0.0.1:' . $port . '", $e, $m);'
+            . '$s = stream_socket_accept($srv, 20); fread($s, 65536); $b = ' . var_export($body, true) . ';'
+            . 'fwrite($s, "HTTP/1.1 ' . $status . ' X\r\nContent-Type: application/json\r\nContent-Length: " . strlen($b) . "\r\nConnection: close\r\n\r\n" . $b);'
+            . 'fclose($s);');
+        $proc = proc_open([PHP_BINARY, $script], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+        usleep(800000); // the child binds the port
+        return [$proc, $script, 'http://127.0.0.1:' . $port . '/v1/elevation'];
+    }
+
+    private function stopServing($proc, string $script): void
+    {
+        if (is_resource($proc)) { proc_terminate($proc); proc_close($proc); }
+        @unlink($script);
+    }
+
+    public function testAnElevationServiceThatNeverAnswersCostsAtMostItsLimitAndThenNothing(): void
+    {
+        // The pointer of the «Πίνακας» console asked for a height whenever the mouse rested, and each ask held a
+        // worker for as long as this took: with the service not answering they filled the host and every other
+        // request of the page, the map layer's included, queued behind them.
+        elevationEndpoint($this->startBlackHole());
+        $this->captureLog();
+
+        $t0 = microtime(true);
+        $this->assertNull(elevationLookup([[35.15, 24.92]]));
+        $took = microtime(true) - $t0;
+        $this->assertLessThan(ELEVATION_TIMEOUT + 2, $took, 'the call must end at its limit, not hang');
+        $this->assertGreaterThan(ELEVATION_TIMEOUT - 1.5, $took, 'it really did wait for the service');
+        $this->assertGreaterThan(time(), externalBreakerPausedUntil(ELEVATION_BREAKER_KEY), 'a failure pauses the service for everybody');
+        $this->assertStringContainsString('[ext] type=elevation host=127.0.0.1 status=0', $this->logged());
+
+        // The next lookup, from anybody, is instant and asks nobody.
+        $t0 = microtime(true);
+        $this->assertNull(elevationLookup([[35.16, 24.93]]));
+        $this->assertLessThan(0.5, microtime(true) - $t0);
+    }
+
+    public function testAPausedElevationLookupDoesNotTouchTheNetworkAndAnExpiredPauseDoesNotBlock(): void
+    {
+        [$proc, $script, $url] = $this->serveOnce(200, json_encode(['elevation' => [349.4, 99.6]]));
+        try {
+            elevationEndpoint($url);
+            externalBreakerTrip(ELEVATION_BREAKER_KEY, 60);
+            $this->assertNull(elevationLookup([[35.15, 24.92], [35.16, 24.93]]), 'paused: no height, and the good service is not even asked');
+
+            dbExecute("UPDATE settings SET setting_value = ? WHERE setting_key = ?", [(string) (time() - 1), ELEVATION_BREAKER_KEY]);
+            $this->assertSame(0, externalBreakerPausedUntil(ELEVATION_BREAKER_KEY), 'a pause in the past is no pause');
+            $this->assertSame([349, 100], elevationLookup([[35.15, 24.92], [35.16, 24.93]]), 'once it is over the service is asked again, in the order of the points');
+            $this->assertSame(0, externalBreakerPausedUntil(ELEVATION_BREAKER_KEY));
+        } finally {
+            $this->stopServing($proc, $script);
+        }
+    }
+
+    public static function elevationReplies(): array
+    {
+        return [
+            'a server error pauses it'                   => [500, 'oops', true],
+            'too many requests pauses it'                => [429, '{"reason":"limit"}', true],
+            'an answer that is not heights pauses it'    => [200, '{"elevation":"x"}', true],
+            'a wrong number of heights pauses it'        => [200, '{"elevation":[1,2]}', true],
+            'a refusal of this request pauses nothing'   => [400, '{"reason":"bad latitude"}', false],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('elevationReplies')]
+    public function testWhatTheElevationServiceSaysDecidesWhetherItIsLeftAlone(int $status, string $body, bool $paused): void
+    {
+        [$proc, $script, $url] = $this->serveOnce($status, $body);
+        try {
+            elevationEndpoint($url);
+            $this->assertNull(elevationLookup([[35.15, 24.92]]));
+            $this->assertSame($paused, externalBreakerPausedUntil(ELEVATION_BREAKER_KEY) > 0);
+        } finally {
+            $this->stopServing($proc, $script);
+        }
+    }
+
+    public function testThePauseHelpersAreOneImplementationForEveryServiceAndEachKeyIsItsOwn(): void
+    {
+        $this->assertSame(0, externalBreakerPausedUntil('zz_guard_key'));
+        externalBreakerTrip('zz_guard_key', 120);
+        $until = externalBreakerPausedUntil('zz_guard_key');
+        $this->assertGreaterThan(time() + 100, $until);
+        $this->assertLessThanOrEqual(time() + 120, $until);
+        $this->assertSame(0, externalBreakerPausedUntil(ELEVATION_BREAKER_KEY), 'another service is not paused with it');
+        $this->assertSame(0, osmOverpassPausedUntil());
+        externalBreakerClear('zz_guard_key');
+        $this->assertSame(0, externalBreakerPausedUntil('zz_guard_key'));
+
+        // The Overpass pause is the same thing under its own key.
+        osmOverpassPause();
+        $this->assertGreaterThan(time(), externalBreakerPausedUntil(OSM_BREAKER_KEY));
+        $this->assertSame(0, externalBreakerPausedUntil(ELEVATION_BREAKER_KEY));
+    }
+
     // --- the weather ---------------------------------------------------------
 
     public function testAFreshWeatherFailureIsRememberedBrieflyAndAGoodAnswerLonger(): void
@@ -346,13 +458,15 @@ require_once $argv[1] . '/config.php';
 require_once $argv[1] . '/includes/db.php';
 require_once $argv[1] . '/includes/functions-core.php';
 require_once $argv[1] . '/includes/osm.php';
+require_once $argv[1] . '/includes/elevation.php';
 require_once $argv[1] . '/includes/update-check.php';
 osmEndpoints(['http://127.0.0.1:1/api/interpreter']);
+elevationEndpoint('http://127.0.0.1:1/v1/elevation');
 $budget = 1; $why = null;
 [, $states] = osmChunkBundle([['zz_fresh', 0.0, 0.0, 0.05, 0.05]], 'core', $budget, $why);
-echo $states['zz_fresh'], '|', updateCheckHttpStatus(['HTTP/1.1 204 No Content']);
+echo $states['zz_fresh'], '|', updateCheckHttpStatus(['HTTP/1.1 204 No Content']), '|', elevationLookup([[35.15, 24.92]]) === null ? 'null' : 'heights';
 dbExecute("DELETE FROM osm_feature_cache WHERE tile_key = 'zz_fresh'");
-dbExecute("DELETE FROM settings WHERE setting_key = ?", [OSM_BREAKER_KEY]);
+dbExecute("DELETE FROM settings WHERE setting_key IN (?, ?)", [OSM_BREAKER_KEY, ELEVATION_BREAKER_KEY]);
 PHP;
         $file = tempnam(sys_get_temp_dir(), 'vo_ext_');
         file_put_contents($file, "<?php\n" . $script);
@@ -364,7 +478,7 @@ PHP;
         }
         $this->assertStringNotContainsString('undefined function', $output, $output);
         $this->assertStringNotContainsString('Fatal error', $output, $output);
-        $this->assertSame('failed|204', trim($output), $output);
+        $this->assertSame('failed|204|null', trim($output), $output);
     }
 
     public function testEveryCallerThatWaitsNobodyIsBoundedAndTheOnesThatDoNotAreTagged(): void
@@ -391,8 +505,18 @@ PHP;
         $this->assertSame(8, OSM_WEB_DEADLINE);
         $this->assertLessThanOrEqual(8, WEATHER_HTTP_TIMEOUT);
         $this->assertLessThanOrEqual(8, UPDATE_CHECK_TIMEOUT);
+        $this->assertLessThanOrEqual(5, ELEVATION_TIMEOUT);
+        $this->assertLessThanOrEqual(ELEVATION_TIMEOUT, ELEVATION_CONNECT_TIMEOUT);
+        $this->assertStringContainsString('CURLOPT_CONNECTTIMEOUT => ELEVATION_CONNECT_TIMEOUT', $read('includes/elevation.php'));
+        // mission-measure.php is the only door to it, and the lookup is the guarded one.
+        $this->assertStringContainsString("'elevations' => elevationLookup(\$points)", $read('mission-measure.php'));
 
         // The page gives up on a map request long before the old two minutes.
         $this->assertStringContainsString('setTimeout(() => ctrl.abort(), 30000)', $read('war-room.php'));
+
+        // A tile still to come is asked for again by itself even when every pause has run out by the end of the
+        // pass (the layer used to say «loading» until somebody moved the map).
+        $this->assertStringContainsString('osmRetryDelayMs([...osmRetryAt.values()], Date.now())', $read('war-room.php'));
+        $this->assertStringContainsString('function osmRetryDelayMs(', $read('assets/js/war-room-utils.js'));
     }
 }

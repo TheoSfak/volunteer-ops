@@ -1184,8 +1184,22 @@ function speechPieceTimeoutMs(piece) {
     return Math.round(String(piece || '').length * 140) + 4000;
 }
 
+/**
+ * How long until the OpenStreetMap layer looks again by itself, when something of it is still to come (a tile that
+ * was being fetched by another request, or one the server could not get): the next of the `retryAts` (times in ms
+ * at which a tile may be asked for again) that has not run out yet, half a second after it, and ONE SECOND from now
+ * when every one of them has. That last case is a pass that went on longer than the pauses it set (its chunks took
+ * seconds each at a public map server): with no future time to wait for, nothing asked again until the map was
+ * moved, and the chip said «loading» for as long as nobody touched it.
+ */
+function osmRetryDelayMs(retryAts, now) {
+    const future = (retryAts || []).filter(at => at > now);
+    return future.length ? Math.min(...future) - now + 500 : 1000;
+}
+
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
+        osmRetryDelayMs,
         shareablePayload,
         isPointerOnlyComputer,
         bearing,

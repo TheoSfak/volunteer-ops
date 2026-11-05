@@ -8716,10 +8716,7 @@ async function osmLoadView() {
 function osmArmRetry() {
     clearTimeout(osmRetryTimer);
     if (!osmOn || !(osmPartial || osmLater)) return;
-    const now = Date.now();
-    const next = Math.min(...[...osmRetryAt.values()].filter(at => at > now));
-    if (!isFinite(next)) return;
-    osmRetryTimer = setTimeout(osmScheduleLoad, next - now + 500);
+    osmRetryTimer = setTimeout(osmScheduleLoad, osmRetryDelayMs([...osmRetryAt.values()], Date.now()));
 }
 
 function osmScheduleLoad() {

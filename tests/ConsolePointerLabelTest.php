@@ -61,6 +61,40 @@ final class ConsolePointerLabelTest extends TestCase
         $this->assertStringContainsString('ptr.heights.set(cell, false);', $js, 'not even when the answer was nothing');
     }
 
+    public function testOnlyTheMouseAsksForAHeightNotTheMapMovingUnderAPointerThatStandsStill(): void
+    {
+        // Live follow re-centres the map on every position change: with a mouse resting over it that was one
+        // lookup per re-centre, with nobody touching anything.
+        $js = $this->source('assets/js/war-room-console-overlay.js');
+        $this->assertStringContainsString('movePtr(e.latlng, oe.clientX, oe.clientY, true);', $js, 'the mouse\'s own movement may ask');
+        $this->assertStringContainsString('movePtr(latlng, ptr.at.x, ptr.at.y, false);', $js, 'the map moving under the pointer only repaints the label');
+        $this->assertMatchesRegularExpression('~clearTimeout\(ptr\.rest\);\n\s+if \(!ask\) return;\n~', $js, 'without ask the rest timer is not armed');
+    }
+
+    public function testOneHeightIsAskedAtATimeAndNoneForAWhileAfterAnAskThatBroughtNone(): void
+    {
+        // Each ask holds one of a shared host's few PHP workers while the outside service answers; a service that
+        // does not answer used to fill them all and every other request of the page queued behind (the map layer's too).
+        $js = $this->source('assets/js/war-room-console-overlay.js');
+        $this->assertStringContainsString('wrcOvHeightGate(ptr, Date.now(), PTR_BUDGET, PTR_WINDOW_MS)', $js);
+        $this->assertStringContainsString('ptr.busy = true;', $js);
+        $this->assertStringContainsString('ptr.busy = false;', $js, 'the answer, whatever it is, frees the next ask');
+        $this->assertStringContainsString('ptr.pausedUntil = wrcOvHeightPausedUntil(Date.now(), got, PTR_PAUSE_MS);', $js);
+
+        // The page keeps away at least as long as the server does, so it never asks into a pause that is still on.
+        preg_match('~const PTR_PAUSE_MS = (\d+);~', $js, $mine);
+        $elevation = $this->source('includes/elevation.php');
+        preg_match('~const ELEVATION_BREAKER_SECONDS = (\d+);~', $elevation, $server);
+        $this->assertNotEmpty($mine);
+        $this->assertNotEmpty($server);
+        $this->assertGreaterThanOrEqual((int) $server[1] * 1000, (int) $mine[1]);
+
+        // The server side of it: the lookup is bounded, logged and paused after a failure.
+        $this->assertStringContainsString('externalBreakerPausedUntil(ELEVATION_BREAKER_KEY)', $elevation);
+        $this->assertStringContainsString('externalBreakerTrip(ELEVATION_BREAKER_KEY, ELEVATION_BREAKER_SECONDS)', $elevation);
+        $this->assertStringContainsString("externalCallLog('elevation'", $elevation);
+    }
+
     public function testTheLabelNeverTakesTheMouseAndStaysOutOfTheWayOfWhatIsBeingRead(): void
     {
         $js = $this->source('assets/js/war-room-console-overlay.js');

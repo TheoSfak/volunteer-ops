@@ -148,6 +148,23 @@ function wrcOvBudget(stamps, now, max, windowMs) {
 }
 
 /**
+ * May the pointer ask the server for a height now? The allowance above, and two more rules: one ask at a time
+ * (a service that does not answer would otherwise pile the asks up, and each one holds one of the host's few PHP
+ * workers for seconds, which is what slowed every other request of the page, the map layer's included), and none
+ * while a failed ask is being waited out. `ask` = {stamps, busy, pausedUntil}. -> {ok, stamps}.
+ */
+function wrcOvHeightGate(ask, now, max, windowMs) {
+    const a = ask || {};
+    if (a.busy || now < (a.pausedUntil || 0)) return {ok: false, stamps: (a.stamps || []).filter(ts => ts > now - windowMs)};
+    return wrcOvBudget(a.stamps, now, max, windowMs);
+}
+
+/** When the pointer may ask again once an answer is in: at once after a height, after `pauseMs` after none (no service, the quota, a failure). */
+function wrcOvHeightPausedUntil(now, gotHeight, pauseMs) {
+    return gotHeight ? 0 : now + pauseMs;
+}
+
+/**
  * Where the tooltip goes: to the lower right of the pointer, or to the other side of it when that side has no
  * room. (x, y) the pointer, (w, h) the tooltip, (vw, vh) the window. -> {x, y} the tooltip's top left corner.
  */
@@ -248,7 +265,7 @@ function wrcOvFind(entries, query, max) {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-    module.exports = {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes, wrcOvNorm, wrcOvFind, wrcOvDrawFace};
+    module.exports = {wrcOvWindow, wrcOvStep, wrcOvElapsed, wrcOvLowestBattery, wrcOvGpsReadout, wrcOvTeamRows, wrcOvLiveStreams, wrcOvTilePick, wrcOvLeft, wrcOvDms, wrcOvCell, wrcOvBudget, wrcOvHeightGate, wrcOvHeightPausedUntil, wrcOvTipAt, wrcOvHeatT, wrcOvHeatColor, wrcOvHeatCellPx, wrcOvHeatMinutes, wrcOvNorm, wrcOvFind, wrcOvDrawFace};
 }
 
 // ── the view ─────────────────────────────────────────────────────────────────
@@ -453,11 +470,16 @@ if (typeof module !== 'undefined' && module.exports) {
     // The photo's white ring and black coordinates label. The position is the map's own answer for the pointer
     // (nothing is asked); the height of the ground comes a moment after the pointer rests, from the same server
     // door as the point menu and the measuring tool (measureElevations), remembered per ~100 m cell and kept to
-    // a part of that door's allowance so it can never use up the heights those two need.
+    // a part of that door's allowance so it can never use up the heights those two need. It is asked for only
+    // when the MOUSE rests (a map that re-centres under a pointer that stands still asks nothing), one ask at a
+    // time, and not at all for a while after an ask that brought no height: every ask holds one of the host's
+    // few PHP workers while the outside service answers, and a service that does not answer would otherwise fill
+    // them all and slow every other request of the page, the map layer's included.
     const PTR_KEY = 'wr-console-ov-pointer';
     const PTR_REST_MS = 700;
     const PTR_BUDGET = 40;            // asks per ten minutes; the server grants 120 to all three users of the door
     const PTR_WINDOW_MS = 600000;
+    const PTR_PAUSE_MS = 300000;      // after an ask that brought no height: none for five minutes (the server pauses for three)
     const ptrRing = mk('div', 'wrc-ov-ptr-ring');
     const ptrTip = mk('div', 'wrc-ov-ptr-tip');
     ptrRing.hidden = true;
@@ -466,7 +488,7 @@ if (typeof module !== 'undefined' && module.exports) {
     root.append(ptrRing, ptrTip);
     const ptrPos = $('.wrc-ov-ptr-pos', ptrTip);
     const ptrH = $('.wrc-ov-ptr-h', ptrTip);
-    const ptr = {on: true, at: null, cell: '', heights: new Map(), stamps: [], rest: 0, bound: false};
+    const ptr = {on: true, at: null, cell: '', heights: new Map(), stamps: [], busy: false, pausedUntil: 0, rest: 0, bound: false};
     try { ptr.on = localStorage.getItem(PTR_KEY) !== 'off'; } catch (e) { /* blocked storage: it starts on */ }
     // A touch screen has no pointer to follow: a tap would leave the label where it landed.
     const canHover = !window.matchMedia || window.matchMedia('(hover: hover) and (pointer: fine)').matches;
@@ -511,22 +533,29 @@ if (typeof module !== 'undefined' && module.exports) {
     }
     function askHeight(cell, latlng) {
         if (typeof measureElevations !== 'function' || ptr.heights.has(cell)) return;
-        const grant = wrcOvBudget(ptr.stamps, Date.now(), PTR_BUDGET, PTR_WINDOW_MS);
+        const grant = wrcOvHeightGate(ptr, Date.now(), PTR_BUDGET, PTR_WINDOW_MS);
         ptr.stamps = grant.stamps;
         if (!grant.ok) return;
         ptr.heights.set(cell, false);   // asked: not asked again for this cell, whatever the answer
+        ptr.busy = true;
         measureElevations([[Number(latlng.lat.toFixed(5)), Number(latlng.lng.toFixed(5))]]).then(heights => {
-            if (!heights || typeof heights[0] !== 'number') return;
+            const got = !!heights && typeof heights[0] === 'number';
+            ptr.busy = false;
+            ptr.pausedUntil = wrcOvHeightPausedUntil(Date.now(), got, PTR_PAUSE_MS);
+            if (!got) return;
             ptr.heights.set(cell, heights[0]);
             if (ptr.cell === cell) paintPtr();
         });
     }
-    function movePtr(latlng, x, y) {
+    // `ask` is true only for the mouse's own movement: the map moving under a pointer that stands still repaints the label
+    // (the position changed) but never asks for a height.
+    function movePtr(latlng, x, y, ask) {
         if (!engaged || !ptr.on || !canHover) return;
         ptr.cell = wrcOvCell(latlng.lat, latlng.lng);
         ptr.at = {latlng, x, y};
         paintPtr();
         clearTimeout(ptr.rest);
+        if (!ask) return;
         const cell = ptr.cell;
         ptr.rest = setTimeout(() => { if (ptr.cell === cell && ptr.at) askHeight(cell, ptr.at.latlng); }, PTR_REST_MS);
     }
@@ -538,7 +567,7 @@ if (typeof module !== 'undefined' && module.exports) {
             const oe = e.originalEvent;
             // Over a popup or one of the map's own controls the label would be in the way of what is being read.
             if (!oe || (oe.target && oe.target.closest && oe.target.closest('.leaflet-popup, .leaflet-control'))) { hidePtr(); return; }
-            movePtr(e.latlng, oe.clientX, oe.clientY);
+            movePtr(e.latlng, oe.clientX, oe.clientY, true);
         });
         m.on('mouseout', hidePtr);
         m.on('dragstart', hidePtr);
@@ -547,7 +576,7 @@ if (typeof module !== 'undefined' && module.exports) {
             if (!ptr.at) return;
             const rect = m.getContainer().getBoundingClientRect();
             const latlng = m.containerPointToLatLng([ptr.at.x - rect.left, ptr.at.y - rect.top]);
-            movePtr(latlng, ptr.at.x, ptr.at.y);
+            movePtr(latlng, ptr.at.x, ptr.at.y, false);
         });
     }
 

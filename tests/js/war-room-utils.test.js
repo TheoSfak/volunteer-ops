@@ -70,6 +70,7 @@ const {
     samplePolylineEvenly,
     elevationClimb,
     naismithMinutes,
+    osmRetryDelayMs,
 } = require('../../assets/js/war-room-utils.js');
 
 // Local-only Haversine, not exported by war-room-utils.js — this file has no
@@ -1262,4 +1263,18 @@ test('Naismith adds an hour per 600 m climbed to 5 km/h on the level', () => {
     assert.equal(naismithMinutes(5000, 600), 120);
     assert.equal(naismithMinutes(0, 300), 30);
     assert.equal(naismithMinutes(1000, -200), 12, 'a descent adds nothing');
+});
+
+test('the map layer looks again at the next pause that has not run out, half a second after it', () => {
+    assert.equal(osmRetryDelayMs([10000, 4000, 7000], 1000), 3500, 'the earliest future time, plus half a second');
+    assert.equal(osmRetryDelayMs([500, 7000], 1000), 6500, 'a time already past is not waited for');
+});
+
+test('with every pause already run out the map layer looks again in a second, never not at all', () => {
+    // A pass that went on longer than the 8 s it set aside for a tile still to come used to leave nothing to wait for:
+    // the layer said «loading» until somebody moved the map.
+    assert.equal(osmRetryDelayMs([500, 900], 1000), 1000);
+    assert.equal(osmRetryDelayMs([1000], 1000), 1000, 'a time that is exactly now has run out too');
+    assert.equal(osmRetryDelayMs([], 1000), 1000);
+    assert.equal(osmRetryDelayMs(undefined, 1000), 1000);
 });
