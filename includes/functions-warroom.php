@@ -9424,6 +9424,10 @@ function loadTeamPositionsForMission(int $missionId, array $continuousFieldMinut
             // 'time' field (war-room.php's $loadPins): a team's last-known
             // ping can be from a different day than "now".
             'time' => date('H:i d/m/Y', strtotime($ping['created_at'])),
+            // The same moment, absolute (v3.437.0): the destination arcs hand it
+            // to the page, which works out "7 minutes ago" itself. An age worked
+            // out here would change on every poll and defeat the payload hash.
+            'ts' => (int) strtotime($ping['created_at']),
             'is_stale' => (time() - strtotime($ping['created_at'])) > warRoomPingStaleThresholdSeconds(),
             // Battery of whoever on the team most recently reported in — a
             // reasonable proxy for "is this team's tracking about to go dark".

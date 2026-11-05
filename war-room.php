@@ -1575,7 +1575,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
 // Nearby Teams (field-card column, both modes) + Team Distances (Teams
 // panel, full view only). Same "define once, call from both the ajax
 // branch and the full-page seed" shape as $loadPins above.
-$loadTeamProximity = function () use ($missionId, $user, $continuousFieldMinutesByVolunteerId) {
+$loadTeamProximity = function () use ($missionId, $user, $continuousFieldMinutesByVolunteerId, $canManageWarRoom) {
     $teamPositions = loadTeamPositionsForMission($missionId, $continuousFieldMinutesByVolunteerId);
 
     $myPing = dbFetchOne(
@@ -1609,7 +1609,13 @@ $loadTeamProximity = function () use ($missionId, $user, $continuousFieldMinutes
     }
     usort($nearbyTeams, fn($a, $b) => ($a['distance_m'] ?? PHP_FLOAT_MAX) <=> ($b['distance_m'] ?? PHP_FLOAT_MAX));
 
-    return ['nearbyTeams' => $nearbyTeams, 'teamDistances' => computeTeamDistanceMatrix($teamPositions)];
+    return [
+        'nearbyTeams' => $nearbyTeams,
+        'teamDistances' => computeTeamDistanceMatrix($teamPositions),
+        // The destination arcs (v3.437.0) start from these same positions, so
+        // they ride this call instead of asking for them a second time.
+        'teamArcs' => teamArcsForMission($missionId, $teamPositions, $canManageWarRoom, $myTeamId > 0 ? $myTeamId : null),
+    ];
 };
 
 // Some viewers have no map (see the map card further down), so
@@ -1849,6 +1855,7 @@ if (get('ajax') === '1') {
         'restrictedAreaProximity' => $restrictedAreaProximity,
         'nearbyTeams' => $teamProximity['nearbyTeams'],
         'teamDistances' => $teamProximity['teamDistances'],
+        'teamArcs' => $teamProximity['teamArcs'],
         'k9Handlers' => k9Handlers(),
         'teamCaptains' => teamCaptains(),
         // «Τι μου ξέφυγε» — the whole assistant panel, not just its badge
@@ -2036,6 +2043,7 @@ $restrictedAreaBreachHistory = loadRestrictedAreaBreachHistoryForUser($missionId
 $teamProximity = $loadTeamProximity();
 $nearbyTeams = $teamProximity['nearbyTeams'];
 $teamDistances = $teamProximity['teamDistances'];
+$teamArcs = $teamProximity['teamArcs'];
 $restrictedAreaProximity = $loadRestrictedAreaProximity();
 // See the ajax branch's own copy of this above. Computed here as well so the
 // badge is already right on first paint rather than popping into existence
@@ -2553,6 +2561,29 @@ include __DIR__ . '/includes/header.php';
     /* Strips Leaflet's default white tooltip box/arrow so only our own colored
        pill (inline-styled per team in dispatchTeamLabelHtml()) shows through. */
     .dispatch-team-label { background: transparent !important; border: none !important; box-shadow: none !important; padding: 0 !important; }
+    /* Destination arcs (assets/js/war-room-team-arcs.js). Fixed dark glass over the map, so no theme tokens:
+       it has to read the same on a satellite picture in every skin. --arc is the team's own colour. */
+    .wr-arc-label { background: transparent; border: 0; }
+    .wr-arc-box { position: absolute; left: 0; top: 0; width: 78px; height: 78px; margin: -39px 0 0 -39px; pointer-events: none; font-family: inherit; color: #fff; }
+    .wr-arc-dial { position: relative; width: 78px; height: 78px; filter: drop-shadow(0 4px 8px rgba(0,0,0,.55)); }
+    .wr-arc-dial svg { display: block; }
+    .wr-arc-dial .bg { fill: rgba(14,20,12,.92); }
+    .wr-arc-dial .track { fill: none; stroke: rgba(255,255,255,.2); stroke-width: 6; }
+    .wr-arc-dial .prog { fill: none; stroke: var(--arc); stroke-width: 6; stroke-linecap: round; }
+    .wr-arc-dial.is-stale { opacity: .88; }
+    .wr-arc-dial.is-stale .track { stroke-dasharray: 4 5; }
+    .wr-arc-dial .txt { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; line-height: 1; }
+    .wr-arc-dial .a { font-size: 10px; font-weight: 700; letter-spacing: .06em; color: #c9d3b8; }
+    .wr-arc-dial b { font-size: 25px; font-weight: 800; font-variant-numeric: tabular-nums; color: #fff; }
+    .wr-arc-dial .u { font-size: 10px; font-weight: 600; color: #e6ecd9; line-height: 1.1; }
+    .wr-arc-under { position: absolute; left: 50%; top: 84px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; white-space: nowrap; }
+    .wr-arc-dist, .wr-arc-pill { display: flex; align-items: center; gap: 6px; padding: 4px 11px 4px 8px; border-radius: 999px; background: rgba(14,20,12,.92); border: 1.5px solid var(--arc); color: #fff; font-size: 13px; font-weight: 800; font-variant-numeric: tabular-nums; box-shadow: 0 2px 8px rgba(0,0,0,.5); }
+    .wr-arc-dist.is-est, .wr-arc-pill.is-est { border-style: dashed; }
+    .wr-arc-dist.is-stale, .wr-arc-pill.is-stale { opacity: .9; }
+    .wr-arc-pill { position: absolute; left: 0; top: 0; transform: translate(-50%, -50%); white-space: nowrap; font-size: 12px; padding: 3px 9px 3px 7px; }
+    .wr-arc-pill span { font-size: 10px; font-weight: 700; color: #e6ecd9; }
+    .wr-arc-pill i { width: 1px; height: 12px; background: rgba(255,255,255,.35); }
+    .wr-arc-chip { padding: 2px 9px; border-radius: 8px; background: rgba(14,20,12,.9); border: 1px solid rgba(255,255,255,.22); color: #f1d9a0; font-size: 11px; font-weight: 600; }
     .dispatch-team-label::before { display: none !important; }
     /* Team name above a live position dot (buildPinMarker()). White pill with a
        team-coloured edge rather than a team-coloured fill: the pin only carries
@@ -6914,6 +6945,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/mesh-gateway.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/mesh-gateway.js') ?>"></script>
 <?php endif; ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-ar.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-ar.js') ?>"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-team-arcs.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-team-arcs.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/triage.js?v=<?= APP_VERSION ?>"></script>
 <?php if ($consoleView): ?>
 <?php /* defer: it reads the page's own state (the poll's arrays, the render
@@ -7181,6 +7213,8 @@ let myTasks = <?= json_encode($myTasks) ?>;
 let routes = <?= json_encode($routes) ?>;
 let nearbyTeams = <?= json_encode($nearbyTeams) ?>;
 let teamDistances = <?= json_encode($teamDistances) ?>;
+// Destination arcs (v3.437.0): where each team is being sent, drawn by assets/js/war-room-team-arcs.js.
+let teamArcs = <?= json_encode($teamArcs) ?>;
 let restrictedAreaProximity = <?= json_encode($restrictedAreaProximity) ?>;
 // Team rosters for the Route Order composer's member picker — lets an admin
 // narrow a route to a subset of a team (e.g. 2 of 4) instead of always the
@@ -8044,6 +8078,8 @@ annotationDrawLayer = L.layerGroup().addTo(map);
 // (not used for buttons today, but keeps the two "War Room order" layers
 // consistent in case a future popup action needs it).
 routeLayer = L.featureGroup().addTo(map);
+// The arcs from each team to where it is being sent (assets/js/war-room-team-arcs.js).
+teamArcsInit();
 // Incidents and POI markers go straight into sharedMarkerCluster
 // (created above, alongside pins) instead of their own layer — no
 // separate init needed here any more.
@@ -8245,6 +8281,7 @@ const MAP_OVERLAYS = [
     {key: 'sectors',     icon: 'bi-grid-3x3-gap-fill',         label: 'map.overlay_sectors',     groups: () => [sectorLayer, sectorBuildingLayer]},
     {key: 'dispatch',    icon: 'bi-geo-fill',                  label: 'map.overlay_dispatch',    groups: () => [dispatchLayer]},
     {key: 'routes',      icon: 'bi-signpost-split-fill',       label: 'map.overlay_routes',      groups: () => [routeLayer]},
+    {key: 'team_arcs',   icon: 'bi-bezier2',                   label: 'map.overlay_team_arcs',   groups: () => [teamArcLayer, teamArcLabelLayer]},
     {key: 'annotations', icon: 'bi-pencil',                    label: 'map.overlay_annotations', groups: () => [annotationLayer]},
 ];
 const MAP_OVERLAYS_KEY = 'wr_hidden_overlays_<?= $missionId ?>';
@@ -14386,6 +14423,7 @@ function enterTrailMode() {
         }
         if (includeAdmin && !mapOverlaysHidden.has('dispatch')) { if (!map.hasLayer(dispatchLayer)) dispatchLayer.addTo(map); }
         else if (map.hasLayer(dispatchLayer)) { map.removeLayer(dispatchLayer); }
+        teamArcsSuspend(true);
         currentTrails = result.trails;
         currentTrailGapSeconds = Number(result.gap_seconds) || 0;
         currentTrailEvents = result.events || [];
@@ -14403,6 +14441,7 @@ function exitTrailMode() {
     if (map.hasLayer(trailLayer)) map.removeLayer(trailLayer);
     sharedMarkerCluster.addLayers(currentPinMarkers);
     if (!map.hasLayer(dispatchLayer) && !mapOverlaysHidden.has('dispatch')) dispatchLayer.addTo(map);
+    teamArcsSuspend(false);
 }
 const trailModeToggleBtn = document.getElementById('trailModeToggle');
 if (trailModeToggleBtn) {
@@ -21104,6 +21143,7 @@ setTimeout(() => {
     renderSosAlerts(sosAlerts);
     renderVoiceMessages(voiceMessages);
     renderNearbyTeams(nearbyTeams);
+    renderTeamArcs(teamArcs);
     renderRestrictedAreaProximity(restrictedAreaProximity);
     renderBroadcastPhotos(broadcastPhotos);
     renderMissingPersonCard(missingPerson);
@@ -27017,6 +27057,7 @@ function pollWarRoomData() {
         // function rather than the data.
         if (typeof renderAckTracker === 'function' && Array.isArray(data.ackTracker)) renderAckTracker(data.ackTracker);
         if (data.nearbyTeams) renderNearbyTeams(nearbyTeams = data.nearbyTeams);
+        if (data.teamArcs) renderTeamArcs(teamArcs = data.teamArcs);
         if (data.restrictedAreaProximity) renderRestrictedAreaProximity(restrictedAreaProximity = data.restrictedAreaProximity);
         if (data.teamDistances) renderTeamDistances(teamDistances = data.teamDistances);
         if (data.liveFragments) applyLiveFragments(data.liveFragments);

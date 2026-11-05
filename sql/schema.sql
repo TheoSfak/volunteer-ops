@@ -3413,4 +3413,24 @@ CREATE TABLE IF NOT EXISTS `mesh_packets` (
     INDEX `idx_mesh_packets_heard` (`heard_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- =============================================
+-- TEAM DESTINATION ARCS — v3.437.0 (migration 201)
+-- One row per team: the place it is being sent now, how far away it was when
+-- the arc first appeared, and the last routed time (scaled by distance in
+-- between). Replaced when the team gets a new target.
+-- =============================================
+CREATE TABLE IF NOT EXISTS `team_arc_state` (
+    `team_id` INT UNSIGNED NOT NULL PRIMARY KEY,
+    `target_kind` VARCHAR(12) NOT NULL COMMENT 'dispatch | sector | route',
+    `target_id` INT UNSIGNED NOT NULL,
+    `first_distance_m` INT UNSIGNED NOT NULL,
+    `minutes` SMALLINT UNSIGNED NULL,
+    `source` VARCHAR(16) NULL,
+    `mode` VARCHAR(8) NULL,
+    `eta_distance_m` INT UNSIGNED NULL,
+    `eta_at` INT UNSIGNED NULL,
+    `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;

@@ -7961,6 +7961,26 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 201,
+            'description' => "Team destination arcs (v3.437.0): team_arc_state keeps, for the one place each team is currently being sent (a dispatch point or area, a sector, the next waypoint of a route), how far away it was when the arc first appeared (so the dial can say how much of the way is done) and the last road/walking time worked out for it (so the 5-second poll does not ask a routing service every time; between asks the time is scaled by the distance still to go). One row per team, replaced when the team gets a new target.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS team_arc_state (
+                    team_id INT UNSIGNED NOT NULL PRIMARY KEY,
+                    target_kind VARCHAR(12) NOT NULL COMMENT 'dispatch | sector | route',
+                    target_id INT UNSIGNED NOT NULL,
+                    first_distance_m INT UNSIGNED NOT NULL COMMENT 'Straight-line metres when the arc first appeared for this target',
+                    minutes SMALLINT UNSIGNED NULL COMMENT 'Last routed or estimated time',
+                    source VARCHAR(16) NULL COMMENT 'osrm | google | straight_line',
+                    mode VARCHAR(8) NULL COMMENT 'foot | vehicle',
+                    eta_distance_m INT UNSIGNED NULL COMMENT 'Straight-line metres at the moment minutes was worked out',
+                    eta_at INT UNSIGNED NULL COMMENT 'Unix time minutes was worked out',
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
