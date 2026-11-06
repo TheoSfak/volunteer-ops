@@ -200,6 +200,14 @@ final class WarRoomLightScriptTest extends TestCase
     {
         // The alias is only the same thing as two copies while nobody writes to one of them.
         $page = WarRoomSource::full();
+        // The one exception is the page's check on the translation file (v3.449.0): when that file did not run, and only
+        // then, it gives the script an empty table - both names one and the same object - so it shows keys instead of
+        // stopping. That is a definition, before anything has read a table, not a write to a table in use; it must stay
+        // the single such place.
+        $page = str_replace("\r\n", "\n", $page);
+        $healTables = "window.WR_STRINGS = {};\n    window.WR_STRINGS_FALLBACK = window.WR_STRINGS;";
+        $this->assertSame(1, substr_count($page, $healTables), 'the exception exists once, as written');
+        $page = str_replace($healTables, '', $page);
         $this->assertDoesNotMatchRegularExpression('~\bWR_STRINGS(?:_FALLBACK)?\s*(?:\[[^\]]*\]\s*)?=[^=]~', preg_replace('~const WR_STRINGS(?:_FALLBACK)? = ~', '', $page));
         $this->assertDoesNotMatchRegularExpression('~\bObject\.(?:assign|defineProperty)\(\s*WR_STRINGS~', $page);
     }

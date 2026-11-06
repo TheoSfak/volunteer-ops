@@ -67,6 +67,7 @@ $defaults = [
     // The war-room page sends its script without the full-line // comments and, for a Greek viewer, the
     // translation table once (wrLightScriptEnabled()). Off puts the page back exactly as it was.
     'war_room_light_script' => '1',
+    'war_room_external_js' => '0',
     // Rescuer heart rate (volunteer_vitals). Off by default: it needs a
     // sensor per volunteer and it collects health data, so it must be an
     // explicit decision by the org, never something that starts working
@@ -526,7 +527,7 @@ $actionRoomFields = [
     'war_room_auto_ping_seconds', 'war_room_auto_ping_high_accuracy',
     'war_room_native_sampling', 'war_room_native_full_tracking',
     'war_room_max_ping_accuracy_m', 'war_room_max_ping_speed_kmh', 'war_room_max_ping_speed_kmh_vehicle', 'war_room_gps_smoothing',
-    'arrival_auto_enabled', 'war_room_light_script',
+    'arrival_auto_enabled', 'war_room_light_script', 'war_room_external_js',
     'war_room_low_battery_pct', 'war_room_max_shift_minutes', 'war_room_floor_height_m',
     'vitals_enabled', 'vitals_sample_seconds', 'vitals_elevated_pct', 'vitals_critical_pct',
     'vitals_low_bpm', 'vitals_reference_age', 'vitals_stale_seconds', 'vitals_retention_days',
@@ -682,6 +683,11 @@ if (isPost()) {
                     // so only a skin that exists is ever stored; anything else is today's console.
                     if ($field === 'war_room_console_skin' && !in_array($value, ['classic', 'nocturne', 'aurora', 'overlay'], true)) {
                         $value = 'classic';
+                    }
+                    // Same closed list: war-room.php branches on exactly these three values (never / only a browser that asked /
+                    // everybody); anything else, an empty field from a stale form included, is today's page.
+                    if ($field === 'war_room_external_js' && !in_array($value, ['0', '1', '2'], true)) {
+                        $value = '0';
                     }
 
                     // Same closed-list reasoning: the clock prints this on every
@@ -2341,6 +2347,16 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                             Ελαφρύτερη σελίδα Action Room (λιγότερα δεδομένα σε κάθε άνοιγμα και ανανέωση)
                         </label>
                         <div><small class="text-muted">Η σελίδα στέλνει το script της χωρίς τα σχόλια του κώδικα και, για όποιον τη διαβάζει στα ελληνικά, τον πίνακα μεταφράσεων μία φορά αντί για δύο: περίπου 40% λιγότερα δεδομένα σε κάθε φόρτωση. Δεν αλλάζει τίποτα στη λειτουργία. Αν κάτι δεν δουλεύει όπως πρέπει, κλείστο και η σελίδα γυρίζει αμέσως ακριβώς όπως ήταν· για μία μόνο φορά, βάλε <code>&amp;rawjs=1</code> στο τέλος της διεύθυνσης.</small></div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="warRoomExternalJs">Πίνακας μεταφράσεων Action Room ως αρχείο που κρατά το κινητό (δοκιμαστικό)</label>
+                        <?php $extJs = (string) ($settings['war_room_external_js'] ?? '0'); ?>
+                        <select class="form-select" style="max-width:420px;" name="war_room_external_js" id="warRoomExternalJs">
+                            <option value="0" <?= $extJs === '0' ? 'selected' : '' ?>>Κλειστό — όλα μέσα στη σελίδα, όπως τώρα</option>
+                            <option value="1" <?= $extJs === '1' ? 'selected' : '' ?>>Μόνο στον περιηγητή που το ζήτησε (δοκιμή)</option>
+                            <option value="2" <?= $extJs === '2' ? 'selected' : '' ?>>Για όλους</option>
+                        </select>
+                        <small class="text-muted">Ο πίνακας μεταφράσεων είναι το μεγαλύτερο κομμάτι της σελίδας που δεν αλλάζει ποτέ από αποστολή σε αποστολή (περίπου 70 KB συμπιεσμένος). Αντί να στέλνεται μέσα στη σελίδα κάθε φορά, το κινητό τον κατεβάζει <strong>μία φορά</strong> ως αρχείο και τον κρατά· σε κάθε επόμενο άνοιγμα ή ανανέωση δεν ξανακατεβαίνει. Δεν αλλάζει τίποτα στη λειτουργία. <strong>Δοκιμή σε ένα μόνο κινητό:</strong> διάλεξε «Μόνο στον περιηγητή που το ζήτησε» και άνοιξε την αποστολή από εκείνο το κινητό με <code>&amp;wrext=1</code> στο τέλος της διεύθυνσης (με <code>&amp;wrext=0</code> το ξεζητά). Αν το αρχείο δεν φτάσει, η σελίδα ξαναφορτώνει μόνη της με τον παλιό τρόπο· για μία φορά μπορείς να βάλεις και μόνος σου <code>&amp;rawjs=1</code>. Για να γυρίσουν όλα όπως ήταν, διάλεξε «Κλειστό» — αμέσως, χωρίς ενημέρωση.</small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Μέγιστη Αποδεκτή Αβεβαιότητα Στίγματος (μ.)</label>

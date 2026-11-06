@@ -7,6 +7,7 @@
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/weather.php';
 require_once __DIR__ . '/includes/lpb-rings.php';
+require_once __DIR__ . '/includes/war-room-bundles.php';
 requireLogin();
 
 // Where this page sends somebody it will not open for. A mission visitor is
@@ -165,6 +166,9 @@ $isAdminAccount = isActionRoomAdminAccount();
 // everyone falls back to the classic single-column layout with no other
 // change needed.
 $viewModeCookie = $_COOKIE['wr_view_mode'] ?? '';
+// Canary for the translation file (setting war_room_external_js = 1): ?wrext=1 asks for it in this browser, ?wrext=0
+// takes it back. It sends a cookie, so it runs here, long before the page prints anything.
+wrExternalJsApplyCanary();
 // The console («Κονσόλα»): one screen, the map always in view, with the queue of
 // what needs the coordinator, the teams, the order form and the feed docked
 // around it. Command staff only, and only by their own choice (the hero button):
@@ -7021,7 +7025,11 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/vitals-sensor.js?v=<?= APP_VERSION ?>"></script>
 <?php endif; ?>
 <script>const WR_MISSION_ID = <?= (int) $missionId ?>;</script>
-<?php $__wrStrings = loadLangStrings('war-room'); $__viewerLang = $user['language'] ?? DEFAULT_LANGUAGE; ?>
+<?php $__wrStrings = loadLangStrings('war-room'); $__viewerLang = $user['language'] ?? DEFAULT_LANGUAGE;
+// The translation tables go out as a file of their own (war-room-js.php, which the phone keeps) when the setting and
+// this browser's canary say so; '' means they stay in the script, exactly as before. Nothing is printed here.
+$__wrExtUrl = wrExternalJsEnabled() ? wrBundleUrl(rtrim(BASE_URL, '/'), 'strings', (string) $__viewerLang) : '';
+$__wrExt = $__wrExtUrl !== ''; ?>
 <script>
 // What PHP works out for this request that the script below reads (the mission id is the line above).
 const WR_BOOT = {
@@ -7133,6 +7141,25 @@ const WR_BOOT = {
     chatHeadsAtLoad: <?= json_encode((object) $chatHeadsAtLoad) ?>,
 };
 </script>
+<?php if ($__wrExt): ?>
+<script src="<?= h($__wrExtUrl) ?>"></script>
+<script>
+<?php /* The file did not arrive or did not run (a missing or half-uploaded file, a dropped connection). Ask for the page the
+   old way instead: ?rawjs=1 never asks for the file, so the page that replaces this one cannot end up here again, and no
+   guard is needed. Until it arrives let the script find an empty table, so that it stops on nothing it cannot name. */ ?>
+if (typeof WR_STRINGS === 'undefined') {
+    (function () {
+        try {
+            var u = new URL(location.href);
+            u.searchParams.set('rawjs', '1');
+            location.replace(u.toString());
+        } catch (e) {}
+    })();
+    window.WR_STRINGS = {};
+    window.WR_STRINGS_FALLBACK = window.WR_STRINGS;
+}
+</script>
+<?php endif; ?>
 <script>
 <?php $__wrLight = wrLightScriptEnabled(); if ($__wrLight) { ob_start('wrStripJsLineComments'); } ?>
 const csrfToken = WR_BOOT.csrf;
@@ -7150,11 +7177,13 @@ const WR_MY_USER_ID = WR_BOOT.myUserId;
 // clock is out. The minutes since an order was finished (assets/js/war-room-done-orders.js) are
 // counted with it, so a phone whose clock is wrong does not fade things early or late.
 const WR_CLOCK_OFFSET = WR_BOOT.serverTime - Date.now() / 1000;
+<?php if (!$__wrExt): /* with the file in use, war-room-js.php has already defined both tables */ ?>
 const WR_STRINGS = <?= json_encode($__wrStrings[$__viewerLang] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 <?php if ($__wrLight && $__viewerLang === DEFAULT_LANGUAGE): /* the same table twice is 68 KB of gzip on every load: say it once */ ?>
 const WR_STRINGS_FALLBACK = WR_STRINGS;
 <?php else: ?>
 const WR_STRINGS_FALLBACK = <?= json_encode($__wrStrings[DEFAULT_LANGUAGE] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+<?php endif; ?>
 <?php endif; ?>
 function t(key, vars = {}) {
     let text = WR_STRINGS[key] ?? WR_STRINGS_FALLBACK[key] ?? key;

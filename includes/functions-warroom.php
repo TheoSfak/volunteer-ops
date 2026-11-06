@@ -13621,3 +13621,44 @@ function wrStripJsLineComments(string $js): string {
         return $js;
     }
 }
+
+/**
+ * Whether the war-room page asks for its translation tables as a file (war-room-js.php) instead of printing them in
+ * its script. Setting war_room_external_js: '0' never (the default), '1' only in a browser that asked for it with
+ * ?wrext=1 (the canary: one phone first, then everybody), '2' for everybody. ?rawjs=1 turns it off for one request, as
+ * it does for the light script - the page then is exactly what it was before this existed.
+ */
+function wrExternalJsEnabled(): bool {
+    return wrExternalJsDecision((string) getSetting('war_room_external_js', '0'), (string) ($_COOKIE['wr_ext_js'] ?? ''), !empty($_GET['rawjs']));
+}
+
+/** The rule itself, apart from where its three inputs come from. */
+function wrExternalJsDecision(string $setting, string $canaryCookie, bool $rawRequested): bool {
+    if ($rawRequested) {
+        return false;
+    }
+    if ($setting === '2') {
+        return true;
+    }
+    return $setting === '1' && $canaryCookie === '1';
+}
+
+/**
+ * The canary switch: ?wrext=1 on the page's address asks for the external files in this browser for a year,
+ * ?wrext=0 takes it back, anything else does nothing. It sends a cookie, so the page calls it before it prints
+ * anything; $_COOKIE is updated too, so the same request already sees the answer.
+ */
+function wrExternalJsApplyCanary(): void {
+    $asked = isset($_GET['wrext']) && is_string($_GET['wrext']) ? $_GET['wrext'] : '';
+    if ($asked !== '0' && $asked !== '1') {
+        return;
+    }
+    @setcookie('wr_ext_js', $asked, [
+        'expires' => $asked === '1' ? time() + 31536000 : time() - 3600,
+        'path' => '/',
+        'secure' => (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off'),
+        'httponly' => true,
+        'samesite' => 'Lax',
+    ]);
+    $_COOKIE['wr_ext_js'] = $asked;
+}
