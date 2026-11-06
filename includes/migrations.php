@@ -8084,6 +8084,15 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 206,
+            'description' => "Scenario routes (v3.455.0): a staged order can now be a route as well - mission_scenario_items.kind grows from ENUM('dispatch','sector') to ENUM('dispatch','sector','route'). A route's payload holds its waypoints, its title, how the team travels and whether it returns to the start, and the team or slot it goes to (never every team: a route has no such audience). Re-running it changes nothing.",
+            'up' => function () {
+                dbExecute("ALTER TABLE mission_scenario_items
+                    MODIFY COLUMN kind ENUM('dispatch','sector','route') NOT NULL DEFAULT 'dispatch' COMMENT 'What kind of order: dispatch = a point or an area (sent as a mission_dispatch_points row), sector = a search sector (sent as a mission_search_sectors row), route = a patrol of waypoints (sent as a mission_routes row); more kinds come with later steps'");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

@@ -599,9 +599,13 @@ final class TeamArcsTest extends TestCase
         $this->assertStringContainsString("body.append('travel_mode', travel.value)", $console);
 
         // And the three endpoints keep it, only ever as foot or vehicle.
-        foreach (['mission-route.php', 'mission-sector.php'] as $endpoint) {
-            $this->assertStringContainsString("normalizeTravelMode(post('travel_mode'))", $this->source($endpoint), $endpoint);
-        }
+        $this->assertStringContainsString("normalizeTravelMode(post('travel_mode'))", $this->source('mission-sector.php'));
+        // A route is sent by createMissionRoute() since v3.455.0, like a dispatch since v3.451.0: the endpoint hands the
+        // posted mode over and prepareMissionRoute() is what narrows it.
+        $this->assertStringContainsString("'travel_mode'         => post('travel_mode')", $this->source('mission-route.php'));
+        $warroom = $this->source('includes/functions-warroom.php');
+        $prepare = substr($warroom, (int) strpos($warroom, 'function prepareMissionRoute('), 7000);
+        $this->assertStringContainsString("normalizeTravelMode(\$input['travel_mode'] ?? null)", $prepare);
         // A dispatch is sent by createMissionDispatch() since v3.451.0: the endpoint hands the posted mode over
         // and the function is what narrows it.
         $this->assertStringContainsString("'travel_mode' => post('travel_mode')", $this->source('mission-dispatch.php'));

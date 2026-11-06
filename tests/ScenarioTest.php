@@ -1178,8 +1178,8 @@ final class ScenarioTest extends TestCase
         $src = $this->source('mission-scenario.php');
         $this->assertStringContainsString("fn(\$r) => (\$r['kind'] ?? '') === 'sector' && !empty(\$r['ok'])", $src);
         $this->assertStringContainsString("'sectors' => loadMissionSectorsForUser(\$missionId, (int) \$userId, true, false), 'areas' => loadMissionSearchAreasForUser(\$missionId, true)", $src);
-        $this->assertStringContainsString("] + \$liveSectors(\$result['results']));", $src, 'play');
-        $this->assertStringContainsString("] + \$liveSectors([\$result['item']]));", $src, 'retry');
+        $this->assertStringContainsString("] + \$liveSectors(\$result['results'])", $src, 'play');
+        $this->assertStringContainsString("] + \$liveSectors([\$result['item']])", $src, 'retry');
         $this->assertStringContainsString("if (\$action === 'add_sectors') {", $src);
     }
 
@@ -1207,6 +1207,499 @@ final class ScenarioTest extends TestCase
         // A sector whose search area has been deleted is red in the card and counted in the play confirmation.
         $this->assertStringContainsString('} else if (item.area_missing) {', $scenarioJs);
         $this->assertStringContainsString("t('scenario.play_confirm_area_missing'", $scenarioJs);
+    }
+
+    // ── Routes (v3.455.0) ───────────────────────────────────────────────────────────────────────────────────
+
+    private function wp(float $lat, float $lng, array $more = []): array
+    {
+        return ['lat' => $lat, 'lng' => $lng] + $more;
+    }
+
+    /** The route window's form as «Στο σενάριο» posts it. */
+    private function routeRow(array $over = []): array
+    {
+        return $over + [
+            'team_id' => (string) $this->teamId,
+            'title' => 'Περίπολος Ρέματος',
+            'waypoints' => json_encode([
+                $this->wp(35.1, 25.1, ['label' => 'Αρχή', 'instructions' => 'Ξεκίνα εδώ', 'dwell_minutes' => 5, 'require_photo' => 1]),
+                $this->wp(35.2, 25.2),
+            ]),
+            'is_closed_loop' => '0',
+            'add_return_waypoint' => '0',
+            'member_ids' => '[]',
+            'travel_mode' => 'foot',
+        ];
+    }
+
+    private function stageRoute(int $phaseId, array $input): array
+    {
+        return addScenarioRouteItem($this->mission, $phaseId, $this->adminId, $input);
+    }
+
+    private function liveRouteCount(): int
+    {
+        return (int) dbFetchValue("SELECT COUNT(*) FROM mission_routes WHERE mission_id = ?", [$this->missionId]);
+    }
+
+    private function liveOrderCount(): int
+    {
+        return (int) dbFetchValue("SELECT COUNT(*) FROM mission_orders WHERE mission_id = ?", [$this->missionId]);
+    }
+
+    /** @return int[] */
+    private function routeMemberIds(int $routeId): array
+    {
+        $ids = array_map('intval', array_column(dbFetchAll("SELECT user_id FROM mission_route_members WHERE route_id = ?", [$routeId]), 'user_id'));
+        sort($ids);
+        return $ids;
+    }
+
+    /** @return int[] ids that got a notification about the order $orderId. */
+    private function notifiedAboutOrder(int $orderId): array
+    {
+        $ids = [];
+        foreach (dbFetchAll("SELECT user_id, data FROM notifications WHERE data LIKE ?", ['%"orderId":' . $orderId . '%']) as $row) {
+            if ((int) (json_decode((string) $row['data'], true)['orderId'] ?? 0) === $orderId) {
+                $ids[] = (int) $row['user_id'];
+            }
+        }
+        sort($ids);
+        return $ids;
+    }
+
+    /** A team of this mission with one volunteer on it who takes part in the Action Room. @return array{team: int, member: int} */
+    private function teamWithMember(string $codename, int $number, bool $inActionRoom = true): array
+    {
+        $team = $this->makeTeam($codename, $number);
+        $member = $this->makeUser('Μέλος ' . $codename);
+        dbInsert("INSERT INTO participation_requests (shift_id, volunteer_id, status) VALUES (?, ?, ?)", [$this->shiftId, $member, PARTICIPATION_APPROVED]);
+        if ($inActionRoom) {
+            dbInsert("INSERT INTO mission_action_room_participants (mission_id, user_id) VALUES (?, ?)", [$this->missionId, $member]);
+        }
+        dbInsert("INSERT INTO mission_team_members (team_id, mission_id, user_id) VALUES (?, ?, ?)", [$team, $this->missionId, $member]);
+        forgetActionRoomParticipantIds($this->missionId);
+        return ['team' => $team, 'member' => $member];
+    }
+
+    public function testARouteCanBeWrittenDownAndIsNotALiveRouteYet(): void
+    {
+        $phase = $this->phase();
+        $before = [$this->liveRouteCount(), $this->liveOrderCount(), $this->notificationCount(), $this->liveCount(), $this->auditCount('create_mission_route')];
+
+        $r = $this->stageRoute($phase, $this->routeRow(['add_return_waypoint' => '1', 'is_closed_loop' => '1']));
+
+        $this->assertTrue($r['ok'], (string) ($r['error'] ?? ''));
+        $this->assertSame($before, [$this->liveRouteCount(), $this->liveOrderCount(), $this->notificationCount(), $this->liveCount(), $this->auditCount('create_mission_route')], 'a staged route is not a route, an order, a push or an audit entry of a sent one');
+        $stored = dbFetchOne("SELECT kind, payload, slot_id, sent_at, sent_ref_id FROM mission_scenario_items WHERE id = ?", [$r['id']]);
+        $this->assertSame('route', $stored['kind']);
+        $this->assertNull($stored['slot_id']);
+        $this->assertNull($stored['sent_at']);
+        $payload = json_decode($stored['payload'], true);
+        $this->assertSame('team', $payload['audience']);
+        $this->assertSame($this->teamId, $payload['team_id']);
+        $this->assertSame('Περίπολος Ρέματος', $payload['label']);
+        $this->assertCount(2, $payload['waypoints']);
+        $this->assertSame('Αρχή', $payload['waypoints'][0]['label']);
+        $this->assertSame(1, $payload['waypoints'][0]['require_photo']);
+        $this->assertSame('foot', $payload['travel_mode']);
+        $this->assertSame(1, $payload['is_closed_loop']);
+        $this->assertSame(1, $payload['add_return_waypoint']);
+        $this->assertSame([], $payload['member_ids']);
+        $this->assertSame(1, $this->auditCount('stage_scenario_item'));
+
+        $item = loadMissionScenario($this->missionId)['phases'][0]['items'][0];
+        $this->assertSame('route', $item['kind']);
+        $this->assertSame('route', $item['type']);
+        $this->assertSame('Περίπολος Ρέματος', $item['label']);
+        $this->assertSame(2, $item['point_count']);
+        $this->assertEquals([[35.1, 25.1], [35.2, 25.2]], $item['geo']);
+        $this->assertTrue($item['closed_loop']);
+        $this->assertTrue($item['return_to_start']);
+        $this->assertSame('team', $item['audience']);
+        $this->assertSame('ΑΛΦΑ 1', $item['team_label']);
+        $this->assertFalse($item['team_missing']);
+        $this->assertFalse($item['team_empty']);
+        $this->assertFalse($item['sent']);
+        $this->assertNull($item['route_id']);
+        $this->assertNull($item['dispatch_id']);
+        $this->assertNull($item['sector_id']);
+    }
+
+    public function testARouteThatCouldNeverBeSentIsRefusedWhenItIsWrittenDown(): void
+    {
+        $foreign = $this->makeTeam('ΔΕΛΤΑ', 9, $this->otherMissionId);
+        $many = fn(int $n) => json_encode(array_map(fn($i) => $this->wp(35.0 + $i * 0.001, 24.0 + $i * 0.001), range(1, $n)));
+        $phase = $this->phase();
+
+        foreach ([
+            'a team of another mission' => [$this->routeRow(['team_id' => (string) $foreign]), t('common.team_not_found')],
+            'a team that is not there' => [$this->routeRow(['team_id' => '987654321']), t('common.team_not_found')],
+            'no waypoints' => [$this->routeRow(['waypoints' => '[]']), t('route.needs_one_waypoint')],
+            'waypoints that are not json' => [$this->routeRow(['waypoints' => 'not json']), t('route.needs_one_waypoint')],
+            'thirty-one waypoints' => [$this->routeRow(['waypoints' => $many(31)]), t('route.too_many_waypoints')],
+            'a latitude of 91' => [$this->routeRow(['waypoints' => json_encode([$this->wp(91, 24.9)])]), t('route.invalid_waypoint')],
+            'a waypoint at 0,0' => [$this->routeRow(['waypoints' => json_encode([$this->wp(0, 0)])]), t('route.invalid_waypoint')],
+            'thirty waypoints and a return to the start' => [$this->routeRow(['waypoints' => $many(30), 'add_return_waypoint' => '1']), t('route.too_many_waypoints_with_return')],
+            'a slot with no waypoints' => [$this->routeRow(['team_id' => 'slot:' . $this->slot(), 'waypoints' => '[]']), t('route.needs_one_waypoint')],
+        ] as $why => [$input, $message]) {
+            $r = $this->stageRoute($phase, $input);
+            $this->assertFalse($r['ok'], $why);
+            $this->assertSame($message, $r['error'], $why);
+        }
+        $this->assertSame(0, $this->stagedItemCount($phase));
+        // Thirty points without the return are fine, and so are twenty-nine with it.
+        $this->assertTrue($this->stageRoute($phase, $this->routeRow(['waypoints' => $many(30)]))['ok']);
+        $this->assertTrue($this->stageRoute($phase, $this->routeRow(['waypoints' => $many(29), 'add_return_waypoint' => '1']))['ok']);
+    }
+
+    public function testARouteGoesToATeamOrASlotNeverToEveryoneOrNobody(): void
+    {
+        $phase = $this->phase();
+        $foreignSlot = (int) dbInsert("INSERT INTO mission_scenario_slots (mission_id, label, created_by, created_at) VALUES (?, ?, ?, NOW())", [$this->otherMissionId, 'Ξένη', $this->adminId]);
+
+        // The route window's empty choice means "people picked across teams"; to a plan that is nobody it can name.
+        foreach (['' => 'empty', 'all' => 'all', 'ALL' => 'ALL', 'abc' => 'junk', '0' => 'zero', '-1' => 'negative', 'slot:abc' => 'slot junk', 'slot:0' => 'slot zero'] as $team => $why) {
+            $r = $this->stageRoute($phase, $this->routeRow(['team_id' => (string) $team]));
+            $this->assertFalse($r['ok'], $why);
+            $this->assertSame(t('scenario.route_needs_team'), $r['error'], $why);
+        }
+        foreach (['slot:987654321', 'slot:' . $foreignSlot] as $team) {
+            $r = $this->stageRoute($phase, $this->routeRow(['team_id' => $team]));
+            $this->assertFalse($r['ok'], $team);
+            $this->assertSame(t('scenario.slot_not_found'), $r['error'], $team);
+        }
+        $this->assertSame(0, $this->stagedItemCount($phase));
+    }
+
+    public function testPlayMakesTheRouteExactlyAsTheRouteWindowWould(): void
+    {
+        $phase = $this->phase();
+        $row = $this->routeRow(['member_ids' => json_encode([$this->members[0]]), 'travel_mode' => 'vehicle', 'is_closed_loop' => '1',
+            'waypoints' => json_encode([$this->wp(35.1, 25.1, ['label' => 'Αρχή', 'instructions' => 'Ξεκίνα εδώ', 'dwell_minutes' => 5, 'require_photo' => 1, 'require_video' => 1, 'require_note' => 1]), $this->wp(35.2, 25.2), $this->wp(35.3, 25.3, ['label' => 'Τέλος'])])]);
+        $this->assertTrue($this->stageRoute($phase, $row)['ok']);
+
+        $result = $this->play($phase);
+
+        $this->assertTrue($result['ok'], (string) ($result['error'] ?? ''));
+        $this->assertSame(1, $result['sent']);
+        $this->assertSame(0, $result['failed']);
+        $this->assertSame('route', $result['results'][0]['kind']);
+        $this->assertNull($result['results'][0]['dispatch_id']);
+        $this->assertNull($result['results'][0]['sector_id']);
+        $made = dbFetchOne("SELECT * FROM mission_routes WHERE id = ?", [$result['results'][0]['route_id']]);
+        $this->assertNotNull($made);
+
+        // The control: the same route sent by hand, the way mission-route.php's `create` does.
+        $byHand = createMissionRoute($this->mission, $this->adminId, ['ring_index' => ''] + $row);
+        $this->assertTrue($byHand['ok']);
+        $control = dbFetchOne("SELECT * FROM mission_routes WHERE id = ?", [$byHand['id']]);
+        foreach (['mission_id', 'team_id', 'title', 'is_closed_loop', 'ring_index', 'travel_mode', 'created_by', 'completed_at', 'cancelled_at'] as $col) {
+            $this->assertSame($control[$col], $made[$col], "column $col");
+        }
+        $this->assertSame($this->teamId, (int) $made['team_id']);
+        $this->assertSame('vehicle', $made['travel_mode']);
+        $this->assertSame(1, (int) $made['is_closed_loop']);
+        $this->assertSame([$this->members[0]], $this->routeMemberIds((int) $made['id']), 'the subset chosen when it was written down');
+        $this->assertSame($this->routeMemberIds((int) $byHand['id']), $this->routeMemberIds((int) $made['id']));
+
+        $cols = 'seq, lat, lng, label, instructions, dwell_minutes, require_photo, require_video, require_note';
+        $wps = dbFetchAll("SELECT $cols FROM mission_route_waypoints WHERE route_id = ? ORDER BY seq", [$made['id']]);
+        $this->assertCount(3, $wps);
+        $this->assertSame($wps, dbFetchAll("SELECT $cols FROM mission_route_waypoints WHERE route_id = ? ORDER BY seq", [$byHand['id']]));
+        $this->assertSame(3, (int) dbFetchValue("SELECT COUNT(*) FROM mission_route_progress WHERE route_id = ? AND team_id = ?", [$made['id'], $this->teamId]));
+
+        $order = dbFetchOne("SELECT order_type, task_text FROM mission_orders WHERE id = ?", [$made['order_id']]);
+        $controlOrder = dbFetchOne("SELECT order_type, task_text FROM mission_orders WHERE id = ?", [$control['order_id']]);
+        $this->assertSame($controlOrder, $order);
+        $this->assertSame('route', $order['order_type']);
+        $this->assertSame([$this->members[0]], $this->notifiedAboutOrder((int) $made['order_id']), 'the people the route is for, and nobody else');
+        $this->assertSame($this->notifiedAboutOrder((int) $control['order_id']), $this->notifiedAboutOrder((int) $made['order_id']));
+        $this->assertSame(1, (int) dbFetchValue("SELECT COUNT(*) FROM audit_logs WHERE action = 'create_mission_route' AND record_id = ?", [$made['id']]));
+
+        $item = loadMissionScenario($this->missionId)['phases'][0]['items'][0];
+        $this->assertTrue($item['sent']);
+        $this->assertSame((int) $made['id'], $item['route_id']);
+        $this->assertNull($item['dispatch_id']);
+        $this->assertSame(0, $this->liveCount(), 'a route is not a dispatch');
+        $this->assertSame(0, $this->liveSectorCount());
+    }
+
+    public function testARouteForASlotAsksWhichTeamAndGoesToThatTeamOnly(): void
+    {
+        $other = $this->teamWithMember('ΓΑΜΜΑ', 3);
+        $slot = $this->slot('Ομάδα Γ');
+        $phase = $this->phase();
+        // A subset named for a slot means nothing yet: the slot has no roster.
+        $r = $this->stageRoute($phase, $this->routeRow(['team_id' => 'slot:' . $slot, 'member_ids' => json_encode([$this->members[0]])]));
+        $this->assertTrue($r['ok'], (string) ($r['error'] ?? ''));
+        $payload = json_decode((string) dbFetchValue("SELECT payload FROM mission_scenario_items WHERE id = ?", [$r['id']]), true);
+        $this->assertSame('slot', $payload['audience']);
+        $this->assertNull($payload['team_id']);
+        $this->assertSame($slot, $payload['slot_id']);
+        $this->assertSame([], $payload['member_ids']);
+        $this->assertSame($slot, (int) dbFetchValue("SELECT slot_id FROM mission_scenario_items WHERE id = ?", [$r['id']]));
+        $item = loadMissionScenario($this->missionId)['phases'][0]['items'][0];
+        $this->assertSame('slot', $item['audience']);
+        $this->assertTrue($item['unmapped']);
+        $this->assertSame('Ομάδα Γ', $item['slot_label']);
+        $this->assertFalse($item['team_empty'], 'there is no team to be empty yet');
+
+        // Play without saying which team the slot is: refused before the phase is claimed, nothing sent.
+        $notes = $this->notificationCount();
+        $refused = $this->play($phase);
+        $this->assertFalse($refused['ok']);
+        $this->assertSame([['id' => $slot, 'label' => 'Ομάδα Γ']], $refused['unmapped']);
+        $this->assertSame(0, $this->liveRouteCount());
+        $this->assertSame($notes, $this->notificationCount());
+        $this->assertNull(dbFetchValue("SELECT played_at FROM mission_scenario_phases WHERE id = ?", [$phase]));
+
+        $played = $this->play2($phase, [$slot => $other['team']]);
+        $this->assertTrue($played['ok'], (string) ($played['error'] ?? ''));
+        $route = dbFetchOne("SELECT * FROM mission_routes WHERE id = ?", [$played['results'][0]['route_id']]);
+        $this->assertSame($other['team'], (int) $route['team_id']);
+        $this->assertSame('foot', $route['travel_mode']);
+        $this->assertSame([$other['member']], $this->routeMemberIds((int) $route['id']));
+        $this->assertSame([$other['member']], $this->notifiedAboutOrder((int) $route['order_id']), 'the team the slot became is told, and no other');
+        foreach ($this->members as $notTold) {
+            $this->assertNotContains($notTold, $this->notifiedAboutOrder((int) $route['order_id']));
+        }
+        $this->assertSame($other['team'], (int) dbFetchValue("SELECT team_id FROM mission_scenario_slots WHERE id = ?", [$slot]));
+    }
+
+    public function testARouteWhoseTeamIsGoneFailsAndIsNeverSentToPeoplePickedAcrossTeams(): void
+    {
+        $doomed = $this->teamWithMember('ΔΕΛΤΑ', 4);
+        $phase = $this->phase();
+        $this->stageRoute($phase, $this->routeRow(['team_id' => (string) $doomed['team'], 'member_ids' => json_encode([$doomed['member']])]));
+        $this->stageRoute($phase, $this->routeRow(['title' => 'Η άλλη']));
+        dbExecute("DELETE FROM mission_teams WHERE id = ?", [$doomed['team']]);
+        $notes = $this->notificationCount();
+        $before = $this->liveRouteCount();
+
+        $this->assertTrue(loadMissionScenario($this->missionId)['phases'][0]['items'][0]['team_missing']);
+        $result = $this->play($phase);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame(1, $result['sent'], 'the other route still goes');
+        $this->assertSame(1, $result['failed']);
+        $this->assertFalse($result['results'][0]['ok']);
+        $this->assertSame(t('common.team_not_found'), $result['results'][0]['error']);
+        $this->assertNull($result['results'][0]['route_id']);
+        $this->assertSame($before + 1, $this->liveRouteCount(), 'only the route that has a team');
+        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_routes WHERE mission_id = ? AND team_id IS NULL", [$this->missionId]), 'and none of them is a route with no team');
+        $this->assertNotContains($doomed['member'], array_map('intval', array_column(dbFetchAll("SELECT user_id FROM notifications WHERE id > ?", [$notes]), 'user_id')));
+    }
+
+    public function testARouteIsNeverReadAsOneForPeoplePickedAcrossTeams(): void
+    {
+        $wps = [['lat' => 35.1, 'lng' => 25.1]];
+        $good = ['audience' => 'team', 'team_id' => 7, 'label' => 'Π', 'waypoints' => $wps, 'member_ids' => [3, '4'], 'is_closed_loop' => 1, 'add_return_waypoint' => 1, 'travel_mode' => 'vehicle'];
+        $input = scenarioRouteInputFromPayload($good);
+        $this->assertSame('7', $input['team_id']);
+        $this->assertSame('', $input['ring_index']);
+        $this->assertSame('1', $input['is_closed_loop']);
+        $this->assertSame('1', $input['add_return_waypoint']);
+        $this->assertSame([3, 4], json_decode($input['member_ids'], true));
+        $this->assertSame('vehicle', $input['travel_mode']);
+        $this->assertSame('0', scenarioRouteInputFromPayload(['is_closed_loop' => 0, 'add_return_waypoint' => 0] + $good)['is_closed_loop']);
+        $this->assertSame('9', scenarioRouteInputFromPayload(['audience' => 'slot', 'slot_id' => 3] + $good, [3 => 9])['team_id']);
+
+        foreach ([
+            'the word all' => ['audience' => 'all'] + $good,
+            'team without an id' => ['team_id' => null] + $good,
+            'team id 0' => ['team_id' => 0] + $good,
+            'no audience at all' => array_diff_key($good, ['audience' => 1]),
+            'an audience that is neither' => ['audience' => 'everyone'] + $good,
+            'a slot that stands for no team' => ['audience' => 'slot', 'slot_id' => 3] + $good,
+            'a slot that is not in the map' => ['audience' => 'slot', 'slot_id' => 8] + $good,
+            'no waypoints' => ['waypoints' => []] + $good,
+            'waypoints that are not a list' => ['waypoints' => 'x'] + $good,
+            'no waypoints key' => array_diff_key($good, ['waypoints' => 1]),
+        ] as $why => $payload) {
+            $this->assertNull(scenarioRouteInputFromPayload($payload, [3 => null]), $why);
+        }
+        $this->assertNull(scenarioRouteInputFromPayload('not an array'));
+
+        // And through play: a staged route whose payload says all, or names a slot with no team, makes no route.
+        $phase = $this->phase();
+        $id = $this->stageRoute($phase, $this->routeRow(['member_ids' => json_encode([$this->members[0]])]))['id'];
+        dbExecute("UPDATE mission_scenario_items SET payload = ? WHERE id = ?", [json_encode(['audience' => 'all', 'team_id' => null] + $good + ['member_ids' => [$this->members[0]]]), $id]);
+        $notes = $this->notificationCount();
+        $result = $this->play($phase);
+        $this->assertSame(1, $result['failed']);
+        $this->assertSame(t('scenario.item_unreadable'), $result['results'][0]['error']);
+        $this->assertSame(0, $this->liveRouteCount());
+        $this->assertSame($notes, $this->notificationCount());
+    }
+
+    public function testARouteToATeamWithNobodyInTheActionRoomIsFlaggedAndFailsWithThatReasonUntilSomeoneIs(): void
+    {
+        $quiet = $this->teamWithMember('ΕΨΙΛΟΝ', 5, false);
+        $phase = $this->phase();
+        $item = $this->stageRoute($phase, $this->routeRow(['team_id' => (string) $quiet['team']]))['id'];
+        $this->assertTrue(loadMissionScenario($this->missionId)['phases'][0]['items'][0]['team_empty'], 'the card says so beforehand');
+
+        $result = $this->play($phase);
+
+        $this->assertSame(1, $result['failed']);
+        $this->assertSame(t('route.team_has_no_gps_members'), $result['results'][0]['error']);
+        $this->assertSame(0, $this->liveRouteCount());
+
+        // Their phone joins the Action Room; trying again sends it, once.
+        setActionRoomParticipation($this->missionId, $quiet['member'], true, $this->adminId);
+        forgetActionRoomParticipantIds($this->missionId);
+        $this->assertFalse(loadMissionScenario($this->missionId)['phases'][0]['items'][0]['team_empty']);
+        $again = retryScenarioItem($this->mission, $item, $this->adminId, 'Scenario Admin');
+        $this->assertTrue($again['item']['ok'], (string) ($again['item']['error'] ?? ''));
+        $this->assertSame(1, $this->liveRouteCount());
+        $this->assertSame([$quiet['member']], $this->routeMemberIds((int) $again['item']['route_id']));
+        $this->assertFalse(retryScenarioItem($this->mission, $item, $this->adminId, 'Scenario Admin')['ok'], 'and not a second time');
+        $this->assertSame(1, $this->liveRouteCount());
+    }
+
+    public function testTheReturnToStartIsAskedOnTheDayNotWhenTheRouteIsWrittenDown(): void
+    {
+        $phase = $this->phase();
+        $this->stageRoute($phase, $this->routeRow(['add_return_waypoint' => '1']));
+        // The team pings only after the plan was written.
+        dbInsert("INSERT INTO volunteer_pings (user_id, shift_id, lat, lng, created_at) VALUES (?, ?, ?, ?, ?)", [$this->members[0], $this->shiftId, 35.9, 25.9, date('Y-m-d H:i:s', time() - 30)]);
+
+        $result = $this->play($phase);
+
+        $this->assertTrue($result['results'][0]['ok'], (string) ($result['results'][0]['error'] ?? ''));
+        $wps = dbFetchAll("SELECT lat, lng, label FROM mission_route_waypoints WHERE route_id = ? ORDER BY seq", [$result['results'][0]['route_id']]);
+        $this->assertCount(3, $wps);
+        $this->assertEquals(35.9, (float) $wps[2]['lat']);
+        $this->assertEquals(25.9, (float) $wps[2]['lng']);
+        $this->assertSame(t('route.return_to_start_label'), $wps[2]['label']);
+    }
+
+    public function testAPhaseCanHoldPointsSectorsAndRoutesAndPlaysThemAllInOrder(): void
+    {
+        $area = $this->searchArea();
+        $phase = $this->phase();
+        $this->stage($phase, $this->point(['label' => 'Σημείο']));
+        $this->stageRoute($phase, $this->routeRow());
+        $this->stageSectors($phase, $area, [$this->sectorRow(['label' => 'Τομέας'])]);
+
+        $result = $this->play($phase);
+
+        $this->assertSame(3, $result['sent']);
+        $this->assertSame(['dispatch', 'route', 'sector'], array_column($result['results'], 'kind'));
+        $this->assertSame(1, $this->liveCount());
+        $this->assertSame(1, $this->liveRouteCount());
+        $this->assertSame(1, $this->liveSectorCount());
+        $items = loadMissionScenario($this->missionId)['phases'][0]['items'];
+        $this->assertSame(['dispatch', 'route', 'sector'], array_column($items, 'kind'));
+        $this->assertNotNull($items[0]['dispatch_id']);
+        $this->assertNull($items[0]['route_id']);
+        $this->assertNotNull($items[1]['route_id']);
+        $this->assertNull($items[1]['dispatch_id']);
+        $this->assertNull($items[1]['sector_id']);
+        $this->assertNotNull($items[2]['sector_id']);
+    }
+
+    public function testRoutesCountAgainstTheLimitOfOrdersInAPhase(): void
+    {
+        $phase = $this->phase();
+        for ($i = 0; $i < SCENARIO_MAX_ITEMS_PER_PHASE; $i++) {
+            $this->assertTrue($this->stageRoute($phase, $this->routeRow(['title' => 'Π' . $i]))['ok'], "route $i");
+        }
+        $r = $this->stageRoute($phase, $this->routeRow());
+        $this->assertFalse($r['ok']);
+        $this->assertSame(t('scenario.too_many_orders', ['max' => SCENARIO_MAX_ITEMS_PER_PHASE]), $r['error']);
+        $this->assertSame(SCENARIO_MAX_ITEMS_PER_PHASE, $this->stagedItemCount($phase));
+    }
+
+    public function testAPlayedPhaseTakesNoMoreRoutesAndAnotherMissionsPhaseIsNotFound(): void
+    {
+        $phase = $this->phase();
+        $this->stage($phase, $this->point());
+        $this->play($phase);
+        $r = $this->stageRoute($phase, $this->routeRow());
+        $this->assertFalse($r['ok']);
+        $this->assertSame(t('scenario.phase_closed_for_orders'), $r['error']);
+
+        $other = ['id' => $this->otherMissionId, 'title' => 'x'];
+        $theirPhase = addScenarioPhase($other, $this->adminId)['id'];
+        $this->assertSame(t('scenario.phase_not_found'), $this->stageRoute($theirPhase, $this->routeRow())['error']);
+        $this->assertSame(0, $this->stagedItemCount($theirPhase));
+    }
+
+    public function testPlayMakesRoutesOnlyThroughTheRouteFunction(): void
+    {
+        $src = $this->source('includes/functions-scenario.php');
+        $this->assertStringContainsString('createMissionRoute($mission, $userId, $input)', $src);
+        $this->assertStringContainsString('prepareMissionRoute($mission,', $src);
+        foreach (['INSERT INTO mission_routes', 'INSERT INTO mission_route_', 'INSERT INTO mission_orders', 'createMissionOrderAndNotify(', 'notifyRouteTeam(', 'sendNotification('] as $never) {
+            $this->assertStringNotContainsString($never, $src, "the scenario never does `$never` itself");
+        }
+        // Everything the route function calls lives where a scenario's endpoint (which never loads the route one) can reach it.
+        $warroom = $this->source('includes/functions-warroom.php');
+        foreach (['createMissionRoute', 'prepareMissionRoute', 'resolveMissionRouteRecipients', 'createMissionOrderAndNotify', 'notifyRouteTeam', 'loadRoutesForUser', 'normalizeTravelMode'] as $fn) {
+            $this->assertSame(1, substr_count($warroom, "function $fn("), $fn);
+        }
+        $this->assertStringNotContainsString("\nfunction ", $this->source('mission-route.php'));
+        $this->assertStringNotContainsString("\nfunction ", $this->source('mission-scenario.php'));
+    }
+
+    public function testPlayAndRetryHandBackTheLiveRoutesTheyMade(): void
+    {
+        // The map and the team's cards have to show a route the moment play sent it, not at the next poll: the answer
+        // carries the list the route endpoint answers with, and only when a route was sent.
+        $src = $this->source('mission-scenario.php');
+        $this->assertStringContainsString("fn(\$r) => (\$r['kind'] ?? '') === 'route' && !empty(\$r['ok'])", $src);
+        $this->assertStringContainsString("'routes' => loadRoutesForUser(\$missionId, (int) \$userId, true)", $src);
+        $this->assertStringContainsString("+ \$liveRoutes(\$result['results']));", $src, 'play');
+        $this->assertStringContainsString("+ \$liveRoutes([\$result['item']]));", $src, 'retry');
+        $add = substr($src, (int) strpos($src, "if (\$action === 'add_route') {"), 1800);
+        $this->assertStringContainsString('addScenarioRouteItem($mission, $phaseId, (int) $userId, [', $add);
+        foreach (['team_id', 'title', 'waypoints', 'is_closed_loop', 'add_return_waypoint', 'member_ids', 'travel_mode'] as $field) {
+            $this->assertStringContainsString("post('$field')", $add);
+        }
+        $this->assertStringContainsString('deleteScenarioPhase($mission, $phaseId', $add, 'a phase made for a refused route is taken out again');
+    }
+
+    public function testTheRouteWindowStagesButNeverSendsARouteToASlotAndKeepsItsPeopleOutOfTheScenario(): void
+    {
+        $page = $this->source('war-room.php');
+        $this->assertStringContainsString('id="routeScenarioBtn"', $page);
+        $this->assertStringContainsString('id="routeScenarioMenu"', $page);
+        // The composer's panel is there for command on a mission with no team yet: that is when a slot is chosen.
+        $this->assertStringContainsString('<?php if (!empty($teams) || $canManageWarRoom): ?>', $page);
+
+        // «Αποστολή» is never ready for a slot (a name for a team, not a team), here and in its handler.
+        $state = substr($page, (int) strpos($page, 'function updateRouteSendState()'), 1600);
+        $this->assertStringContainsString("const isSlot = chosen.indexOf('slot:') === 0;", $state);
+        $this->assertStringContainsString("(chosen === 'pick' || isSlot)", $state);
+        // «Στο σενάριο» is ready for a team or a slot - never the empty choice (people across teams), never "new slot".
+        $this->assertStringContainsString("!(/^[0-9]+\$/.test(chosen) || /^slot:[0-9]+\$/.test(chosen))", $state);
+        $this->assertStringContainsString("if (teamSelect.value.indexOf('slot:') === 0) { alert(t('scenario.route_slot_send_hint')); return; }", $page);
+
+        $start = (int) strpos($page, "const scenarioBtn = document.getElementById('routeScenarioBtn')");
+        $this->assertGreaterThan(0, $start);
+        $handler = substr($page, (int) strpos($page, "scenarioMenu.addEventListener('click'", $start), 3200);
+        // The scenario button decides, not the send button (found with a real click for the point window in v3.453.0).
+        $this->assertStringNotContainsString('sendBtn.disabled', $handler);
+        $this->assertStringContainsString('scenarioBtn.disabled', $handler);
+        $this->assertStringContainsString('window.wrScenario.stageRoute(choice.dataset.scPhase, {', $handler);
+        // A slot has no roster to pick from; a real team goes to the people ticked.
+        $this->assertStringContainsString("const memberIds = isSlot ? [] :", $handler);
+        // What is already staged is drawn under the next route.
+        $this->assertStringContainsString('window.wrScenario.drawGhostsInto(routeComposerAreasLayer)', $page);
+
+        $js = $this->source('assets/js/war-room-scenario.js');
+        $this->assertStringContainsString("request('add_route'", $js);
+        $this->assertStringContainsString('stageRoute: stageRoute', $js);
+        $this->assertStringContainsString('showNewRoutes(res);', $js, 'routes sent by play or retry appear on the map at once');
+        $this->assertStringContainsString("item.type === 'route'", $js);
+        $this->assertStringContainsString("t('scenario.play_confirm_team_empty'", $js);
+        $this->assertStringContainsString('} else if (item.team_empty) {', $js);
+        // A ghost route is a dashed line through its waypoints with the phase number where it starts.
+        $this->assertStringContainsString("L.polyline(item.geo, style)", $js);
+        $this->assertStringContainsString('pinIcon(phase.n)', $js);
     }
 
     // ── Where it may be read, and who may ask ───────────────────────────────────────────────────────────────
@@ -1254,7 +1747,7 @@ final class ScenarioTest extends TestCase
         // POSTs need the CSRF token before any action.
         $csrf = strpos($src, "hash_equals(\$_SESSION['csrf_token']");
         $this->assertNotFalse($csrf);
-        foreach (['add_phase', 'rename_phase', 'delete_phase', 'add_item', 'add_sectors', 'delete_item', 'play_phase', 'retry_item'] as $action) {
+        foreach (['add_phase', 'rename_phase', 'delete_phase', 'add_item', 'add_sectors', 'add_route', 'delete_item', 'play_phase', 'retry_item'] as $action) {
             $this->assertGreaterThan($csrf, strpos($src, "'$action'"), "$action is after the CSRF check");
         }
         // The same open-mission gate as the dispatch endpoint.

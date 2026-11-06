@@ -13,6 +13,8 @@
  *     instead of sending it, and (v3.454.0) the same button of the sector-division window, which puts every
  *     piece of the division into a phase (stageSectors); a sector is a grey ghost polygon like an area, and the
  *     card names the search area it is cut from;
+ *   - the route window's «Στο σενάριο ▾» (v3.455.0): the route drawn there goes into a phase instead of out to a team
+ *     (stageRoute); a staged route is a grey dashed line through its waypoints with the phase number at its start;
  *   - the team slots (v3.453.0): names for teams that may not exist yet, in the card, in the window's recipient
  *     list, and in the dialog that play opens to ask which team is which.
  *
@@ -94,12 +96,23 @@
         if (res && Array.isArray(res.sectors) && typeof sectorRefreshAfter === 'function') sectorRefreshAfter(res.sectors, res.areas);
     }
 
+    // A play or a retry that sent routes answers with the live list of routes, the one the route endpoint answers
+    // with, so they are on the map and in the team's cards at once and not at the next poll.
+    function showNewRoutes(res) {
+        if (!res || !Array.isArray(res.routes) || typeof renderRouteLayer !== 'function') return;
+        routes = res.routes;
+        if (typeof renderMyRoutes === 'function') renderMyRoutes(routes);
+        if (typeof renderRoutesAdmin === 'function') renderRoutesAdmin(routes);
+        renderRouteLayer(routes);
+    }
+
     // ── Words ──────────────────────────────────────────────────────────────────────────────────────────────────
     function phaseName(phase) {
         return t('scenario.phase_n', {n: phase.n});
     }
     function itemKind(item) {
         if (item.type === 'sector') return t('scenario.kind_sector');
+        if (item.type === 'route') return t('scenario.kind_route');
         return item.type === 'point' ? t('scenario.kind_point') : t('scenario.kind_area');
     }
     function itemTarget(item) {
@@ -113,7 +126,8 @@
 
     // ── The card ───────────────────────────────────────────────────────────────────────────────────────────────
     function itemHtml(phase, item) {
-        const icon = item.type === 'point' ? 'bi-geo-alt-fill' : (item.type === 'sector' ? 'bi-grid-3x3-gap-fill' : 'bi-bounding-box');
+        const icon = item.type === 'point' ? 'bi-geo-alt-fill'
+            : (item.type === 'sector' ? 'bi-grid-3x3-gap-fill' : (item.type === 'route' ? 'bi-signpost-split-fill' : 'bi-bounding-box'));
         const badgeClass = item.team_missing ? 'bg-danger'
             : (item.audience === 'all' ? 'bg-warning text-dark' : (item.audience === 'slot' ? (item.unmapped ? 'bg-warning text-dark' : 'bg-info text-dark') : 'bg-secondary'));
         const target = `<span class="badge ${badgeClass}">${esc(itemTarget(item))}</span>`;
@@ -126,6 +140,8 @@
             status = `<div class="small text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(t('scenario.team_gone_hint'))}</div>`;
         } else if (item.area_missing) {
             status = `<div class="small text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(t('scenario.area_gone_hint'))}</div>`;
+        } else if (item.team_empty) {
+            status = `<div class="small text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(t('scenario.team_empty_hint'))}</div>`;
         } else if (item.unmapped) {
             status = `<div class="small text-muted"><i class="bi bi-hourglass-split me-1"></i>${esc(t('scenario.slot_unmapped_hint'))}</div>`;
         }
@@ -137,8 +153,12 @@
             ? `<span>${esc(itemTitle(item))}</span>`
             : `<a href="#" class="wr-sc-goto" data-sc="goto" data-item="${item.id}" title="${esc(t('scenario.show_on_map'))}">${esc(itemTitle(item))}</a>`;
         // A sector says which search area it is cut from (the area may be gone: then the line below says so).
-        const where = (item.type === 'sector' && item.area_label)
+        let where = (item.type === 'sector' && item.area_label)
             ? ` <span class="text-muted small">${esc(t('scenario.sector_in_area', {area: item.area_label}))}</span>` : '';
+        // A route says how many points it has, and whether the team is to return to where it started.
+        if (item.type === 'route') {
+            where = ` <span class="text-muted small">${esc(t('scenario.route_points', {n: item.point_count || 0}))}${item.return_to_start ? ' · ' + esc(t('scenario.route_return_hint')) : ''}</span>`;
+        }
         return `<li class="wr-sc-item d-flex align-items-start gap-1" data-item="${item.id}">
             <i class="bi ${icon} text-secondary mt-1"></i>
             <span class="flex-grow-1">${goto}${where} <i class="bi bi-arrow-right-short"></i> ${target}${status}</span>
@@ -218,6 +238,8 @@
         if (missing) text += '\n\n' + t('scenario.play_confirm_missing', {n: missing});
         const noArea = pending.filter(i => i.area_missing).length;
         if (noArea) text += '\n\n' + t('scenario.play_confirm_area_missing', {n: noArea});
+        const noPeople = pending.filter(i => i.team_empty).length;
+        if (noPeople) text += '\n\n' + t('scenario.play_confirm_team_empty', {n: noPeople});
         return text;
     }
 
@@ -337,6 +359,7 @@
             if (hit && typeof map !== 'undefined' && map && hit.item.geo) {
                 if (typeof scrollToCard === 'function') scrollToCard('mapCard');
                 if (hit.item.type === 'point') map.setView([hit.item.geo.lat, hit.item.geo.lng], Math.max(map.getZoom(), 16));
+                else if (Array.isArray(hit.item.geo) && hit.item.geo.length === 1) map.setView(hit.item.geo[0], Math.max(map.getZoom(), 16));
                 else map.fitBounds(L.latLngBounds(hit.item.geo), {padding: [40, 40]});
             }
             return;
@@ -379,6 +402,7 @@
             const afterPlay = res => {
                 if (res.dispatches && typeof renderDispatches === 'function') renderDispatches(dispatches = res.dispatches);
                 showNewSectors(res);
+                showNewRoutes(res);
                 if (res.failed > 0) {
                     const lines = (res.results || []).filter(r => !r.ok).map(r => '• ' + r.error);
                     alert(t('scenario.play_partial', {sent: res.sent, failed: res.failed}) + '\n\n' + lines.join('\n'));
@@ -404,6 +428,7 @@
             run('retry_item', {item_id: el.dataset.item}, res => {
                 if (res.dispatches && typeof renderDispatches === 'function') renderDispatches(dispatches = res.dispatches);
                 showNewSectors(res);
+                showNewRoutes(res);
                 if (res.item && !res.item.ok) alert(res.item.error || t('common.send_failed'));
             });
         }
@@ -421,7 +446,16 @@
             phase.items.forEach(item => {
                 if (item.sent || !item.geo) return;
                 const tip = [phaseName(phase), itemTitle(item), '→ ' + itemTarget(item)].join(' · ') + ' — ' + t('scenario.ghost_not_sent');
-                if (item.type === 'point') {
+                if (item.type === 'route') {
+                    // A dashed line through the waypoints (back to the first one when the route is a loop), a dot at each
+                    // waypoint, and the phase number where it starts.
+                    if (!Array.isArray(item.geo) || !item.geo.length) return;
+                    const style = {color: '#6b7280', weight: 3, dashArray: '7 6', fill: false};
+                    if (item.geo.length >= 3 && item.closed_loop) L.polygon(item.geo, style).bindTooltip(tip, {sticky: true}).addTo(layer);
+                    else if (item.geo.length >= 2) L.polyline(item.geo, style).bindTooltip(tip, {sticky: true}).addTo(layer);
+                    item.geo.forEach(p => L.circleMarker(p, {radius: 3, color: '#6b7280', weight: 2, fillColor: '#f3f4f6', fillOpacity: 1, interactive: false}).addTo(layer));
+                    L.marker(item.geo[0], {icon: pinIcon(phase.n), keyboard: false, zIndexOffset: -500}).bindTooltip(tip).addTo(layer);
+                } else if (item.type === 'point') {
                     L.marker([item.geo.lat, item.geo.lng], {icon: pinIcon(phase.n), keyboard: false, zIndexOffset: -500})
                         .bindTooltip(tip).addTo(layer);
                 } else if (Array.isArray(item.geo) && item.geo.length >= 3) {
@@ -468,6 +502,17 @@
             .catch(() => { alert(t('common.send_failed')); return {ok: false}; });
     }
 
+    // The route window's «Στο σενάριο»: the route drawn there goes into the phase instead of out to a team. fields =
+    // {team_id: '39' | 'slot:3', title, waypoints: JSON text, is_closed_loop: '1'|'0', add_return_waypoint: '1'|'0',
+    // member_ids: JSON text, travel_mode}. A route has no «όλες οι ομάδες»: the empty team of the window ("people
+    // picked across teams") is refused by the server. Resolves with the endpoint's answer (phase_id on success); a
+    // refusal has already been shown to the person.
+    function stageRoute(phaseId, fields) {
+        return request('add_route', Object.assign({phase_id: String(phaseId)}, fields))
+            .then(res => { if (!res || !res.ok) failed(res); return res; })
+            .catch(() => { alert(t('common.send_failed')); return {ok: false}; });
+    }
+
     function phaseNumber(phaseId) {
         const p = findPhase(phaseId);
         return p ? p.n : null;
@@ -487,5 +532,5 @@
         document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
     }
 
-    window.wrScenario = {init: init, reload: load, menuHtml: menuHtml, stage: stage, stageSectors: stageSectors, phaseNumber: phaseNumber, drawGhostsInto: drawGhostsInto, phases: () => scenario.phases, newSlot: newSlot, fillSlotOptions: fillSlotOptions};
+    window.wrScenario = {init: init, reload: load, menuHtml: menuHtml, stage: stage, stageSectors: stageSectors, stageRoute: stageRoute, phaseNumber: phaseNumber, drawGhostsInto: drawGhostsInto, phases: () => scenario.phases, newSlot: newSlot, fillSlotOptions: fillSlotOptions};
 })();

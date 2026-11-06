@@ -42,6 +42,17 @@
  * an area. scenarioSectorInputFromPayload() is its own payload-to-form function with the same rule as the
  * dispatch one: a team that is missing, or a slot that stands for none, is null, never "no team".
  *
+ * ROUTES (v3.455.0). A staged order can also be a route (kind 'route'): a patrol of one to thirty waypoints, each with its
+ * instructions, dwell time and the photo/video/note it expects, for a real team or a slot. Play hands it to
+ * createMissionRoute() - the function the route window's send uses - so it is born exactly as a hand-drawn one is (the
+ * route, its members, the order behind it, every waypoint and its progress row, the audit entry, the team told), and
+ * prepareMissionRoute() checks it when it is staged. A route has no «όλες οι ομάδες» either: with no team the route
+ * window makes a route of people picked across teams, which a plan cannot name, so scenarioRouteInputFromPayload()
+ * returns null for a team that is missing, a slot that stands for none and the word 'all' - never "no team". Two
+ * things about a route are only known on the day: who is on the team (the people who take part in the Action Room) and
+ * where the team is (the optional «επιστροφή στην αφετηρία» waypoint is its last ping). Both are asked when the route
+ * is SENT; the card says beforehand when a team has nobody in the Action Room (team_empty) and play warns.
+ *
  * FIRST PRESS WINS. Pressing play claims the phase with one conditional UPDATE (played_at IS NULL); two
  * coordinators pressing at once send it once. An item that fails (the team was deleted since, the shape no
  * longer passes) does not stop the others: it keeps its reason in last_error, and the panel offers to try
@@ -67,7 +78,9 @@ const SCENARIO_SLOT_LABEL_MAX = 80;
  * mission (it will fail at play). For an item to a slot, slot_label is the slot, team_id / team_label the team
  * the slot stands for now, and unmapped is true while it stands for none. An item of kind 'sector' has type
  * 'sector', the polygon in geo, and area_id / area_label for the search area it is cut from (area_missing is true
- * when that area has been deleted since: it will fail at play).
+ * when that area has been deleted since: it will fail at play). An item of kind 'route' has type 'route', its
+ * waypoints as [[lat, lng], ...] in geo, label = the route's title, point_count, closed_loop, return_to_start and,
+ * for a real team, team_empty (true when nobody on that team takes part in the Action Room: it will fail at play).
  */
 function loadMissionScenario(int $missionId): array {
     $teamLabels = [];
@@ -119,6 +132,23 @@ function loadMissionScenario(int $missionId): array {
         }
     }
 
+    // The people of each team who take part in the Action Room, for the routes that go to a team: a route with
+    // nobody to receive it fails at play, and the card says so beforehand.
+    $participantsByTeam = [];
+    foreach ($items as $row) {
+        if ($row['kind'] === 'route') {
+            foreach (dbFetchAll(
+                "SELECT m.team_id, COUNT(*) AS n FROM mission_team_members m
+                 JOIN mission_action_room_participants p ON p.mission_id = m.mission_id AND p.user_id = m.user_id
+                 WHERE m.mission_id = ? GROUP BY m.team_id",
+                [$missionId]
+            ) as $r) {
+                $participantsByTeam[(int) $r['team_id']] = (int) $r['n'];
+            }
+            break;
+        }
+    }
+
     $byPhase = [];
     foreach ($items as $row) {
         $payload = json_decode((string) $row['payload'], true);
@@ -126,6 +156,7 @@ function loadMissionScenario(int $missionId): array {
             $payload = [];
         }
         $isSector = $row['kind'] === 'sector';
+        $isRoute = $row['kind'] === 'route';
         $areaId = $isSector ? (int) ($payload['area_id'] ?? 0) : 0;
         $audience = in_array($payload['audience'] ?? '', ['all', 'slot'], true) ? $payload['audience'] : 'team';
         $slotId = $audience === 'slot' ? (int) ($payload['slot_id'] ?? 0) : 0;
@@ -147,8 +178,8 @@ function loadMissionScenario(int $missionId): array {
             'slot_id'      => $slotId ?: null,
             'slot_label'   => $audience === 'slot' ? ($slot['label'] ?? ($payload['slot_label'] ?? null)) : null,
             'unmapped'     => $audience === 'slot' && $teamLabelNow === null,
-            'type'         => $isSector ? 'sector' : ($payload['type'] ?? null),
-            'geo'          => $payload['geo'] ?? null,
+            'type'         => $isSector ? 'sector' : ($isRoute ? 'route' : ($payload['type'] ?? null)),
+            'geo'          => $isRoute ? scenarioRouteGhostPoints($payload) : ($payload['geo'] ?? null),
             'label'        => $payload['label'] ?? null,
             'travel_mode'  => $payload['travel_mode'] ?? null,
             'area_id'      => $isSector ? $areaId : null,
@@ -156,8 +187,13 @@ function loadMissionScenario(int $missionId): array {
             'area_missing' => $isSector && !isset($areaLabels[$areaId]),
             'sent'         => $row['sent_at'] !== null,
             'sent_at'      => $row['sent_at'],
-            'dispatch_id'  => !$isSector && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
+            'point_count'  => $isRoute ? count(is_array($payload['waypoints'] ?? null) ? $payload['waypoints'] : []) : null,
+            'closed_loop'  => $isRoute ? !empty($payload['is_closed_loop']) : null,
+            'return_to_start' => $isRoute ? !empty($payload['add_return_waypoint']) : null,
+            'team_empty'   => $isRoute && $teamId > 0 && isset($teamLabels[(int) $teamId]) && empty($participantsByTeam[(int) $teamId]),
+            'dispatch_id'  => !$isSector && !$isRoute && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'sector_id'    => $isSector && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
+            'route_id'     => $isRoute && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'error'        => $row['last_error'],
         ];
     }
@@ -408,6 +444,95 @@ function addScenarioSectorItems(array $mission, int $phaseId, int $userId, int $
     return ['ok' => true, 'count' => count($rows)];
 }
 
+/** A staged route's waypoints as [[lat, lng], ...] for the map, or null when it has none. */
+function scenarioRouteGhostPoints($payload): ?array {
+    if (!is_array($payload) || !is_array($payload['waypoints'] ?? null) || !$payload['waypoints']) {
+        return null;
+    }
+    $points = [];
+    foreach ($payload['waypoints'] as $wp) {
+        if (is_array($wp) && isset($wp['lat'], $wp['lng'])) {
+            $points[] = [(float) $wp['lat'], (float) $wp['lng']];
+        }
+    }
+    return $points ?: null;
+}
+
+/**
+ * Writes a route into a phase. $input is the route window's form: team_id (a team's id, or 'slot:<id>' for a slot of
+ * this scenario - a route has no «όλες οι ομάδες», and the word 'all' or an empty team, which in the route window means
+ * "people picked across teams", is REFUSED), title, waypoints (JSON text), is_closed_loop ('1'), add_return_waypoint
+ * ('1'), member_ids (JSON text; only a real team has them: a slot goes to the whole team it comes to stand for),
+ * travel_mode. Checked by prepareMissionRoute(), exactly as sending it would be, so a route that could never be sent
+ * (a team of another mission, no waypoint, thirty-one of them, one out of range) is refused when it is written down.
+ * The return waypoint, which is the team's last ping on the day, is not a point of the plan, but a route that already
+ * has thirty could never take it, so that is refused here as it would be at send. A phase that has been played takes
+ * no more orders. ['ok' => true, 'id' => n] or ['ok' => false, 'error' => text].
+ */
+function addScenarioRouteItem(array $mission, int $phaseId, int $userId, array $input): array {
+    $missionId = (int) $mission['id'];
+    $phase = scenarioPhaseRow($missionId, $phaseId);
+    if (!$phase) {
+        return ['ok' => false, 'error' => t('scenario.phase_not_found')];
+    }
+    if ($phase['played_at'] !== null) {
+        return ['ok' => false, 'error' => t('scenario.phase_closed_for_orders')];
+    }
+    if ((int) dbFetchValue("SELECT COUNT(*) FROM mission_scenario_items WHERE phase_id = ?", [$phaseId]) >= SCENARIO_MAX_ITEMS_PER_PHASE) {
+        return ['ok' => false, 'error' => t('scenario.too_many_orders', ['max' => SCENARIO_MAX_ITEMS_PER_PHASE])];
+    }
+
+    $who = scenarioParseAudience($missionId, (string) ($input['team_id'] ?? ''), false);
+    if ($who === null) {
+        return ['ok' => false, 'error' => t('scenario.route_needs_team')];
+    }
+    if (isset($who['error'])) {
+        return ['ok' => false, 'error' => $who['error']];
+    }
+    $audience = $who['audience'];
+    $slot = $who['slot'];
+
+    $prepared = prepareMissionRoute($mission, [
+        // '' for a slot: only the route's own rules are checked (the shape, the thirty points), not a team.
+        'team_id'        => $who['team_input'],
+        'ring_index'     => '',
+        'title'          => $input['title'] ?? '',
+        'waypoints'      => $input['waypoints'] ?? '',
+        'member_ids'     => $audience === 'team' ? ($input['member_ids'] ?? '') : '',
+        'is_closed_loop' => $input['is_closed_loop'] ?? '',
+        'travel_mode'    => $input['travel_mode'] ?? null,
+    ]);
+    if (!$prepared['ok']) {
+        return $prepared;
+    }
+    $addReturn = ($input['add_return_waypoint'] ?? '') === '1';
+    if ($addReturn && count($prepared['waypoints']) >= ROUTE_MAX_WAYPOINTS) {
+        return ['ok' => false, 'error' => t('route.too_many_waypoints_with_return')];
+    }
+
+    $payload = [
+        'audience'            => $audience,
+        'team_id'             => $audience === 'team' ? (int) $prepared['team_id'] : null,
+        'label'               => $prepared['title'],
+        'waypoints'           => $prepared['waypoints'],
+        'is_closed_loop'      => $prepared['closed_loop_asked'] ? 1 : 0,
+        'add_return_waypoint' => $addReturn ? 1 : 0,
+        'travel_mode'         => $prepared['travel_mode'],
+        'member_ids'          => $audience === 'team' ? array_values(array_unique(array_filter($prepared['member_ids'], fn($id) => $id > 0))) : [],
+    ];
+    if ($audience === 'slot') {
+        $payload['slot_id'] = (int) $slot['id'];
+        $payload['slot_label'] = $slot['label'];
+    }
+    $seq = 1 + (int) dbFetchValue("SELECT COALESCE(MAX(seq), 0) FROM mission_scenario_items WHERE phase_id = ?", [$phaseId]);
+    $id = (int) dbInsert(
+        "INSERT INTO mission_scenario_items (phase_id, mission_id, seq, kind, payload, slot_id, created_by, created_at) VALUES (?, ?, ?, 'route', ?, ?, ?, NOW())",
+        [$phaseId, $missionId, $seq, json_encode($payload), $slot ? (int) $slot['id'] : null, $userId]
+    );
+    logAudit('stage_scenario_item', 'mission_scenario_items', $id, null, ['mission_id' => $missionId, 'phase_id' => $phaseId, 'type' => 'route', 'audience' => $audience, 'team_id' => $payload['team_id'], 'slot_id' => $payload['slot_id'] ?? null, 'waypoints' => count($payload['waypoints'])]);
+    return ['ok' => true, 'id' => $id];
+}
+
 /** Takes one staged order off the plan. Null on success. */
 function deleteScenarioItem(array $mission, int $itemId, int $userId): ?string {
     $missionId = (int) $mission['id'];
@@ -479,18 +604,55 @@ function scenarioSectorInputFromPayload($payload, array $slotTeams = []): ?array
 }
 
 /**
+ * What createMissionRoute() takes, built from a staged route's payload, or null when the payload cannot be read as a
+ * route. The route's twin of scenarioSectorInputFromPayload(), with the same rule: a route goes to a REAL team -
+ * audience 'team' with a team id, or audience 'slot' whose slot stands for a team ($slotTeams: slot id => team id, as
+ * scenarioSlotTeamMap() gives it). A missing team, a slot that stands for none and the word 'all' (which a route does
+ * not have) are all null, never "no team": with no team the route window makes a route of people picked across
+ * teams, which is not the order that was staged and would tell whoever happens to be in member_ids.
+ */
+function scenarioRouteInputFromPayload($payload, array $slotTeams = []): ?array {
+    if (!is_array($payload) || !is_array($payload['waypoints'] ?? null) || !$payload['waypoints']) {
+        return null;
+    }
+    if (($payload['audience'] ?? '') === 'team' && (int) ($payload['team_id'] ?? 0) > 0) {
+        $teamId = (string) (int) $payload['team_id'];
+    } elseif (($payload['audience'] ?? '') === 'slot' && (int) ($slotTeams[(int) ($payload['slot_id'] ?? 0)] ?? 0) > 0) {
+        $teamId = (string) (int) $slotTeams[(int) $payload['slot_id']];
+    } else {
+        return null;
+    }
+    return [
+        'team_id'             => $teamId,
+        'ring_index'          => '',
+        'title'               => (string) ($payload['label'] ?? ''),
+        'waypoints'           => json_encode($payload['waypoints']),
+        'add_return_waypoint' => !empty($payload['add_return_waypoint']) ? '1' : '0',
+        'member_ids'          => json_encode(array_values(array_map('intval', is_array($payload['member_ids'] ?? null) ? $payload['member_ids'] : []))),
+        'is_closed_loop'      => !empty($payload['is_closed_loop']) ? '1' : '0',
+        'travel_mode'         => (string) ($payload['travel_mode'] ?? ''),
+    ];
+}
+
+/**
  * Sends one staged order - a point or an area through createMissionDispatch(), a sector through
- * createMissionSector() - and writes down what came of it. Returns ['item_id' => n, 'kind' => 'dispatch'|'sector',
- * 'ok' => bool, 'dispatch_id' => n|null (the live order, for a point or an area), 'sector_id' => n|null (for a
- * sector), 'error' => text|null]. Never throws: an item that blows up is a failed item, not an aborted phase.
- * A sector whose search area has been deleted since fails with that reason and creates nothing.
+ * createMissionSector(), a route through createMissionRoute() - and writes down what came of it. Returns ['item_id' =>
+ * n, 'kind' => 'dispatch'|'sector'|'route', 'ok' => bool, 'dispatch_id' => n|null (the live order, for a point or an
+ * area), 'sector_id' => n|null (for a sector), 'route_id' => n|null (for a route), 'error' => text|null]. Never
+ * throws: an item that blows up is a failed item, not an aborted phase. A sector whose search area has been deleted
+ * since fails with that reason and creates nothing.
  */
 function scenarioSendItem(array $mission, array $item, int $userId, string $userName): array {
     $itemId = (int) $item['id'];
-    $isSector = ($item['kind'] ?? 'dispatch') === 'sector';
+    $kind = in_array($item['kind'] ?? 'dispatch', ['sector', 'route'], true) ? $item['kind'] : 'dispatch';
+    $isSector = $kind === 'sector';
     $payload = json_decode((string) $item['payload'], true);
     $slotTeams = scenarioSlotTeamMap((int) $mission['id']);
-    $input = $isSector ? scenarioSectorInputFromPayload($payload, $slotTeams) : scenarioDispatchInputFromPayload($payload, $slotTeams);
+    $input = match ($kind) {
+        'sector' => scenarioSectorInputFromPayload($payload, $slotTeams),
+        'route' => scenarioRouteInputFromPayload($payload, $slotTeams),
+        default => scenarioDispatchInputFromPayload($payload, $slotTeams),
+    };
     if ($input === null) {
         $result = ['ok' => false, 'error' => is_array($payload) && ($payload['audience'] ?? '') === 'slot'
             ? t('scenario.item_slot_unmapped', ['slot' => (string) ($payload['slot_label'] ?? '')])
@@ -499,17 +661,16 @@ function scenarioSendItem(array $mission, array $item, int $userId, string $user
         $result = ['ok' => false, 'error' => t('scenario.item_area_gone', ['area' => (string) ($payload['area_label'] ?? '')])];
     } else {
         try {
-            if ($isSector) {
-                $result = createMissionSector($mission, $userId, $input);
-            } else {
-                $result = createMissionDispatch($mission, $userId, $userName, $input);
-            }
+            $result = match ($kind) {
+                'sector' => createMissionSector($mission, $userId, $input),
+                'route' => createMissionRoute($mission, $userId, $input),
+                default => createMissionDispatch($mission, $userId, $userName, $input),
+            };
         } catch (Throwable $e) {
             error_log('[scenario] item ' . $itemId . ' failed: ' . $e->getMessage());
             $result = ['ok' => false, 'error' => t('scenario.item_failed_unexpected')];
         }
     }
-    $kind = $isSector ? 'sector' : 'dispatch';
     if ($result['ok']) {
         dbExecute(
             "UPDATE mission_scenario_items SET sent_at = NOW(), sent_ref_id = ?, last_error = NULL WHERE id = ?",
@@ -517,12 +678,15 @@ function scenarioSendItem(array $mission, array $item, int $userId, string $user
         );
         return [
             'item_id' => $itemId, 'kind' => $kind, 'ok' => true,
-            'dispatch_id' => $isSector ? null : (int) $result['id'], 'sector_id' => $isSector ? (int) $result['id'] : null, 'error' => null,
+            'dispatch_id' => $kind === 'dispatch' ? (int) $result['id'] : null,
+            'sector_id' => $isSector ? (int) $result['id'] : null,
+            'route_id' => $kind === 'route' ? (int) $result['id'] : null,
+            'error' => null,
         ];
     }
     $error = mb_substr((string) $result['error'], 0, 250);
     dbExecute("UPDATE mission_scenario_items SET last_error = ? WHERE id = ?", [$error, $itemId]);
-    return ['item_id' => $itemId, 'kind' => $kind, 'ok' => false, 'dispatch_id' => null, 'sector_id' => null, 'error' => $error];
+    return ['item_id' => $itemId, 'kind' => $kind, 'ok' => false, 'dispatch_id' => null, 'sector_id' => null, 'route_id' => null, 'error' => $error];
 }
 
 /**

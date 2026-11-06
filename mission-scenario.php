@@ -53,6 +53,10 @@ $fail = fn(string $error, array $extra = []) => json_encode(['ok' => false, 'err
 $liveSectors = fn(array $results) => array_filter($results, fn($r) => ($r['kind'] ?? '') === 'sector' && !empty($r['ok']))
     ? ['sectors' => loadMissionSectorsForUser($missionId, (int) $userId, true, false), 'areas' => loadMissionSearchAreasForUser($missionId, true)]
     : [];
+// Likewise a play or a retry that has sent routes: the live list of routes, the one the route endpoint answers with.
+$liveRoutes = fn(array $results) => array_filter($results, fn($r) => ($r['kind'] ?? '') === 'route' && !empty($r['ok']))
+    ? ['routes' => loadRoutesForUser($missionId, (int) $userId, true)]
+    : [];
 
 if ($action === 'add_phase') {
     $result = addScenarioPhase($mission, (int) $userId, (string) post('title'));
@@ -135,6 +139,42 @@ if ($action === 'add_sectors') {
     exit;
 }
 
+if ($action === 'add_route') {
+    // The route window's «Στο σενάριο»: the route drawn there goes into the phase instead of out to a team.
+    // team_id is a team's id or 'slot:<id>' - a route has no «όλες οι ομάδες», and an empty team (which the route
+    // window means as "people picked across teams") is refused. As for add_item, a "new phase" made for a refused
+    // order is taken out again.
+    $phaseId = (int) post('phase_id');
+    $madePhase = false;
+    if ($phaseId === 0 && post('phase_id') === 'new') {
+        $made = addScenarioPhase($mission, (int) $userId, '');
+        if (!$made['ok']) {
+            echo $fail($made['error']);
+            exit;
+        }
+        $phaseId = (int) $made['id'];
+        $madePhase = true;
+    }
+    $result = addScenarioRouteItem($mission, $phaseId, (int) $userId, [
+        'team_id'             => post('team_id'),
+        'title'               => post('title'),
+        'waypoints'           => post('waypoints'),
+        'is_closed_loop'      => post('is_closed_loop'),
+        'add_return_waypoint' => post('add_return_waypoint'),
+        'member_ids'          => post('member_ids'),
+        'travel_mode'         => post('travel_mode'),
+    ]);
+    if (!$result['ok']) {
+        if ($madePhase) {
+            deleteScenarioPhase($mission, $phaseId, (int) $userId);
+        }
+        echo $fail($result['error']);
+        exit;
+    }
+    echo $answer(['item_id' => $result['id'], 'phase_id' => $phaseId]);
+    exit;
+}
+
 if ($action === 'delete_item') {
     $error = deleteScenarioItem($mission, (int) post('item_id'), (int) $userId);
     echo $error === null ? $answer() : $fail($error);
@@ -183,7 +223,7 @@ if ($action === 'play_phase') {
         'failed'     => $result['failed'],
         'results'    => $result['results'],
         'dispatches' => loadMissionDispatchesForUser($missionId, (int) $userId, true, false),
-    ] + $liveSectors($result['results']));
+    ] + $liveSectors($result['results']) + $liveRoutes($result['results']));
     exit;
 }
 
@@ -196,7 +236,7 @@ if ($action === 'retry_item') {
     echo $answer([
         'item'       => $result['item'],
         'dispatches' => loadMissionDispatchesForUser($missionId, (int) $userId, true, false),
-    ] + $liveSectors([$result['item']]));
+    ] + $liveSectors([$result['item']]) + $liveRoutes([$result['item']]));
     exit;
 }
 

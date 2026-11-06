@@ -5423,6 +5423,312 @@ function maybeCompleteRoute(int $routeId, int $actorId): bool {
     return true;
 }
 
+/** The most waypoints a route can have, the one that returns to the start included. */
+const ROUTE_MAX_WAYPOINTS = 30;
+
+/**
+ * Everything createMissionRoute() checks about a route that belongs to the ROUTE itself, and nothing it does: the
+ * team (when one is named) is one of this mission's, the ring is 0-3, and the waypoints are one to thirty valid
+ * points. Split out of createMissionRoute() in v3.455.0 - as prepareMissionDispatch() and prepareMissionSector()
+ * were - so that a scenario can check a route when it is STAGED with the very rules that will check it when it is
+ * SENT: a route that could never be sent is refused when it is written down, not when the exercise has begun. Pure:
+ * it reads, it writes nothing and tells no one. The checks run in the order the endpoint always ran them, so a form
+ * with two mistakes gets the same message it always got.
+ *
+ * It does NOT ask who is on the team today (resolveMissionRouteRecipients(), at send) nor whether the team has
+ * pinged yet for the return waypoint (createMissionRoute(), at send): both change between the day a plan is written
+ * and the day it is played.
+ *
+ * $input is what the form posts, as post() returns it (a string, or ''/null when absent): team_id ('' = no team: a
+ * route for people picked across teams), ring_index, title, waypoints (JSON text of [{lat, lng, label,
+ * instructions, dwell_minutes, require_photo, require_video, require_note}, ...]), add_return_waypoint ('1'),
+ * member_ids (JSON text), is_closed_loop ('1'), travel_mode. Returns ['ok' => false, 'error' => <text to show>], or
+ * ['ok' => true, 'team_id' => int|null, 'team' => row|null, 'team_label' => string|null, 'ring_index' => int|null,
+ * 'title' => string|null, 'waypoints' => list (as submitted, without the return waypoint), 'add_return' => bool
+ * (asked for AND a team is named), 'member_ids' => int[] (as submitted), 'closed_loop_asked' => bool,
+ * 'travel_mode' => 'foot'|'vehicle'|null (as chosen; a route with no team stores none)].
+ */
+function prepareMissionRoute(array $mission, array $input): array {
+    $missionId = (int) $mission['id'];
+
+    // team_id is optional (migration v110): a route can be assembled from
+    // specific individuals across two or more different teams instead of
+    // always belonging to one nominal team — see the cross-team branch of
+    // resolveMissionRouteRecipients().
+    $teamIdRaw = $input['team_id'] ?? null;
+    $teamId = ($teamIdRaw !== '' && $teamIdRaw !== null) ? (int) $teamIdRaw : null;
+    $team = null;
+    if ($teamId !== null) {
+        $team = dbFetchOne("SELECT id, codename, team_number FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
+        if (!$team) {
+            return ['ok' => false, 'error' => t('common.team_not_found')];
+        }
+    }
+
+    // 0-3, matching LPB_RING_TABLE's own [25,50,75,95] index — set only by
+    // the war-room.php ring shortcuts, null for a hand-drawn route. Backs
+    // the "reset ring assignments" bulk-clear (see the clear_ring_generated
+    // action of mission-route.php).
+    $ringIndexRaw = $input['ring_index'] ?? null;
+    $ringIndex = ($ringIndexRaw !== '' && $ringIndexRaw !== null) ? (int) $ringIndexRaw : null;
+    if ($ringIndex !== null && ($ringIndex < 0 || $ringIndex > 3)) {
+        return ['ok' => false, 'error' => t('common.invalid_request')];
+    }
+
+    $title = trim((string) ($input['title'] ?? ''));
+    $title = $title !== '' ? mb_substr($title, 0, 255) : null;
+
+    $waypointsRaw = json_decode((string) ($input['waypoints'] ?? ''), true);
+    if (!is_array($waypointsRaw) || count($waypointsRaw) < 1) {
+        return ['ok' => false, 'error' => t('route.needs_one_waypoint')];
+    }
+    if (count($waypointsRaw) > ROUTE_MAX_WAYPOINTS) {
+        return ['ok' => false, 'error' => t('route.too_many_waypoints')];
+    }
+
+    $waypoints = [];
+    foreach ($waypointsRaw as $wp) {
+        if (!is_array($wp) || !isset($wp['lat'], $wp['lng']) || !is_numeric($wp['lat']) || !is_numeric($wp['lng'])) {
+            return ['ok' => false, 'error' => t('route.invalid_waypoint')];
+        }
+        // Same range check ping-location.php already applies to a live GPS
+        // fix — a waypoint is admin-placed, not device-reported, but a
+        // malformed/out-of-range value here would still corrupt the map and
+        // every downstream distance/ETA calculation against it.
+        $wpLat = (float) $wp['lat']; $wpLng = (float) $wp['lng'];
+        if ($wpLat < -90 || $wpLat > 90 || $wpLng < -180 || $wpLng > 180 || ($wpLat == 0 && $wpLng == 0)) {
+            return ['ok' => false, 'error' => t('route.invalid_waypoint')];
+        }
+        $label = isset($wp['label']) ? trim((string) $wp['label']) : '';
+        $instructions = isset($wp['instructions']) ? trim((string) $wp['instructions']) : '';
+        $dwellRaw = $wp['dwell_minutes'] ?? null;
+        $waypoints[] = [
+            'lat'           => (float) $wp['lat'],
+            'lng'           => (float) $wp['lng'],
+            'label'         => $label !== '' ? mb_substr($label, 0, 255) : null,
+            'instructions'  => $instructions !== '' ? mb_substr($instructions, 0, 2000) : null,
+            'dwell_minutes' => ($dwellRaw !== null && $dwellRaw !== '' && is_numeric($dwellRaw)) ? max(0, (int) $dwellRaw) : null,
+            'require_photo' => !empty($wp['require_photo']) ? 1 : 0,
+            'require_video' => !empty($wp['require_video']) ? 1 : 0,
+            'require_note'  => !empty($wp['require_note']) ? 1 : 0,
+        ];
+    }
+
+    $memberIdsRaw = json_decode((string) ($input['member_ids'] ?? ''), true);
+
+    return [
+        'ok'                => true,
+        'team_id'           => $teamId,
+        'team'              => $team,
+        'team_label'        => $team ? teamLabel($team['codename'], $team['team_number']) : null,
+        'ring_index'        => $ringIndex,
+        'title'             => $title,
+        'waypoints'         => $waypoints,
+        // Single-team mode only: cross-team routes have no one team to capture a position from, and the composer
+        // itself hides this checkbox in that mode, so it should never even arrive truthy there — the $teamId check
+        // is still the real authorization boundary, not just a UI nicety.
+        'add_return'        => ($input['add_return_waypoint'] ?? '') === '1' && $teamId !== null,
+        'member_ids'        => is_array($memberIdsRaw) ? array_map('intval', $memberIdsRaw) : [],
+        'closed_loop_asked' => ($input['is_closed_loop'] ?? '') === '1',
+        // On foot or with a vehicle, as the person giving the order chose in the composer (v3.438.0). Absent or
+        // anything else = the team's own transport.
+        'travel_mode'       => normalizeTravelMode($input['travel_mode'] ?? null),
+    ];
+}
+
+/**
+ * Who a route goes to, asked at the moment it is sent (the roster is live state). With a team: the team's members
+ * who take part in the Action Room, narrowed to the submitted subset when there is one (a forged id can never add
+ * someone who is not on the team; no subset, or nothing of it surviving, is the whole team). With no team: the
+ * submitted people who are approved on the mission and take part in the Action Room - there is no "whole roster"
+ * to fall back to, so none selected is an error. Returns ['ok' => false, 'error' => text] or ['ok' => true,
+ * 'recipient_ids' => int[], 'team_label' => the team's label, or the members' own names for a cross-team route].
+ */
+function resolveMissionRouteRecipients(int $missionId, ?array $team, array $submittedMemberIds): array {
+    if ($team !== null) {
+        // Single-team mode. Optional subset of the team this specific route
+        // actually applies to (e.g. only 2 of 4 members sent on a temporary
+        // task) — see migration v109. Every submitted id is intersected
+        // against the team's real roster: a forged member_ids array must
+        // never be able to add a recipient/actor who isn't even on this
+        // team. No subset submitted (or nothing survives the intersection)
+        // falls back to the whole team — the composer's default, unchanged
+        // old behavior.
+        //
+        // Narrowed to the team members who take part in the Action Room: a
+        // route is an order with waypoints to acknowledge and walk, and
+        // somebody whose phone is not in the operation can neither see it nor
+        // clear it. On a team of five carried by one phone, the route goes to
+        // that phone.
+        $teamRoster = array_values(array_intersect(
+            array_map('intval', array_column(dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [(int) $team['id']]), 'user_id')),
+            actionRoomParticipantIds($missionId)
+        ));
+        if (empty($teamRoster)) {
+            return ['ok' => false, 'error' => t('route.team_has_no_gps_members')];
+        }
+        $recipientIds = !empty($submittedMemberIds)
+            ? array_values(array_intersect($teamRoster, $submittedMemberIds))
+            : $teamRoster;
+        if (empty($recipientIds)) {
+            $recipientIds = $teamRoster;
+        }
+        return ['ok' => true, 'recipient_ids' => $recipientIds, 'team_label' => teamLabel($team['codename'], $team['team_number'])];
+    }
+
+    // Cross-team mode (migration v110): no single team, so there's no
+    // "whole roster" to fall back to — the admin must explicitly pick
+    // who this route applies to. Validated against every approved
+    // participant of the MISSION (not just one team), so a forged id
+    // still can't add a recipient/actor who isn't even on this mission.
+    $approvedIds = array_values(array_intersect(
+        array_map('intval', array_column(dbFetchAll(
+            "SELECT DISTINCT pr.volunteer_id FROM participation_requests pr
+             JOIN shifts s ON s.id = pr.shift_id
+             WHERE s.mission_id = ? AND pr.status = ?",
+            [$missionId, PARTICIPATION_APPROVED]
+        ), 'volunteer_id')),
+        actionRoomParticipantIds($missionId)
+    ));
+    $recipientIds = array_values(array_intersect($approvedIds, $submittedMemberIds));
+    if (empty($recipientIds)) {
+        return ['ok' => false, 'error' => t('route.select_at_least_one_member')];
+    }
+    // No team codename exists for a cross-team route — the members'
+    // own names stand in for it wherever {team} is substituted into a
+    // notification template (see routeMixedTeamLabel()'s docblock for
+    // why this must stay untranslated/language-neutral).
+    $memberNamePlaceholders = implode(',', array_fill(0, count($recipientIds), '?'));
+    $teamLbl = implode(', ', array_column(dbFetchAll(
+        "SELECT name FROM users WHERE id IN ($memberNamePlaceholders) ORDER BY name",
+        $recipientIds
+    ), 'name'));
+    return ['ok' => true, 'recipient_ids' => $recipientIds, 'team_label' => $teamLbl];
+}
+
+/**
+ * Command sends a route («Εντολή Πορείας»): an ordered patrol of one to thirty waypoints for one team (or for people
+ * picked across teams), each with its instructions, an advisory dwell time and the photo/video/note it expects. This
+ * is the body of mission-route.php's `create` (v3.455.0), moved here unchanged so that anything else that has to send
+ * the very same route - a step of a scenario, next - goes through the same checks, writes the same rows and audit
+ * entry and tells the same people as a hand-drawn one: the route, its members, the underlying order (the push, the
+ * banner, «Ελήφθη») and every waypoint with its progress row. Command only: the caller has checked that.
+ *
+ * $input is the form's: see prepareMissionRoute(). Returns ['ok' => true, 'id' => <route id>] or ['ok' => false,
+ * 'error' => <text to show>].
+ */
+function createMissionRoute(array $mission, int $userId, array $input): array {
+    $prepared = prepareMissionRoute($mission, $input);
+    if (!$prepared['ok']) {
+        return $prepared;
+    }
+    $missionId = (int) $mission['id'];
+    $teamId = $prepared['team_id'];
+    $team = $prepared['team'];
+    $ringIndex = $prepared['ring_index'];
+    $title = $prepared['title'];
+    $waypoints = $prepared['waypoints'];
+
+    // Captures the team's own current position (their latest ping, same
+    // "team is one unit" join shape computeDispatchEta() uses) and appends
+    // it as one more real waypoint, so the patrol's last leg is a genuine
+    // tracked depart/arrive/complete back to wherever the team actually
+    // started — not just cosmetic. Silently does nothing if the team has no
+    // ping yet, same "advisory, never blocks route creation" choice already
+    // made for is_closed_loop just below.
+    if ($prepared['add_return']) {
+        $startPing = dbFetchOne(
+            "SELECT vp.lat, vp.lng
+             FROM volunteer_pings vp
+             JOIN mission_team_members mtm ON mtm.user_id = vp.user_id
+             JOIN shifts s ON s.id = vp.shift_id AND s.mission_id = mtm.mission_id
+             WHERE mtm.team_id = ?
+             ORDER BY vp.created_at DESC LIMIT 1",
+            [$teamId]
+        );
+        if ($startPing) {
+            $waypoints[] = [
+                'lat'           => (float) $startPing['lat'],
+                'lng'           => (float) $startPing['lng'],
+                'label'         => t('route.return_to_start_label'),
+                'instructions'  => null,
+                'dwell_minutes' => null,
+                'require_photo' => 0,
+                'require_video' => 0,
+                'require_note'  => 0,
+            ];
+        }
+    }
+
+    // The cap checked in prepareMissionRoute() counts only what the composer submitted. The
+    // return waypoint is appended AFTER it and is a real, tracked waypoint of
+    // its own (depart/arrive/complete like any other), so it has to count
+    // against the same 30 — otherwise it silently stored 31. That was reachable,
+    // not theoretical: a ring perimeter route arrives at exactly 30
+    // (ringPolygonPointCount() clamps there), ring routes always carry a team,
+    // and the composer only hides this checkbox in cross-team mode. Re-checked
+    // here rather than pre-emptively lowering the submit-time cap to 29, so a
+    // route that never asked for a return waypoint still gets its full 30 and
+    // the error names the real cause.
+    if (count($waypoints) > ROUTE_MAX_WAYPOINTS) {
+        return ['ok' => false, 'error' => t('route.too_many_waypoints_with_return')];
+    }
+
+    $who = resolveMissionRouteRecipients($missionId, $team, $prepared['member_ids']);
+    if (!$who['ok']) {
+        return $who;
+    }
+    $recipientIds = $who['recipient_ids'];
+    $teamLbl = $who['team_label'];
+
+    // Purely a map-rendering hint (draw the connecting line back to point 1) —
+    // never adds a waypoint the team has to visit, and geometrically meaningless
+    // under 3 points, so silently ignore rather than reject a 1-2 point route
+    // that happened to send it (e.g. a stale composer click before points were added).
+    $isClosedLoop = ($prepared['closed_loop_asked'] && count($waypoints) >= 3) ? 1 : 0;
+
+    $travelMode = $prepared['travel_mode'];
+
+    $routeId = dbInsert(
+        "INSERT INTO mission_routes (mission_id, team_id, title, is_closed_loop, ring_index, travel_mode, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
+        [$missionId, $teamId, $title, $isClosedLoop, $ringIndex, $teamId !== null ? $travelMode : null, $userId]
+    );
+    foreach ($recipientIds as $memberId) {
+        dbInsert("INSERT INTO mission_route_members (route_id, user_id, added_at) VALUES (?, ?, NOW())", [$routeId, $memberId]);
+    }
+
+    // task_text on the underlying order is just a compact summary — the real
+    // per-waypoint content lives in mission_route_waypoints and is what the
+    // "Η Πορεία μου" card actually renders; this only feeds the generic
+    // order history/report views that already know how to print task_text.
+    $summary = $title
+        ? t('route.order_summary_titled', ['title' => $title, 'count' => count($waypoints)])
+        : t('route.order_summary_untitled', ['count' => count($waypoints)]);
+
+    $orderId = createMissionOrderAndNotify(
+        $missionId, $mission['title'], 'route', $userId, $recipientIds,
+        'order.route.title', ['team' => $teamLbl],
+        null, 'order.route.message', ['team' => $teamLbl, 'count' => count($waypoints)],
+        $summary
+    );
+    dbExecute("UPDATE mission_routes SET order_id = ? WHERE id = ?", [$orderId, $routeId]);
+
+    $seq = 1;
+    foreach ($waypoints as $wp) {
+        $waypointId = dbInsert(
+            "INSERT INTO mission_route_waypoints (route_id, seq, lat, lng, label, instructions, dwell_minutes, require_photo, require_video, require_note, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",
+            [$routeId, $seq, $wp['lat'], $wp['lng'], $wp['label'], $wp['instructions'], $wp['dwell_minutes'], $wp['require_photo'], $wp['require_video'], $wp['require_note']]
+        );
+        dbInsert("INSERT INTO mission_route_progress (waypoint_id, route_id, team_id) VALUES (?, ?, ?)", [$waypointId, $routeId, $teamId]);
+        $seq++;
+    }
+
+    logAudit('create_mission_route', 'mission_routes', $routeId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'member_ids' => $recipientIds, 'waypoints' => count($waypoints), 'ring_index' => $ringIndex]);
+
+    return ['ok' => true, 'id' => (int) $routeId];
+}
+
 /**
  * «Ξανάνοιγμα διαδρομής» (v3.443.0): command takes back the completion of a route that closed too soon or by
  * mistake. A route completes by itself when its last point closes, so reopening is undoing that: the route is

@@ -6717,7 +6717,16 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                         <button type="button" class="btn btn-outline-secondary" id="routeCoordsAddBtn" title="<?= t('dispatch.coords_add_title') ?>"><i class="bi bi-plus-lg"></i></button>
                     </div>
                     <div class="ms-auto d-flex gap-2">
+                        <span class="small text-success align-self-center" id="routeScenarioStatus" role="status"></span>
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="routeClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
+                        <?php
+                        // «Στο σενάριο ▾» (v3.455.0): the route drawn here goes into a phase of the scenario instead of
+                        // out to a team. The menu is built by assets/js/war-room-scenario.js.
+                        ?>
+                        <div class="btn-group" id="routeScenarioGroup">
+                            <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" id="routeScenarioBtn" data-bs-toggle="dropdown" aria-expanded="false" title="<?= t('scenario.route_add_to_scenario_title') ?>" disabled><i class="bi bi-collection-play me-1"></i><?= t('scenario.add_to_scenario') ?></button>
+                            <ul class="dropdown-menu dropdown-menu-end" id="routeScenarioMenu"></ul>
+                        </div>
                         <button type="button" class="btn btn-success btn-sm" id="routeSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('route.send_btn') ?></button>
                     </div>
                 </div>
@@ -6734,7 +6743,8 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                         // #routeWaypointPanel, which renderWaypointPanel()
                         // rewrites whole.
                         ?>
-                        <?php if (!empty($teams)): ?>
+                        <?php // v3.455.0: also with no team yet ($canManageWarRoom is always true in here) - «Στο σενάριο» can send a route to a team slot before the teams exist. ?>
+                        <?php if (!empty($teams) || $canManageWarRoom): ?>
                         <div class="p-2 border-bottom" style="max-height:40%;overflow-y:auto;">
                             <label class="form-label small fw-semibold mb-1" for="routeTeamSelect"><?= t('route.recipients_label') ?></label>
                             <select class="form-select form-select-sm mb-2" id="routeTeamSelect">
@@ -28273,6 +28283,9 @@ document.querySelectorAll('.team-form').forEach(form => {
             const geo = type === 'point' ? {lat: drawPoints[0][0], lng: drawPoints[0][1]} : drawPoints;
             const noteText = noteInput.value.trim();
             const combinedLabel = noteText && lastAddressLabel ? (noteText + ' — ' + lastAddressLabel) : (noteText || lastAddressLabel);
+            // Bootstrap's hide() does nothing for a disabled toggle, and the button is disabled below, so the menu is
+            // closed first: otherwise it stays open over the window after the order has gone into the phase.
+            bootstrap.Dropdown.getOrCreateInstance(scenarioBtn).hide();
             scenarioBtn.disabled = true;
             window.wrScenario.stage(choice.dataset.scPhase, {
                 // 'all' is "every team" to the scenario endpoint, and it is the only word that means that.
@@ -28707,6 +28720,9 @@ document.querySelectorAll('.team-form').forEach(form => {
                 label: (labelInputs[i] ? labelInputs[i].value.trim() : '') || t('sector.wedge_label_placeholder', {letter: GREEK_LETTERS[i % GREEK_LETTERS.length]}),
                 geo: poly,
             }));
+            // Bootstrap's hide() does nothing for a disabled toggle, and the button is disabled below, so the menu is
+            // closed first: otherwise it stays open over the window after the order has gone into the phase.
+            bootstrap.Dropdown.getOrCreateInstance(scenarioBtn).hide();
             scenarioBtn.disabled = true;
             window.wrScenario.stageSectors(choice.dataset.scPhase, currentArea.id, sectors).then(res => {
                 if (res && res.ok) {
@@ -30123,7 +30139,20 @@ let pendingRouteRingIndex = null;
 function updateRouteSendState() {
     const sendBtn = document.getElementById('routeSendBtn');
     const teamSelect = document.getElementById('routeTeamSelect');
-    if (sendBtn) sendBtn.disabled = routeWaypoints.length < 1 || (!!teamSelect && teamSelect.value === 'pick');
+    const chosen = teamSelect ? teamSelect.value : '';
+    // A scenario slot is only ever staged («Στο σενάριο»): sending to a name that stands for no team yet is not possible.
+    const isSlot = chosen.indexOf('slot:') === 0;
+    if (sendBtn) {
+        sendBtn.disabled = routeWaypoints.length < 1 || (!!teamSelect && (chosen === 'pick' || isSlot));
+        sendBtn.title = isSlot ? t('scenario.route_slot_send_hint') : '';
+    }
+    // «Στο σενάριο» (v3.455.0): a point and a team or a slot. A route for people picked across teams (the empty
+    // choice) is not an order a plan can name, so it cannot be staged.
+    const scenarioBtn = document.getElementById('routeScenarioBtn');
+    if (scenarioBtn) {
+        scenarioBtn.disabled = !window.wrScenario || routeWaypoints.length < 1 || !(/^[0-9]+$/.test(chosen) || /^slot:[0-9]+$/.test(chosen));
+        scenarioBtn.title = !!teamSelect && chosen === '' ? t('scenario.route_stage_hint') : t('scenario.route_add_to_scenario_title');
+    }
 }
 
 function renderRouteComposerMap() {
@@ -30219,6 +30248,8 @@ function renderRouteComposerAreas() {
     renderDispatchesReference(routeComposerAreasLayer);
     renderMissingPersonReference(routeComposerAreasLayer);
     renderSearchRingsReference(routeComposerAreasLayer);
+    // What is already staged in the scenario, so the next route is not drawn blind (v3.455.0).
+    if (window.wrScenario) window.wrScenario.drawGhostsInto(routeComposerAreasLayer);
 }
 
 function renderWaypointPanel() {
@@ -30314,6 +30345,10 @@ function renderWaypointPanel() {
     const sendBtn = document.getElementById('routeSendBtn');
     const teamSelect = document.getElementById('routeTeamSelect');
     const memberPicker = document.getElementById('routeMemberPicker');
+    // «Στο σενάριο» (v3.455.0): follows the same readiness as «Αποστολή», except that a slot may be chosen.
+    const scenarioBtn = document.getElementById('routeScenarioBtn');
+    const scenarioMenu = document.getElementById('routeScenarioMenu');
+    const scenarioStatus = document.getElementById('routeScenarioStatus');
     // On foot or with a vehicle (v3.438.0): follows the team picked until somebody picks it.
     const routeTravelSelect = document.getElementById('routeTravelSelect');
     let routeTravelTouched = false;
@@ -30368,6 +30403,13 @@ function renderWaypointPanel() {
             memberPicker.innerHTML = `<span class="text-muted">${escapeHtml(t('route.pick_team_first'))}</span>`;
             return;
         }
+        // A scenario slot (v3.455.0): no roster to list yet - the route goes to the whole team the slot comes to
+        // stand for, and the return to where it started is answered on the day.
+        if (teamSelect.value.indexOf('slot:') === 0) {
+            returnWrap.classList.remove('d-none');
+            memberPicker.innerHTML = `<span class="text-muted">${escapeHtml(t('scenario.route_slot_members'))}</span>`;
+            return;
+        }
         const isCrossTeam = teamSelect.value === '';
         returnWrap.classList.toggle('d-none', isCrossTeam);
         if (isCrossTeam) returnCheck.checked = false;
@@ -30404,10 +30446,31 @@ function renderWaypointPanel() {
             </label>
         `).join('') || `<span class="text-muted">${t('route.team_has_no_members')}</span>`;
     }
-    if (teamSelect) {
-        renderRouteMemberPicker();
-        teamSelect.addEventListener('change', renderRouteMemberPicker);
+    // The scenario's team slots live in the recipient list as a group of their own (v3.455.0).
+    function refreshRouteSlotOptions() {
+        if (window.wrScenario && teamSelect) window.wrScenario.fillSlotOptions(teamSelect);
     }
+    function onRouteTeamChange() {
+        if (teamSelect.value !== 'slot:new') { renderRouteMemberPicker(); return; }
+        // «+ Νέα θέση ομάδας…»: asks for the name, then the new slot is the choice (nothing is, if the person said no).
+        teamSelect.value = 'pick';
+        if (!window.wrScenario) { renderRouteMemberPicker(); return; }
+        window.wrScenario.newSlot().then(id => {
+            refreshRouteSlotOptions();
+            if (id) teamSelect.value = 'slot:' + id;
+            renderRouteMemberPicker();
+        });
+    }
+    if (teamSelect) {
+        refreshRouteSlotOptions();
+        renderRouteMemberPicker();
+        teamSelect.addEventListener('change', onRouteTeamChange);
+    }
+    // The plan changed (a slot added, an order staged or sent): the list of slots and the ghosts follow.
+    document.addEventListener('wr-scenario-updated', () => {
+        refreshRouteSlotOptions();
+        renderRouteComposerAreas();
+    });
 
     // Shared by real map clicks and the manual coordinates field below — same
     // reasoning as the dispatch composer's addDrawPoint().
@@ -30579,6 +30642,52 @@ function renderWaypointPanel() {
         }).catch(() => { addressStatus.textContent = t('dispatch.search_failed'); });
     });
 
+    // «Στο σενάριο ▾» (v3.455.0): the same route «Αποστολή» would send, written into a phase instead. The window stays
+    // open for the next one; what was drawn is cleared, the recipient is kept.
+    if (scenarioBtn && scenarioMenu) {
+        scenarioBtn.addEventListener('show.bs.dropdown', () => {
+            scenarioMenu.innerHTML = window.wrScenario ? window.wrScenario.menuHtml() : '';
+        });
+        scenarioMenu.addEventListener('click', e => {
+            const choice = e.target.closest('[data-sc-phase]');
+            if (!choice) return;
+            e.preventDefault();
+            if (!window.wrScenario || scenarioBtn.disabled || !routeWaypoints.length || !teamSelect) return;
+            const chosen = teamSelect.value;
+            if (!/^([0-9]+|slot:[0-9]+)$/.test(chosen)) { alert(t('scenario.route_stage_hint')); return; }
+            const isSlot = chosen.indexOf('slot:') === 0;
+            // A slot has no roster yet; a real team goes to the people ticked here.
+            const memberIds = isSlot ? [] : [...memberPicker.querySelectorAll('.route-member-check:checked')].map(cb => cb.value);
+            if (!isSlot && !memberIds.length) { alert(t('route.team_has_no_members')); return; }
+            const payload = routeWaypoints.map(wp => ({
+                lat: wp.lat, lng: wp.lng, label: wp.label, instructions: wp.instructions,
+                dwell_minutes: wp.dwell_minutes, require_photo: wp.require_photo ? 1 : 0,
+                require_video: wp.require_video ? 1 : 0, require_note: wp.require_note ? 1 : 0,
+            }));
+            // Bootstrap's hide() does nothing for a disabled toggle, and the button is disabled below, so the menu is
+            // closed first: otherwise it stays open over the window after the order has gone into the phase.
+            bootstrap.Dropdown.getOrCreateInstance(scenarioBtn).hide();
+            scenarioBtn.disabled = true;
+            window.wrScenario.stageRoute(choice.dataset.scPhase, {
+                team_id: chosen, title: titleInput.value.trim(), waypoints: JSON.stringify(payload),
+                is_closed_loop: routeClosed ? '1' : '0', member_ids: JSON.stringify(memberIds),
+                add_return_waypoint: document.getElementById('routeReturnToStartCheck').checked ? '1' : '0',
+                travel_mode: routeTravelSelect ? routeTravelSelect.value : '',
+            }).then(res => {
+                if (res && res.ok) {
+                    const phase = window.wrScenario.phases().find(p => String(p.id) === String(res.phase_id));
+                    resetRouteComposer();
+                    titleInput.value = '';
+                    if (scenarioStatus && phase) scenarioStatus.textContent = t('scenario.staged_ok', {phase: t('scenario.phase_n', {n: phase.n}), n: phase.items.length});
+                }
+                updateRouteSendState();
+            });
+        });
+        // A line about the last route put in is only true until the next change.
+        [titleInput, teamSelect].forEach(el => { if (el) el.addEventListener('input', () => { if (scenarioStatus) scenarioStatus.textContent = ''; }); });
+        if (teamSelect) teamSelect.addEventListener('change', () => { if (scenarioStatus) scenarioStatus.textContent = ''; });
+    }
+
     sendBtn.addEventListener('click', () => {
         if (!routeWaypoints.length) return;
         // A route fundamentally has nowhere to go without a team to pick
@@ -30588,6 +30697,8 @@ function renderWaypointPanel() {
         // usable even before a team exists (see the top-of-IIFE comment).
         if (!teamSelect) { alert(t('briefing.no_teams_yet')); return; }
         if (teamSelect.value === 'pick') { alert(t('dispatch.pick_team_first')); return; }
+        // A slot is not a team (v3.455.0): it can be staged, never sent.
+        if (teamSelect.value.indexOf('slot:') === 0) { alert(t('scenario.route_slot_send_hint')); return; }
         const payload = routeWaypoints.map(wp => ({
             lat: wp.lat, lng: wp.lng, label: wp.label, instructions: wp.instructions,
             dwell_minutes: wp.dwell_minutes, require_photo: wp.require_photo ? 1 : 0,

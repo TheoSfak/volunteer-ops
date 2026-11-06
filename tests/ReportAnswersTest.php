@@ -182,7 +182,13 @@ final class ReportAnswersTest extends TestCase
         $this->assertStringNotContainsString('SELECT user_id FROM mission_team_members', $shortage, 'a second copy of the old recipient rule');
 
         $warRoom = file_get_contents(__DIR__ . '/../includes/functions-warroom.php');
-        $this->assertSame(1, substr_count($warRoom, 'dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?"'), 'one recipient rule for both kinds of report');
+        // A route's own roster (resolveMissionRouteRecipients(), moved here from mission-route.php in v3.455.0) is a
+        // different rule: who a ROUTE goes to. What this pins is that the report answers have only one copy of theirs.
+        $withoutRoutes = preg_replace('/function resolveMissionRouteRecipients\(.*?
+}?
+/s', '', $warRoom);
+        $this->assertNotSame($warRoom, $withoutRoutes);
+        $this->assertSame(1, substr_count($withoutRoutes, 'dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?"'), 'one recipient rule for both kinds of report');
     }
 
     public function testClosingAnIncidentStoresCommandsComment(): void

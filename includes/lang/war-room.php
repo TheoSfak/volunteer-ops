@@ -3382,7 +3382,7 @@ return [
         // «Σενάριο» (v3.452.0): includes/functions-scenario.php, mission-scenario.php, assets/js/war-room-scenario.js
         'scenario.card_title' => 'Σενάριο',
         'scenario.note' => 'Γράψε από πριν τις εντολές της άσκησης σε φάσεις και στείλε κάθε φάση όταν έρθει η ώρα της, με το ▶. Τίποτα δεν φεύγει μόνο του και το σενάριο το βλέπει μόνο η διοίκηση.',
-        'scenario.empty' => 'Δεν υπάρχει σενάριο ακόμα. Φτιάξε μια φάση, ή πάτα «Στο σενάριο» στο παράθυρο αποστολής σημείου ή περιοχής, ή στο παράθυρο χωρισμού σε τομείς.',
+        'scenario.empty' => 'Δεν υπάρχει σενάριο ακόμα. Φτιάξε μια φάση, ή πάτα «Στο σενάριο» στο παράθυρο αποστολής σημείου ή περιοχής, στο παράθυρο χωρισμού σε τομείς ή στο παράθυρο διαδρομής.',
         'scenario.phase_n' => 'Φάση {n}',
         'scenario.new_phase_n' => 'Νέα φάση (Φάση {n})',
         'scenario.add_phase_btn' => 'Νέα φάση',
@@ -3461,6 +3461,17 @@ return [
         'scenario.sector_add_to_scenario_title' => 'Βάζει τους τομείς σε φάση του σεναρίου, χωρίς να τους δημιουργήσει τώρα',
         'scenario.sector_stage_hint' => 'Για να μπουν στο σενάριο, κάθε τομέας χρειάζεται ομάδα ή θέση ομάδας.',
         'scenario.sector_slot_save_hint' => 'Μια θέση ομάδας δεν είναι ομάδα· διάλεξε πραγματικές ομάδες ή πάτα «Στο σενάριο».',
+        // «Σενάριο» - διαδρομές (v3.455.0)
+        'scenario.kind_route' => 'Διαδρομή',
+        'scenario.route_points' => 'σημεία: {n}',
+        'scenario.route_return_hint' => 'με επιστροφή στην αφετηρία',
+        'scenario.team_empty_hint' => 'Κανένα μέλος της ομάδας δεν συμμετέχει στο Action Room· η διαδρομή δεν θα σταλεί.',
+        'scenario.play_confirm_team_empty' => 'Προσοχή: διαδρομές που δεν θα σταλούν επειδή κανένα μέλος της ομάδας τους δεν συμμετέχει στο Action Room: {n}.',
+        'scenario.route_needs_team' => 'Η διαδρομή πηγαίνει σε μία ομάδα ή θέση ομάδας· διάλεξε ποια. Διαδρομή για άτομα από πολλές ομάδες δεν μπαίνει στο σενάριο.',
+        'scenario.route_add_to_scenario_title' => 'Βάζει τη διαδρομή σε φάση του σεναρίου, χωρίς να τη στείλει τώρα',
+        'scenario.route_stage_hint' => 'Στο σενάριο μπαίνει διαδρομή για μία ομάδα ή θέση ομάδας (όχι για άτομα από πολλές ομάδες).',
+        'scenario.route_slot_send_hint' => 'Μια θέση ομάδας δεν είναι ομάδα· διάλεξε πραγματική ομάδα ή πάτα «Στο σενάριο».',
+        'scenario.route_slot_members' => 'Θέση ομάδας: η διαδρομή θα πάει σε όλη την ομάδα που θα οριστεί για τη θέση.',
     ],
     'en' => [
         'common.mission_not_found' => 'Mission not found.',
@@ -6727,7 +6738,7 @@ return [
         // Scenario (v3.452.0): includes/functions-scenario.php, mission-scenario.php, assets/js/war-room-scenario.js
         'scenario.card_title' => 'Scenario',
         'scenario.note' => 'Write the exercise orders down in phases beforehand and send each phase when its time comes, with ▶. Nothing goes out by itself and only command staff can see the scenario.',
-        'scenario.empty' => 'There is no scenario yet. Make a phase, or press "Add to scenario" in the point or area window, or in the window that divides an area into sectors.',
+        'scenario.empty' => 'There is no scenario yet. Make a phase, or press "Add to scenario" in the point or area window, in the window that divides an area into sectors, or in the route window.',
         'scenario.phase_n' => 'Phase {n}',
         'scenario.new_phase_n' => 'New phase (Phase {n})',
         'scenario.add_phase_btn' => 'New phase',
@@ -6806,5 +6817,16 @@ return [
         'scenario.sector_add_to_scenario_title' => 'Puts the sectors into a phase of the scenario without creating them now',
         'scenario.sector_stage_hint' => 'To go into the scenario every sector needs a team or a team slot.',
         'scenario.sector_slot_save_hint' => 'A team slot is not a team; choose real teams or press "Add to scenario".',
+        // Scenario - routes (v3.455.0)
+        'scenario.kind_route' => 'Route',
+        'scenario.route_points' => 'points: {n}',
+        'scenario.route_return_hint' => 'returns to the start',
+        'scenario.team_empty_hint' => 'Nobody on the team takes part in the Action Room; the route will not be sent.',
+        'scenario.play_confirm_team_empty' => 'Careful: routes that will not be sent because nobody on their team takes part in the Action Room: {n}.',
+        'scenario.route_needs_team' => 'A route goes to one team or team slot; choose which. A route for people from several teams cannot go into the scenario.',
+        'scenario.route_add_to_scenario_title' => 'Puts the route into a phase of the scenario without sending it now',
+        'scenario.route_stage_hint' => 'A route goes into the scenario for one team or team slot (not for people from several teams).',
+        'scenario.route_slot_send_hint' => 'A team slot is not a team; choose a real team or press "Add to scenario".',
+        'scenario.route_slot_members' => 'Team slot: the route goes to the whole team the slot comes to stand for.',
     ],
 ];
