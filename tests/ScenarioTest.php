@@ -787,6 +787,428 @@ final class ScenarioTest extends TestCase
         $this->assertTrue($this->stage($phase, $this->slotOrder($slot, ['type' => 'polygon', 'geo' => json_encode([[35.0, 24.8], [35.0, 24.9], [35.1, 24.9]])]))['ok']);
     }
 
+    // ── Sectors (v3.454.0) ─────────────────────────────────────────────────────────────────────────────────────
+
+    private function searchArea(?int $missionId = null, string $label = 'Περιοχή Ρέματος'): int
+    {
+        return (int) dbInsert(
+            "INSERT INTO mission_search_areas (mission_id, label, geo, created_by, created_at) VALUES (?, ?, ?, ?, NOW())",
+            [$missionId ?? $this->missionId, $label, json_encode([[35.0, 24.8], [35.0, 25.0], [35.2, 25.0], [35.2, 24.8]]), $this->adminId]
+        );
+    }
+
+    /** One row of the sector window's division, as stageSectors() takes it. */
+    private function sectorRow(array $over = []): array
+    {
+        return $over + ['team_id' => (string) $this->teamId, 'label' => 'Τομέας Α', 'geo' => [[35.0, 24.8], [35.0, 24.9], [35.1, 24.9]]];
+    }
+
+    private function stageSectors(int $phaseId, int $areaId, array $rows): array
+    {
+        return addScenarioSectorItems($this->mission, $phaseId, $this->adminId, $areaId, $rows);
+    }
+
+    private function liveSectorCount(): int
+    {
+        return (int) dbFetchValue("SELECT COUNT(*) FROM mission_search_sectors WHERE mission_id = ?", [$this->missionId]);
+    }
+
+    private function auditCount(string $action): int
+    {
+        return (int) dbFetchValue("SELECT COUNT(*) FROM audit_logs WHERE action = ?", [$action]);
+    }
+
+    /** @return int[] ids that got a notification about the sector $sectorId. */
+    private function notifiedAboutSector(int $sectorId): array
+    {
+        $ids = [];
+        foreach (dbFetchAll("SELECT user_id FROM notifications WHERE data LIKE ?", ['%"sectorId":' . $sectorId . '}%']) as $row) {
+            $ids[] = (int) $row['user_id'];
+        }
+        sort($ids);
+        return $ids;
+    }
+
+    private function stagedItemCount(int $phaseId): int
+    {
+        return (int) dbFetchValue("SELECT COUNT(*) FROM mission_scenario_items WHERE phase_id = ?", [$phaseId]);
+    }
+
+    public function testASectorCanBeWrittenDownAndIsNotALiveSectorYet(): void
+    {
+        $area = $this->searchArea();
+        $phase = $this->phase();
+        $notes = $this->notificationCount();
+        $audit = $this->auditCount('create_mission_sector');
+
+        $r = $this->stageSectors($phase, $area, [$this->sectorRow(['geo' => [['35.0', '24.8'], ['35.0', '24.9'], ['35.1', '24.9']]])]);
+
+        $this->assertTrue($r['ok'], (string) ($r['error'] ?? ''));
+        $this->assertSame(1, $r['count']);
+        $this->assertSame(0, $this->liveSectorCount(), 'nothing is made until play');
+        $this->assertSame($notes, $this->notificationCount(), 'and nobody is told');
+        $this->assertSame($audit, $this->auditCount('create_mission_sector'));
+        $this->assertSame('sector', dbFetchValue("SELECT kind FROM mission_scenario_items WHERE phase_id = ?", [$phase]));
+        $item = loadMissionScenario($this->missionId)['phases'][0]['items'][0];
+        $this->assertSame('sector', $item['kind']);
+        $this->assertSame('sector', $item['type']);
+        $this->assertSame('team', $item['audience']);
+        $this->assertSame('ΑΛΦΑ 1', $item['team_label']);
+        $this->assertSame('Τομέας Α', $item['label']);
+        $this->assertEquals([[35.0, 24.8], [35.0, 24.9], [35.1, 24.9]], $item['geo'], 'stored as numbers, as the real sector would');
+        $this->assertSame($area, $item['area_id']);
+        $this->assertSame('Περιοχή Ρέματος', $item['area_label']);
+        $this->assertFalse($item['area_missing']);
+        $this->assertFalse($item['sent']);
+        $this->assertNull($item['sector_id']);
+        $this->assertNull($item['dispatch_id']);
+        $this->assertSame(1, $this->auditCount('stage_scenario_sectors'));
+    }
+
+    public function testTheWholeDivisionGoesInTogetherOrNotAtAll(): void
+    {
+        $area = $this->searchArea();
+        $phase = $this->phase();
+        $foreignTeam = $this->makeTeam('ΔΕΛΤΑ', 9, $this->otherMissionId);
+
+        foreach ([
+            'a piece of two points' => [$this->sectorRow(['label' => 'Α']), $this->sectorRow(['label' => 'Β', 'geo' => [[35.0, 24.8], [35.0, 24.9]]])],
+            'a piece for a team of another mission' => [$this->sectorRow(['label' => 'Α']), $this->sectorRow(['label' => 'Β', 'team_id' => (string) $foreignTeam])],
+            'a piece with no name' => [$this->sectorRow(['label' => 'Α']), $this->sectorRow(['label' => '   '])],
+            'a piece with an invalid point' => [$this->sectorRow(['label' => 'Α']), $this->sectorRow(['label' => 'Β', 'geo' => [[35.0, 24.8], [0, 0], [35.1, 24.9]]])],
+        ] as $why => $rows) {
+            $r = $this->stageSectors($phase, $area, $rows);
+            $this->assertFalse($r['ok'], $why);
+            $this->assertSame(0, $this->stagedItemCount($phase), "$why: the good piece is not left behind");
+        }
+        // The person is told WHICH piece was refused.
+        $r = $this->stageSectors($phase, $area, [$this->sectorRow(['label' => 'Α']), $this->sectorRow(['label' => 'Β', 'geo' => [[35.0, 24.8]]])]);
+        $this->assertSame(t('scenario.sector_refused', ['sector' => 'Β', 'error' => t('dispatch.polygon_needs_3_points')]), $r['error']);
+
+        $this->assertSame(3, $this->stageSectors($phase, $area, [
+            $this->sectorRow(['label' => 'Α']),
+            $this->sectorRow(['label' => 'Β', 'team_id' => (string) $this->secondTeamId]),
+            $this->sectorRow(['label' => 'Γ']),
+        ])['count']);
+        $this->assertSame(['Α', 'Β', 'Γ'], array_column(loadMissionScenario($this->missionId)['phases'][0]['items'], 'label'), 'in the order of the division');
+        $this->assertFalse($this->stageSectors($phase, $area, [])['ok'], 'an empty division is not a staging');
+    }
+
+    public function testASectorGoesToATeamOrASlotNeverToEveryoneOrNobody(): void
+    {
+        $area = $this->searchArea();
+        $phase = $this->phase();
+
+        // A sector has no «όλες οι ομάδες», and an unassigned sector is not an order to anyone.
+        foreach (['the word all' => 'all', 'no team' => '', 'spaces' => '  ', 'a word' => 'abc', 'zero' => '0', 'a negative id' => '-3'] as $why => $team) {
+            $r = $this->stageSectors($phase, $area, [$this->sectorRow(['team_id' => $team])]);
+            $this->assertFalse($r['ok'], $why);
+            $this->assertSame(t('scenario.sector_needs_team'), $r['error'], $why);
+        }
+        $r = $this->stageSectors($phase, $area, [$this->sectorRow(['team_id' => 'slot:987654321'])]);
+        $this->assertSame(t('scenario.slot_not_found'), $r['error']);
+        $other = ['id' => $this->otherMissionId, 'title' => 'Other'];
+        $foreignSlot = addScenarioSlot($other, $this->adminId, 'Ξένη')['id'];
+        $this->assertFalse($this->stageSectors($phase, $area, [$this->sectorRow(['team_id' => 'slot:' . $foreignSlot])])['ok'], 'a slot of another mission');
+        $this->assertSame(0, $this->stagedItemCount($phase));
+    }
+
+    public function testPlayMakesTheSectorExactlyAsTheSectorWindowWould(): void
+    {
+        $area = $this->searchArea();
+        $phase = $this->phase();
+        $row = $this->sectorRow(['label' => 'Τομέας Ρέματος']);
+        $this->stageSectors($phase, $area, [$row]);
+
+        $result = $this->play($phase);
+
+        $this->assertTrue($result['ok'], (string) ($result['error'] ?? ''));
+        $this->assertSame(1, $result['sent']);
+        $this->assertSame(0, $result['failed']);
+        $this->assertSame('sector', $result['results'][0]['kind']);
+        $this->assertNull($result['results'][0]['dispatch_id']);
+        $made = dbFetchOne("SELECT * FROM mission_search_sectors WHERE mission_id = ?", [$this->missionId]);
+        $this->assertNotNull($made);
+        $this->assertSame((int) $made['id'], $result['results'][0]['sector_id']);
+
+        // The control: the same sector made by hand, the way mission-sector.php's `create` does.
+        $byHand = createMissionSector($this->mission, $this->adminId, [
+            'label' => 'Τομέας Ρέματος', 'area_id' => (string) $area, 'team_id' => (string) $this->teamId, 'geo' => json_encode($row['geo']),
+        ]);
+        $control = dbFetchOne("SELECT * FROM mission_search_sectors WHERE id = ?", [$byHand['id']]);
+        foreach (['mission_id', 'area_id', 'team_id', 'label', 'geo', 'status', 'created_by', 'status_updated_by', 'acknowledged_at'] as $col) {
+            $this->assertSame($control[$col], $made[$col], "column $col");
+        }
+        $this->assertSame('assigned', $made['status']);
+        $this->assertSame($this->teamId, (int) $made['team_id']);
+        $this->assertNotNull($made['status_updated_at']);
+
+        $log = dbFetchAll("SELECT from_status, to_status, team_id, user_id FROM mission_sector_status_log WHERE sector_id = ?", [$made['id']]);
+        $controlLog = dbFetchAll("SELECT from_status, to_status, team_id, user_id FROM mission_sector_status_log WHERE sector_id = ?", [$byHand['id']]);
+        $this->assertSame($controlLog, $log);
+        $this->assertCount(1, $log);
+        $this->assertSame(1, (int) dbFetchValue("SELECT COUNT(*) FROM audit_logs WHERE action = 'create_mission_sector' AND record_id = ?", [$made['id']]));
+        // The team - its approved members - is told, as for the hand-made one, and nobody else.
+        $this->assertSame($this->members, $this->notifiedAboutSector((int) $made['id']));
+        $this->assertSame($this->notifiedAboutSector((int) $byHand['id']), $this->notifiedAboutSector((int) $made['id']));
+
+        $item = loadMissionScenario($this->missionId)['phases'][0]['items'][0];
+        $this->assertTrue($item['sent']);
+        $this->assertSame((int) $made['id'], $item['sector_id']);
+        $this->assertNull($item['dispatch_id']);
+        $this->assertSame(0, $this->liveCount(), 'a sector is not a dispatch');
+    }
+
+    public function testASectorForASlotAsksWhichTeamAndIsMadeForThatTeamOnly(): void
+    {
+        $area = $this->searchArea();
+        $slot = $this->slot();
+        $phase = $this->phase();
+        $this->stageSectors($phase, $area, [
+            $this->sectorRow(['label' => 'Για τη θέση', 'team_id' => 'slot:' . $slot]),
+            $this->sectorRow(['label' => 'Για την ομάδα']),
+        ]);
+        $item = loadMissionScenario($this->missionId)['phases'][0]['items'][0];
+        $this->assertSame('slot', $item['audience']);
+        $this->assertTrue($item['unmapped']);
+        $this->assertSame('Ομάδα Α', $item['slot_label']);
+        $this->assertSame($slot, (int) dbFetchValue("SELECT slot_id FROM mission_scenario_items WHERE phase_id = ? ORDER BY seq LIMIT 1", [$phase]));
+
+        // The slot mechanism of v3.453.0 covers sectors: the slot cannot be deleted from under one, and the
+        // phase is refused BEFORE it is claimed, with nothing made - not even the sector that has a team.
+        $this->assertSame(t('scenario.slot_in_use'), deleteScenarioSlot($this->mission, $slot, $this->adminId));
+        $this->assertSame([['id' => $slot, 'label' => 'Ομάδα Α']], scenarioUnmappedSlotsOfPhase($this->missionId, $phase));
+        $notes = $this->notificationCount();
+        $r = $this->play($phase);
+        $this->assertFalse($r['ok']);
+        $this->assertSame([['id' => $slot, 'label' => 'Ομάδα Α']], $r['unmapped']);
+        $this->assertNull(loadMissionScenario($this->missionId)['phases'][0]['played_at'], 'still only a plan');
+        $this->assertSame(0, $this->liveSectorCount());
+        $this->assertSame($notes, $this->notificationCount());
+
+        // The dialog's answer: the sector is made for that team, and for no other.
+        $r = $this->play2($phase, [$slot => $this->secondTeamId]);
+        $this->assertTrue($r['ok'], (string) ($r['error'] ?? ''));
+        $this->assertSame(2, $r['sent']);
+        $teams = dbFetchAll("SELECT label, team_id, status FROM mission_search_sectors WHERE mission_id = ? ORDER BY id", [$this->missionId]);
+        $this->assertSame([['label' => 'Για τη θέση', 'team_id' => $this->secondTeamId, 'status' => 'assigned'], ['label' => 'Για την ομάδα', 'team_id' => $this->teamId, 'status' => 'assigned']], $teams);
+        $this->assertSame($this->secondTeamId, (int) dbFetchValue("SELECT team_id FROM mission_scenario_slots WHERE id = ?", [$slot]), 'the choice stays');
+        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_search_sectors WHERE mission_id = ? AND team_id IS NULL", [$this->missionId]));
+    }
+
+    public function testASectorWhoseSearchAreaWasDeletedFailsWithThatReasonAndMakesNothing(): void
+    {
+        $area = $this->searchArea(null, 'Περιοχή που θα φύγει');
+        $phase = $this->phase();
+        $this->stage($phase, $this->point(['label' => 'Σημείο']));
+        $this->stageSectors($phase, $area, [$this->sectorRow(['label' => 'Ορφανός'])]);
+        dbExecute("DELETE FROM mission_search_areas WHERE id = ?", [$area]);
+
+        $item = loadMissionScenario($this->missionId)['phases'][0]['items'][1];
+        $this->assertTrue($item['area_missing'], 'the plan shows it before play');
+        $this->assertSame('Περιοχή που θα φύγει', $item['area_label'], 'and still names the area that was');
+        $audit = $this->auditCount('create_mission_sector');
+
+        $result = $this->play($phase);
+
+        $this->assertTrue($result['ok']);
+        $this->assertSame(1, $result['sent'], 'the other order still goes');
+        $this->assertSame(1, $result['failed']);
+        $reason = t('scenario.item_area_gone', ['area' => 'Περιοχή που θα φύγει']);
+        $this->assertSame($reason, $result['results'][1]['error']);
+        $this->assertSame(0, $this->liveSectorCount(), 'no sector, and above all not one with no area or no team');
+        $this->assertSame($audit, $this->auditCount('create_mission_sector'));
+        $items = loadMissionScenario($this->missionId)['phases'][0]['items'];
+        $this->assertFalse($items[1]['sent']);
+        $this->assertSame($reason, $items[1]['error']);
+
+        // Trying again fails the same way, and still makes nothing.
+        $again = retryScenarioItem($this->mission, $items[1]['id'], $this->adminId, 'x');
+        $this->assertTrue($again['ok']);
+        $this->assertFalse($again['item']['ok']);
+        $this->assertSame($reason, $again['item']['error']);
+        $this->assertSame(0, $this->liveSectorCount());
+    }
+
+    public function testASectorWhoseTeamIsGoneFailsAndIsNotMadeUnassigned(): void
+    {
+        $doomed = $this->makeTeam('ΓΑΜΜΑ', 3);
+        $area = $this->searchArea();
+        $phase = $this->phase();
+        $this->stageSectors($phase, $area, [$this->sectorRow(['team_id' => (string) $doomed])]);
+        dbExecute("DELETE FROM mission_teams WHERE id = ?", [$doomed]);
+        $this->assertTrue(loadMissionScenario($this->missionId)['phases'][0]['items'][0]['team_missing']);
+        $notes = $this->notificationCount();
+
+        $result = $this->play($phase);
+
+        $this->assertSame(1, $result['failed']);
+        $this->assertSame(t('common.team_not_found'), $result['results'][0]['error']);
+        $this->assertSame(0, $this->liveSectorCount(), 'an unassigned sector would tell nobody, and is not what was staged');
+        $this->assertSame($notes, $this->notificationCount());
+    }
+
+    public function testAStagedSectorBecomesASectorWithATeamOrNotAtAll(): void
+    {
+        $poly = [[35.0, 24.8], [35.0, 24.9], [35.1, 24.9]];
+        $team = ['audience' => 'team', 'team_id' => 7, 'area_id' => 3, 'label' => 'Α', 'geo' => $poly];
+        $input = scenarioSectorInputFromPayload($team);
+        $this->assertSame(['area_id' => '3', 'team_id' => '7', 'label' => 'Α', 'geo' => json_encode($poly)], $input);
+        $this->assertSame('9', scenarioSectorInputFromPayload(['audience' => 'slot', 'slot_id' => 4] + $team, [4 => 9])['team_id']);
+
+        foreach ([
+            'every team' => ['audience' => 'all'] + $team,
+            'team without an id' => ['team_id' => null] + $team,
+            'team id 0' => ['team_id' => 0] + $team,
+            'no audience at all' => array_diff_key($team, ['audience' => 1]),
+            'an audience that is neither' => ['audience' => 'everyone'] + $team,
+            'a slot that stands for no team' => ['audience' => 'slot', 'slot_id' => 4] + $team,
+            'a slot of the payload that the map does not know' => ['audience' => 'slot', 'slot_id' => 5] + $team,
+            'no area' => ['area_id' => 0] + $team,
+            'no shape' => array_diff_key($team, ['geo' => 1]),
+            'a shape that is not a list' => ['geo' => 'x'] + $team,
+        ] as $why => $payload) {
+            $this->assertNull(scenarioSectorInputFromPayload($payload, [4 => null]), $why);
+        }
+        $this->assertNull(scenarioSectorInputFromPayload('not an array'));
+        $this->assertNull(scenarioSectorInputFromPayload(null));
+        // «Whatever the payload says, the form it gives always names a team»: the one property that matters.
+        $this->assertNotSame('', scenarioSectorInputFromPayload($team)['team_id']);
+    }
+
+    public function testASectorCannotBeStagedInAnotherMissionsAreaOrOneThatIsNotThere(): void
+    {
+        $phase = $this->phase();
+        $foreign = $this->searchArea($this->otherMissionId, 'Ξένη περιοχή');
+        $r = $this->stageSectors($phase, $foreign, [$this->sectorRow()]);
+        $this->assertFalse($r['ok']);
+        $this->assertSame(t('sector.area_not_found'), $r['error']);
+        $this->assertFalse($this->stageSectors($phase, 987654321, [$this->sectorRow()])['ok']);
+        $this->assertFalse($this->stageSectors($phase, 0, [$this->sectorRow()])['ok']);
+        $this->assertSame(0, $this->stagedItemCount($phase));
+        // Nor into a phase of another mission, or one that was already played.
+        $area = $this->searchArea();
+        $foreignPhase = addScenarioPhase(['id' => $this->otherMissionId, 'title' => 'x'], $this->adminId)['id'];
+        $this->assertSame(t('scenario.phase_not_found'), $this->stageSectors($foreignPhase, $area, [$this->sectorRow()])['error']);
+        $this->stage($phase, $this->point());
+        $this->assertTrue($this->play($phase)['ok']);
+        $this->assertSame(t('scenario.phase_closed_for_orders'), $this->stageSectors($phase, $area, [$this->sectorRow()])['error']);
+    }
+
+    public function testAPhaseCanHoldPointsAreasAndSectorsAndPlaysThemAllInOrder(): void
+    {
+        $area = $this->searchArea();
+        $phase = $this->phase();
+        $this->stage($phase, $this->point(['label' => 'Σημείο']));
+        $this->stageSectors($phase, $area, [$this->sectorRow(['label' => 'Τομέας'])]);
+        $this->stage($phase, $this->area(['label' => 'Περιοχή αποστολής']));
+
+        $result = $this->play($phase);
+
+        $this->assertSame(3, $result['sent']);
+        $this->assertSame(['dispatch', 'sector', 'dispatch'], array_column($result['results'], 'kind'));
+        $this->assertSame(2, $this->liveCount());
+        $this->assertSame(1, $this->liveSectorCount());
+        $items = loadMissionScenario($this->missionId)['phases'][0]['items'];
+        $this->assertSame(['dispatch', 'sector', 'dispatch'], array_column($items, 'kind'));
+        $this->assertNull($items[0]['sector_id']);
+        $this->assertNull($items[1]['dispatch_id']);
+        $this->assertNotNull($items[1]['sector_id']);
+    }
+
+    public function testSectorsCountAgainstTheLimitOfOrdersInAPhase(): void
+    {
+        $area = $this->searchArea();
+        $phase = $this->phase();
+        $rows = [];
+        for ($i = 1; $i <= SCENARIO_MAX_ITEMS_PER_PHASE + 1; $i++) {
+            $rows[] = $this->sectorRow(['label' => 'Τ' . $i]);
+        }
+        $r = $this->stageSectors($phase, $area, $rows);
+        $this->assertFalse($r['ok']);
+        $this->assertSame(t('scenario.too_many_orders', ['max' => SCENARIO_MAX_ITEMS_PER_PHASE]), $r['error']);
+        $this->assertSame(0, $this->stagedItemCount($phase), 'none of them, not the first sixty');
+        $this->assertTrue($this->stage($phase, $this->point())['ok']);
+        $this->assertFalse($this->stageSectors($phase, $area, array_slice($rows, 0, SCENARIO_MAX_ITEMS_PER_PHASE))['ok'], 'the order already in the phase counts');
+        $this->assertTrue($this->stageSectors($phase, $area, array_slice($rows, 0, SCENARIO_MAX_ITEMS_PER_PHASE - 1))['ok']);
+    }
+
+    public function testPrepareMissionSectorChecksAndWritesNothing(): void
+    {
+        $area = $this->searchArea(null, 'Περιοχή Έρευνας');
+        $before = [$this->liveSectorCount(), $this->notificationCount(), $this->auditCount('create_mission_sector')];
+
+        $ok = prepareMissionSector($this->mission, ['label' => '  Τομέας  ', 'area_id' => (string) $area, 'team_id' => (string) $this->teamId, 'geo' => json_encode([[35.0, 24.8], [35.0, 24.9], [35.1, 24.9]])]);
+        $this->assertTrue($ok['ok']);
+        $this->assertSame('Τομέας', $ok['label']);
+        $this->assertSame($area, $ok['area_id']);
+        $this->assertSame('Περιοχή Έρευνας', $ok['area_label']);
+        $this->assertSame($this->teamId, $ok['team_id']);
+        $this->assertSame('ΑΛΦΑ 1', $ok['team_label']);
+        $noTeam = prepareMissionSector($this->mission, ['label' => 'Τ', 'area_id' => $area, 'team_id' => '', 'geo' => json_encode([[35.0, 24.8], [35.0, 24.9], [35.1, 24.9]])]);
+        $this->assertNull($noTeam['team_id']);
+        $this->assertNull($noTeam['team_label']);
+
+        $this->assertSame($before, [$this->liveSectorCount(), $this->notificationCount(), $this->auditCount('create_mission_sector')]);
+    }
+
+    public function testPlayMakesSectorsOnlyThroughTheSectorFunction(): void
+    {
+        $src = $this->source('includes/functions-scenario.php');
+        $this->assertStringContainsString('createMissionSector($mission, $userId, $input)', $src);
+        $this->assertStringContainsString('prepareMissionSector($mission,', $src);
+        $this->assertStringNotContainsString('INSERT INTO mission_search_sectors', $src, 'the scenario never writes a live sector itself');
+        $this->assertStringNotContainsString('mission_sector_status_log', $src);
+        $this->assertStringNotContainsString('notifySectorAssigned(', $src, 'and never tells the team itself');
+
+        // The sector endpoint hands `create` to the same function, and the notification it needs lives where the
+        // scenario's endpoint (which never loads the sector one) can reach it.
+        $endpoint = $this->source('mission-sector.php');
+        $create = substr($endpoint, (int) strpos($endpoint, "if (\$action === 'create') {"), 900);
+        $this->assertStringContainsString('createMissionSector($mission, (int) $userId', $create);
+        $this->assertStringNotContainsString('INSERT INTO mission_search_sectors', $create);
+        $this->assertStringNotContainsString('function notifySectorAssigned', $endpoint);
+        $this->assertSame(1, substr_count($this->source('includes/functions-warroom.php'), 'function notifySectorAssigned('));
+    }
+
+    public function testPlayAndRetryHandBackTheLiveSectorsTheyMade(): void
+    {
+        // The map has to show a sector the moment play made it, not at the next poll: the answer carries the pair
+        // of lists the sector endpoint answers with, and only when a sector was made.
+        $src = $this->source('mission-scenario.php');
+        $this->assertStringContainsString("fn(\$r) => (\$r['kind'] ?? '') === 'sector' && !empty(\$r['ok'])", $src);
+        $this->assertStringContainsString("'sectors' => loadMissionSectorsForUser(\$missionId, (int) \$userId, true, false), 'areas' => loadMissionSearchAreasForUser(\$missionId, true)", $src);
+        $this->assertStringContainsString("] + \$liveSectors(\$result['results']));", $src, 'play');
+        $this->assertStringContainsString("] + \$liveSectors([\$result['item']]));", $src, 'retry');
+        $this->assertStringContainsString("if (\$action === 'add_sectors') {", $src);
+    }
+
+    public function testTheSectorWindowStagesButNeverMakesASectorForASlot(): void
+    {
+        $page = $this->source('war-room.php');
+        $this->assertStringContainsString('id="divideScenarioBtn"', $page);
+        $start = (int) strpos($page, "const scenarioBtn = document.getElementById('divideScenarioBtn')");
+        $this->assertGreaterThan(0, $start);
+        $js = substr($page, $start, 22000);
+        // «Στο σενάριο» needs a team or a slot for every piece: never an empty one, never the unfinished "new slot" row.
+        $this->assertStringContainsString("const lacking = values.some(v => v === '' || v === 'slot:new');", $js);
+        $this->assertStringContainsString('window.wrScenario.stageSectors(choice.dataset.scPhase, currentArea.id, sectors)', $js);
+        // «Αποθήκευση Τομέων» makes sectors now, so it refuses a slot - disabled, and once more in its handler.
+        $this->assertStringContainsString("saveBtn.disabled = values.length === 0 || hasSlot;", $js);
+        $this->assertStringContainsString("if (Array.from(teamSelects).some(sel => sel.value.indexOf('slot:') === 0)) return;", $js);
+        // The window's ghosts: what is already staged is drawn under the division.
+        $this->assertStringContainsString('window.wrScenario.drawGhostsInto(refLayer)', $js);
+
+        $scenarioJs = $this->source('assets/js/war-room-scenario.js');
+        $this->assertStringContainsString("request('add_sectors'", $scenarioJs);
+        $this->assertStringContainsString('stageSectors: stageSectors', $scenarioJs);
+        $this->assertStringContainsString('showNewSectors(res);', $scenarioJs, 'sectors made by play or retry appear on the map at once');
+        $this->assertStringContainsString("item.type === 'sector'", $scenarioJs);
+        // A sector whose search area has been deleted is red in the card and counted in the play confirmation.
+        $this->assertStringContainsString('} else if (item.area_missing) {', $scenarioJs);
+        $this->assertStringContainsString("t('scenario.play_confirm_area_missing'", $scenarioJs);
+    }
+
     // ── Where it may be read, and who may ask ───────────────────────────────────────────────────────────────
 
     public function testOnlyTheScenarioCodeReadsTheScenarioTables(): void
@@ -832,7 +1254,7 @@ final class ScenarioTest extends TestCase
         // POSTs need the CSRF token before any action.
         $csrf = strpos($src, "hash_equals(\$_SESSION['csrf_token']");
         $this->assertNotFalse($csrf);
-        foreach (['add_phase', 'rename_phase', 'delete_phase', 'add_item', 'delete_item', 'play_phase', 'retry_item'] as $action) {
+        foreach (['add_phase', 'rename_phase', 'delete_phase', 'add_item', 'add_sectors', 'delete_item', 'play_phase', 'retry_item'] as $action) {
             $this->assertGreaterThan($csrf, strpos($src, "'$action'"), "$action is after the CSRF check");
         }
         // The same open-mission gate as the dispatch endpoint.

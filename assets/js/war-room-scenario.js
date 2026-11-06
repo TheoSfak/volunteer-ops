@@ -10,7 +10,9 @@
  *     plan can be read against the ground. A ghost is not an order: nobody but command ever sees one, and it is
  *     gone from the map the moment its phase is played, because the real order is there instead;
  *   - the «Στο σενάριο ▾» button of the point/area window, which puts the order being drawn into a phase
- *     instead of sending it;
+ *     instead of sending it, and (v3.454.0) the same button of the sector-division window, which puts every
+ *     piece of the division into a phase (stageSectors); a sector is a grey ghost polygon like an area, and the
+ *     card names the search area it is cut from;
  *   - the team slots (v3.453.0): names for teams that may not exist yet, in the card, in the window's recipient
  *     list, and in the dialog that play opens to ask which team is which.
  *
@@ -86,11 +88,18 @@
         alert((res && res.error) || t('common.send_failed'));
     }
 
+    // A play or a retry that made sectors answers with the live list of sectors and areas, the pair the sector
+    // endpoint answers with, so the new ones are on the map at once and not at the next poll.
+    function showNewSectors(res) {
+        if (res && Array.isArray(res.sectors) && typeof sectorRefreshAfter === 'function') sectorRefreshAfter(res.sectors, res.areas);
+    }
+
     // ── Words ──────────────────────────────────────────────────────────────────────────────────────────────────
     function phaseName(phase) {
         return t('scenario.phase_n', {n: phase.n});
     }
     function itemKind(item) {
+        if (item.type === 'sector') return t('scenario.kind_sector');
         return item.type === 'point' ? t('scenario.kind_point') : t('scenario.kind_area');
     }
     function itemTarget(item) {
@@ -104,7 +113,7 @@
 
     // ── The card ───────────────────────────────────────────────────────────────────────────────────────────────
     function itemHtml(phase, item) {
-        const icon = item.type === 'point' ? 'bi-geo-alt-fill' : 'bi-bounding-box';
+        const icon = item.type === 'point' ? 'bi-geo-alt-fill' : (item.type === 'sector' ? 'bi-grid-3x3-gap-fill' : 'bi-bounding-box');
         const badgeClass = item.team_missing ? 'bg-danger'
             : (item.audience === 'all' ? 'bg-warning text-dark' : (item.audience === 'slot' ? (item.unmapped ? 'bg-warning text-dark' : 'bg-info text-dark') : 'bg-secondary'));
         const target = `<span class="badge ${badgeClass}">${esc(itemTarget(item))}</span>`;
@@ -115,6 +124,8 @@
             status = `<div class="small text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(item.error)}</div>`;
         } else if (item.team_missing) {
             status = `<div class="small text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(t('scenario.team_gone_hint'))}</div>`;
+        } else if (item.area_missing) {
+            status = `<div class="small text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(t('scenario.area_gone_hint'))}</div>`;
         } else if (item.unmapped) {
             status = `<div class="small text-muted"><i class="bi bi-hourglass-split me-1"></i>${esc(t('scenario.slot_unmapped_hint'))}</div>`;
         }
@@ -125,9 +136,12 @@
         const goto = item.sent
             ? `<span>${esc(itemTitle(item))}</span>`
             : `<a href="#" class="wr-sc-goto" data-sc="goto" data-item="${item.id}" title="${esc(t('scenario.show_on_map'))}">${esc(itemTitle(item))}</a>`;
+        // A sector says which search area it is cut from (the area may be gone: then the line below says so).
+        const where = (item.type === 'sector' && item.area_label)
+            ? ` <span class="text-muted small">${esc(t('scenario.sector_in_area', {area: item.area_label}))}</span>` : '';
         return `<li class="wr-sc-item d-flex align-items-start gap-1" data-item="${item.id}">
             <i class="bi ${icon} text-secondary mt-1"></i>
-            <span class="flex-grow-1">${goto} <i class="bi bi-arrow-right-short"></i> ${target}${status}</span>
+            <span class="flex-grow-1">${goto}${where} <i class="bi bi-arrow-right-short"></i> ${target}${status}</span>
             ${retry}${del}
         </li>`;
     }
@@ -202,6 +216,8 @@
         let text = t('scenario.play_confirm', {phase: phaseName(phase), orders: pending.length, targets: names.join(', ')});
         const missing = pending.filter(i => i.team_missing).length;
         if (missing) text += '\n\n' + t('scenario.play_confirm_missing', {n: missing});
+        const noArea = pending.filter(i => i.area_missing).length;
+        if (noArea) text += '\n\n' + t('scenario.play_confirm_area_missing', {n: noArea});
         return text;
     }
 
@@ -362,6 +378,7 @@
             if (!phase) return;
             const afterPlay = res => {
                 if (res.dispatches && typeof renderDispatches === 'function') renderDispatches(dispatches = res.dispatches);
+                showNewSectors(res);
                 if (res.failed > 0) {
                     const lines = (res.results || []).filter(r => !r.ok).map(r => '• ' + r.error);
                     alert(t('scenario.play_partial', {sent: res.sent, failed: res.failed}) + '\n\n' + lines.join('\n'));
@@ -386,6 +403,7 @@
         } else if (act === 'retry') {
             run('retry_item', {item_id: el.dataset.item}, res => {
                 if (res.dispatches && typeof renderDispatches === 'function') renderDispatches(dispatches = res.dispatches);
+                showNewSectors(res);
                 if (res.item && !res.item.ok) alert(res.item.error || t('common.send_failed'));
             });
         }
@@ -441,6 +459,15 @@
             .catch(() => { alert(t('common.send_failed')); return {ok: false}; });
     }
 
+    // The sector window's «Στο σενάριο»: every piece of one division of the search area areaId goes into the phase
+    // together or not at all. sectors = [{team_id: '39' | 'slot:3', label, geo: [[lat, lng], ...]}, ...]. Resolves
+    // with the endpoint's answer (phase_id, count on success); a refusal has already been shown to the person.
+    function stageSectors(phaseId, areaId, sectors) {
+        return request('add_sectors', {phase_id: String(phaseId), area_id: String(areaId), sectors: JSON.stringify(sectors)})
+            .then(res => { if (!res || !res.ok) failed(res); return res; })
+            .catch(() => { alert(t('common.send_failed')); return {ok: false}; });
+    }
+
     function phaseNumber(phaseId) {
         const p = findPhase(phaseId);
         return p ? p.n : null;
@@ -460,5 +487,5 @@
         document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
     }
 
-    window.wrScenario = {init: init, reload: load, menuHtml: menuHtml, stage: stage, phaseNumber: phaseNumber, drawGhostsInto: drawGhostsInto, phases: () => scenario.phases, newSlot: newSlot, fillSlotOptions: fillSlotOptions};
+    window.wrScenario = {init: init, reload: load, menuHtml: menuHtml, stage: stage, stageSectors: stageSectors, phaseNumber: phaseNumber, drawGhostsInto: drawGhostsInto, phases: () => scenario.phases, newSlot: newSlot, fillSlotOptions: fillSlotOptions};
 })();

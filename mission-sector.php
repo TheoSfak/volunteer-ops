@@ -16,36 +16,9 @@ requireLogin();
 
 header('Content-Type: application/json');
 
-/**
- * Notify a team's approved participants that a sector was (re)assigned to
- * them. Team-scoped only, not mission-wide — mirrors mission-dispatch.php's
- * own create-notification fix (a team-targeted alert must not fire for every
- * other team on the mission).
- */
-function notifySectorAssigned(int $missionId, string $missionTitle, int $teamId, int $sectorId, string $label, int $excludeUserId): void {
-    $recipientIds = actionRoomNotifyRecipientIds($missionId, $teamId, $excludeUserId);
-    if (empty($recipientIds)) {
-        return;
-    }
-
-    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-    $langByUserId = getUserLanguages($recipientIds);
-    foreach ($recipientIds as $recipientId) {
-        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
-        $message = t('sector.assigned_notify_message', ['label' => $label], $lang);
-        sendNotification($recipientId, t('sector.assigned_notify_title', ['mission' => $missionTitle], $lang), $message, 'info', 'mission_sector_assigned', [
-            'url' => $warRoomUrl,
-            'tag' => 'sector-assigned-mission-' . $missionId,
-            'bannerMission' => $missionId,
-            // Lets the Action Room open this as the order popup and frame the
-            // sector on the map (see war-room.php's banners).
-            'sectorId' => $sectorId,
-        ]);
-    }
-}
-
-// notifySectorStatusChanged() moved to includes/functions-warroom.php (v3.382.0),
-// next to recordSectorArrivalByGps(), which needs it too.
+// notifySectorAssigned() (v3.454.0) and notifySectorStatusChanged() (v3.382.0) live in
+// includes/functions-warroom.php: the first because createMissionSector() needs it and a scenario reaches that
+// function without this file, the second because recordSectorArrivalByGps() needs it too.
 
 /**
  * Every mutating action below ends by reloading and returning the current
@@ -363,64 +336,19 @@ if ($action === 'set_area_terrain') {
 }
 
 if ($action === 'create') {
-    $label = trim((string) post('label'));
-    if ($label === '') {
-        echo json_encode(['ok' => false, 'error' => t('sector.invalid_label')]);
+    // The sector itself - the checks, the rows, the audit entry, the team told - lives in createMissionSector()
+    // (v3.454.0), so a scenario can make exactly the same one.
+    $result = createMissionSector($mission, (int) $userId, [
+        'label'   => post('label'),
+        'area_id' => post('area_id'),
+        'team_id' => post('team_id'),
+        'geo'     => post('geo'),
+    ]);
+    if (!$result['ok']) {
+        echo json_encode($result);
         exit;
     }
-    $label = mb_substr($label, 0, 255);
-
-    $areaId = (int) post('area_id');
-    $area = dbFetchOne("SELECT id FROM mission_search_areas WHERE id = ? AND mission_id = ?", [$areaId, $missionId]);
-    if (!$area) {
-        echo json_encode(['ok' => false, 'error' => t('sector.area_not_found')]);
-        exit;
-    }
-
-    $teamIdRaw = post('team_id');
-    $teamId = ($teamIdRaw !== '' && $teamIdRaw !== null) ? (int) $teamIdRaw : null;
-    if ($teamId) {
-        $team = dbFetchOne("SELECT id FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
-        if (!$team) {
-            echo json_encode(['ok' => false, 'error' => t('common.team_not_found')]);
-            exit;
-        }
-    }
-
-    $rawGeo = json_decode((string) post('geo'), true);
-    if (!is_array($rawGeo) || count($rawGeo) < 3) {
-        echo json_encode(['ok' => false, 'error' => t('dispatch.polygon_needs_3_points')]);
-        exit;
-    }
-    foreach ($rawGeo as $pt) {
-        if (!is_array($pt) || !isset($pt[0], $pt[1]) || !$isValidLatLng($pt[0], $pt[1])) {
-            echo json_encode(['ok' => false, 'error' => t('dispatch.invalid_point')]);
-            exit;
-        }
-    }
-    $geo = array_map(fn($pt) => [(float) $pt[0], (float) $pt[1]], $rawGeo);
-
-    $status = $teamId ? 'assigned' : 'not_started';
-    $sectorId = dbInsert(
-        "INSERT INTO mission_search_sectors (mission_id, area_id, team_id, label, geo, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
-        [$missionId, $areaId, $teamId, $label, json_encode($geo), $status, $userId]
-    );
-    if ($teamId) {
-        dbExecute("UPDATE mission_search_sectors SET status_updated_at = NOW(), status_updated_by = ? WHERE id = ?", [$userId, $sectorId]);
-        dbInsert(
-            "INSERT INTO mission_sector_status_log (sector_id, from_status, to_status, team_id, user_id, created_at) VALUES (?, 'not_started', 'assigned', ?, ?, NOW())",
-            [$sectorId, $teamId, $userId]
-        );
-    }
-    logAudit('create_mission_sector', 'mission_search_sectors', $sectorId, null, ['mission_id' => $missionId, 'team_id' => $teamId]);
-
-    // No notification if created unassigned — an admin laying out several
-    // sectors before assigning any teams must not fire a push per sector.
-    if ($teamId) {
-        notifySectorAssigned($missionId, $mission['title'], $teamId, (int) $sectorId, $label, $userId);
-    }
-
-    echo json_encode(['ok' => true, 'id' => (int) $sectorId] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
+    echo json_encode($result + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
 }
 

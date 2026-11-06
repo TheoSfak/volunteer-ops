@@ -6542,6 +6542,16 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                             <button type="button" class="btn btn-outline-secondary btn-sm" id="divideSectorsClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
                             <button type="button" class="btn btn-success btn-sm flex-grow-1" id="divideSectorsSaveBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('sector.divide_save_btn') ?></button>
                         </div>
+                        <?php
+                        // «Στο σενάριο ▾» (v3.454.0): every piece of this division goes into a phase of the scenario
+                        // instead of being made now. Each piece needs a team or a team slot. The menu is built by
+                        // assets/js/war-room-scenario.js.
+                        ?>
+                        <div class="btn-group w-100" id="divideScenarioGroup">
+                            <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" id="divideScenarioBtn" data-bs-toggle="dropdown" aria-expanded="false" title="<?= t('scenario.sector_add_to_scenario_title') ?>" disabled><i class="bi bi-collection-play me-1"></i><?= t('scenario.add_to_scenario') ?></button>
+                            <ul class="dropdown-menu dropdown-menu-end" id="divideScenarioMenu"></ul>
+                        </div>
+                        <div class="small text-success" id="divideScenarioStatus" role="status"></div>
                     </div>
                     <div id="divideSectorsGridPane" class="d-none flex-column gap-2 flex-grow-1" style="min-height:0;">
                         <div class="small text-muted"><?= t('grid.hint') ?></div>
@@ -28328,6 +28338,12 @@ document.querySelectorAll('.team-form').forEach(form => {
     const wedgeListEl = document.getElementById('divideSectorsWedgeList');
     const clearBtn = document.getElementById('divideSectorsClearBtn');
     const saveBtn = document.getElementById('divideSectorsSaveBtn');
+    // «Στο σενάριο» (v3.454.0): the pieces of this division, written into a phase instead of made now.
+    const scenarioBtn = document.getElementById('divideScenarioBtn');
+    const scenarioMenu = document.getElementById('divideScenarioMenu');
+    const scenarioStatus = document.getElementById('divideScenarioStatus');
+    // Set only while a division that was just staged is wiped, so renderWedges() starts the rows afresh.
+    let wipeRows = false;
 
     // Greek capitals, matching the wedge-lettering convention already used
     // for the placeholder sector label ("Τομέας Α1") — 24 letters is far
@@ -28509,8 +28525,8 @@ document.querySelectorAll('.team-form').forEach(form => {
         const wedgeAreas = wedges.map(poly => polygonAreaSquareMeters(poly));
         const wedgeTier = areaTierForGroup([polygonAreaSquareMeters(currentArea ? currentArea.geo : []), ...wedgeAreas]);
         setAreaHeader(wedgeTier);
-        const existingValues = Array.from(wedgeListEl.querySelectorAll('.wedge-label-input')).map(inp => inp.value);
-        const existingTeamIds = Array.from(wedgeListEl.querySelectorAll('.wedge-team-select')).map(sel => sel.value);
+        const existingValues = wipeRows ? [] : Array.from(wedgeListEl.querySelectorAll('.wedge-label-input')).map(inp => inp.value);
+        const existingTeamIds = wipeRows ? [] : Array.from(wedgeListEl.querySelectorAll('.wedge-team-select')).map(sel => sel.value);
         wedgeListEl.innerHTML = '';
         wedges.forEach((poly, i) => {
             const color = WEDGE_COLORS[i % WEDGE_COLORS.length];
@@ -28554,7 +28570,10 @@ document.querySelectorAll('.team-form').forEach(form => {
             teamSelect.style.cssText = 'max-width:40%;';
             teamSelect.innerHTML = `<option value="">${escapeHtml(t('sector.unassigned_option'))}</option>` +
                 teams.map(tm => `<option value="${tm.id}">${escapeHtml(tm.label)}</option>`).join('');
+            // The scenario's team slots, as a group of their own (v3.454.0): a piece can be staged for a slot, never made for one.
+            if (window.wrScenario) window.wrScenario.fillSlotOptions(teamSelect);
             teamSelect.value = existingTeamIds[i] || '';
+            teamSelect.addEventListener('change', () => onWedgeTeamChange(teamSelect));
             row.appendChild(swatch);
             row.appendChild(input);
             row.appendChild(teamSelect);
@@ -28568,7 +28587,53 @@ document.querySelectorAll('.team-form').forEach(form => {
             sizeEl.textContent = t('sector.area_size', {size: formatAreaSquareMeters(wedgeAreas[i], wedgeTier)});
             wedgeListEl.appendChild(sizeEl);
         });
-        saveBtn.disabled = wedges.length === 0;
+        syncDivideButtons();
+    }
+
+    // What each button is allowed to do with the recipients chosen (v3.454.0):
+    //   «Αποθήκευση Τομέων» makes the sectors now, so it takes real teams or none - a slot is a name for a team,
+    //   not a team, and is refused here;
+    //   «Στο σενάριο» writes them into a phase, where a sector has no "no team" and no "every team": each piece
+    //   needs a team or a slot.
+    function syncDivideButtons() {
+        const values = Array.from(wedgeListEl.querySelectorAll('.wedge-team-select')).map(sel => sel.value);
+        const hasSlot = values.some(v => v.indexOf('slot:') === 0);
+        saveBtn.disabled = values.length === 0 || hasSlot;
+        saveBtn.title = hasSlot ? t('scenario.sector_slot_save_hint') : '';
+        if (scenarioBtn) {
+            const lacking = values.some(v => v === '' || v === 'slot:new');
+            scenarioBtn.disabled = values.length === 0 || lacking || !window.wrScenario;
+            scenarioBtn.title = values.length && lacking ? t('scenario.sector_stage_hint') : t('scenario.sector_add_to_scenario_title');
+        }
+    }
+
+    function onWedgeTeamChange(select) {
+        if (scenarioStatus) scenarioStatus.textContent = '';
+        if (select.value !== 'slot:new') { syncDivideButtons(); return; }
+        select.value = '';
+        if (!window.wrScenario) { syncDivideButtons(); return; }
+        // A new slot is asked for by name; the answer refreshes every list (wr-scenario-updated, below) and the new
+        // slot is then the one this list shows.
+        window.wrScenario.newSlot().then(id => {
+            refreshWedgeSlotOptions();
+            if (id) select.value = 'slot:' + id;
+            syncDivideButtons();
+        });
+    }
+
+    function refreshWedgeSlotOptions() {
+        if (!window.wrScenario) return;
+        wedgeListEl.querySelectorAll('.wedge-team-select').forEach(sel => window.wrScenario.fillSlotOptions(sel));
+        syncDivideButtons();
+    }
+    document.addEventListener('wr-scenario-updated', refreshWedgeSlotOptions);
+
+    // The ground already staged in the scenario, drawn dimmed under the division like the rest of the live map.
+    function drawReference() {
+        if (!refLayer) return;
+        refLayer.clearLayers();
+        renderFullMapReference(refLayer);
+        if (window.wrScenario) window.wrScenario.drawGhostsInto(refLayer);
     }
 
     function resetDivision() {
@@ -28585,6 +28650,8 @@ document.querySelectorAll('.team-form').forEach(form => {
         if (!wedges.length || !currentArea) return;
         const labelInputs = wedgeListEl.querySelectorAll('.wedge-label-input');
         const teamSelects = wedgeListEl.querySelectorAll('.wedge-team-select');
+        // A slot is only ever staged («Στο σενάριο»): the button is disabled for one, and this is the same rule once more.
+        if (Array.from(teamSelects).some(sel => sel.value.indexOf('slot:') === 0)) return;
         saveBtn.disabled = true;
         const posts = wedges.map((poly, i) => {
             const label = (labelInputs[i] ? labelInputs[i].value.trim() : '') || `${t('sector.wedge_label_placeholder', {letter: GREEK_LETTERS[i % GREEK_LETTERS.length]})}`;
@@ -28617,6 +28684,44 @@ document.querySelectorAll('.team-form').forEach(form => {
             });
         }).catch(() => { alert(t('common.send_failed')); saveBtn.disabled = false; });
     });
+
+    // «Στο σενάριο ▾» (v3.454.0): the pieces of the division, with the team or slot each was given, go into a
+    // phase of the scenario together or not at all; nothing is made now. When it works the rows start afresh
+    // (so the same pieces cannot be staged twice by a second press) and the window stays open.
+    if (scenarioBtn && scenarioMenu) {
+        scenarioBtn.addEventListener('show.bs.dropdown', () => {
+            scenarioMenu.innerHTML = window.wrScenario ? window.wrScenario.menuHtml() : '';
+        });
+        scenarioMenu.addEventListener('click', e => {
+            const choice = e.target.closest('[data-sc-phase]');
+            if (!choice) return;
+            e.preventDefault();
+            if (!window.wrScenario || scenarioBtn.disabled || !currentArea) return;
+            const wedges = computeWedges();
+            const labelInputs = wedgeListEl.querySelectorAll('.wedge-label-input');
+            const teamSelects = wedgeListEl.querySelectorAll('.wedge-team-select');
+            if (!wedges.length) return;
+            const sectors = wedges.map((poly, i) => ({
+                // A team's id, or 'slot:<id>'. Nothing else is a recipient of a sector.
+                team_id: teamSelects[i] ? teamSelects[i].value : '',
+                label: (labelInputs[i] ? labelInputs[i].value.trim() : '') || t('sector.wedge_label_placeholder', {letter: GREEK_LETTERS[i % GREEK_LETTERS.length]}),
+                geo: poly,
+            }));
+            scenarioBtn.disabled = true;
+            window.wrScenario.stageSectors(choice.dataset.scPhase, currentArea.id, sectors).then(res => {
+                if (res && res.ok) {
+                    const phase = window.wrScenario.phases().find(p => String(p.id) === String(res.phase_id));
+                    wipeRows = true;
+                    resetDivision();
+                    wipeRows = false;
+                    drawReference();
+                    if (scenarioStatus && phase) scenarioStatus.textContent = t('scenario.sector_staged_ok', {phase: t('scenario.phase_n', {n: phase.n}), n: res.count, total: phase.items.length});
+                } else {
+                    syncDivideButtons();
+                }
+            });
+        });
+    }
 
     // ── Grid mode ───────────────────────────────────────────────────────────
     // The second way to divide the same area: instead of the admin cutting it
@@ -28800,8 +28905,8 @@ document.querySelectorAll('.team-form').forEach(form => {
             composerMap.createPane('sectorVertexPane');
             composerMap.getPane('sectorVertexPane').style.zIndex = 650;
         }
-        refLayer.clearLayers();
-        renderFullMapReference(refLayer);
+        drawReference();
+        if (scenarioStatus) scenarioStatus.textContent = '';
         if (currentArea && currentArea.geo && currentArea.geo.length) {
             composerMap.fitBounds(L.latLngBounds(currentArea.geo), {padding: [30, 30]});
         }

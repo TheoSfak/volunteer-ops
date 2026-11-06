@@ -5526,6 +5526,148 @@ function recordRouteWaypointArrival(array $mission, array $wp, int $userId, ?flo
 }
 
 /**
+ * Notify a team's approved participants that a sector was (re)assigned to
+ * them. Team-scoped only, not mission-wide — mirrors mission-dispatch.php's
+ * own create-notification fix (a team-targeted alert must not fire for every
+ * other team on the mission).
+ *
+ * Lived in mission-sector.php until v3.454.0. It is here now because
+ * createMissionSector() calls it, and a scenario's play (mission-scenario.php)
+ * reaches that function without ever loading the sector endpoint.
+ */
+function notifySectorAssigned(int $missionId, string $missionTitle, int $teamId, int $sectorId, string $label, int $excludeUserId): void {
+    $recipientIds = actionRoomNotifyRecipientIds($missionId, $teamId, $excludeUserId);
+    if (empty($recipientIds)) {
+        return;
+    }
+
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    $langByUserId = getUserLanguages($recipientIds);
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        $message = t('sector.assigned_notify_message', ['label' => $label], $lang);
+        sendNotification($recipientId, t('sector.assigned_notify_title', ['mission' => $missionTitle], $lang), $message, 'info', 'mission_sector_assigned', [
+            'url' => $warRoomUrl,
+            'tag' => 'sector-assigned-mission-' . $missionId,
+            'bannerMission' => $missionId,
+            // Lets the Action Room open this as the order popup and frame the
+            // sector on the map (see war-room.php's banners).
+            'sectorId' => $sectorId,
+        ]);
+    }
+}
+
+/**
+ * Everything createMissionSector() checks about a sector, and nothing it does: the label is not empty, the search
+ * area is one of this mission's, the team (if any) is one of this mission's, the polygon has at least three valid
+ * points. Split out of createMissionSector() in v3.454.0 - as prepareMissionDispatch() was split out of
+ * createMissionDispatch() - so that a scenario can check a sector when it is STAGED with the very rules that will
+ * check it when it is SENT. Pure: it reads, it writes nothing and tells no one. The checks run in the order the
+ * endpoint always ran them, so a form with two mistakes gets the same message it always got.
+ *
+ * $input is what the form posts, as post() returns it (a string, or ''/null when absent): label, area_id, team_id
+ * ('' = no team), geo (JSON text of [[lat, lng], ...]). Returns ['ok' => false, 'error' => <text to show>], or
+ * ['ok' => true, 'label' => string, 'area_id' => int, 'area_label' => string, 'team_id' => int|null, 'team_label' =>
+ * string|null, 'geo' => [[lat, lng], ...]].
+ */
+function prepareMissionSector(array $mission, array $input): array {
+    $missionId = (int) $mission['id'];
+    $label = trim((string) ($input['label'] ?? ''));
+    if ($label === '') {
+        return ['ok' => false, 'error' => t('sector.invalid_label')];
+    }
+    $label = mb_substr($label, 0, 255);
+
+    $areaId = (int) ($input['area_id'] ?? 0);
+    $area = dbFetchOne("SELECT id, label FROM mission_search_areas WHERE id = ? AND mission_id = ?", [$areaId, $missionId]);
+    if (!$area) {
+        return ['ok' => false, 'error' => t('sector.area_not_found')];
+    }
+
+    $teamIdRaw = $input['team_id'] ?? null;
+    $teamId = ($teamIdRaw !== '' && $teamIdRaw !== null) ? (int) $teamIdRaw : null;
+    $team = null;
+    if ($teamId) {
+        $team = dbFetchOne("SELECT id, codename, team_number FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
+        if (!$team) {
+            return ['ok' => false, 'error' => t('common.team_not_found')];
+        }
+    }
+
+    $rawGeo = json_decode((string) ($input['geo'] ?? ''), true);
+    if (!is_array($rawGeo) || count($rawGeo) < 3) {
+        return ['ok' => false, 'error' => t('dispatch.polygon_needs_3_points')];
+    }
+    // The range mission-sector.php's `create_area` and prepareMissionDispatch() enforce for a drawn shape.
+    $isValidLatLng = fn($lat, $lng) => is_numeric($lat) && is_numeric($lng)
+        && (float) $lat >= -90 && (float) $lat <= 90 && (float) $lng >= -180 && (float) $lng <= 180
+        && !((float) $lat === 0.0 && (float) $lng === 0.0);
+    foreach ($rawGeo as $pt) {
+        if (!is_array($pt) || !isset($pt[0], $pt[1]) || !$isValidLatLng($pt[0], $pt[1])) {
+            return ['ok' => false, 'error' => t('dispatch.invalid_point')];
+        }
+    }
+    $geo = array_map(fn($pt) => [(float) $pt[0], (float) $pt[1]], $rawGeo);
+
+    return [
+        'ok'         => true,
+        'label'      => $label,
+        'area_id'    => (int) $area['id'],
+        'area_label' => (string) $area['label'],
+        'team_id'    => $teamId,
+        'team_label' => $team ? teamLabel($team['codename'], $team['team_number']) : null,
+        'geo'        => $geo,
+    ];
+}
+
+/**
+ * Command draws one sector in a search area, with or without a team. This is the body of mission-sector.php's
+ * `create` (v3.454.0), moved here unchanged so that anything else that has to make the very same sector - a step
+ * of a scenario, next - goes through the same checks, writes the same rows and audit entry and tells the same
+ * people as a hand-drawn one. Command only: the caller has checked that.
+ *
+ * With a team the sector is born «assigned» (status stamped, a row in the status log, the team told); without one
+ * it is born «not_started» and nobody is told - an admin laying out several sectors before assigning any team must
+ * not fire a push per sector.
+ *
+ * $input is the form's: see prepareMissionSector(). Returns ['ok' => true, 'id' => <sector id>] or ['ok' => false,
+ * 'error' => <text to show>].
+ */
+function createMissionSector(array $mission, int $userId, array $input): array {
+    $prepared = prepareMissionSector($mission, $input);
+    if (!$prepared['ok']) {
+        return $prepared;
+    }
+    $missionId = (int) $mission['id'];
+    $areaId = $prepared['area_id'];
+    $teamId = $prepared['team_id'];
+    $label = $prepared['label'];
+    $geo = $prepared['geo'];
+
+    $status = $teamId ? 'assigned' : 'not_started';
+    $sectorId = dbInsert(
+        "INSERT INTO mission_search_sectors (mission_id, area_id, team_id, label, geo, status, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
+        [$missionId, $areaId, $teamId, $label, json_encode($geo), $status, $userId]
+    );
+    if ($teamId) {
+        dbExecute("UPDATE mission_search_sectors SET status_updated_at = NOW(), status_updated_by = ? WHERE id = ?", [$userId, $sectorId]);
+        dbInsert(
+            "INSERT INTO mission_sector_status_log (sector_id, from_status, to_status, team_id, user_id, created_at) VALUES (?, 'not_started', 'assigned', ?, ?, NOW())",
+            [$sectorId, $teamId, $userId]
+        );
+    }
+    logAudit('create_mission_sector', 'mission_search_sectors', $sectorId, null, ['mission_id' => $missionId, 'team_id' => $teamId]);
+
+    // No notification if created unassigned — an admin laying out several
+    // sectors before assigning any teams must not fire a push per sector.
+    if ($teamId) {
+        notifySectorAssigned($missionId, $mission['title'], $teamId, (int) $sectorId, $label, $userId);
+    }
+
+    return ['ok' => true, 'id' => (int) $sectorId];
+}
+
+/**
  * «Ελήφθη» on a search sector. Command staff may confirm any sector (standing
  * in for a team); anyone else only their own team's, and only as an approved
  * participant. Returns null on success, else the error to show.

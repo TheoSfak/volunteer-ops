@@ -48,6 +48,11 @@ if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', 
 $action = post('action');
 $answer = fn(array $extra = []) => json_encode(['ok' => true, 'scenario' => loadMissionScenario($missionId)] + $extra);
 $fail = fn(string $error, array $extra = []) => json_encode(['ok' => false, 'error' => $error, 'scenario' => loadMissionScenario($missionId)] + $extra);
+// The sectors a play or a retry has just made are live now: hand back the live list (the same pair the sector
+// endpoint answers with) so the map shows them at once, not at the next poll. Only when one was made.
+$liveSectors = fn(array $results) => array_filter($results, fn($r) => ($r['kind'] ?? '') === 'sector' && !empty($r['ok']))
+    ? ['sectors' => loadMissionSectorsForUser($missionId, (int) $userId, true, false), 'areas' => loadMissionSearchAreasForUser($missionId, true)]
+    : [];
 
 if ($action === 'add_phase') {
     $result = addScenarioPhase($mission, (int) $userId, (string) post('title'));
@@ -99,6 +104,37 @@ if ($action === 'add_item') {
     exit;
 }
 
+if ($action === 'add_sectors') {
+    // The sector window's «Στο σενάριο»: every piece of one division of an existing search area goes into the
+    // phase together or not at all. sectors = JSON [{team_id, label, geo}, ...]; team_id is a team's id or
+    // 'slot:<id>' - a sector has no «όλες οι ομάδες», and an empty team is refused. As for add_item, a "new
+    // phase" made for a refused order is taken out again.
+    $phaseId = (int) post('phase_id');
+    $madePhase = false;
+    if ($phaseId === 0 && post('phase_id') === 'new') {
+        $made = addScenarioPhase($mission, (int) $userId, '');
+        if (!$made['ok']) {
+            echo $fail($made['error']);
+            exit;
+        }
+        $phaseId = (int) $made['id'];
+        $madePhase = true;
+    }
+    $sectors = json_decode((string) post('sectors'), true);
+    $result = is_array($sectors)
+        ? addScenarioSectorItems($mission, $phaseId, (int) $userId, (int) post('area_id'), $sectors)
+        : ['ok' => false, 'error' => t('common.invalid_request')];
+    if (!$result['ok']) {
+        if ($madePhase) {
+            deleteScenarioPhase($mission, $phaseId, (int) $userId);
+        }
+        echo $fail($result['error']);
+        exit;
+    }
+    echo $answer(['count' => $result['count'], 'phase_id' => $phaseId]);
+    exit;
+}
+
 if ($action === 'delete_item') {
     $error = deleteScenarioItem($mission, (int) post('item_id'), (int) $userId);
     echo $error === null ? $answer() : $fail($error);
@@ -147,7 +183,7 @@ if ($action === 'play_phase') {
         'failed'     => $result['failed'],
         'results'    => $result['results'],
         'dispatches' => loadMissionDispatchesForUser($missionId, (int) $userId, true, false),
-    ]);
+    ] + $liveSectors($result['results']));
     exit;
 }
 
@@ -160,7 +196,7 @@ if ($action === 'retry_item') {
     echo $answer([
         'item'       => $result['item'],
         'dispatches' => loadMissionDispatchesForUser($missionId, (int) $userId, true, false),
-    ]);
+    ] + $liveSectors([$result['item']]));
     exit;
 }
 
