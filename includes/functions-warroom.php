@@ -13662,3 +13662,24 @@ function wrExternalJsApplyCanary(): void {
     ]);
     $_COOKIE['wr_ext_js'] = $asked;
 }
+
+/**
+ * How slow the war-room page's polls may get while nothing changes, in milliseconds; 0 means never slower than the
+ * 5 seconds they always were (the default). Settings > Action Room: war_room_poll_idle_max_seconds ('0' off, '10',
+ * '15', '30') and war_room_poll_idle_staff ('1' = command staff slow down too; otherwise they stay on 5 seconds).
+ * assets/js/war-room-poll-rhythm.js decides the rhythm below this ceiling; the page gets it as WR_BOOT.pollIdleMaxMs.
+ */
+function wrPollIdleMaxMs(bool $canManage): int {
+    return wrPollIdleMaxMsDecision((string) getSetting('war_room_poll_idle_max_seconds', '0'), (string) getSetting('war_room_poll_idle_staff', '0'), $canManage);
+}
+
+/** The rule itself, apart from where its inputs come from. */
+function wrPollIdleMaxMsDecision(string $capSeconds, string $staffToo, bool $canManage): int {
+    if (!in_array($capSeconds, ['10', '15', '30'], true)) {
+        return 0;
+    }
+    if ($canManage && $staffToo !== '1') {
+        return 0;
+    }
+    return (int) $capSeconds * 1000;
+}

@@ -68,6 +68,8 @@ $defaults = [
     // translation table once (wrLightScriptEnabled()). Off puts the page back exactly as it was.
     'war_room_light_script' => '1',
     'war_room_external_js' => '0',
+    'war_room_poll_idle_max_seconds' => '0',
+    'war_room_poll_idle_staff' => '0',
     // Rescuer heart rate (volunteer_vitals). Off by default: it needs a
     // sensor per volunteer and it collects health data, so it must be an
     // explicit decision by the org, never something that starts working
@@ -527,7 +529,7 @@ $actionRoomFields = [
     'war_room_auto_ping_seconds', 'war_room_auto_ping_high_accuracy',
     'war_room_native_sampling', 'war_room_native_full_tracking',
     'war_room_max_ping_accuracy_m', 'war_room_max_ping_speed_kmh', 'war_room_max_ping_speed_kmh_vehicle', 'war_room_gps_smoothing',
-    'arrival_auto_enabled', 'war_room_light_script', 'war_room_external_js',
+    'arrival_auto_enabled', 'war_room_light_script', 'war_room_external_js', 'war_room_poll_idle_max_seconds', 'war_room_poll_idle_staff',
     'war_room_low_battery_pct', 'war_room_max_shift_minutes', 'war_room_floor_height_m',
     'vitals_enabled', 'vitals_sample_seconds', 'vitals_elevated_pct', 'vitals_critical_pct',
     'vitals_low_bpm', 'vitals_reference_age', 'vitals_stale_seconds', 'vitals_retention_days',
@@ -558,7 +560,7 @@ if (isPost()) {
         foreach ($fieldsToUpdate as $field) {
                     $value = isset($_POST[$field]) ? $_POST[$field] : '';
 
-                    if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'osm_layer_enabled', 'triage_expectant_enabled', 'triage_trts_suggestion_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy', 'war_room_gps_smoothing', 'arrival_auto_enabled', 'war_room_native_sampling', 'war_room_native_full_tracking', 'war_room_light_script'])) {
+                    if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'osm_layer_enabled', 'triage_expectant_enabled', 'triage_trts_suggestion_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy', 'war_room_gps_smoothing', 'arrival_auto_enabled', 'war_room_native_sampling', 'war_room_native_full_tracking', 'war_room_light_script', 'war_room_poll_idle_staff'])) {
                         $value = isset($_POST[$field]) ? '1' : '0';
                     }
 
@@ -687,6 +689,11 @@ if (isPost()) {
                     // Same closed list: war-room.php branches on exactly these three values (never / only a browser that asked /
                     // everybody); anything else, an empty field from a stale form included, is today's page.
                     if ($field === 'war_room_external_js' && !in_array($value, ['0', '1', '2'], true)) {
+                        $value = '0';
+                    }
+                    // Closed list: the page slows its polls down to at most this many seconds while nothing changes, and 0 is
+                    // today's fixed 5. Anything else, an empty field from a stale form included, is off.
+                    if ($field === 'war_room_poll_idle_max_seconds' && !in_array($value, ['0', '10', '15', '30'], true)) {
                         $value = '0';
                     }
 
@@ -2357,6 +2364,22 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                             <option value="2" <?= $extJs === '2' ? 'selected' : '' ?>>Για όλους</option>
                         </select>
                         <small class="text-muted">Ο πίνακας μεταφράσεων είναι το μεγαλύτερο κομμάτι της σελίδας που δεν αλλάζει ποτέ από αποστολή σε αποστολή (περίπου 70 KB συμπιεσμένος). Αντί να στέλνεται μέσα στη σελίδα κάθε φορά, το κινητό τον κατεβάζει <strong>μία φορά</strong> ως αρχείο και τον κρατά· σε κάθε επόμενο άνοιγμα ή ανανέωση δεν ξανακατεβαίνει. Δεν αλλάζει τίποτα στη λειτουργία. <strong>Δοκιμή σε ένα μόνο κινητό:</strong> διάλεξε «Μόνο στον περιηγητή που το ζήτησε» και άνοιξε την αποστολή από εκείνο το κινητό με <code>&amp;wrext=1</code> στο τέλος της διεύθυνσης (με <code>&amp;wrext=0</code> το ξεζητά). Αν το αρχείο δεν φτάσει, η σελίδα ξαναφορτώνει μόνη της με τον παλιό τρόπο· για μία φορά μπορείς να βάλεις και μόνος σου <code>&amp;rawjs=1</code>. Για να γυρίσουν όλα όπως ήταν, διάλεξε «Κλειστό» — αμέσως, χωρίς ενημέρωση.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="warRoomPollIdleMax">Πιο αραιός έλεγχος για αλλαγές όταν η αποστολή είναι ήσυχη</label>
+                        <?php $pollIdle = (string) ($settings['war_room_poll_idle_max_seconds'] ?? '0'); ?>
+                        <select class="form-select" style="max-width:420px;" name="war_room_poll_idle_max_seconds" id="warRoomPollIdleMax">
+                            <option value="0" <?= $pollIdle === '0' ? 'selected' : '' ?>>Κλειστό — πάντα κάθε 5 δλ., όπως τώρα</option>
+                            <option value="10" <?= $pollIdle === '10' ? 'selected' : '' ?>>Έως κάθε 10 δλ.</option>
+                            <option value="15" <?= $pollIdle === '15' ? 'selected' : '' ?>>Έως κάθε 15 δλ.</option>
+                            <option value="30" <?= $pollIdle === '30' ? 'selected' : '' ?>>Έως κάθε 30 δλ.</option>
+                        </select>
+                        <div class="form-check mt-2">
+                            <input class="form-check-input" type="checkbox" name="war_room_poll_idle_staff" id="warRoomPollIdleStaff"
+                                   <?= ($settings['war_room_poll_idle_staff'] ?? '0') === '1' ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="warRoomPollIdleStaff">Να αραιώνει και για τη διοίκηση (αλλιώς η διοίκηση μένει πάντα στα 5 δλ.)</label>
+                        </div>
+                        <small class="text-muted">Η σελίδα ρωτά τον server κάθε 5 δλ. αν άλλαξε κάτι — και όταν δεν συμβαίνει τίποτα, κάθε ερώτηση κοστίζει δεδομένα στο κινητό και δουλειά στον server. Με αυτή τη ρύθμιση, όσο δεν αλλάζει τίποτα, οι ερωτήσεις αραιώνουν σταδιακά: μετά από 30 δλ. ησυχίας κάθε 10 δλ., μετά από 1,5 λεπτό κάθε 15, μετά από 3 λεπτά κάθε 30 — ποτέ πιο αραιά από την τιμή που διαλέγεις. <strong>Γυρίζει αμέσως στα 5 δλ.</strong> μόλις αλλάξει κάτι (θέση, εντολή, SOS, μήνυμα), μόλις κάποιος πατήσει ή αγγίξει την οθόνη, μόλις ξαναφανεί η σελίδα και αν χαθεί η σύνδεση. Το τίμημα: αν ήταν όλα ήσυχα, ένα καινούργιο SOS, μια εντολή ή ένα μήνυμα μπορεί να φανεί σε όποιον απλώς κοιτάζει τη σελίδα με καθυστέρηση μέχρι την τιμή που διάλεξες. Σε αποστολή με συνεχή κίνηση (θέσεις που ανανεώνονται) σχεδόν δεν αραιώνει. Το μήνυμα «χάθηκε η επαφή» περιμένει ανάλογα περισσότερο όσο η σελίδα είναι σε αργό ρυθμό. Δεν αγγίζει το GPS ούτε τις ειδοποιήσεις.</small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Μέγιστη Αποδεκτή Αβεβαιότητα Στίγματος (μ.)</label>

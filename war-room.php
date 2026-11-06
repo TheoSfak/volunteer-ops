@@ -7004,6 +7004,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" integrity="sha512-OFs3W4DIZ5ZkrDhBFtsCP6JXtMEDGmhl0QPlmWYBJay40TT1n3gt2Xuw8Pf/iezgW9CdabjkNChRqozl/YADmg==" crossorigin="anonymous"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/esri-imagery.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-utils.js?v=<?= APP_VERSION ?>"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-poll-rhythm.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/media-queue.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/trail-display.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/floor-display.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/floor-display.js') ?>"></script>
@@ -7045,6 +7046,7 @@ const WR_BOOT = {
     myUserId: <?= (int) $user['id'] ?>,
     serverTime: <?= time() ?>,
     jsLocale: <?= json_encode($__viewerLang === 'en' ? 'en-US' : 'el-GR') ?>,
+    pollIdleMaxMs: <?= wrPollIdleMaxMs($canManageWarRoom) ?>,
     canManage: <?= json_encode($canManageWarRoom) ?>,
     canField: <?= json_encode($isApprovedParticipant || $canManageWarRoom) ?>,
     mapPointLinkMax: <?= (int) MAP_POINT_LINK_MAX ?>,
@@ -7198,6 +7200,10 @@ function t(key, vars = {}) {
     return text;
 }
 const jsLocale = WR_BOOT.jsLocale;
+// How often the polls ask while nothing changes (Settings > Action Room; assets/js/war-room-poll-rhythm.js). With the
+// cap off (0) every timer below runs on every tick, exactly as before, and the staleness limit is the old 20 s.
+const wrRhythm = wrCreatePollRhythm(WR_BOOT.pollIdleMaxMs);
+wrWatchPollActivity(wrRhythm, document);
 
 // ── No request on this page waits forever ───────────────────────────────────
 // A request sent into a dead connection does not fail, it waits — until the
@@ -23109,7 +23115,7 @@ function loadActivity() {
     }).finally(() => { clearTimeout(activityKiller); activityInFlight = false; });
 }
 loadActivity();
-setInterval(() => { if (!document.hidden) loadActivity(); }, 15000);
+setInterval(() => { if (!document.hidden && wrRhythm.due('activity', 15000)) loadActivity(); }, 15000);
 
 const reportModalEl = document.getElementById('reportModal');
 if (reportModalEl) {
@@ -24817,7 +24823,8 @@ function setFieldStatus(btn, prId, status) {
 // looks live. Four consecutive misses (~20s) is past any normal jitter, so
 // past that the page says out loud how old what you're looking at actually is.
 let lastPollOkAt = Date.now();
-const POLL_STALE_MS = 20000;
+// The limit itself - 20 s at the 5 s rhythm - is wrRhythm.staleMs(): it follows the rhythm when the polls are slowed down,
+// and a failed poll puts the rhythm back to fast, so a real outage still shows within the old 20 s of the first miss.
 // The last poll that did not reach the server, and how: 'network' (nothing
 // got through at all) or 'timeout' (sent, and no answer inside POLL_ABORT_MS —
 // what the 26/09/2026 outage looked like). Cleared by the next one that gets
@@ -24839,7 +24846,7 @@ function renderPollStaleness() {
     const el = document.getElementById('pollStaleBanner');
     if (!el) return;
     const ageMs = Date.now() - lastPollOkAt;
-    if (ageMs < POLL_STALE_MS) {
+    if (ageMs < wrRhythm.staleMs()) {
         el.classList.add('d-none');
         return;
     }
@@ -24934,6 +24941,7 @@ function restartPoll() {
     if (pollAbortCurrent) { try { pollAbortCurrent.abort(); } catch (e) {} }
     pollAbortCurrent = null;
     pollInFlight = false;
+    wrRhythm.bump();
     return pollWarRoomData();
 }
 // Its own timer, not just the poll's: when the poll is failing its .then()
@@ -27218,6 +27226,8 @@ function pollWarRoomData() {
             document.getElementById('mapRefresh').textContent = data.time || '';
             return;
         }
+        // Something changed: back to the base rhythm (assets/js/war-room-poll-rhythm.js).
+        wrRhythm.bump();
         // Refreshed BEFORE any render below — every k9BadgeHtml()/captainBadgeHtml()
         // call in this same tick must see the new registry, not the previous cycle's.
         if (data.k9Handlers) k9Handlers = data.k9Handlers;
@@ -27388,6 +27398,7 @@ function pollWarRoomData() {
         if (!answered && pollAbortCurrent === pollAbort) {
             lastPollFailure = {at: Date.now(), kind: e && e.name === 'AbortError' ? 'timeout' : 'network'};
         }
+        wrRhythm.bump();   // a poll that failed: look again at the base rhythm, and judge staleness by it
         renderPollStaleness();
     }).finally(() => {
         clearTimeout(pollKiller);
@@ -27400,7 +27411,7 @@ function pollWarRoomData() {
         if (pollAbortCurrent === pollAbort) { pollInFlight = false; pollAbortCurrent = null; }
     });
 }
-setInterval(() => { if (!document.hidden) pollWarRoomData(); }, 5000);
+setInterval(() => { if (!document.hidden && wrRhythm.due('main', 5000)) pollWarRoomData(); }, 5000);
 
 // A tab sitting in a background window/inactive phone screen still fires
 // these 5s timers at full rate today — harmless for one open tab, but this
@@ -27413,6 +27424,7 @@ setInterval(() => { if (!document.hidden) pollWarRoomData(); }, 5000);
 // back to this tab" from ever showing stale data on the way back in.
 document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
+    wrRhythm.bump();
     // A poll still out from before the screen went dark is not waited for.
     // It may be sitting on a connection that died while the phone slept, and
     // its own POLL_ABORT_MS timer was frozen along with the page — so it could
@@ -27712,6 +27724,7 @@ document.querySelectorAll('.team-form').forEach(form => {
                 if (!data.ok || teamId !== activeTeamId || !data.messages.length) return;
                 const nearBottom = chatMessagesEl.scrollHeight - chatMessagesEl.scrollTop - chatMessagesEl.clientHeight < 60;
                 data.messages.forEach(renderMessage);
+                wrRhythm.bump();
                 lastIdByRoom[teamId] = data.messages[data.messages.length - 1].id;
                 renderPendingChat(); // keeps what is still waiting below what just arrived
                 if (nearBottom) chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
@@ -27937,7 +27950,7 @@ document.querySelectorAll('.team-form').forEach(form => {
             baselineRoom(tab.dataset.teamId, CHAT_HEADS_AT_LOAD);
         });
     }
-    setInterval(() => { if (!document.hidden) pollRoom(); }, 5000);
+    setInterval(() => { if (!document.hidden && wrRhythm.due('chat', 5000)) pollRoom(); }, 5000);
     // Scoped here (not the outer visibilitychange listener further up) since
     // pollRoom only exists inside this closure.
     document.addEventListener('visibilitychange', () => {

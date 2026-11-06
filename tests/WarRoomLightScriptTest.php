@@ -240,7 +240,8 @@ final class WarRoomLightScriptTest extends TestCase
         $settings = str_replace("\r\n", "\n", (string) WarRoomSource::read('settings.php'));
         $this->assertStringContainsString("'war_room_light_script' => '1',", $settings, 'default on');
         $this->assertMatchesRegularExpression("~\\\$actionRoomFields = \\[[^;]*'war_room_light_script'~s", $settings, 'saved with the Action Room tab');
-        $this->assertStringContainsString("'war_room_native_full_tracking', 'war_room_light_script'])", $settings, 'an unticked box is saved as 0');
+        // in the list of checkboxes, whatever has been added after it since (the list is the one with 'achievements_enabled' in it)
+        $this->assertMatchesRegularExpression("~in_array\\(\\\$field, \\['achievements_enabled'[^\\]]*'war_room_light_script'[^\\]]*\\]\\)~", $settings, 'an unticked box is saved as 0');
         $this->assertStringContainsString('name="war_room_light_script"', $settings);
         $this->assertStringContainsString("(\$settings['war_room_light_script'] ?? '1') === '1' ? 'checked' : ''", $settings);
     }
