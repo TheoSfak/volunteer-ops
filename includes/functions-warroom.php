@@ -13563,3 +13563,61 @@ function loadChatRoomUnread(int $missionId, array $teamIds, array $cursors): arr
     }
     return $rooms;
 }
+
+/**
+ * Whether the war-room page sends a lighter script: the full-line // comments of its two big inline scripts left
+ * out and, for a viewer who reads the default language, the translation table sent once instead of twice
+ * (setting war_room_light_script, on unless it is '0'). ?rawjs=1 turns it off for one request - the page then is
+ * exactly what it was before this existed, to read the script as written or to compare the two.
+ */
+function wrLightScriptEnabled(): bool {
+    return wrLightScriptDecision((string) getSetting('war_room_light_script', '1'), !empty($_GET['rawjs']));
+}
+
+/** The rule itself, apart from where its two inputs come from: off for the setting '0' and for a request that asks for the raw script. */
+function wrLightScriptDecision(string $setting, bool $rawRequested): bool {
+    return !$rawRequested && $setting !== '0';
+}
+
+/**
+ * Output-buffer callback for the war-room page's inline scripts (ob_start('wrStripJsLineComments') ...
+ * ob_end_flush()): leaves out every line that holds nothing but a // comment. The comments stay in the source,
+ * where they explain the code; they were 22% of the bytes of the script and about a third of what it compresses to.
+ *
+ * It works on lines, not on the language, so every doubt must end in KEEPING the line (the script means the same
+ * with or without its comments, but a dropped line that was not a comment is a broken page):
+ *  - a line inside a template literal is text, not a comment: lines are kept while an odd number of unescaped
+ *    backticks has been seen on the lines kept so far (a stray backtick in a string or in a trailing comment can only
+ *    keep more);
+ *  - the line after one that ends with a backslash continues a string (or a template): kept;
+ *  - a line that holds the end of a block comment may close one that began above: kept.
+ * Only a // that opens the line (after spaces or tabs) counts. A trailing comment, a URL inside a string and a line
+ * with code before the // are untouched. Bytes, not characters (no /u: the page has text that is not valid UTF-8).
+ * A buffer without any // in it, and any failure, come back unchanged.
+ */
+function wrStripJsLineComments(string $js): string {
+    if (strpos($js, '//') === false) {
+        return $js;
+    }
+    try {
+        $kept = [];
+        $inTemplate = false;
+        $continued = false;
+        foreach (explode("\n", $js) as $line) {
+            if (!$inTemplate && !$continued) {
+                $t = ltrim($line, " \t");
+                if (isset($t[1]) && $t[0] === '/' && $t[1] === '/' && strpos($t, '*/') === false) {
+                    continue;
+                }
+            }
+            $kept[] = $line;
+            if (strpos($line, '`') !== false && (substr_count($line, '`') - substr_count($line, '\\`')) % 2 !== 0) {
+                $inTemplate = !$inTemplate;
+            }
+            $continued = substr(rtrim($line, "\r"), -1) === '\\';
+        }
+        return implode("\n", $kept);
+    } catch (\Throwable $e) {
+        return $js;
+    }
+}

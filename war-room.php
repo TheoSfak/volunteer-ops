@@ -7021,6 +7021,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/vitals-sensor.js?v=<?= APP_VERSION ?>"></script>
 <?php endif; ?>
 <script>
+<?php $__wrLight = wrLightScriptEnabled(); if ($__wrLight) { ob_start('wrStripJsLineComments'); } ?>
 const csrfToken = '<?= csrfToken() ?>';
 // Settings → Γενικές → «Μονάδα Έκτασης». Consumed by areaTierForGroup()
 // in war-room-utils.js, which is why it is a bare global rather than a
@@ -7038,7 +7039,11 @@ const WR_MY_USER_ID = <?= (int) $user['id'] ?>;
 const WR_CLOCK_OFFSET = <?= time() ?> - Date.now() / 1000;
 <?php $__wrStrings = loadLangStrings('war-room'); $__viewerLang = $user['language'] ?? DEFAULT_LANGUAGE; ?>
 const WR_STRINGS = <?= json_encode($__wrStrings[$__viewerLang] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+<?php if ($__wrLight && $__viewerLang === DEFAULT_LANGUAGE): /* the same table twice is 68 KB of gzip on every load: say it once */ ?>
+const WR_STRINGS_FALLBACK = WR_STRINGS;
+<?php else: ?>
 const WR_STRINGS_FALLBACK = <?= json_encode($__wrStrings[DEFAULT_LANGUAGE] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+<?php endif; ?>
 function t(key, vars = {}) {
     let text = WR_STRINGS[key] ?? WR_STRINGS_FALLBACK[key] ?? key;
     for (const [k, v] of Object.entries(vars)) text = text.replaceAll('{' + k + '}', String(v));
@@ -30360,6 +30365,7 @@ setInterval(function () {
         el.textContent = t('live.remaining', {time: m + ':' + s});
     });
 }, 1000);
+<?php if ($__wrLight) { ob_end_flush(); } ?>
 </script>
 
 <?php if ($liveEnabled): ?>
@@ -30370,6 +30376,7 @@ setInterval(function () {
      was read against and field-tested with. -->
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.22.3/dist/livekit-client.umd.min.js"></script>
 <script>
+<?php if ($__wrLight) { ob_start('wrStripJsLineComments'); } ?>
 // ══ LIVE VIDEO ══════════════════════════════════════════════════════════════
 // Two independent halves that never both run in one browser: a volunteer
 // publishes (myLiveCard), command subscribes (liveStreamsCard). The token each
@@ -31251,6 +31258,7 @@ setInterval(function () {
     }
     ensureViewer();
 })();
+<?php if ($__wrLight) { ob_end_flush(); } ?>
 </script>
 <?php endif; ?>
 
