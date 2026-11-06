@@ -58,13 +58,28 @@ function wrTimeDispatch(d, T) {
             note: com ? p.note : null,
         });
     }).filter(p => p.departed || p.arrived || p.completed);
-    // The finish that counts is the one of the team this order was sent to. An order sent to every team
-    // has none, as on the live map.
+    // The finish that counts is the one of the team this order was sent to.
     const own = d.team_id !== null && d.team_id !== undefined ? progress.find(p => p.scope === 't' + d.team_id) : null;
+    let completedTs = own && own.completed ? own.completed_ts : null;
+    let completedDisplay = own && own.completed ? own.completed : null;
+    // An order sent to EVERY team is finished only when all the teams it waits for (all_scopes) have, the
+    // moment the last one did - the same rule as the server's broadcastFinish(); until then it only counts them.
+    let teamsDone = null;
+    if (d.team_id === null || d.team_id === undefined) {
+        const scopes = Array.isArray(d.all_scopes) ? d.all_scopes : [];
+        const lines = scopes.map(s => progress.find(p => p.scope === s && p.completed)).filter(Boolean);
+        teamsDone = scopes.length ? lines.length : null;
+        if (scopes.length && lines.length === scopes.length) {
+            const last = lines.reduce((a, b) => (b.completed_ts >= a.completed_ts ? b : a));
+            completedTs = last.completed_ts;
+            completedDisplay = last.completed;
+        }
+    }
     return Object.assign({}, d, {
         progress,
-        completed_ts: own && own.completed ? own.completed_ts : null,
-        completed_display: own && own.completed ? own.completed : null,
+        teams_done: teamsDone,
+        completed_ts: completedTs,
+        completed_display: completedDisplay,
         declines: (d.declines || []).filter(dc => !dc.ts || dc.ts <= T),
         // A picture of the past: nothing here acts on the order.
         eta: null, acks: [], my_receipt: null, my_departed: null, my_ack: null, my_completed: null, my_declined: null,
@@ -77,14 +92,18 @@ function wrTimeSector(s, T) {
     const log = s.status_log || [];
     const upto = log.filter(l => l.ts && l.ts <= T);
     const last = upto.length ? upto[upto.length - 1] : null;
-    // Before its first change a sector was in the status that change left (the log keeps both ends).
-    const status = last ? last.to_status : ((log.length && log[0].from_status) || (log.length ? 'not_started' : s.status));
+    // Before its first change a sector was in the status that change left (the log keeps both ends). At the very
+    // end (T = Infinity, the archive of a finished mission) it is the status it has, whatever the log says.
+    const final = T === Infinity;
+    const status = final ? s.status : (last ? last.to_status : ((log.length && log[0].from_status) || (log.length ? 'not_started' : s.status)));
+    const completedTs = status !== 'completed' ? null : (final ? (s.completed_ts || (last ? last.ts : null)) : (last ? last.ts : null));
     return Object.assign({}, s, {
         status,
-        status_label: t('sector.status.' + status),
+        // The archive page (mission-archive.php) has no t(): it never shows the label.
+        status_label: typeof t === 'function' ? t('sector.status.' + status) : status,
         status_color: WR_TIME_STATUS_COLORS[status] || 'secondary',
-        status_updated_at: last ? last.time : null,
-        completed_ts: status === 'completed' && last ? last.ts : null,
+        status_updated_at: final ? (s.status_updated_at || (last ? last.time : null)) : (last ? last.time : null),
+        completed_ts: completedTs,
         status_log: upto,
         declined: null, next_status: null, next_status_label: null,
         can_manage: false, can_acknowledge: false, can_self_report: false, can_decline: false,
@@ -102,6 +121,18 @@ function wrTimeRoute(r, T) {
         completed_at_display: status === 'completed' ? r.completed_at_display : null,
         declined: null, can_manage: false, can_decline: false, is_route_member: false,
     });
+}
+
+// «σημεία/περιοχές: 4 (✓ 2) · τομείς: 10 (✓ 0) · διαδρομές: 1 (✓ 1)»: how many of each there were, and how many
+// of those were finished, in the lists as they stood at a moment (the output of the three functions above).
+// A route called off is not counted. Shared with the archive page.
+function wrTimeCounts(ds, ss, rs) {
+    const live = (rs || []).filter(r => r.status !== 'cancelled');
+    return {
+        d: ds.length, dc: ds.filter(d => d.completed_ts).length,
+        s: ss.length, sc: ss.filter(s => s.status === 'completed').length,
+        r: live.length, rc: live.filter(r => r.status === 'completed').length,
+    };
 }
 
 function wrTimeMap(list, fn) {
@@ -156,14 +187,11 @@ function wrTimeSummaryRefresh() {
             line.classList.add('d-none');
         } else {
             const time = wrTimeLabel(wrTimeT);
-            const ds = wrTimeDispatches((dispatches || []).filter(d => !d.map_point_id));
-            const ss = wrTimeSectors(sectors || []);
-            const rs = wrTimeRoutes(routes || []).filter(r => r.status !== 'cancelled');
-            const n = {
-                d: ds.length, dc: ds.filter(d => d.completed_ts).length,
-                s: ss.length, sc: ss.filter(s => s.status === 'completed').length,
-                r: rs.length, rc: rs.filter(r => r.status === 'completed').length,
-            };
+            const n = wrTimeCounts(
+                wrTimeDispatches((dispatches || []).filter(d => !d.map_point_id)),
+                wrTimeSectors(sectors || []),
+                wrTimeRoutes(routes || [])
+            );
             line.textContent = (n.d + n.s + n.r === 0) ? t('timemachine.summary_none', {time}) : t('timemachine.summary', Object.assign({time}, n));
             line.classList.remove('d-none');
         }

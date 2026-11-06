@@ -54,6 +54,24 @@ var routes = [
 ];
 `, ctx);
 
+// v3.442.0: an order sent to EVERY team waits for all_scopes; and the archive page asks for the very end (T = Infinity).
+vm.runInContext(`
+var broadcasts = [
+  // Waits for t40 and t41: t40 finishes at 130, t41 at 150.
+  {id: 4, type: 'point', team_id: null, sent_ts: 100, all_scopes: ['t40', 't41'], progress: [
+    {scope: 't40', label: 'Bravo', departed: null, arrived: null, completed: '00:02', departed_ts: null, arrived_ts: null, completed_ts: 130, note: null},
+    {scope: 't41', label: 'Charlie', departed: null, arrived: null, completed: '00:03', departed_ts: null, arrived_ts: null, completed_ts: 150, note: null},
+    // a volunteer with no team finishing it does not count for the teams
+    {scope: 'u9', label: 'Solo', departed: null, arrived: null, completed: '00:01', departed_ts: null, arrived_ts: null, completed_ts: 90, note: null}]},
+  // No team to wait for (all of them empty): never finished, as before.
+  {id: 5, type: 'point', team_id: null, sent_ts: 100, all_scopes: [], progress: [
+    {scope: 't40', label: 'Bravo', departed: null, arrived: null, completed: '00:02', departed_ts: null, arrived_ts: null, completed_ts: 130, note: null}]},
+];
+// Completed by an unlogged change: the row says completed, the log ends on in_progress, the payload says when.
+var unlogged = {id: 10, team_id: null, status: 'completed', created_ts: 5, completed_ts: 75, status_updated_at: '00:07',
+  status_log: [{from_status: 'assigned', to_status: 'in_progress', ts: 30, time: '00:01'}]};
+`, ctx);
+
 const run = (code) => JSON.parse(vm.runInContext('JSON.stringify(' + code + ')', ctx));
 const at = (T) => vm.runInContext('wrTimeSet(' + T + ')', ctx);
 const pick = (items, f) => items.map(f);
@@ -104,6 +122,26 @@ out.routes250 = run('wrTimeRoutes(routes).map(r => [r.id, r.status, r.completed_
 
 // The lists the page holds are never touched by looking at a moment.
 out.liveUntouched = run('[dispatches[0].can_delete, dispatches[0].completed_ts, sectors[0].status, routes[0].status]');
+
+// An order sent to every team (v3.442.0).
+const bc = (id, T) => run('wrTimeDispatch(broadcasts.filter(d => d.id === ' + id + ')[0], ' + T + ')');
+out.bc125 = bc(4, 125);
+out.bc135 = bc(4, 135);
+out.bc155 = bc(4, 155);
+out.bcEmpty = bc(5, 500);
+out.bcBefore = run('wrTimeDispatch(broadcasts[0], 50)');
+
+// The very end, as the archive page of a finished mission asks for it.
+out.endSector7 = run('wrTimeSector(sectors[0], Infinity)');
+out.endUnlogged = run('wrTimeSector(unlogged, Infinity)');
+out.pastUnlogged = run('wrTimeSector(unlogged, 60)');
+out.endRoutes = run('wrTimeRoutes(routes).length') ;
+out.endRoute22 = run('wrTimeRoute(routes[1], Infinity).status');
+out.endDispatch1 = run('wrTimeDispatch(dispatches[0], Infinity).completed_ts');
+
+// The one line under the scrubber, shared with the archive page.
+at(135);
+out.counts135 = run('wrTimeCounts(wrTimeDispatches(dispatches), wrTimeSectors(sectors), wrTimeRoutes(routes))');
 
 // Back to the present.
 at(null);

@@ -1326,6 +1326,52 @@ function loadDispatchProgress(array $dispatchIds): array {
 }
 
 /**
+ * The teams an order sent to EVERY team waits for (v3.442.0), as progress scope keys ('t<id>'): every team
+ * of the mission that has at least one member (an empty team cannot finish anything). Such an order is
+ * finished when all of them have; until then it stays live with how many have («2/3»), and a team that
+ * said «Δεν μπορώ» keeps it live as well, since that is still something to act on.
+ *
+ * @return string[]
+ */
+function missionBroadcastScopes(int $missionId): array {
+    $rows = dbFetchAll(
+        "SELECT mt.id FROM mission_teams mt
+         WHERE mt.mission_id = ?
+           AND EXISTS (SELECT 1 FROM mission_team_members m WHERE m.team_id = mt.id)
+         ORDER BY mt.id",
+        [$missionId]
+    );
+    return array_map(fn($r) => 't' . (int) $r['id'], $rows);
+}
+
+/**
+ * How an order sent to every team stands: the scopes it waits for, how many of them have finished it,
+ * and - only once ALL have - the moment the last one did.
+ *
+ * @param string[] $scopes missionBroadcastScopes()
+ * @param array    $progress one dispatch's lines from loadDispatchProgress(), keyed by scope
+ * @return array{done: int, ts: ?int, display: ?string}
+ */
+function broadcastFinish(array $scopes, array $progress): array {
+    $done = 0;
+    $last = null;
+    $lastDisplay = null;
+    foreach ($scopes as $scope) {
+        $ts = $progress[$scope]['completed_ts'] ?? null;
+        if (!$ts) {
+            continue;
+        }
+        $done++;
+        if ($last === null || $ts >= $last) {
+            $last = $ts;
+            $lastDisplay = $progress[$scope]['completed'] ?? null;
+        }
+    }
+    $all = $scopes !== [] && $done === count($scopes);
+    return ['done' => $done, 'ts' => $all ? $last : null, 'display' => $all ? $lastDisplay : null];
+}
+
+/**
  * War Room: load dispatch points/areas visible to $userId, each augmented with
  * its receipt (mission_dispatch_receipts, "Ελήφθη") and arrival (mission_dispatch_acks,
  * "Άφιξη") acknowledgements — shared by war-room.php (live map, twice) and
@@ -1400,6 +1446,8 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
 
     $myTeamId = getUserTeamIdForMission($missionId, $userId);
     $progressByDispatch = loadDispatchProgress($dispatchIds);
+    // Only worked out when some order here goes to every team (v3.442.0).
+    $broadcastScopes = array_filter($rows, fn($r) => $r['team_id'] === null) ? missionBroadcastScopes($missionId) : [];
     $myScopeKey = dispatchProgressScopeKey($myTeamId, $userId);
     $declines = loadActiveOrderDeclines($missionId);
 
@@ -1435,13 +1483,14 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
         }
     }
 
-    return array_map(function ($row) use ($canManageWarRoom, $isApprovedParticipant, $userId, $myTeamId, $acksByDispatch, $receiptsByDispatch, $progressByDispatch, $myScopeKey, $declines, $incidentsById) {
+    return array_map(function ($row) use ($canManageWarRoom, $isApprovedParticipant, $userId, $myTeamId, $acksByDispatch, $receiptsByDispatch, $progressByDispatch, $myScopeKey, $declines, $incidentsById, $broadcastScopes) {
         $dispatchId = (int) $row['id'];
         $teamId = $row['team_id'] ? (int) $row['team_id'] : null;
         $acks = $acksByDispatch[$dispatchId] ?? [];
         $eligible = $teamId === null || $teamId === $myTeamId;
 
         $progress = $progressByDispatch[$dispatchId] ?? [];
+        $broadcast = $teamId === null ? broadcastFinish($broadcastScopes, $progress) : ['done' => 0, 'ts' => null, 'display' => null];
         $mine = $progress[$myScopeKey] ?? ['departed' => null, 'arrived' => null, 'completed' => null];
         // My team's arrival. A dispatch from before v3.325.0 has none in the
         // progress table, only per-person rows — any one of those from my team
@@ -1515,8 +1564,12 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             // When the team this was sent to finished it (v3.439.0): the map fades it a few minutes
             // later. Always null for an order sent to every team, since no single team finishes that
             // one, so it stays live; null too for a team that only said «Δεν μπορώ».
-            'completed_ts'      => $teamId !== null ? ($progress['t' . $teamId]['completed_ts'] ?? null) : null,
-            'completed_display' => $teamId !== null ? ($progress['t' . $teamId]['completed'] ?? null) : null,
+            'completed_ts'      => $teamId !== null ? ($progress['t' . $teamId]['completed_ts'] ?? null) : $broadcast['ts'],
+            'completed_display' => $teamId !== null ? ($progress['t' . $teamId]['completed'] ?? null) : $broadcast['display'],
+            // An order sent to EVERY team (v3.442.0): the teams it waits for and how many have finished
+            // it («2/3» on the map). It is finished, and fades, only when all of them have.
+            'all_scopes'        => $teamId === null ? $broadcastScopes : null,
+            'teams_done'        => $teamId === null ? $broadcast['done'] : null,
             'can_complete' => $isApprovedParticipant && $eligible && !$mine['completed'],
             // «Δεν μπορώ» is my TEAM's answer too, like the three steps.
             'my_declined'  => $declines['dispatch:' . $dispatchId][$myScopeKey] ?? null,

@@ -60,22 +60,37 @@ foreach (dbFetchAll("SELECT id, codename, team_number FROM mission_teams WHERE m
     $teams[] = ['id' => (int) $row['id'], 'label' => teamLabel($row['codename'], $row['team_number'])];
 }
 
+// Every order carries the moments of its own history (v3.442.0), in the same shape the live Action Room's
+// payload has them, so assets/js/war-room-time-machine.js can say how it stood at any moment the replay
+// scrubber is on, and what was finished by then.
 $dispatches = [];
-foreach (dbFetchAll(
-    "SELECT d.type, d.geo, d.label, mt.codename, mt.team_number, mt.color
+$dispatchRows = dbFetchAll(
+    "SELECT d.id, d.team_id, d.type, d.geo, d.label, d.created_at, mt.codename, mt.team_number, mt.color
      FROM mission_dispatch_points d
      LEFT JOIN mission_teams mt ON mt.id = d.team_id
-     WHERE d.mission_id = ? ORDER BY d.created_at",
+     WHERE d.mission_id = ? ORDER BY d.created_at, d.id",
     [$missionId]
-) as $row) {
+);
+$progressByDispatch = $dispatchRows ? loadDispatchProgress(array_map(fn($r) => (int) $r['id'], $dispatchRows)) : [];
+$broadcastScopes = missionBroadcastScopes($missionId);
+foreach ($dispatchRows as $row) {
     $geo = $decodeGeo($row['geo']);
     if ($geo === null) continue;
+    $progress = $progressByDispatch[(int) $row['id']] ?? [];
     $dispatches[] = [
         'type'  => $row['type'],
         'geo'   => $geo,
         'label' => (string) $row['label'],
         'team'  => $row['codename'] !== null ? teamLabel($row['codename'], $row['team_number']) : null,
         'color' => $teamColor($row['color']),
+        'team_id'    => $row['team_id'] !== null ? (int) $row['team_id'] : null,
+        'sent_ts'    => (int) strtotime($row['created_at']),
+        'all_scopes' => $row['team_id'] === null ? $broadcastScopes : null,
+        'progress'   => array_values(array_map(fn($p, $scope) => [
+            'scope' => $scope, 'label' => $p['label'],
+            'departed' => $p['departed'], 'arrived' => $p['arrived'], 'completed' => $p['completed'],
+            'departed_ts' => $p['departed_ts'], 'arrived_ts' => $p['arrived_ts'], 'completed_ts' => $p['completed_ts'],
+        ], $progress, array_keys($progress))),
     ];
 }
 
@@ -86,20 +101,41 @@ foreach (dbFetchAll("SELECT label, geo FROM mission_search_areas WHERE mission_i
 }
 
 $sectors = [];
-foreach (dbFetchAll(
-    "SELECT s.label, s.geo, s.status, mt.color
+$sectorRows = dbFetchAll(
+    "SELECT s.id, s.label, s.geo, s.status, s.status_updated_at, s.created_at, mt.color
      FROM mission_search_sectors s
      LEFT JOIN mission_teams mt ON mt.id = s.team_id
      WHERE s.mission_id = ? ORDER BY s.created_at, s.id",
     [$missionId]
-) as $row) {
+);
+$logBySector = [];
+if ($sectorRows) {
+    $sph = implode(',', array_fill(0, count($sectorRows), '?'));
+    foreach (dbFetchAll(
+        "SELECT sector_id, from_status, to_status, created_at FROM mission_sector_status_log
+         WHERE sector_id IN ($sph) ORDER BY sector_id, created_at, id",
+        array_map(fn($r) => (int) $r['id'], $sectorRows)
+    ) as $l) {
+        $logBySector[(int) $l['sector_id']][] = [
+            'from_status' => $l['from_status'], 'to_status' => $l['to_status'],
+            'ts' => (int) strtotime($l['created_at']), 'time' => date('d/m H:i', strtotime($l['created_at'])),
+        ];
+    }
+}
+foreach ($sectorRows as $row) {
     $geo = $decodeGeo($row['geo']);
-    if ($geo !== null) $sectors[] = ['label' => (string) $row['label'], 'geo' => $geo, 'color' => $teamColor($row['color'])];
+    if ($geo !== null) $sectors[] = [
+        'label' => (string) $row['label'], 'geo' => $geo, 'color' => $teamColor($row['color']),
+        'status' => $row['status'], 'created_ts' => (int) strtotime($row['created_at']),
+        'status_updated_at' => $row['status_updated_at'] ? date('d/m H:i', strtotime($row['status_updated_at'])) : null,
+        'completed_ts' => $row['status'] === 'completed' && $row['status_updated_at'] ? (int) strtotime($row['status_updated_at']) : null,
+        'status_log' => $logBySector[(int) $row['id']] ?? [],
+    ];
 }
 
 $routes = [];
 $routeRows = dbFetchAll(
-    "SELECT r.id, r.title, r.is_closed_loop, mt.color
+    "SELECT r.id, r.title, r.is_closed_loop, r.created_at, r.completed_at, r.cancelled_at, mt.color
      FROM mission_routes r LEFT JOIN mission_teams mt ON mt.id = r.team_id
      WHERE r.mission_id = ? ORDER BY r.created_at",
     [$missionId]
@@ -117,7 +153,13 @@ if ($routeRows) {
     foreach ($routeRows as $row) {
         $wps = $waypointsByRoute[(int) $row['id']] ?? [];
         if ($wps) {
-            $routes[] = ['title' => (string) $row['title'], 'closed' => (bool) $row['is_closed_loop'], 'color' => $teamColor($row['color']), 'waypoints' => $wps];
+            $routes[] = [
+                'title' => (string) $row['title'], 'closed' => (bool) $row['is_closed_loop'], 'color' => $teamColor($row['color']), 'waypoints' => $wps,
+                'status' => $row['cancelled_at'] ? 'cancelled' : ($row['completed_at'] ? 'completed' : 'active'),
+                'created_ts' => (int) strtotime($row['created_at']),
+                'completed_ts' => $row['completed_at'] ? (int) strtotime($row['completed_at']) : null,
+                'cancelled_ts' => $row['cancelled_at'] ? (int) strtotime($row['cancelled_at']) : null,
+            ];
         }
     }
 }
@@ -183,6 +225,7 @@ $jsKeys = [
     'archive.auto_suffix', 'archive.route_popup', 'archive.waypoint_popup',
     'archive.view_street', 'archive.view_topo', 'archive.view_satellite', 'archive.view_hybrid',
     'archive.media_video_gone',
+    'timemachine.summary', 'timemachine.summary_none',
     // Stops and gaps in the trail, the same words as the live Πορεία Ομάδων.
     'trail.stop_title', 'trail.stop_fixes', 'trail.duration_m', 'trail.duration_hm', 'trail.gap_tooltip',
 ];
@@ -254,6 +297,10 @@ include __DIR__ . '/includes/header.php';
                         <input class="form-check-input" type="checkbox" id="archiveCollapse" checked>
                         <label class="form-check-label small" for="archiveCollapse"><?= h(t('trail.collapse_stops')) ?></label>
                     </div>
+                    <div class="col-auto form-check ms-2">
+                        <input class="form-check-input" type="checkbox" id="archiveOrdersAsOf" checked>
+                        <label class="form-check-label small" for="archiveOrdersAsOf"><?= h(t('timemachine.orders_toggle')) ?></label>
+                    </div>
                     <div class="col-auto">
                         <button type="button" id="archiveShow" class="btn btn-primary btn-sm"><?= h(t('archive.btn_show')) ?></button>
                     </div>
@@ -273,6 +320,7 @@ include __DIR__ . '/includes/header.php';
                     <input type="range" id="archiveScrubber" class="form-range flex-grow-1" step="1">
                     <span class="small text-muted text-nowrap" id="archiveScrubberTime"></span>
                 </div>
+                <div class="small text-muted mt-1 d-none" id="archiveOrdersSummary"></div>
             </div>
         </div>
         <div class="col-lg-4">
@@ -344,6 +392,8 @@ include __DIR__ . '/includes/header.php';
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/esri-imagery.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/trail-display.js?v=<?= APP_VERSION ?>"></script>
+<?php /* How an order stood at a moment (v3.442.0): the same working-out as the live «Πορεία Ομάδων». */ ?>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-time-machine.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-time-machine.js') ?>"></script>
 <script>
 (function () {
     const ARCHIVE = <?= json_encode($archive, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
@@ -376,16 +426,11 @@ include __DIR__ . '/includes/header.php';
     const staticBounds = [];
     const extend = (lat, lng) => staticBounds.push([lat, lng]);
 
+    // The orders themselves (points and areas, sectors, routes) are drawn by drawOrders() further down, as they stood at
+    // the moment the replay scrubber is on; here only the frame they all fit in, from every one of them.
     ARCHIVE.dispatches.forEach(d => {
-        const tip = esc(d.label || '') + (d.team ? ' — ' + esc(d.team) : '');
-        const color = d.color || '#7c3aed';
-        if (d.type === 'point' && d.geo.lat !== undefined) {
-            L.circleMarker([d.geo.lat, d.geo.lng], {radius: 8, color: '#fff', weight: 2, fillColor: color, fillOpacity: 0.9}).bindTooltip(tip).addTo(groups.dispatch);
-            extend(d.geo.lat, d.geo.lng);
-        } else if (Array.isArray(d.geo) && d.geo.length) {
-            L.polygon(d.geo, {color, weight: 2, opacity: 0.6, dashArray: '6,4', fillOpacity: 0.06}).bindTooltip(tip).addTo(groups.dispatch);
-            d.geo.forEach(p => extend(p[0], p[1]));
-        }
+        if (d.type === 'point' && d.geo.lat !== undefined) extend(d.geo.lat, d.geo.lng);
+        else if (Array.isArray(d.geo) && d.geo.length) d.geo.forEach(p => extend(p[0], p[1]));
     });
     ARCHIVE.areas.forEach(a => {
         if (!Array.isArray(a.geo) || !a.geo.length) return;
@@ -393,21 +438,59 @@ include __DIR__ . '/includes/header.php';
         a.geo.forEach(p => extend(p[0], p[1]));
     });
     ARCHIVE.sectors.forEach(s => {
-        if (!Array.isArray(s.geo) || !s.geo.length) return;
-        L.polygon(s.geo, {color: s.color || '#0d9488', weight: 1.5, opacity: 0.6, fillOpacity: 0.1}).bindTooltip(esc(s.label)).addTo(groups.sectors);
-        s.geo.forEach(p => extend(p[0], p[1]));
+        if (Array.isArray(s.geo) && s.geo.length) s.geo.forEach(p => extend(p[0], p[1]));
     });
-    ARCHIVE.routes.forEach(r => {
-        const color = r.color || '#2563eb';
-        const pts = r.waypoints.map(w => [w.lat, w.lng]);
-        if (r.closed && pts.length > 2) pts.push(pts[0]);
-        if (pts.length > 1) L.polyline(pts, {color, weight: 3, opacity: 0.55, dashArray: '2,8'}).bindTooltip(esc(STR['archive.route_popup'].replace('{title}', r.title))).addTo(groups.routes);
-        r.waypoints.forEach((w, i) => {
-            L.circleMarker([w.lat, w.lng], {radius: 5, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1})
-                .bindTooltip(esc(STR['archive.waypoint_popup'].replace('{n}', i + 1).replace('{label}', w.label))).addTo(groups.routes);
-            extend(w.lat, w.lng);
+    ARCHIVE.routes.forEach(r => r.waypoints.forEach(w => extend(w.lat, w.lng)));
+
+    // ── The orders, as they stood at a moment (assets/js/war-room-time-machine.js) ──
+    // Not given yet: not there. Finished by then: a quiet record of what was covered (a small tick for a point, an
+    // outline for a sector, a faint line for a route), as on the live map; still going: drawn full. The end of the
+    // scrubber is the end of the mission, when nothing is going any more except what was never finished.
+    const sectorOrders = L.layerGroup().addTo(groups.sectors);
+    function drawOrders(T) {
+        groups.dispatch.clearLayers();
+        groups.routes.clearLayers();
+        sectorOrders.clearLayers();
+        const ds = ARCHIVE.dispatches.map(d => wrTimeDispatch(d, T)).filter(Boolean);
+        const ss = ARCHIVE.sectors.map(s => wrTimeSector(s, T)).filter(Boolean);
+        const rs = ARCHIVE.routes.map(r => wrTimeRoute(r, T)).filter(Boolean);
+        ds.forEach(d => {
+            const total = Array.isArray(d.all_scopes) ? d.all_scopes.length : 0;
+            const part = total && d.teams_done > 0 && d.teams_done < total ? ' ✓' + d.teams_done + '/' + total : '';
+            const done = !!d.completed_ts;
+            const tip = esc(d.label || '') + (d.team ? ' — ' + esc(d.team) : '') + part + (done ? ' · ✓ ' + esc(d.completed_display || '') : '');
+            const color = d.color || '#7c3aed';
+            if (d.type === 'point' && d.geo.lat !== undefined) {
+                L.circleMarker([d.geo.lat, d.geo.lng], done
+                    ? {radius: 5, color: '#fff', weight: 1.5, fillColor: color, fillOpacity: 0.4}
+                    : {radius: 8, color: '#fff', weight: 2, fillColor: color, fillOpacity: 0.9}).bindTooltip(tip).addTo(groups.dispatch);
+            } else if (Array.isArray(d.geo) && d.geo.length) {
+                L.polygon(d.geo, done
+                    ? {color, weight: 1.5, opacity: 0.35, dashArray: '4,4', fillOpacity: 0.02}
+                    : {color, weight: 2, opacity: 0.6, dashArray: '6,4', fillOpacity: 0.06}).bindTooltip(tip).addTo(groups.dispatch);
+            }
         });
-    });
+        ss.forEach(s => {
+            if (!Array.isArray(s.geo) || !s.geo.length) return;
+            const done = s.status === 'completed';
+            L.polygon(s.geo, done
+                ? {color: s.color || '#0d9488', weight: 2, opacity: 0.85, fillOpacity: 0.04}
+                : {color: s.color || '#0d9488', weight: 1.5, opacity: 0.6, fillOpacity: 0.22})
+                .bindTooltip(esc(s.label) + (done && s.status_updated_at ? ' · ✓ ' + esc(s.status_updated_at) : '')).addTo(sectorOrders);
+        });
+        rs.forEach(r => {
+            const faint = r.status !== 'active';
+            const color = r.color || '#2563eb';
+            const pts = r.waypoints.map(w => [w.lat, w.lng]);
+            if (r.closed && pts.length > 2) pts.push(pts[0]);
+            if (pts.length > 1) L.polyline(pts, {color, weight: faint ? 2 : 3, opacity: faint ? 0.25 : 0.55, dashArray: '2,8'}).bindTooltip(esc(STR['archive.route_popup'].replace('{title}', r.title))).addTo(groups.routes);
+            r.waypoints.forEach((w, i) => {
+                L.circleMarker([w.lat, w.lng], {radius: faint ? 3.5 : 5, color: '#fff', weight: faint ? 1 : 2, fillColor: color, fillOpacity: faint ? 0.4 : 1})
+                    .bindTooltip(esc(STR['archive.waypoint_popup'].replace('{n}', i + 1).replace('{label}', w.label))).addTo(groups.routes);
+            });
+        });
+        return wrTimeCounts(ds, ss, rs);
+    }
     const sevColor = {low: '#16a34a', medium: '#f59e0b', high: '#ea580c', critical: '#dc2626'};
     ARCHIVE.incidents.forEach(i => {
         L.circleMarker([i.lat, i.lng], {radius: 9, color: '#fff', weight: 2, fillColor: sevColor[i.severity] || '#dc2626', fillOpacity: 1}).bindPopup(esc(i.text)).addTo(groups.incidents);
@@ -514,6 +597,20 @@ include __DIR__ . '/includes/header.php';
         });
         if (fit && bounds.length) { map.invalidateSize(); map.fitBounds(L.latLngBounds(bounds.concat(staticBounds)), {padding: [40, 40]}); }
         renderEvents(cutoff);
+        // The orders stand as they did at this instant too: one place, so no call site can move the trails and leave them behind.
+        applyOrders(cutoff);
+    }
+    // The end of the scrubber (or no scrubber, or «Οι εντολές όπως ήταν» unticked) is the end of the mission.
+    const ordersSummary = document.getElementById('archiveOrdersSummary');
+    function applyOrders(cutoff) {
+        const on = document.getElementById('archiveOrdersAsOf').checked;
+        const past = on && cutoff !== Infinity && !(maxTs !== null && cutoff >= maxTs);
+        const n = drawOrders(past ? cutoff : Infinity);
+        if (!past) { ordersSummary.textContent = ''; ordersSummary.classList.add('d-none'); return; }
+        const text = (n.d + n.s + n.r === 0) ? STR['timemachine.summary_none'] : STR['timemachine.summary'];
+        ordersSummary.textContent = text.replace('{time}', fmtTime(cutoff))
+            .replace('{d}', n.d).replace('{dc}', n.dc).replace('{s}', n.s).replace('{sc}', n.sc).replace('{r}', n.r).replace('{rc}', n.rc);
+        ordersSummary.classList.remove('d-none');
     }
     function setLabel(ts) { timeLabel.textContent = fmtTime(ts); }
     function stopReplay() { if (timer) { clearInterval(timer); timer = null; } playBtn.innerHTML = '<i class="bi bi-play-fill"></i>'; }
@@ -561,6 +658,11 @@ include __DIR__ . '/includes/header.php';
     document.getElementById('archiveCollapse').addEventListener('change', () => {
         renderTrails(bar.classList.contains('d-none') ? Infinity : Number(scrubber.value), false);
     });
+    // Ticking «Οι εντολές όπως ήταν εκείνη την ώρα» or not changes only the orders: redraw where the scrubber is.
+    document.getElementById('archiveOrdersAsOf').addEventListener('change', () => {
+        renderTrails(bar.classList.contains('d-none') ? Infinity : Number(scrubber.value), false);
+    });
+    drawOrders(Infinity);   // the first picture, before the trails have come
     loadTrails();
 
     // ── Gallery viewer: one photo or one video at a time, read only ──────────

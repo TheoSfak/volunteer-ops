@@ -9322,7 +9322,10 @@ function renderTeamRosters(items) {
 function dispatchTeamLabelHtml(item) {
     const p = item.team_id && item.progress && item.progress.length === 1 ? item.progress[0] : null;
     const status = p ? (p.completed ? '✅ ' : (p.arrived ? '📍 ' : (p.departed ? '🚶 ' : ''))) : '';
-    return `<span style="background:${item.team_color_bg};color:${item.team_color_fg};padding:2px 8px;border-radius:10px;font-weight:700;font-size:.72rem;white-space:nowrap;box-shadow:0 1px 3px #0006;">${status}${escapeHtml(item.team_label)}</span>`;
+    // An order to EVERY team says how many have finished it, «2/3», while some still have not (v3.442.0).
+    const total = !item.team_id && Array.isArray(item.all_scopes) ? item.all_scopes.length : 0;
+    const howMany = total && item.teams_done > 0 && item.teams_done < total ? ` ✓${item.teams_done}/${total}` : '';
+    return `<span style="background:${item.team_color_bg};color:${item.team_color_fg};padding:2px 8px;border-radius:10px;font-weight:700;font-size:.72rem;white-space:nowrap;box-shadow:0 1px 3px #0006;">${status}${escapeHtml(item.team_label)}${howMany}</span>`;
 }
 // The casualty a dispatch was sent to (v3.344.0), wherever the order is shown
 // to the team going: who, a button that calls them, and — once command has

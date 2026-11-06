@@ -264,6 +264,161 @@ final class TimeMachineTest extends TestCase
         $this->assertSame('archived', $out['phaseLater'], 'ten minutes and a second after');
     }
 
+    // ── An order sent to every team (v3.442.0) ──────────────────────────────
+
+    private function addMember(int $teamId): void
+    {
+        $userId = (int) dbInsert(
+            "INSERT INTO users (name, email, password) VALUES (?, ?, ?)",
+            ['Member', 'tm-member-' . uniqid('', true) . '@example.invalid', 'x']
+        );
+        dbInsert("INSERT INTO mission_team_members (team_id, mission_id, user_id) VALUES (?, ?, ?)", [$teamId, $this->missionId, $userId]);
+    }
+
+    private function broadcastItem(int $id): array
+    {
+        foreach (loadMissionDispatchesForUser($this->missionId, $this->adminId, true, false) as $row) {
+            if ($row['id'] === $id) {
+                return $row;
+            }
+        }
+        $this->fail('dispatch ' . $id . ' is not in the payload');
+    }
+
+    public function testAnOrderToEveryTeamIsFinishedOnlyWhenEveryTeamWithMembersHas(): void
+    {
+        $this->addMember($this->teamA);
+        $teamB = (int) dbInsert(
+            "INSERT INTO mission_teams (mission_id, codename, team_number, color, created_by) VALUES (?, ?, ?, ?, ?)",
+            [$this->missionId, 'ΒΗΤΑ', 2, '#2a78d6', $this->adminId]
+        );
+        $this->addMember($teamB);
+        // A third team with nobody in it cannot finish anything, so the order must not wait for it.
+        dbInsert(
+            "INSERT INTO mission_teams (mission_id, codename, team_number, color, created_by) VALUES (?, ?, ?, ?, ?)",
+            [$this->missionId, 'ΓΑΜΜΑ', 3, '#2a78d6', $this->adminId]
+        );
+        $id = (int) dbInsert(
+            "INSERT INTO mission_dispatch_points (mission_id, team_id, type, geo, label, created_by) VALUES (?, NULL, 'point', ?, ?, ?)",
+            [$this->missionId, json_encode(['lat' => 35.2, 'lng' => 24.9]), 'Για όλους', $this->adminId]
+        );
+        $first = date('Y-m-d H:i:s', time() - 1200);
+        $last = date('Y-m-d H:i:s', time() - 300);
+
+        $item = $this->broadcastItem($id);
+        $this->assertSame(['t' . $this->teamA, 't' . $teamB], $item['all_scopes'], 'the empty team is not waited for');
+        $this->assertSame(0, $item['teams_done']);
+        $this->assertNull($item['completed_ts']);
+
+        dbInsert("INSERT INTO mission_dispatch_progress (dispatch_id, team_id, scope_key, completed_at, completed_by) VALUES (?, ?, ?, ?, ?)",
+            [$id, $this->teamA, 't' . $this->teamA, $first, $this->adminId]);
+        $item = $this->broadcastItem($id);
+        $this->assertSame(1, $item['teams_done']);
+        $this->assertNull($item['completed_ts'], 'one team of two: still a live order');
+        $this->assertNull($item['completed_display']);
+
+        dbInsert("INSERT INTO mission_dispatch_progress (dispatch_id, team_id, scope_key, completed_at, completed_by) VALUES (?, ?, ?, ?, ?)",
+            [$id, $teamB, 't' . $teamB, $last, $this->adminId]);
+        $item = $this->broadcastItem($id);
+        $this->assertSame(2, $item['teams_done']);
+        $this->assertSame(strtotime($last), $item['completed_ts'], 'finished at the moment the LAST team did');
+        $this->assertSame(date('H:i', strtotime($last)), $item['completed_display']);
+    }
+
+    public function testATeamThatCannotKeepsAnOrderToEveryTeamLive(): void
+    {
+        // «Δεν μπορώ» is not a finish: the order still asks for something, so it must not fade.
+        $this->addMember($this->teamA);
+        $id = (int) dbInsert(
+            "INSERT INTO mission_dispatch_points (mission_id, team_id, type, geo, label, created_by) VALUES (?, NULL, 'point', ?, ?, ?)",
+            [$this->missionId, json_encode(['lat' => 35.2, 'lng' => 24.9]), 'Για όλους', $this->adminId]
+        );
+        // The team answered, but did not finish.
+        dbInsert("INSERT INTO mission_dispatch_progress (dispatch_id, team_id, scope_key, departed_at) VALUES (?, ?, ?, ?)",
+            [$id, $this->teamA, 't' . $this->teamA, date('Y-m-d H:i:s', time() - 600)]);
+
+        $item = $this->broadcastItem($id);
+        $this->assertSame(0, $item['teams_done']);
+        $this->assertNull($item['completed_ts']);
+    }
+
+    public function testAnOrderToOneTeamHasNoCountToShow(): void
+    {
+        $this->addMember($this->teamA);
+        $id = (int) dbInsert(
+            "INSERT INTO mission_dispatch_points (mission_id, team_id, type, geo, label, created_by) VALUES (?, ?, 'point', ?, ?, ?)",
+            [$this->missionId, $this->teamA, json_encode(['lat' => 35.2, 'lng' => 24.9]), 'Για μία', $this->adminId]
+        );
+        $item = $this->broadcastItem($id);
+        $this->assertNull($item['all_scopes']);
+        $this->assertNull($item['teams_done']);
+    }
+
+    public function testTheBroadcastWorkingOutIsTheSameOnTheServerAndInTheBrowser(): void
+    {
+        $out = $this->harness();
+        $this->assertSame(0, $out['bc125']['teams_done'], 'a volunteer with no team finishing it does not count for the teams');
+        $this->assertSame(1, $out['bc135']['teams_done']);
+        $this->assertNull($out['bc135']['completed_ts']);
+        $this->assertSame(2, $out['bc155']['teams_done']);
+        $this->assertSame(150, $out['bc155']['completed_ts'], 'the moment the last team finished');
+        $this->assertSame('00:03', $out['bc155']['completed_display']);
+        $this->assertNull($out['bcEmpty']['completed_ts'], 'no team to wait for: never finished');
+        $this->assertNull($out['bcBefore'], 'not sent yet');
+    }
+
+    public function testTheEndOfTheMissionIsTheStatusTheRowHas(): void
+    {
+        $out = $this->harness();
+        $this->assertSame(['completed', 120], [$out['endSector7']['status'], $out['endSector7']['completed_ts']]);
+        // Completed by a change nobody logged: at the end the row wins over the log, and the payload says when.
+        $this->assertSame('completed', $out['endUnlogged']['status']);
+        $this->assertSame(75, $out['endUnlogged']['completed_ts']);
+        $this->assertSame('00:07', $out['endUnlogged']['status_updated_at']);
+        $this->assertSame('in_progress', $out['pastUnlogged']['status'], 'but at a moment before it, the log is what says');
+        $this->assertNull($out['pastUnlogged']['completed_ts']);
+        $this->assertSame('cancelled', $out['endRoute22']);
+        $this->assertSame(130, $out['endDispatch1']);
+    }
+
+    public function testTheCountsLineIsSharedAndLeavesCalledOffRoutesOut(): void
+    {
+        $this->assertSame(['d' => 2, 'dc' => 1, 's' => 3, 'sc' => 1, 'r' => 1, 'rc' => 0], $this->harness()['counts135']);
+    }
+
+    // ── The archive of a finished mission (v3.442.0) ────────────────────────
+
+    public function testTheArchiveCarriesTheMomentsOfEveryOrderInThePayloadShapeTheMachineReads(): void
+    {
+        $archive = $this->source('mission-archive.php');
+        foreach (['sent_ts', 'all_scopes', 'departed_ts', 'arrived_ts', 'completed_ts', 'created_ts', 'cancelled_ts', 'status_log', 'to_status', 'from_status'] as $field) {
+            $this->assertStringContainsString("'" . $field . "'", $archive, $field);
+        }
+        $this->assertStringContainsString('missionBroadcastScopes($missionId)', $archive);
+        $this->assertStringContainsString('loadDispatchProgress(', $archive);
+        $this->assertStringContainsString('assets/js/war-room-time-machine.js', $archive);
+    }
+
+    public function testTheArchiveDrawsTheOrdersAsOfTheScrubberAndTheEndIsTheEnd(): void
+    {
+        $archive = $this->source('mission-archive.php');
+        $this->assertStringContainsString('wrTimeDispatch(d, T)', $archive);
+        $this->assertStringContainsString('wrTimeSector(s, T)', $archive);
+        $this->assertStringContainsString('wrTimeRoute(r, T)', $archive);
+        $this->assertMatchesRegularExpression('/renderEvents\(cutoff\);[^}]*?applyOrders\(cutoff\);/s', $archive, 'one place, after every render of the trails');
+        $this->assertStringContainsString("past = on && cutoff !== Infinity && !(maxTs !== null && cutoff >= maxTs)", $archive, 'the end of the scrubber is the end of the mission');
+        $this->assertStringContainsString('id="archiveOrdersAsOf" checked', $archive);
+        $this->assertStringContainsString('id="archiveOrdersSummary"', $archive);
+        $this->assertStringContainsString("'timemachine.summary', 'timemachine.summary_none'", $archive);
+        $this->assertStringNotContainsString('fetch(', $this->source('assets/js/war-room-time-machine.js'));
+    }
+
+    public function testTheCountLabelIsOnThePinOfAnOrderToEveryTeam(): void
+    {
+        $page = $this->source('war-room.php');
+        $this->assertMatchesRegularExpression('/function dispatchTeamLabelHtml\(item\) \{.*?item\.all_scopes.*?item\.teams_done.*?howMany/s', $page);
+    }
+
     // ── How the page is wired ───────────────────────────────────────────────
 
     public function testTheThreeRenderFunctionsGoThroughTheMachineAtTheirTop(): void
