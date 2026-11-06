@@ -469,16 +469,22 @@ dbExecute("DELETE FROM osm_feature_cache WHERE tile_key = 'zz_fresh'");
 dbExecute("DELETE FROM settings WHERE setting_key IN (?, ?)", [OSM_BREAKER_KEY, ELEVATION_BREAKER_KEY]);
 PHP;
         $file = tempnam(sys_get_temp_dir(), 'vo_ext_');
+        // The child's own log lines ("[ext] type=overpass ...") go to a file of their own. With no error_log in
+        // php.ini (GitHub's runner) PHP prints them to stderr, `2>&1` folds them into the output compared below,
+        // and the test failed on every push since v3.434.2 while passing on a machine whose php.ini names a log.
+        $log = tempnam(sys_get_temp_dir(), 'vo_ext_log_');
         file_put_contents($file, "<?php\n" . $script);
         try {
-            $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($file) . ' ' . escapeshellarg($root) . ' 2>&1';
+            $cmd = escapeshellarg(PHP_BINARY) . ' -d error_log=' . escapeshellarg($log) . ' ' . escapeshellarg($file) . ' ' . escapeshellarg($root) . ' 2>&1';
             $output = (string) shell_exec($cmd);
+            $logged = (string) @file_get_contents($log);
         } finally {
             @unlink($file);
+            @unlink($log);
         }
-        $this->assertStringNotContainsString('undefined function', $output, $output);
-        $this->assertStringNotContainsString('Fatal error', $output, $output);
-        $this->assertSame('failed|204|null', trim($output), $output);
+        $this->assertStringNotContainsString('undefined function', $output . $logged, $output . $logged);
+        $this->assertStringNotContainsString('Fatal error', $output . $logged, $output . $logged);
+        $this->assertSame('failed|204|null', trim($output), $output . $logged);
     }
 
     public function testEveryCallerThatWaitsNobodyIsBoundedAndTheOnesThatDoNotAreTagged(): void
