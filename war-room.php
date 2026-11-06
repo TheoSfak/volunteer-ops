@@ -3721,6 +3721,17 @@ include __DIR__ . '/includes/header.php';
     .team-board-idle { margin-top: .15rem; font-size: .72rem; font-weight: 700; color: #fbbf24; }
     .team-board-more { margin-top: .15rem; font-size: .66rem; color: #94a3b8; }
     @media (prefers-reduced-motion: reduce) { .team-board-chevron { transition: none; } }
+
+    /* A modal is what is being worked on, and these three float at z-index 1150, above Bootstrap's modal (1055)
+       and its backdrop (1050): the «Εντολές ομάδων» board and the acknowledgement panel (with the cards dragged
+       out of it) sat on top of the point/area window and covered its map. While any modal is open they go under
+       the backdrop, one step below it and above the page, and come back when it closes. Not the ticker (1900),
+       the SOS overlay or the order popup: those are alarms and stay on top of everything, as before. Inside a
+       fullscreen map the acknowledgement nodes already sit at 620/621 (an id rule, which wins), so only the board
+       needed this there. */
+    body.modal-open .ack-tracker,
+    body.modal-open .ack-tracker-float,
+    body.modal-open .team-board { z-index: 1040; }
     /* Phone: along the top, full width less the gutters; the acknowledgement
        panel has the bottom. Starts minimized there (initTeamBoard()), and the
        list scrolls inside a short cap so the page is still the page. */
