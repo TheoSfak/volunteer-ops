@@ -173,7 +173,14 @@ wrExternalJsApplyCanary();
 // what needs the coordinator, the teams, the order form and the feed docked
 // around it. Command staff only, and only by their own choice (the hero button):
 // a cookie asking for it from anyone else is ignored, exactly like an unknown value.
-if ($viewModeCookie === 'console' && !$canManageWarRoom) {
+// The cookie belongs to the BROWSER, not to the account. An admin who picked a
+// view on a phone (or in the Android app) leaves it behind when they sign out,
+// and the next person to sign in there - a plain volunteer - inherited it: 'full'
+// gave them the desktop layout (no tab bar, SOS in the middle of the page) with
+// no way back, because the view button only renders for command staff. So for
+// anyone who cannot manage the room the cookie is dropped whatever it says, and
+// the default for their account (the tabs) is what they get.
+if ($viewModeCookie !== '' && !$canManageWarRoom) {
     $viewModeCookie = '';
 }
 $consoleView = $viewModeCookie === 'console';

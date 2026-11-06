@@ -86,13 +86,46 @@ final class WarRoomConsoleTest extends TestCase
         $page = $this->source('war-room.php');
 
         // A cookie asking for the console is dropped for anyone who cannot manage the room.
-        $this->assertStringContainsString("if (\$viewModeCookie === 'console' && !\$canManageWarRoom) {", $page);
+        $this->assertStringContainsString("if (\$viewModeCookie !== '' && !\$canManageWarRoom) {", $page);
         $this->assertStringContainsString("\$consoleView = \$viewModeCookie === 'console';", $page);
 
         // The form that sets the cookie is command-only and takes only the three views.
         $handler = substr($page, (int) strpos($page, "post('action') === 'toggle_view_mode'"), 1800);
         $this->assertStringContainsString('if (!$canManageWarRoom) {', $handler);
         $this->assertStringContainsString("in_array(\$askedMode, ['console', 'full', 'tabs'], true)", $handler);
+    }
+
+    /**
+     * The wr_view_mode cookie belongs to the browser, not to the account. An admin
+     * who chose «Πλήρης όψη» on a phone (or in the Android app) left 'full' behind
+     * when they signed out, and the next person to sign in there, a plain
+     * volunteer, got the desktop layout: no tab bar, the SOS in the middle of the
+     * page, and no way back, because the view button only renders for command
+     * staff. Dropping only 'console' (the old rule) was not enough: 'full' and
+     * 'tabs' are just as foreign to someone who cannot manage the room.
+     */
+    public function testTheViewCookieIsDroppedForAnyoneWhoCannotManageTheRoom(): void
+    {
+        $page = $this->source('war-room.php');
+
+        // Whatever the cookie says, not just 'console'.
+        $drop = "if (\$viewModeCookie !== '' && !\$canManageWarRoom) {";
+        $this->assertSame(1, substr_count($page, $drop));
+        $this->assertStringNotContainsString("\$viewModeCookie === 'console' && !\$canManageWarRoom", $page);
+
+        // ...and before anything is worked out from it.
+        $dropAt = (int) strpos($page, $drop);
+        foreach ([
+            "\$consoleView = \$viewModeCookie === 'console';",
+            "\$volunteerTabs = in_array(\$viewModeCookie, ['tabs', 'full', 'console'], true)",
+        ] as $derived) {
+            $at = strpos($page, $derived);
+            $this->assertNotFalse($at, "$derived is gone");
+            $this->assertGreaterThan($dropAt, $at, "$derived is worked out before the cookie is dropped");
+        }
+
+        // Nothing else reads the cookie, so there is no second path around the rule.
+        $this->assertSame(1, substr_count($page, "\$_COOKIE['wr_view_mode']"));
     }
 
     public function testTheConsoleAssetsLoadForTheConsoleViewOnly(): void
