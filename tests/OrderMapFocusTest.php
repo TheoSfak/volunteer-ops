@@ -21,7 +21,7 @@ final class OrderMapFocusTest extends TestCase
 
     protected function setUp(): void
     {
-        $text = file_get_contents(__DIR__ . '/../war-room.php');
+        $text = WarRoomSource::full();
         $this->assertNotFalse($text);
         $this->page = str_replace("\r\n", "\n", (string) $text);
     }

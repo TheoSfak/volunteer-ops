@@ -15,7 +15,7 @@ final class ConsoleLiveButtonTest extends TestCase
 {
     private function source(string $relative): string
     {
-        return (string) file_get_contents(__DIR__ . '/../' . $relative);
+        return (string) WarRoomSource::read($relative);
     }
 
     public function testTheButtonReadsTheMarkupTheLiveCardActuallyHas(): void

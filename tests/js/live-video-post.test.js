@@ -19,7 +19,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const SRC = fs.readFileSync(path.join(__dirname, '../../war-room.php'), 'utf8');
+const SRC = require('./war-room-source').full();
 
 // Functions in that block are indented four spaces and close on a line that is
 // exactly "    }". If either anchor ever stops matching, say so plainly rather

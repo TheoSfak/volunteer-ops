@@ -153,7 +153,7 @@ final class RosterSignatureTest extends TestCase
 
     public function testOnlyCommandStaffAreGivenTheFingerprint(): void
     {
-        $page = file_get_contents(__DIR__ . '/../war-room.php');
+        $page = WarRoomSource::full();
 
         $this->assertStringContainsString('$rosterSig = $canManageWarRoom ? missionRosterSignature($missionId) : null;', $page);
         $this->assertStringContainsString("'rosterSig' => \$rosterSig,", $page);
@@ -162,7 +162,7 @@ final class RosterSignatureTest extends TestCase
 
     public function testAMismatchReloadsThroughTheSoftReloadWithItsOwnNotice(): void
     {
-        $page = file_get_contents(__DIR__ . '/../war-room.php');
+        $page = WarRoomSource::full();
 
         $this->assertStringContainsString(
             "else if (data.rosterSig && ROSTER_SIG && data.rosterSig !== ROSTER_SIG) reloadForGpsChange(false, 'roster');",

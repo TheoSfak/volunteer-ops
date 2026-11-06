@@ -32,7 +32,7 @@ final class ConsoleMapMenusTest extends TestCase
     protected function setUp(): void
     {
         $this->base = (string) file_get_contents(__DIR__ . '/../assets/css/war-room-console.css');
-        $this->warRoom = (string) file_get_contents(__DIR__ . '/../war-room.php');
+        $this->warRoom = (string) WarRoomSource::full();
     }
 
     /** (ids, classes + attributes + pseudo-classes, elements) of one simple selector chain. */

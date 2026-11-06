@@ -484,7 +484,7 @@ PHP;
     public function testEveryCallerThatWaitsNobodyIsBoundedAndTheOnesThatDoNotAreTagged(): void
     {
         $root = realpath(__DIR__ . '/..');
-        $read = fn(string $f) => (string) file_get_contents($root . '/' . $f);
+        $read = fn(string $f) => (string) WarRoomSource::read($f);
 
         // The two jobs nobody waits for are the only callers allowed the long deadline.
         $this->assertStringContainsString('$maxAge, true);', $read('includes/osm-bulk.php'));

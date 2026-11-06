@@ -21,7 +21,7 @@ final class ConsoleFindMeasureTest extends TestCase
 {
     private static function source(string $file): string
     {
-        return str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../' . $file));
+        return str_replace("\r\n", "\n", (string) \WarRoomSource::read($file));
     }
 
     /** The text between two markers of a source file. */

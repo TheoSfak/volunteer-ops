@@ -217,7 +217,7 @@ final class ChatUnreadPollTest extends TestCase
 
     public function testThePageNoLongerAsksForTheOtherRoomsOneByOne(): void
     {
-        $warRoom = (string) file_get_contents(__DIR__ . '/../war-room.php');
+        $warRoom = (string) WarRoomSource::full();
 
         $this->assertStringNotContainsString('pollOtherRoomsForUnread()', $warRoom, 'the per-room poll is back');
         $this->assertStringNotContainsString('team_id=${otherTeamId}', $warRoom, 'a request per other room is back');
@@ -226,7 +226,7 @@ final class ChatUnreadPollTest extends TestCase
 
     public function testTheMainPollCarriesTheCursorsAndAppliesTheAnswer(): void
     {
-        $warRoom = (string) file_get_contents(__DIR__ . '/../war-room.php');
+        $warRoom = (string) WarRoomSource::full();
 
         $this->assertStringContainsString("'&chat_after=' + encodeURIComponent(chatCursors)", $warRoom);
         $this->assertStringContainsString('window.wrChat.apply(data.chatUnread)', $warRoom);
@@ -240,7 +240,7 @@ final class ChatUnreadPollTest extends TestCase
 
     public function testTheServerOnlyAnswersAPageThatAsked(): void
     {
-        $warRoom = (string) file_get_contents(__DIR__ . '/../war-room.php');
+        $warRoom = (string) WarRoomSource::full();
 
         $this->assertMatchesRegularExpression("~'chatUnread' => isset\(\\\$_GET\['chat_after'\]\)\s*\?\s*loadChatRoomUnread\(~", $warRoom);
     }

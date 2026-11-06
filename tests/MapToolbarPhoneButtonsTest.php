@@ -27,7 +27,7 @@ final class MapToolbarPhoneButtonsTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->source = (string) file_get_contents(__DIR__ . '/../war-room.php');
+        $this->source = (string) WarRoomSource::full();
     }
 
     public function testThePhoneRuleHidesTheClassOnlyAtPhoneWidth(): void

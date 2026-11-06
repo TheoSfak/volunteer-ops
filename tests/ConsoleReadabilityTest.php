@@ -180,7 +180,7 @@ final class ConsoleReadabilityTest extends TestCase
     {
         $css = self::css();
         // The chip's fill is the page's own cream; the cluster discs are MarkerCluster's green / gold / orange.
-        $page = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../war-room.php'));
+        $page = str_replace("\r\n", "\n", (string) \WarRoomSource::full());
         $this->assertStringContainsString('.wr-hidden-chip { background: #fff8e1;', $page, 'the fill the ink is chosen for');
         $this->assertMatchesRegularExpression('~\.wr-hidden-chip \{ color: (#[0-9a-f]{6}); \}~', $css);
         preg_match('~\.wr-hidden-chip \{ color: (#[0-9a-f]{6}); \}~', $css, $chip);
@@ -216,7 +216,7 @@ final class ConsoleReadabilityTest extends TestCase
     public function testTheOtherLooksAreUntouched(): void
     {
         foreach (['assets/css/war-room-console-nocturne.css', 'assets/css/war-room-console-aurora.css', 'assets/css/war-room-console.css'] as $other) {
-            $source = (string) file_get_contents(__DIR__ . '/../' . $other);
+            $source = (string) \WarRoomSource::read($other);
             foreach (['--ov-red-fill', 'wr-polygon-label', 'ov-select'] as $needle) {
                 $this->assertStringNotContainsString($needle, $source, "$other");
             }

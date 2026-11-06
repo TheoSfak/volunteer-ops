@@ -22,7 +22,7 @@ final class BaroFloorWiringTest extends TestCase
 {
     private static function source(string $file): string
     {
-        return (string) file_get_contents(__DIR__ . '/../' . $file);
+        return (string) \WarRoomSource::read($file);
     }
 
     public function testTheRealBootstrapLoadsTheFloorFunctions(): void

@@ -19,7 +19,7 @@ final class VoiceHoldToArmTest extends TestCase
 {
     private static function source(): string
     {
-        return (string) file_get_contents(__DIR__ . '/../war-room.php');
+        return (string) WarRoomSource::full();
     }
 
     private static function wiring(): string

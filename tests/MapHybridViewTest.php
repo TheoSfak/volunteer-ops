@@ -26,7 +26,7 @@ final class MapHybridViewTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->warRoom = (string) file_get_contents(__DIR__ . '/../war-room.php');
+        $this->warRoom = (string) WarRoomSource::full();
     }
 
     private function addMapBaseLayers(): string

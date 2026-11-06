@@ -309,7 +309,7 @@ final class GuestParityTest extends TestCase
 
     public function testWarRoomRemovesVisitorsThroughTheOneFunction(): void
     {
-        $source = (string) file_get_contents(__DIR__ . '/../war-room.php');
+        $source = (string) WarRoomSource::full();
         $this->assertStringContainsString('removeMissionVisitor(', $source);
         $this->assertStringNotContainsString('function activeMissionRecipientIds', $source, 'defined once, in includes/, where the tests reach it');
     }
@@ -362,7 +362,7 @@ final class GuestParityTest extends TestCase
 
     public function testWarRoomRefusesThroughOneExitOnly(): void
     {
-        $source = (string) file_get_contents(__DIR__ . '/../war-room.php');
+        $source = (string) WarRoomSource::full();
         // Everything before the first POST handler is the page's access checks.
         $head = substr($source, 0, (int) strpos($source, 'if (isPost()) {'));
         $this->assertGreaterThan(2000, strlen($head), 'the scan must cover the access checks');
@@ -390,7 +390,7 @@ final class GuestParityTest extends TestCase
 
     public function testExportControlsAreNotOfferedToAVisitor(): void
     {
-        $lines = file(__DIR__ . '/../war-room.php', FILE_IGNORE_NEW_LINES);
+        $lines = preg_split('/\r?\n/', WarRoomSource::full());
         $seen = 0;
         foreach ($lines as $index => $line) {
             if (!preg_match('~href="exports/export-mission-(activity|chat)\.php~', $line)) {
@@ -410,7 +410,7 @@ final class GuestParityTest extends TestCase
         $this->assertContains('export-mission-activity.php', WAR_ROOM_PARTNER_GUEST_PAGES, 'a partner guest keeps the export');
         $this->assertNotContains('export-mission-activity.php', $this->visitorAllowed(), 'which a visitor does not');
         $this->assertNotContains('export-mission-chat.php', $this->visitorAllowed());
-        $this->assertStringContainsString('$canExportMissionData = !isMissionVisitor();', (string) file_get_contents(__DIR__ . '/../war-room.php'));
+        $this->assertStringContainsString('$canExportMissionData = !isMissionVisitor();', (string) WarRoomSource::full());
     }
 
     // ── 5. nothing is mailed to an address that cannot receive ──────────────

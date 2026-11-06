@@ -77,6 +77,16 @@ already being fully migrated. No extra setup needed beyond the DB credentials
 already used by every other test (`TEST_DB_HOST`/`PORT`/`USER`/`PASS`); the
 test creates and tears down its own schema itself.
 
+## Reading the war-room page's source
+
+Many tests pin war-room.php's code by reading its text. They all go through
+`WarRoomSource` (`tests/WarRoomSource.php`; `tests/js/war-room-source.js` for the
+Node tests): `WarRoomSource::full()` is the page and every file its script was
+moved to, `WarRoomSource::read('war-room.php')` is the same thing, and any other
+path is just that file. Never `file_get_contents()` the page directly - the test
+would keep passing while the code it guards moved elsewhere.
+`WarRoomSourceTest` fails when a test does.
+
 ## JavaScript tests
 
 A handful of pure/near-pure functions from war-room.php's inline `<script>`

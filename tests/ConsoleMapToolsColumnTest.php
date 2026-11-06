@@ -24,7 +24,7 @@ final class ConsoleMapToolsColumnTest extends TestCase
 {
     private static function source(string $file): string
     {
-        return str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../' . $file));
+        return str_replace("\r\n", "\n", (string) \WarRoomSource::read($file));
     }
 
     private static function between(string $text, string $from, string $to): string

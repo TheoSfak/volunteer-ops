@@ -28,7 +28,7 @@ final class IncidentOutcomeOptionsTest extends TestCase
         $labels = array_keys(INCIDENT_OUTCOME_LABELS);
         $this->assertEqualsCanonicalizing($labels, self::enumValues(), 'the outcome ENUM and INCIDENT_OUTCOME_LABELS drifted apart');
 
-        $src = (string) file_get_contents(__DIR__ . '/../war-room.php');
+        $src = (string) WarRoomSource::full();
         $start = strpos($src, 'const INCIDENT_OUTCOME_OPTIONS = [');
         $this->assertNotFalse($start);
         preg_match_all("~\\['([a-z_]+)', 'incident\\.outcome\\.~", substr($src, $start, 600), $m);

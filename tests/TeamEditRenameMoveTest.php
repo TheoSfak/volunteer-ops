@@ -217,7 +217,7 @@ final class TeamEditRenameMoveTest extends TestCase
 
     public function testTheEditWindowAndTheSaveAreWiredTogether(): void
     {
-        $page = (string) file_get_contents(__DIR__ . '/../war-room.php');
+        $page = (string) WarRoomSource::full();
         // The field and the select are in the page...
         $this->assertStringContainsString('name="codename" id="editTeamName-', $page);
         $this->assertStringContainsString('name="move_to[<?= $userId ?>]"', $page);

@@ -52,7 +52,7 @@ final class GuestAccessTest extends TestCase
         $sources = array_merge([self::root() . '/war-room.php'], glob(self::root() . '/assets/js/*.js') ?: []);
         $found = [];
         foreach ($sources as $file) {
-            $code = (string) file_get_contents($file);
+            $code = (string) ($file === self::root() . '/war-room.php' ? WarRoomSource::full() : file_get_contents($file));
             // fetch(), the page's own fetchWithTimeout()/post() wrappers, the
             // vitals sensor's `endpoint:` option and sendBeacon — a pattern that
             // only knew fetch( missed ping-location.php and volunteer-status.php.

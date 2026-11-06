@@ -20,7 +20,7 @@ final class PingOfflineQueueWiringTest extends TestCase
 {
     private function source(string $file): string
     {
-        $text = file_get_contents(__DIR__ . '/../' . $file);
+        $text = WarRoomSource::read($file);
         $this->assertNotFalse($text, $file);
         return $text;
     }

@@ -33,7 +33,7 @@ final class CoverageHeatTest extends TestCase
 
     private static function source(string $file): string
     {
-        return str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../' . $file));
+        return str_replace("\r\n", "\n", (string) \WarRoomSource::read($file));
     }
 
     /** A ping row as volunteer_pings gives it: metres east/north of the corner, seconds after T0. */

@@ -23,7 +23,7 @@ final class ArFieldViewTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->warRoom = (string) file_get_contents(__DIR__ . '/../war-room.php');
+        $this->warRoom = (string) WarRoomSource::full();
         $this->module = (string) file_get_contents(__DIR__ . '/../assets/js/war-room-ar.js');
         $this->lang = (string) file_get_contents(__DIR__ . '/../includes/lang/war-room.php');
     }

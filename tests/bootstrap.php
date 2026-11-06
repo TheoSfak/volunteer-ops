@@ -48,3 +48,4 @@ require_once __DIR__ . '/../includes/webpush.php';
 require_once __DIR__ . '/../includes/newsletter-functions.php';
 require_once __DIR__ . '/../includes/training-functions.php';
 require_once __DIR__ . '/../includes/achievements-functions.php';
+require_once __DIR__ . '/WarRoomSource.php';

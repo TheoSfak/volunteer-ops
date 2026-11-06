@@ -148,7 +148,7 @@ final class RestrictedAreaLineTest extends TestCase
 
     public function testTheComposerMapAndAIKnowTheLine(): void
     {
-        $page = (string) file_get_contents(__DIR__ . '/../war-room.php');
+        $page = (string) WarRoomSource::full();
         $this->assertStringContainsString('id="restrictedAreaShapeSelect"', $page);
         $this->assertStringContainsString('<option value="line">', $page);
         $this->assertStringContainsString('shape: shapeSelect.value,', $page);

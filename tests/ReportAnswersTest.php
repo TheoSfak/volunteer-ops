@@ -191,7 +191,7 @@ final class ReportAnswersTest extends TestCase
         $this->assertStringContainsString("post('note')", $page);
         $this->assertStringContainsString('outcome_note = ?', $page);
         // …and the form that sends it.
-        $war = file_get_contents(__DIR__ . '/../war-room.php');
+        $war = WarRoomSource::full();
         $this->assertStringContainsString('incident-note-input', $war);
         $this->assertStringContainsString("note: noteInput ? noteInput.value : ''", $war);
 
@@ -271,7 +271,7 @@ final class ReportAnswersTest extends TestCase
             $this->assertArrayHasKey('html', $fragment);
         }
 
-        $page = file_get_contents(__DIR__ . '/../war-room.php');
+        $page = WarRoomSource::full();
         $this->assertStringContainsString("'myReports' => \$isApprovedParticipant ? buildMyReportsFragments(", $page);
         $this->assertStringContainsString('if (data.myReports) applyLiveFragments(data.myReports);', $page);
         $this->assertStringContainsString("renderMyReportsFragment(\$missionId, (int) \$user['id'], 'shortage')", $page);

@@ -80,7 +80,7 @@ final class RestrictedAreaKindTest extends TestCase
 
     public function testTheComposerOffersTheThreeKindsAndSendsTheChosenOne(): void
     {
-        $page = (string) file_get_contents(__DIR__ . '/../war-room.php');
+        $page = (string) WarRoomSource::full();
         foreach (['danger', 'cliff', 'forbidden'] as $kind) {
             $this->assertStringContainsString('<option value="' . $kind . '"><?= t(\'restricted_area.kind_' . $kind . '\') ?></option>', $page);
         }

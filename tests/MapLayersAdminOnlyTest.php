@@ -26,7 +26,7 @@ final class MapLayersAdminOnlyTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->source = (string) file_get_contents(__DIR__ . '/../war-room.php');
+        $this->source = (string) WarRoomSource::full();
     }
 
     /** The body of a top-level function in war-room.php's script. */

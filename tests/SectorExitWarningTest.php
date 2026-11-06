@@ -343,7 +343,7 @@ final class SectorExitWarningTest extends TestCase
 
     public function testThePopupOffersCompleteSectorAndTheMapTapNeverIsIt(): void
     {
-        $page = (string) file_get_contents(__DIR__ . '/../war-room.php');
+        $page = (string) WarRoomSource::full();
         $fn = function (string $signature) use ($page): string {
             $start = strpos($page, $signature);
             $this->assertNotFalse($start, "$signature is gone");

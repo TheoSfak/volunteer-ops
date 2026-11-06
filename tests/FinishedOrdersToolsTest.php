@@ -65,7 +65,7 @@ final class FinishedOrdersToolsTest extends TestCase
 
     private function source(string $relative): string
     {
-        $source = file_get_contents($this->root() . '/' . $relative);
+        $source = WarRoomSource::read($relative);
         $this->assertNotFalse($source, $relative . ' is missing');
         return $source;
     }

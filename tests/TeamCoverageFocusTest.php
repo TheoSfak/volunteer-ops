@@ -200,7 +200,7 @@ final class TeamCoverageFocusTest extends TestCase
 
     private function source(string $file): string
     {
-        return str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../' . $file));
+        return str_replace("\r\n", "\n", (string) WarRoomSource::read($file));
     }
 
     public function testTheEndpointAnswersPerTeamBehindTheSameGateAndTheSameUnchangedLine(): void

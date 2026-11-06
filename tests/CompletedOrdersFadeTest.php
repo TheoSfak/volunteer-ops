@@ -218,7 +218,7 @@ final class CompletedOrdersFadeTest extends TestCase
 
     private function page(): string
     {
-        return (string) file_get_contents(__DIR__ . '/../war-room.php');
+        return (string) WarRoomSource::full();
     }
 
     private function script(): string

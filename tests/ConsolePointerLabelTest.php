@@ -26,7 +26,7 @@ final class ConsolePointerLabelTest extends TestCase
 
     private function source(string $relative): string
     {
-        $text = file_get_contents($this->root . '/' . $relative);
+        $text = \WarRoomSource::read($relative);
         $this->assertNotFalse($text, $relative);
         return str_replace("\r\n", "\n", (string) $text);
     }

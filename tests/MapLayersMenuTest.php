@@ -28,7 +28,7 @@ final class MapLayersMenuTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->source = (string) file_get_contents(__DIR__ . '/../war-room.php');
+        $this->source = (string) WarRoomSource::full();
     }
 
     /** The body of the addOsmLayer() IIFE: where the OpenStreetMap section is added to the menu. */

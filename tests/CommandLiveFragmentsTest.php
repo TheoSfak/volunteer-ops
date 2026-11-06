@@ -383,7 +383,7 @@ final class CommandLiveFragmentsTest extends TestCase
 
     public function testThePolledTeamsNoLongerCarryTheBriefingToken(): void
     {
-        $page = file_get_contents(__DIR__ . '/../war-room.php');
+        $page = WarRoomSource::full();
 
         $this->assertStringContainsString("'teams' => array_map(fn(\$team) => array_diff_key(\$team, ['briefing_token' => true]), \$teams),", $page);
         // And nothing in the browser was reading it from there.
@@ -392,7 +392,7 @@ final class CommandLiveFragmentsTest extends TestCase
 
     public function testTheCopyButtonSurvivesTheFragmentBeingReplaced(): void
     {
-        $page = file_get_contents(__DIR__ . '/../war-room.php');
+        $page = WarRoomSource::full();
 
         $this->assertStringNotContainsString("querySelectorAll('.wr-briefing-copy-btn')", $page, 'per-button listeners die when the poll replaces the list');
         $this->assertStringContainsString("e.target.closest('.wr-briefing-copy-btn')", $page);
@@ -401,7 +401,7 @@ final class CommandLiveFragmentsTest extends TestCase
 
     public function testThePageAndThePollAgreeOnTheFragmentKeys(): void
     {
-        $page = file_get_contents(__DIR__ . '/../war-room.php');
+        $page = WarRoomSource::full();
         $builder = file_get_contents(__DIR__ . '/../includes/functions-warroom.php');
 
         preg_match_all("/warRoomLiveFragment\\('(\\w+)'/", $page, $onPage);
@@ -419,7 +419,7 @@ final class CommandLiveFragmentsTest extends TestCase
 
     public function testOnlyCommandStaffReceiveTheFragmentsAndTheBrowserAppliesThem(): void
     {
-        $page = file_get_contents(__DIR__ . '/../war-room.php');
+        $page = WarRoomSource::full();
 
         $this->assertMatchesRegularExpression(
             "/'liveFragments' => \\\$canManageWarRoom\\s*\\?\\s*buildCommandLiveFragments\\(.*?\\)\\s*:\\s*null,/s",

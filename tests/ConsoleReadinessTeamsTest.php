@@ -15,7 +15,7 @@ final class ConsoleReadinessTeamsTest extends TestCase
 {
     public function testTheRosterIdsGoOnlyToCommandStaff(): void
     {
-        $page = (string) file_get_contents(__DIR__ . '/../war-room.php');
+        $page = (string) WarRoomSource::full();
         $this->assertStringContainsString(
             "const ROSTER_PERSON_IDS = <?= json_encode(\$canManageWarRoom ? array_values(array_map('intval', array_keys(\$distinctApprovedById))) : []) ?>;",
             $page,

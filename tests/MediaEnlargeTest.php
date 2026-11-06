@@ -21,7 +21,7 @@ final class MediaEnlargeTest extends TestCase
 
     protected function setUp(): void
     {
-        $page = file_get_contents(__DIR__ . '/../war-room.php');
+        $page = WarRoomSource::full();
         $console = file_get_contents(__DIR__ . '/../assets/js/war-room-console.js');
         $this->assertNotFalse($page);
         $this->assertNotFalse($console);
