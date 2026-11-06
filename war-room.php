@@ -7067,6 +7067,70 @@ const WR_BOOT = {
     maxPingAccuracyM: <?= (int) getSetting('war_room_max_ping_accuracy_m', '50') ?>,
     appName: <?= json_encode(getSetting('app_name', 'VolunteerOps')) ?>,
     gridMaxCells: <?= gridMaxCells() ?>,
+    missionLocation: <?= json_encode(['lat' => $mission['latitude'] ? (float)$mission['latitude'] : null, 'lng' => $mission['longitude'] ? (float)$mission['longitude'] : null, 'title' => $mission['title']]) ?>,
+    pins: <?= json_encode($pins) ?>,
+    k9Handlers: <?= json_encode(k9Handlers(), JSON_UNESCAPED_UNICODE) ?>,
+    teamCaptains: <?= json_encode(teamCaptains(), JSON_UNESCAPED_UNICODE) ?>,
+    dispatches: <?= json_encode($dispatches) ?>,
+    annotations: <?= json_encode($annotations) ?>,
+    areas: <?= json_encode($areas) ?>,
+    teams: <?= json_encode(array_values(array_map(fn($t) => ['id' => $t['id'], 'label' => teamLabel($t['codename'], $t['team_number']), 'transport' => normalizeTeamTransport($t['transport'] ?? 'foot'), 'color_bg' => teamBadgeColors($t['color'] ?? null)[0], 'color_fg' => teamBadgeColors($t['color'] ?? null)[1]], $teams))) ?>,
+    sectors: <?= json_encode($sectors) ?>,
+    media: <?= json_encode($photos) ?>,
+    broadcastPhotos: <?= json_encode($broadcastPhotos) ?>,
+    myTasks: <?= json_encode($myTasks) ?>,
+    routes: <?= json_encode($routes) ?>,
+    nearbyTeams: <?= json_encode($nearbyTeams) ?>,
+    teamDistances: <?= json_encode($teamDistances) ?>,
+    teamArcs: <?= json_encode($teamArcs) ?>,
+    restrictedAreaProximity: <?= json_encode($restrictedAreaProximity) ?>,
+    missionTeamsForRoute: <?= json_encode(array_values(array_map(fn($t) => [
+    'id' => $t['id'],
+    'label' => teamLabel($t['codename'], $t['team_number']),
+    'members' => array_values(array_map(
+        fn($m) => ['id' => $m['user_id'], 'name' => $m['name']],
+        array_filter($t['members'], fn($m) => in_array((int) $m['user_id'], $actionRoomParticipantIds, true))
+    )),
+], $teams)), JSON_UNESCAPED_UNICODE) ?>,
+    allApprovedForRoute: <?= json_encode(array_values(array_map(
+    fn($p) => ['id' => $p['user_id'], 'name' => $p['name'], 'team_label' => $teamLabelByUserId[$p['user_id']] ?? null],
+    array_filter($distinctApprovedById, fn($p) => in_array((int) $p['user_id'], $actionRoomParticipantIds, true))
+)), JSON_UNESCAPED_UNICODE) ?>,
+    shortageReports: <?= json_encode($shortageReports) ?>,
+    missionIncidents: <?= json_encode($incidents) ?>,
+    triageState: <?= json_encode($triage, JSON_UNESCAPED_UNICODE) ?>,
+    sosAlerts: <?= json_encode($sosAlerts) ?>,
+    voiceMessages: <?= json_encode($voiceMessages, JSON_UNESCAPED_UNICODE) ?>,
+    commandPost: <?= json_encode($commandPost, JSON_UNESCAPED_UNICODE) ?>,
+    mapPoints: <?= json_encode($mapPoints, JSON_UNESCAPED_UNICODE) ?>,
+    mapPointsVersion: <?= json_encode($mapPointsVersion) ?>,
+    mapPointRoute: <?= json_encode($mapPointRoute, JSON_UNESCAPED_UNICODE) ?>,
+    mpVisible: <?= json_encode($mapPointsVisible) ?>,
+    mpRouting: <?= json_encode($mapPointsRouting) ?>,
+    pointsOfInterest: <?= json_encode($pointsOfInterest) ?>,
+    missingPerson: <?= json_encode($missingPerson) ?>,
+    weather: <?= json_encode($weather) ?>,
+    exposureUrgency: <?= json_encode($exposureUrgency) ?>,
+    restrictedAreas: <?= json_encode($restrictedAreas) ?>,
+    restrictedAreaBreaches: <?= json_encode($restrictedAreaBreaches) ?>,
+    restrictedAreaBreachHistory: <?= json_encode($restrictedAreaBreachHistory) ?>,
+    savedLayout: <?= json_encode($warRoomLayout) ?>,
+    wrTeamsAtLoad: <?= json_encode(array_values(array_map(fn($team) => [
+    'id' => (int) $team['id'],
+    'codename' => $team['codename'],
+    'team_number' => $team['team_number'],
+    // For the «Εντολές ομάδων» panel's colour swatch (renderTeamBoard()).
+    'color' => $team['color'] ?? null,
+    'leader_id' => $team['leader_id'],
+    'leader_name' => $team['leader_name'],
+    'members' => array_map(fn($m) => ['user_id' => (int) $m['user_id'], 'name' => $m['name']], $team['members']),
+], $teams)), JSON_UNESCAPED_UNICODE) ?>,
+    offlineContacts: <?= json_encode($offlineContacts, JSON_UNESCAPED_UNICODE) ?>,
+    snapshotMission: <?= json_encode(['id' => $missionId, 'title' => $mission['title'], 'location' => $mission['location'] ?? ''], JSON_UNESCAPED_UNICODE) ?>,
+    gpsParticipationSig: <?= json_encode($gpsParticipationSig) ?>,
+    rosterSig: <?= json_encode($rosterSig) ?>,
+    rosterPersonIds: <?= json_encode($canManageWarRoom ? array_values(array_map('intval', array_keys($distinctApprovedById))) : []) ?>,
+    chatHeadsAtLoad: <?= json_encode((object) $chatHeadsAtLoad) ?>,
 };
 </script>
 <script>
@@ -7216,8 +7280,8 @@ VitalsSensor.init({
     endpoint: 'vitals-ingest.php',
 });
 <?php endif; ?>
-const missionLocation = <?= json_encode(['lat' => $mission['latitude'] ? (float)$mission['latitude'] : null, 'lng' => $mission['longitude'] ? (float)$mission['longitude'] : null, 'title' => $mission['title']]) ?>;
-let pins = <?= json_encode($pins) ?>;
+const missionLocation = WR_BOOT.missionLocation;
+let pins = WR_BOOT.pins;
 
 // Where the map window of an order (a point, an area, a route, a search area, a restricted
 // area) opens: next to the mission, at street level - not on all of Greece, which is where
@@ -7261,15 +7325,15 @@ function applyOrderMapView(orderMap) {
 // refreshed from every poll so a handler added mid-mission shows up on the
 // board within one cycle instead of needing a reload. Object keys are
 // strings after json_encode, so every lookup below goes through String(id).
-let k9Handlers = <?= json_encode(k9Handlers(), JSON_UNESCAPED_UNICODE) ?>;
+let k9Handlers = WR_BOOT.k9Handlers;
 // Home-team captain registry, keyed by user id — client-side twin of
 // teamCaptains() in includes/functions-warroom.php, same shipped-once-then-
 // polled-refresh shape as k9Handlers above. Deliberately unrelated to
 // team.leader_id (the existing per-mission Ομάδες Αποστολής leader star).
-let teamCaptains = <?= json_encode(teamCaptains(), JSON_UNESCAPED_UNICODE) ?>;
-let dispatches = <?= json_encode($dispatches) ?>;
-let annotations = <?= json_encode($annotations) ?>;
-let areas = <?= json_encode($areas) ?>;
+let teamCaptains = WR_BOOT.teamCaptains;
+let dispatches = WR_BOOT.dispatches;
+let annotations = WR_BOOT.annotations;
+let areas = WR_BOOT.areas;
 // Set by openDivideSectorsForArea() (declared further down, inside the
 // map block, where the area popup's "Divide into Sectors" button
 // lives) and read by the divideSectorsModal IIFE (declared later in the
@@ -7303,7 +7367,7 @@ let pendingAreaSeed = null;
 // below) — needs the team roster available client-side for that <select>'s
 // options, same id+label shape mission-history.php/etc. already compute
 // server-side via teamLabel().
-let teams = <?= json_encode(array_values(array_map(fn($t) => ['id' => $t['id'], 'label' => teamLabel($t['codename'], $t['team_number']), 'transport' => normalizeTeamTransport($t['transport'] ?? 'foot'), 'color_bg' => teamBadgeColors($t['color'] ?? null)[0], 'color_fg' => teamBadgeColors($t['color'] ?? null)[1]], $teams))) ?>;
+let teams = WR_BOOT.teams;
 // Foot or vehicle for an order (v3.438.0): the team's own way is the starting
 // answer in every window that asks, and the person giving the order changes it
 // with one choice. "vehicle" for a team on a motorbike or in a car.
@@ -7316,7 +7380,7 @@ function travelSelectHtml(cssClass, selected, attrs = '') {
         + ['foot', 'vehicle'].map(mode => `<option value="${mode}"${mode === selected ? ' selected' : ''}>${escapeHtml(t('travel.' + mode))}</option>`).join('')
         + '</select>';
 }
-let sectors = <?= json_encode($sectors) ?>;
+let sectors = WR_BOOT.sectors;
 // Verified Coverage — populated only once an admin toggles the layer on
 // (mission-sector-coverage.php), keyed by sector id: {percent, gap_cells}.
 // Kept separate from the `sectors` array itself rather than merged into it,
@@ -7328,8 +7392,8 @@ let sectorCoverageById = {};
 // ring index (0-3, matching pct=[25,50,75,95] elsewhere), not a DB id, since
 // rings have no row of their own. See computeMissionRingCoverage().
 let ringCoverageById = {};
-let media = <?= json_encode($photos) ?>;
-let broadcastPhotos = <?= json_encode($broadcastPhotos) ?>;
+let media = WR_BOOT.media;
+let broadcastPhotos = WR_BOOT.broadcastPhotos;
 // Media re-renders every image tag from scratch (mission-photo-view.php is
 // deliberately Cache-Control: no-store, since it's access-gated field media),
 // so re-running renderMedia() on a poll tick where nothing actually changed
@@ -7337,13 +7401,13 @@ let broadcastPhotos = <?= json_encode($broadcastPhotos) ?>;
 // Track what was last rendered and skip the call entirely when the fetched
 // list is byte-for-byte the same.
 let mediaSignature = JSON.stringify(media);
-let myTasks = <?= json_encode($myTasks) ?>;
-let routes = <?= json_encode($routes) ?>;
-let nearbyTeams = <?= json_encode($nearbyTeams) ?>;
-let teamDistances = <?= json_encode($teamDistances) ?>;
+let myTasks = WR_BOOT.myTasks;
+let routes = WR_BOOT.routes;
+let nearbyTeams = WR_BOOT.nearbyTeams;
+let teamDistances = WR_BOOT.teamDistances;
 // Destination arcs (v3.437.0): where each team is being sent, drawn by assets/js/war-room-team-arcs.js.
-let teamArcs = <?= json_encode($teamArcs) ?>;
-let restrictedAreaProximity = <?= json_encode($restrictedAreaProximity) ?>;
+let teamArcs = WR_BOOT.teamArcs;
+let restrictedAreaProximity = WR_BOOT.restrictedAreaProximity;
 // Team rosters for the Route Order composer's member picker — lets an admin
 // narrow a route to a subset of a team (e.g. 2 of 4) instead of always the
 // whole team. See includes/migrations.php v109.
@@ -7351,24 +7415,14 @@ let restrictedAreaProximity = <?= json_encode($restrictedAreaProximity) ?>;
 // acknowledge and walk, so offering the other four of a five-person team as
 // recipients would be offering people who will never see it. This is the
 // picker's data only — the teams card above still lists every member.
-const missionTeamsForRoute = <?= json_encode(array_values(array_map(fn($t) => [
-    'id' => $t['id'],
-    'label' => teamLabel($t['codename'], $t['team_number']),
-    'members' => array_values(array_map(
-        fn($m) => ['id' => $m['user_id'], 'name' => $m['name']],
-        array_filter($t['members'], fn($m) => in_array((int) $m['user_id'], $actionRoomParticipantIds, true))
-    )),
-], $teams)), JSON_UNESCAPED_UNICODE) ?>;
+const missionTeamsForRoute = WR_BOOT.missionTeamsForRoute;
 // Every approved participant of the mission, with their current team label
 // (or none) — feeds the composer's cross-team picker mode, where a route
 // can be assembled from specific individuals across two or more different
 // teams instead of always one nominal team. See includes/migrations.php v110.
-const allApprovedForRoute = <?= json_encode(array_values(array_map(
-    fn($p) => ['id' => $p['user_id'], 'name' => $p['name'], 'team_label' => $teamLabelByUserId[$p['user_id']] ?? null],
-    array_filter($distinctApprovedById, fn($p) => in_array((int) $p['user_id'], $actionRoomParticipantIds, true))
-)), JSON_UNESCAPED_UNICODE) ?>;
-let shortageReports = <?= json_encode($shortageReports) ?>;
-let missionIncidents = <?= json_encode($incidents) ?>;
+const allApprovedForRoute = WR_BOOT.allApprovedForRoute;
+let shortageReports = WR_BOOT.shortageReports;
+let missionIncidents = WR_BOOT.missionIncidents;
 // Regular participants see the same masked incidentsList as command staff (unlike
 // shortageReportsList, which never renders for them at all) — this flag is what
 // hides the seen/resolve action buttons for everyone except command staff, since
@@ -7376,7 +7430,7 @@ let missionIncidents = <?= json_encode($incidents) ?>;
 const canManageIncidents = WR_BOOT.canManage;
 // Mass-casualty triage board (null on a mission that never had one). See the
 // triage section further down for what reads these.
-let triageState = <?= json_encode($triage, JSON_UNESCAPED_UNICODE) ?>;
+let triageState = WR_BOOT.triageState;
 const TRIAGE_CAN_MANAGE = WR_BOOT.canManage;
 const TRIAGE_CAN_FIELD = WR_BOOT.canField;
 const TRIAGE_MISSION_ID = WR_MISSION_ID;
@@ -7385,21 +7439,21 @@ const TRIAGE_MISSION_ID = WR_MISSION_ID;
 // whose clock is five minutes out would otherwise show every red five
 // minutes fresher or staler than it is.
 const TRIAGE_CLOCK_OFFSET_S = WR_BOOT.serverTime - Math.floor(Date.now() / 1000);
-let sosAlerts = <?= json_encode($sosAlerts) ?>;
-let voiceMessages = <?= json_encode($voiceMessages, JSON_UNESCAPED_UNICODE) ?>;
+let sosAlerts = WR_BOOT.sosAlerts;
+let voiceMessages = WR_BOOT.voiceMessages;
 // The Συντονιστικό (null until command places it). See renderCommandPost().
-let commandPost = <?= json_encode($commandPost, JSON_UNESCAPED_UNICODE) ?>;
+let commandPost = WR_BOOT.commandPost;
 // Its own copy of canManageWarRoom: CAN_MANAGE_WAR_ROOM is declared further
 // down than the map code that first draws the command post.
 const CP_CAN_MANAGE = WR_BOOT.canManage;
 // Σημεία χάρτη (v3.361.0): the imported reference points and their version.
 // Same early copy of the permission as above, for the same reason.
-let mapPoints = <?= json_encode($mapPoints, JSON_UNESCAPED_UNICODE) ?>;
-let mapPointsVersion = <?= json_encode($mapPointsVersion) ?>;
+let mapPoints = WR_BOOT.mapPoints;
+let mapPointsVersion = WR_BOOT.mapPointsVersion;
 // The road route command drew between the points, shared with everybody (or null).
-let mapPointRoute = <?= json_encode($mapPointRoute, JSON_UNESCAPED_UNICODE) ?>;
-const MP_VISIBLE = <?= json_encode($mapPointsVisible) ?>;
-const MP_ROUTING = <?= json_encode($mapPointsRouting) ?>;
+let mapPointRoute = WR_BOOT.mapPointRoute;
+const MP_VISIBLE = WR_BOOT.mpVisible;
+const MP_ROUTING = WR_BOOT.mpRouting;
 const MP_LINK_MAX = WR_BOOT.mapPointLinkMax;
 const MP_CAN_MANAGE = CP_CAN_MANAGE;
 const MP_MAX_LIST_ROWS = 150;
@@ -7412,8 +7466,8 @@ const CP_FOLLOW_STALE_S = WR_BOOT.pingStaleSeconds;
 const CP_FOLLOW_SETTLE_MIN = WR_BOOT.commandPostFollowSettleMin;
 // Shown in its popup: the channel command listens on, set with the briefing.
 const MISSION_RADIO_CHANNEL = WR_BOOT.radioChannel;
-let pointsOfInterest = <?= json_encode($pointsOfInterest) ?>;
-let missingPerson = <?= json_encode($missingPerson) ?>;
+let pointsOfInterest = WR_BOOT.pointsOfInterest;
+let missingPerson = WR_BOOT.missingPerson;
 // weather can be non-null purely because exposureUrgencyOn fetched it for the
 // exposure card, even while the compass toggle itself is off — so the
 // compass control needs its own explicit flag, not just `if (weather)`.
@@ -7423,11 +7477,11 @@ const weatherCompassEnabled = WR_BOOT.weatherCompassOn;
 // subject_category <select> was built from.
 const searchRingsEnabled = WR_BOOT.searchRingsOn;
 const LPB_RING_TABLE = WR_BOOT.lpbRingTable;
-let weather = <?= json_encode($weather) ?>;
-let exposureUrgency = <?= json_encode($exposureUrgency) ?>;
-let restrictedAreas = <?= json_encode($restrictedAreas) ?>;
-let restrictedAreaBreaches = <?= json_encode($restrictedAreaBreaches) ?>;
-let restrictedAreaBreachHistory = <?= json_encode($restrictedAreaBreachHistory) ?>;
+let weather = WR_BOOT.weather;
+let exposureUrgency = WR_BOOT.exposureUrgency;
+let restrictedAreas = WR_BOOT.restrictedAreas;
+let restrictedAreaBreaches = WR_BOOT.restrictedAreaBreaches;
+let restrictedAreaBreachHistory = WR_BOOT.restrictedAreaBreachHistory;
 
 // Drag-and-drop card layout (admin desktop view only — #wrZoneMain/#wrZoneSidebar
 // only exist in the DOM when canManageWarRoom, so their absence
@@ -7436,7 +7490,7 @@ let restrictedAreaBreachHistory = <?= json_encode($restrictedAreaBreachHistory) 
 // different zone is already in its final position before Leaflet ever
 // measures it — see the map.invalidateSize() calls further down for the two
 // cases (initial load, live drag) where a corrective resize is still needed.
-let savedLayout = <?= json_encode($warRoomLayout) ?>;
+let savedLayout = WR_BOOT.savedLayout;
 // id -> already-localized short label, for the show/hide checklist modal.
 let cardLabels = WR_BOOT.cardLabels;
 (function() {
@@ -15755,16 +15809,7 @@ const OP_LATER_STORE = 'wrOpLater_' + WR_MISSION_ID;
 const OP_TEAM_STORE = 'wrOpTeamSeen_' + WR_MISSION_ID;
 // Who is on which team as of this page load — the poll only sends teams with
 // its first full payload, and the team notice has to be possible before then.
-const WR_TEAMS_AT_LOAD = <?= json_encode(array_values(array_map(fn($team) => [
-    'id' => (int) $team['id'],
-    'codename' => $team['codename'],
-    'team_number' => $team['team_number'],
-    // For the «Εντολές ομάδων» panel's colour swatch (renderTeamBoard()).
-    'color' => $team['color'] ?? null,
-    'leader_id' => $team['leader_id'],
-    'leader_name' => $team['leader_name'],
-    'members' => array_map(fn($m) => ['user_id' => (int) $m['user_id'], 'name' => $m['name']], $team['members']),
-], $teams)), JSON_UNESCAPED_UNICODE) ?>;
+const WR_TEAMS_AT_LOAD = WR_BOOT.wrTeamsAtLoad;
 // How long a banner may wait for its order to appear in the page state before
 // it is drawn as an ordinary ticker line instead — so it is never lost.
 const OP_PENDING_MS = 20000;
@@ -17631,8 +17676,8 @@ setInterval(flushQueue, 15000);
 // service worker, which cannot read a cached authenticated PHP response, but
 // it CAN read same-origin localStorage from the page context.
 const SNAPSHOT_KEY = 'wr_field_snapshot';
-const OFFLINE_CONTACTS = <?= json_encode($offlineContacts, JSON_UNESCAPED_UNICODE) ?>;
-const SNAPSHOT_MISSION = <?= json_encode(['id' => $missionId, 'title' => $mission['title'], 'location' => $mission['location'] ?? ''], JSON_UNESCAPED_UNICODE) ?>;
+const OFFLINE_CONTACTS = WR_BOOT.offlineContacts;
+const SNAPSHOT_MISSION = WR_BOOT.snapshotMission;
 const SNAPSHOT_LANG = WR_BOOT.viewerLang;
 // The participation request SOS and «Έφτασα» are filed against
 // (volunteer-status.php). null for a viewer who is not a participant, who
@@ -23172,14 +23217,14 @@ function applyGpsParticipationToRow(uid, takesPart) {
 // lists scrolled inside cards, the map view. Three seconds' grace so that a
 // handover (one off, one on) is one reload, and none at all while a window
 // is open or something is being typed.
-const GPS_PARTICIPATION_SIG = <?= json_encode($gpsParticipationSig) ?>;
+const GPS_PARTICIPATION_SIG = WR_BOOT.gpsParticipationSig;
 // The roster counterpart (command staff only, null for everybody else): who is
 // approved on this mission, as this page was built. See $rosterSig.
-const ROSTER_SIG = <?= json_encode($rosterSig) ?>;
+const ROSTER_SIG = WR_BOOT.rosterSig;
 // And who they are, for the console's preparation checklist («Μπήκαν όλοι σε
 // ομάδα;»): every approved person, once, in a team or not. Command staff only;
 // the roster moving reloads the page, so this never goes stale.
-const ROSTER_PERSON_IDS = <?= json_encode($canManageWarRoom ? array_values(array_map('intval', array_keys($distinctApprovedById))) : []) ?>;
+const ROSTER_PERSON_IDS = WR_BOOT.rosterPersonIds;
 const GPS_RELOAD_VIEW_KEY = 'wr-gps-reload-view-' + WR_MISSION_ID;
 const GPS_RELOAD_GRACE_MS = 3000;
 let gpsReloadDeadline = 0;
@@ -27606,7 +27651,7 @@ document.querySelectorAll('.team-form').forEach(form => {
     // The key a room goes by in the poll's chatUnread and in its chat_after parameter: 'general' or the team id.
     const roomKey = teamId => teamId === '' ? 'general' : String(teamId);
     // Where each room stood as the page was built (see $chatHeadsAtLoad). A room that is not here has no message.
-    const CHAT_HEADS_AT_LOAD = <?= json_encode((object) $chatHeadsAtLoad) ?>;
+    const CHAT_HEADS_AT_LOAD = WR_BOOT.chatHeadsAtLoad;
 
     // Sets a room's unread cursor to "everything already said", without ever
     // rendering it. Used for every room this viewer can see but is not

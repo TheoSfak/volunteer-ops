@@ -157,7 +157,8 @@ final class RosterSignatureTest extends TestCase
 
         $this->assertStringContainsString('$rosterSig = $canManageWarRoom ? missionRosterSignature($missionId) : null;', $page);
         $this->assertStringContainsString("'rosterSig' => \$rosterSig,", $page);
-        $this->assertStringContainsString('const ROSTER_SIG = <?= json_encode($rosterSig) ?>;', $page);
+        $this->assertStringContainsString('const ROSTER_SIG = WR_BOOT.rosterSig;', $page);
+        $this->assertStringContainsString('    rosterSig: <?= json_encode($rosterSig) ?>,', $page);
     }
 
     public function testAMismatchReloadsThroughTheSoftReloadWithItsOwnNotice(): void

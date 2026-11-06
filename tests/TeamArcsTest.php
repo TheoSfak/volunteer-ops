@@ -370,7 +370,8 @@ final class TeamArcsTest extends TestCase
     {
         $page = $this->source('war-room.php');
         $this->assertStringContainsString("'teamArcs' => \$teamProximity['teamArcs']", $page, 'the poll payload');
-        $this->assertStringContainsString('let teamArcs = <?= json_encode($teamArcs) ?>;', $page, 'the first paint');
+        $this->assertStringContainsString('let teamArcs = WR_BOOT.teamArcs;', $page, 'the first paint');
+        $this->assertStringContainsString('    teamArcs: <?= json_encode($teamArcs) ?>,', $page, 'from the same arcs the poll carries');
         $this->assertStringContainsString('if (data.teamArcs) renderTeamArcs(teamArcs = data.teamArcs);', $page, 'every poll after');
         $this->assertStringContainsString('renderTeamArcs(teamArcs);', $page, 'the first draw');
         $this->assertStringContainsString('teamArcsInit();', $page);

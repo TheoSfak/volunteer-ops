@@ -90,11 +90,16 @@ final class WarRoomBootTest extends TestCase
         $from += strlen("const WR_BOOT = {\n");
         $to = strpos($page, "\n};\n</script>", $from);
         $this->assertNotFalse($to);
+        $body = substr($page, $from, $to - $from);
+        // A key, a colon and the PHP echo (or the same inside quotes), then a comma; the PHP may run over several lines.
+        preg_match_all("~^    (\\w+): ('?)(<\\?=.*?\\?>)\\2,\$~sm", $body, $found, PREG_SET_ORDER);
         $entries = [];
-        foreach (explode("\n", substr($page, $from, $to - $from)) as $line) {
-            $this->assertSame(1, preg_match("~^    (\\w+): (?:'<\\?= (.+) \\?>'|<\\?= (.+) \\?>),\$~", $line, $m), 'a boot line is "key: <?= php ?>," (or the same inside quotes): ' . $line);
-            $entries[$m[1]] = isset($m[3]) && $m[3] !== '' ? ['bare', $m[3]] : ['string', $m[2]];
+        $covered = [];
+        foreach ($found as $e) {
+            $covered[] = $e[0];
+            $entries[$e[1]] = [$e[2] === "'" ? 'string' : 'bare', trim(substr($e[3], 3, -2))];
         }
+        $this->assertSame($body, implode("\n", $covered), 'every line of the boot is a "key: <?= php ?>," entry and nothing else');
         return $entries;
     }
 
@@ -114,7 +119,7 @@ final class WarRoomBootTest extends TestCase
     public function testEveryBootKeyIsReadAndEveryReadIsAKey(): void
     {
         $keys = array_keys($this->bootEntries());
-        $this->assertGreaterThanOrEqual(40, count($keys));
+        $this->assertGreaterThanOrEqual(85, count($keys), 'the single values (R1b) and the state of the mission (R1c)');
         [$script] = $this->bigScripts();
         preg_match_all('~(?<![A-Za-z0-9_])WR_BOOT\.(\w+)~', $script, $m);
         $read = array_unique($m[1]);
@@ -127,7 +132,7 @@ final class WarRoomBootTest extends TestCase
     {
         [$script] = $this->bigScripts();
         foreach ($this->bootEntries() as $key => [, $php]) {
-            $this->assertStringNotContainsString('<?= ' . $php . ' ?>', $script, $key . ' is printed by the boot, not in the middle of the script');
+            $this->assertStringNotContainsString('<?= ' . preg_replace('~\\s+~', ' ', $php) . ' ?>', preg_replace('~\\s+~', ' ', $script), $key . ' is printed by the boot, not in the middle of the script');
         }
     }
 
@@ -137,6 +142,22 @@ final class WarRoomBootTest extends TestCase
         $this->assertDoesNotMatchRegularExpression('~(?<![A-Za-z0-9_])WR_BOOT\.\w+\s*(?:[-+*/]?=(?!=)|\+\+|--)~', $script, 'never assigned to');
         $this->assertDoesNotMatchRegularExpression('~(?:delete\s+WR_BOOT|Object\.(?:assign|defineProperty|freeze)\(\s*WR_BOOT)~', $script);
         $this->assertDoesNotMatchRegularExpression("~'\\s*\\+\\s*WR_BOOT\\.\\w+\\s*(?:\\.|\\[|\\?\\.)~", $script, 'no method or index on a string built from a boot value');
+    }
+
+    public function testEachBootKeyIsReadByOneVariableExceptTheFourPlainValuesSeveralReadersShare(): void
+    {
+        // The script used to get its own copy of every list (let pins = [...]; let sectors = [...]). A key read in two
+        // places would hand both variables the SAME array, and a push in one would show up in the other.
+        [$script] = $this->bigScripts();
+        $shared = ['serverTime', 'canManage', 'baseUrl', 'mapPointAssignMax'];
+        foreach (array_keys($this->bootEntries()) as $key) {
+            $reads = preg_match_all('~(?<![A-Za-z0-9_])WR_BOOT\.' . $key . '(?![A-Za-z0-9_])~', $script);
+            if (in_array($key, $shared, true)) {
+                $this->assertGreaterThanOrEqual(2, $reads, $key . ' is a plain value read in several places');
+            } else {
+                $this->assertSame(1, $reads, $key . ' must be read by exactly one variable');
+            }
+        }
     }
 
     public function testTheSpotsThatNeedAStringOrAnUnbrokenNumberStillGetOne(): void
@@ -159,11 +180,11 @@ final class WarRoomBootTest extends TestCase
 
     public function testTheEchoesThatAreStillPrintedInPlaceOnlyGoDown(): void
     {
-        // What is left in the first script after R1b (53, three of them over several lines): the two translation
-        // tables, the state of the mission (R1c) and the few inside PHP conditions (when those chunks move out). A
-        // new echo here is a new per-request value in the middle of the code; put it in the boot instead.
-        // Lower this number when R1c lands.
+        // What is left in the first script after R1c (8): the two translation tables and the six inside PHP
+        // conditions (vitals twice, the assistant panel, aiIsConfigured, the heart-rate flag, the ack cards), which
+        // go when those chunks move out. A new echo here is a new per-request value in the middle of the code; put
+        // it in the boot instead.
         [$script] = $this->bigScripts();
-        $this->assertLessThanOrEqual(53, preg_match_all('~<\?=~', $script));
+        $this->assertLessThanOrEqual(8, preg_match_all('~<\?=~', $script));
     }
 }
