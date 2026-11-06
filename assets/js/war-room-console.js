@@ -505,7 +505,7 @@ if (typeof module !== 'undefined' && module.exports) {
     const PLAN_SECTIONS = [
         ['teams', 'console.plan_teams', ['teamsCard', 'participantsCard', 'shiftsCard']],
         ['areas', 'console.plan_areas', ['sectorsListCard', 'sectorsCard', 'restrictedAreasCard', 'missingPersonCard', 'weatherCard', 'poiListCard']],
-        ['orders', 'console.plan_orders', ['teamRoutesAdminCard', 'dispatchCard', 'routeOrderCard', 'requestLocationCard', 'requestPhotoCard', 'requestVideoCard', 'requestLiveCard', 'requestTaskCard', 'requestSpeakCard', 'broadcastCard', 'broadcastPhotoCard']],
+        ['orders', 'console.plan_orders', ['teamRoutesAdminCard', 'dispatchCard', 'scenarioCard', 'routeOrderCard', 'requestLocationCard', 'requestPhotoCard', 'requestVideoCard', 'requestLiveCard', 'requestTaskCard', 'requestSpeakCard', 'broadcastCard', 'broadcastPhotoCard']],
         ['field', 'console.plan_field', ['shortageListCard', 'incidentsListCard', 'activityCard', 'trailEventsCard', 'sosAlertsCard', 'voiceMessagesCard']],
         ['mission', 'console.plan_mission', ['triageCard', 'briefingCard', 'missionVisitorsCard', 'missionMgmtCard', 'endMissionCard']],
         ['other', 'console.plan_other', []],

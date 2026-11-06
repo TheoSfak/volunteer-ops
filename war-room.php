@@ -5963,6 +5963,19 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
 
+        <?php
+        // «Σενάριο» (v3.452.0): orders written down before an exercise, sent phase by phase with a manual ▶.
+        // Filled entirely by assets/js/war-room-scenario.js from mission-scenario.php (command only): the plan
+        // is not in the page, not in WR_BOOT and not in the 5-second poll.
+        ?>
+        <div class="card shadow-sm mb-4 border-primary" data-card-id="scenarioCard">
+            <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-collection-play-fill me-1"></i><?= t('scenario.card_title') ?></h5></div>
+            <div class="card-body">
+                <p class="small text-muted"><?= t('scenario.note') ?></p>
+                <div id="scenarioBody"></div>
+            </div>
+        </div>
+
         <div class="card shadow-sm mb-4 border-primary" data-card-id="sectorsCard">
             <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-grid-3x3-gap-fill me-1"></i><?= t('sector.card_title') ?></h5></div>
             <div class="card-body">
@@ -6475,7 +6488,16 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                     </div>
                     <input type="text" id="dispatchNoteInput" class="form-control" style="max-width:260px;" maxlength="200" placeholder="<?= t('dispatch.note_placeholder') ?>">
                     <div class="ms-auto d-flex gap-2">
+                        <span class="small text-success align-self-center" id="dispatchScenarioStatus" role="status"></span>
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="dispatchClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
+                        <?php
+                        // «Στο σενάριο ▾» (v3.452.0): the order drawn here goes into a phase of the scenario
+                        // instead of out to a team. The menu is built by assets/js/war-room-scenario.js.
+                        ?>
+                        <div class="btn-group" id="dispatchScenarioGroup">
+                            <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" id="dispatchScenarioBtn" data-bs-toggle="dropdown" aria-expanded="false" title="<?= t('scenario.add_to_scenario_title') ?>" disabled><i class="bi bi-collection-play me-1"></i><?= t('scenario.add_to_scenario') ?></button>
+                            <ul class="dropdown-menu dropdown-menu-end" id="dispatchScenarioMenu"></ul>
+                        </div>
                         <button type="button" class="btn btn-success btn-sm" id="dispatchSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('dispatch.send_short_btn') ?></button>
                     </div>
                 </div>
@@ -7017,6 +7039,9 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-time-machine.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-time-machine.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-team-coverage.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-team-coverage.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-done-orders.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-done-orders.js') ?>"></script>
+<?php if ($canManageWarRoom): ?>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-scenario.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-scenario.js') ?>"></script>
+<?php endif; ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/triage.js?v=<?= APP_VERSION ?>"></script>
 <?php if ($consoleView): ?>
 <?php /* defer: it reads the page's own state (the poll's arrays, the render
@@ -27127,6 +27152,9 @@ function applyTeamBoardCollapsed(collapsed) {
     syncTeamBoardLeft();
     renderTeamBoard();
 })();
+// «Σενάριο» (v3.452.0): the card, the ghosts on the map and the plan's own requests live in
+// assets/js/war-room-scenario.js, which is only loaded for command staff.
+if (window.wrScenario) window.wrScenario.init();
 <?php endif; ?>
 
 // Named (not the previous inline arrow passed straight to setInterval) so
@@ -27981,6 +28009,14 @@ document.querySelectorAll('.team-form').forEach(form => {
     const noteInput = document.getElementById('dispatchNoteInput');
     const clearBtn = document.getElementById('dispatchClearBtn');
     const sendBtn = document.getElementById('dispatchSendBtn');
+    // «Στο σενάριο» (v3.452.0): follows the same readiness as «Αποστολή» (a place and a recipient).
+    const scenarioGroup = document.getElementById('dispatchScenarioGroup');
+    const scenarioBtn = document.getElementById('dispatchScenarioBtn');
+    const scenarioMenu = document.getElementById('dispatchScenarioMenu');
+    const scenarioStatus = document.getElementById('dispatchScenarioStatus');
+    function syncScenarioBtn() {
+        if (scenarioBtn) scenarioBtn.disabled = sendBtn.disabled;
+    }
 
     let dispatchMap = null;
     let refLayer = null;
@@ -28011,6 +28047,8 @@ document.querySelectorAll('.team-form').forEach(form => {
         if (!refLayer) return;
         refLayer.clearLayers();
         renderFullMapReference(refLayer);
+        // What is already staged in the scenario, so the next order is not drawn blind (v3.452.0).
+        if (window.wrScenario) window.wrScenario.drawGhostsInto(refLayer);
     }
 
     function resetDrawing() {
@@ -28020,6 +28058,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         vertexMarkers = [];
         if (shapeLayer) { dispatchMap.removeLayer(shapeLayer); shapeLayer = null; }
         sendBtn.disabled = true;
+        syncScenarioBtn();
     }
 
     function updateShapePreview() {
@@ -28033,6 +28072,7 @@ document.querySelectorAll('.team-form').forEach(form => {
     // A place and a recipient: nothing goes to every team by default.
     function updateSendState() {
         sendBtn.disabled = !(drawPoints.length === 1 || (isClosed && drawPoints.length >= 3)) || !teamSelect.value;
+        syncScenarioBtn();
     }
     teamSelect.addEventListener('change', updateSendState);
 
@@ -28121,6 +28161,9 @@ document.querySelectorAll('.team-form').forEach(form => {
             if (pendingDispatchSeed.teamId) { teamSelect.value = pendingDispatchSeed.teamId; syncTravelSelect(); }
             pendingRingIndex = pendingDispatchSeed.ringIndex ?? null;
             pendingIncidentId = pendingDispatchSeed.incidentId || null;
+            // An order tied to a real casualty or to a search ring is sent, not staged: neither can be
+            // written down beforehand (v3.452.0).
+            if (scenarioGroup) scenarioGroup.classList.toggle('d-none', !!(pendingIncidentId || pendingRingIndex !== null));
             if (incidentLine && pendingDispatchSeed.incidentText) {
                 incidentLine.querySelector('span').textContent = pendingDispatchSeed.incidentText;
                 incidentLine.classList.remove('d-none');
@@ -28143,6 +28186,8 @@ document.querySelectorAll('.team-form').forEach(form => {
         noteInput.value = '';
         pendingRingIndex = null;
         pendingIncidentId = null;
+        if (scenarioGroup) scenarioGroup.classList.remove('d-none');
+        if (scenarioStatus) scenarioStatus.textContent = '';
         if (incidentLine) incidentLine.classList.add('d-none');
         // Back to «— Διάλεξε ομάδα —»: the next dispatch is chosen afresh.
         teamSelect.value = '';
@@ -28166,6 +28211,46 @@ document.querySelectorAll('.team-form').forEach(form => {
             }
         }).catch(() => { addressStatus.textContent = t('dispatch.search_failed'); });
     });
+
+    // «Στο σενάριο ▾» (v3.452.0): the same order «Αποστολή» would send, written into a phase instead. The
+    // window stays open for the next one; what was drawn is cleared, the recipient is kept.
+    if (scenarioBtn && scenarioMenu) {
+        scenarioBtn.addEventListener('show.bs.dropdown', () => {
+            scenarioMenu.innerHTML = window.wrScenario ? window.wrScenario.menuHtml() : '';
+        });
+        scenarioMenu.addEventListener('click', e => {
+            const choice = e.target.closest('[data-sc-phase]');
+            if (!choice) return;
+            e.preventDefault();
+            if (!window.wrScenario || sendBtn.disabled) return;
+            if (!teamSelect.value) { alert(t('dispatch.pick_team_first')); return; }
+            const type = isClosed ? 'polygon' : 'point';
+            const geo = type === 'point' ? {lat: drawPoints[0][0], lng: drawPoints[0][1]} : drawPoints;
+            const noteText = noteInput.value.trim();
+            const combinedLabel = noteText && lastAddressLabel ? (noteText + ' — ' + lastAddressLabel) : (noteText || lastAddressLabel);
+            scenarioBtn.disabled = true;
+            window.wrScenario.stage(choice.dataset.scPhase, {
+                // 'all' is "every team" to the scenario endpoint, and it is the only word that means that.
+                team_id: teamSelect.value, type: type, geo: JSON.stringify(geo), label: combinedLabel,
+                travel_mode: teamSelect.value === 'all' ? '' : travelSelect.value,
+            }).then(res => {
+                if (res && res.ok) {
+                    const phase = window.wrScenario.phases().find(p => String(p.id) === String(res.phase_id));
+                    resetDrawing();
+                    noteInput.value = '';
+                    lastAddressLabel = '';
+                    addressStatus.textContent = '';
+                    updateSendState();
+                    renderDispatchContext();
+                    if (scenarioStatus && phase) scenarioStatus.textContent = t('scenario.staged_ok', {phase: t('scenario.phase_n', {n: phase.n}), n: phase.items.length});
+                } else {
+                    syncScenarioBtn();
+                }
+            });
+        });
+        // A line about the last order put in is only true until the next change.
+        [addressInput, noteInput, teamSelect].forEach(el => el.addEventListener('input', () => { if (scenarioStatus) scenarioStatus.textContent = ''; }));
+    }
 
     sendBtn.addEventListener('click', () => {
         const type = isClosed ? 'polygon' : 'point';

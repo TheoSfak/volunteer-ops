@@ -24,6 +24,7 @@ require_once __DIR__ . '/includes/functions-baro.php';
 require_once __DIR__ . '/includes/functions-mesh.php';
 require_once __DIR__ . '/includes/functions-coverage-heat.php';
 require_once __DIR__ . '/includes/functions-team-arcs.php';
+require_once __DIR__ . '/includes/functions-scenario.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/i18n.php';
 require_once __DIR__ . '/includes/permissions.php';

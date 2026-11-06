@@ -46,7 +46,7 @@ final class WarRoomLayoutTest extends TestCase
     {
         $ids = warRoomAllCardIds();
         $this->assertSame(count($ids), count(array_unique($ids)), 'a card is listed in two places');
-        $this->assertSame(44, count($ids));
+        $this->assertSame(45, count($ids), 'v3.452.0 added the scenario card');
         $labelled = array_keys(warRoomCardLabels());
         sort($ids);
         sort($labelled);

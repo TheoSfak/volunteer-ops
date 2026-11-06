@@ -4814,18 +4814,18 @@ function advanceMissionDispatch(array $mission, int $dispatchId, int $userId, st
 }
 
 /**
- * Command sends a point or an area to one team or to every team. This is the body of mission-dispatch.php's
- * `create` (v3.451.0), moved here unchanged so that anything else that has to send the very same order - a
- * step of a scenario, next - goes through the same checks, writes the same row and audit entry and tells the
- * same people as a hand-drawn one. Command only: the caller has checked that.
+ * Everything createMissionDispatch() checks about an order to a point or an area, and nothing it does: the team
+ * is one of this mission's, the ring and the incident are real, the type and the shape are valid. Split out of
+ * createMissionDispatch() in v3.452.0 so that a scenario can check an order when it is STAGED with the very
+ * same rules that will check it when it is SENT - an order that could never be sent is refused when it is
+ * written down, not when the exercise has begun. Pure: it reads, it writes nothing and tells no one.
  *
- * $input is what the form posts, as post() returns it (a string, or ''/null when absent): team_id ('' = every
- * team), ring_index, incident_id, type ('point' or 'polygon'), label, geo (JSON text), travel_mode.
- * $userName is the sender's name, for the line the command staff who are not recipients get.
- *
- * Returns ['ok' => true, 'id' => <dispatch id>] or ['ok' => false, 'error' => <text to show>].
+ * $input is the same array createMissionDispatch() takes. Returns ['ok' => false, 'error' => <text to show>],
+ * or ['ok' => true, 'team_id' => int|null (null = every team), 'team_label' => string|null, 'ring_index' =>
+ * int|null, 'incident' => array|null, 'type' => 'point'|'polygon', 'label' => string|null, 'geo' => array
+ * (['lat' =>, 'lng' =>] for a point, [[lat, lng], ...] for an area), 'travel_mode' => 'foot'|'vehicle'|null].
  */
-function createMissionDispatch(array $mission, int $userId, string $userName, array $input): array {
+function prepareMissionDispatch(array $mission, array $input): array {
     $missionId = (int) $mission['id'];
     $teamIdRaw = $input['team_id'] ?? null;
     $teamId = ($teamIdRaw !== '' && $teamIdRaw !== null) ? (int) $teamIdRaw : null;
@@ -4898,6 +4898,46 @@ function createMissionDispatch(array $mission, int $userId, string $userName, ar
     // window (v3.438.0). Absent or anything else = the team's own transport,
     // and an order to every team has no one team to travel, so none.
     $travelMode = $teamId ? normalizeTravelMode($input['travel_mode'] ?? null) : null;
+
+    return [
+        'ok'          => true,
+        'team_id'     => $teamId,
+        'team_label'  => $teamLabel,
+        'ring_index'  => $ringIndex,
+        'incident'    => $incident,
+        'type'        => $type,
+        'label'       => $label,
+        'geo'         => $geo,
+        'travel_mode' => $travelMode,
+    ];
+}
+
+/**
+ * Command sends a point or an area to one team or to every team. This is the body of mission-dispatch.php's
+ * `create` (v3.451.0), moved here unchanged so that anything else that has to send the very same order - a
+ * step of a scenario, next - goes through the same checks, writes the same row and audit entry and tells the
+ * same people as a hand-drawn one. Command only: the caller has checked that.
+ *
+ * $input is what the form posts, as post() returns it (a string, or ''/null when absent): team_id ('' = every
+ * team), ring_index, incident_id, type ('point' or 'polygon'), label, geo (JSON text), travel_mode.
+ * $userName is the sender's name, for the line the command staff who are not recipients get.
+ *
+ * Returns ['ok' => true, 'id' => <dispatch id>] or ['ok' => false, 'error' => <text to show>].
+ */
+function createMissionDispatch(array $mission, int $userId, string $userName, array $input): array {
+    $prepared = prepareMissionDispatch($mission, $input);
+    if (!$prepared['ok']) {
+        return $prepared;
+    }
+    $missionId = (int) $mission['id'];
+    $teamId = $prepared['team_id'];
+    $teamLabel = $prepared['team_label'];
+    $ringIndex = $prepared['ring_index'];
+    $incident = $prepared['incident'];
+    $type = $prepared['type'];
+    $label = $prepared['label'];
+    $geo = $prepared['geo'];
+    $travelMode = $prepared['travel_mode'];
 
     $dispatchId = dbInsert(
         "INSERT INTO mission_dispatch_points (mission_id, team_id, type, geo, label, ring_index, incident_id, travel_mode, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())",

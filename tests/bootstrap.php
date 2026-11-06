@@ -34,6 +34,7 @@ require_once __DIR__ . '/../includes/functions-baro.php';
 require_once __DIR__ . '/../includes/functions-mesh.php';
 require_once __DIR__ . '/../includes/functions-coverage-heat.php';
 require_once __DIR__ . '/../includes/functions-team-arcs.php';
+require_once __DIR__ . '/../includes/functions-scenario.php';
 require_once __DIR__ . '/../includes/ai.php';
 require_once __DIR__ . '/../includes/ai-context.php';
 require_once __DIR__ . '/../includes/ai-observer.php';

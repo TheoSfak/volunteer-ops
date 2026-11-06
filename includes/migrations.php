@@ -8007,6 +8007,45 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 203,
+            'description' => "Scenario (v3.452.0): orders written down before an exercise starts and sent, phase by phase, by a manual press of play. mission_scenario_phases is the list of phases of one mission (played_at / played_by = who pressed play and when; NULL = not sent yet); mission_scenario_items holds each staged order as JSON exactly as the order window would send it (payload), with sent_at / sent_ref_id (the live dispatch it became) / last_error once play has been pressed. Their own tables on purpose, not a flag on mission_dispatch_points: every reader of the live orders (the poll, the reports, the assistant, the team board, the statistics) would otherwise have to remember to skip a staged row, and one miss would show the plan to the field. Nothing here is read by any of them.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_scenario_phases (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    seq SMALLINT UNSIGNED NOT NULL DEFAULT 1 COMMENT 'Position in the scenario; the number shown is the position, so a deleted phase leaves no gap',
+                    title VARCHAR(120) NULL COMMENT 'Optional name; NULL = just Phase n',
+                    played_at DATETIME NULL COMMENT 'When play was pressed; NULL = still only a plan',
+                    played_by INT UNSIGNED NULL,
+                    created_by INT UNSIGNED NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_scenario_phase_mission (mission_id, seq),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (played_by) REFERENCES users(id) ON DELETE SET NULL,
+                    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_scenario_items (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    phase_id INT UNSIGNED NOT NULL,
+                    mission_id INT UNSIGNED NOT NULL,
+                    seq SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+                    kind ENUM('dispatch') NOT NULL DEFAULT 'dispatch' COMMENT 'What kind of order; more kinds come with later steps',
+                    payload TEXT NOT NULL COMMENT 'JSON: audience (team|all), team_id, type, geo, label, travel_mode',
+                    sent_at DATETIME NULL COMMENT 'When it went out as a live order',
+                    sent_ref_id INT UNSIGNED NULL COMMENT 'The live order it became (mission_dispatch_points.id); no foreign key, the plan outlives the order',
+                    last_error VARCHAR(255) NULL COMMENT 'Why the last attempt to send it failed',
+                    created_by INT UNSIGNED NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    INDEX idx_scenario_item_phase (phase_id, seq),
+                    INDEX idx_scenario_item_mission (mission_id),
+                    FOREIGN KEY (phase_id) REFERENCES mission_scenario_phases(id) ON DELETE CASCADE,
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

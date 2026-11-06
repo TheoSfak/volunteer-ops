@@ -3444,4 +3444,44 @@ ALTER TABLE `mission_search_sectors`  ADD COLUMN `travel_mode` ENUM('foot','vehi
 ALTER TABLE `mission_routes`          ADD COLUMN `travel_mode` ENUM('foot','vehicle') NULL DEFAULT NULL COMMENT 'How the team was told to go; NULL = its own transport';
 ALTER TABLE `dispatch_eta_cache`      ADD COLUMN `route_m` INT UNSIGNED NULL DEFAULT NULL COMMENT 'Metres of the routed path (not the straight line)';
 
+-- =============================================
+-- SCENARIO - v3.452.0 (migration 203)
+-- Orders written down before an exercise and sent, phase by phase, by a manual
+-- press of play. Their own tables, not a flag on mission_dispatch_points: no
+-- reader of the live orders ever sees a staged one.
+-- =============================================
+CREATE TABLE IF NOT EXISTS `mission_scenario_phases` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `seq` SMALLINT UNSIGNED NOT NULL DEFAULT 1 COMMENT 'Position in the scenario',
+    `title` VARCHAR(120) NULL COMMENT 'Optional name; NULL = just Phase n',
+    `played_at` DATETIME NULL COMMENT 'When play was pressed; NULL = still only a plan',
+    `played_by` INT UNSIGNED NULL,
+    `created_by` INT UNSIGNED NOT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_scenario_phase_mission` (`mission_id`, `seq`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`played_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `mission_scenario_items` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `phase_id` INT UNSIGNED NOT NULL,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `seq` SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+    `kind` ENUM('dispatch') NOT NULL DEFAULT 'dispatch' COMMENT 'What kind of order; more kinds come with later steps',
+    `payload` TEXT NOT NULL COMMENT 'JSON: audience (team|all), team_id, type, geo, label, travel_mode',
+    `sent_at` DATETIME NULL COMMENT 'When it went out as a live order',
+    `sent_ref_id` INT UNSIGNED NULL COMMENT 'The live order it became (mission_dispatch_points.id); no foreign key',
+    `last_error` VARCHAR(255) NULL COMMENT 'Why the last attempt to send it failed',
+    `created_by` INT UNSIGNED NOT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX `idx_scenario_item_phase` (`phase_id`, `seq`),
+    INDEX `idx_scenario_item_mission` (`mission_id`),
+    FOREIGN KEY (`phase_id`) REFERENCES `mission_scenario_phases`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
