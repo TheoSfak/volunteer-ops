@@ -7020,6 +7020,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <?php if (vitalsEnabled()): ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/vitals-sensor.js?v=<?= APP_VERSION ?>"></script>
 <?php endif; ?>
+<script>const WR_MISSION_ID = <?= (int) $missionId ?>;</script>
 <script>
 <?php $__wrLight = wrLightScriptEnabled(); if ($__wrLight) { ob_start('wrStripJsLineComments'); } ?>
 const csrfToken = '<?= csrfToken() ?>';
@@ -7331,7 +7332,7 @@ const canManageIncidents = <?= json_encode($canManageWarRoom) ?>;
 let triageState = <?= json_encode($triage, JSON_UNESCAPED_UNICODE) ?>;
 const TRIAGE_CAN_MANAGE = <?= json_encode($canManageWarRoom) ?>;
 const TRIAGE_CAN_FIELD = <?= json_encode($isApprovedParticipant || $canManageWarRoom) ?>;
-const TRIAGE_MISSION_ID = <?= $missionId ?>;
+const TRIAGE_MISSION_ID = WR_MISSION_ID;
 // Server clock minus this device's clock, in seconds, measured once at load.
 // Ages on the board ("waiting 14′") come from server timestamps, and a phone
 // whose clock is five minutes out would otherwise show every red five
@@ -7690,7 +7691,7 @@ let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>
         if (!row.querySelector('[data-card-id]') && !row.textContent.trim()) row.remove();
     });
 
-    const storeKey = 'wrTab_<?= $missionId ?>';
+    const storeKey = 'wrTab_' + WR_MISSION_ID;
     const badgeOf = {};
     bar.querySelectorAll('[data-tab-target]').forEach(b => {
         badgeOf[b.dataset.tabTarget] = b.querySelector('.wr-tab-badge');
@@ -8364,7 +8365,7 @@ const MAP_OVERLAYS = [
     {key: 'team_arcs',   icon: 'bi-bezier2',                   label: 'map.overlay_team_arcs',   groups: () => [teamArcLayer, teamArcLabelLayer]},
     {key: 'annotations', icon: 'bi-pencil',                    label: 'map.overlay_annotations', groups: () => [annotationLayer]},
 ];
-const MAP_OVERLAYS_KEY = 'wr_hidden_overlays_<?= $missionId ?>';
+const MAP_OVERLAYS_KEY = 'wr_hidden_overlays_' + WR_MISSION_ID;
 const mapOverlaysHidden = new Set();
 let mapHiddenChip = null;
 function setMapOverlayShown(key, shown) {
@@ -8811,7 +8812,7 @@ function osmRequest(body) {
     // two minutes.
     const timer = setTimeout(() => ctrl.abort(), 30000);
     const form = new URLSearchParams({
-        csrf_token: csrfToken, mission_id: '<?= $missionId ?>',
+        csrf_token: csrfToken, mission_id: String(WR_MISSION_ID),
         south: body.south.toFixed(6), north: body.north.toFixed(6),
         west: body.west.toFixed(6), east: body.east.toFixed(6), groups: body.groups,
     });
@@ -9095,7 +9096,7 @@ if (annoToolbarEl) {
 document.getElementById('annoToolClearAll')?.addEventListener('click', () => {
     if (!annotations.length) return;
     if (!confirm(t('annotation.clear_all_confirm'))) return;
-    const data = new URLSearchParams({csrf_token: csrfToken, action: 'clear_all', mission_id: '<?= $missionId ?>'});
+    const data = new URLSearchParams({csrf_token: csrfToken, action: 'clear_all', mission_id: String(WR_MISSION_ID)});
     fetch('mission-annotation.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
         if (result.ok) renderAnnotations(annotations = []);
         else alert(result.error || t('common.failed'));
@@ -9107,7 +9108,7 @@ document.getElementById('annoToolClearAll')?.addEventListener('click', () => {
 // cancelActiveDrawing() again.
 window.addEventListener('blur', cancelActiveDrawing);
 function submitAnnotation(type, geo, label) {
-    const data = new URLSearchParams({csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>, type, geo: JSON.stringify(geo)});
+    const data = new URLSearchParams({csrf_token: csrfToken, action: 'create', mission_id: WR_MISSION_ID, type, geo: JSON.stringify(geo)});
     if (label) data.append('label', label);
     fetch('mission-annotation.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
         if (result.ok) renderAnnotations(annotations = [...annotations, result.annotation]);
@@ -9302,12 +9303,9 @@ function renderTeamRosters(items) {
                 e.preventDefault();
                 if (!confirm(t('teams.delete_confirm', {team: teamLabel(team.codename, team.team_number)}))) return;
                 const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete_team', team_id: team.id});
-                // No shared top-level `missionId` JS variable exists in this
-                // file (only IIFE-local ones, e.g. the chat block's own) —
-                // every other top-level function embeds <?= $missionId ?>
-                // directly at its own call site instead, so this matches
-                // that same convention rather than introducing a new global.
-                fetch('war-room.php?id=<?= $missionId ?>', {method: 'POST', body: data}).then(() => location.reload());
+                // WR_MISSION_ID (the one-line boot script above this one) is the
+                // mission this page is about; no function embeds the id itself.
+                fetch('war-room.php?id=' + WR_MISSION_ID, {method: 'POST', body: data}).then(() => location.reload());
             });
         }
         listEl.appendChild(row);
@@ -9631,7 +9629,7 @@ function askCompletionReport(subject, hintKey) {
 }
 function sendDispatchAction(action, id, btnEl, note, extra) {
     if (btnEl) btnEl.disabled = true;
-    const data = new URLSearchParams({csrf_token: csrfToken, action: action, mission_id: '<?= $missionId ?>', id: String(id)});
+    const data = new URLSearchParams({csrf_token: csrfToken, action: action, mission_id: String(WR_MISSION_ID), id: String(id)});
     if (note) data.set('note', note);
     Object.keys(extra || {}).forEach(k => data.set(k, extra[k]));
     return fetch('mission-dispatch.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
@@ -9684,7 +9682,7 @@ function renderAnnotations(items) {
             layer.on('click', () => {
                 if (activeTool !== 'erase') return;
                 if (!confirm(t('annotation.delete_confirm'))) return;
-                const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: <?= $missionId ?>, id: item.id});
+                const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: WR_MISSION_ID, id: item.id});
                 fetch('mission-annotation.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
                     if (result.ok) renderAnnotations(annotations = annotations.filter(a => String(a.id) !== String(item.id)));
                 });
@@ -9705,7 +9703,7 @@ dispatchLayer.on('popupopen', event => {
     if (delBtn) {
         delBtn.addEventListener('click', () => {
             if (!confirm(t('dispatch.delete_confirm'))) return;
-            const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: <?= $missionId ?>, id: delBtn.dataset.id});
+            const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: WR_MISSION_ID, id: delBtn.dataset.id});
             fetch('mission-dispatch.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
                 if (result.ok) {
                     map.closePopup();
@@ -9816,7 +9814,7 @@ function areaTerrainSelectHtml(area) {
 }
 function areaSetTerrain(id, terrain, selectEl) {
     if (selectEl) selectEl.disabled = true;
-    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'set_area_terrain', id, terrain});
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'set_area_terrain', id, terrain});
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) {
             if (map) map.closePopup();
@@ -9830,7 +9828,7 @@ function areaSetTerrain(id, terrain, selectEl) {
 
 function sectorAdminSetStatus(id, status, selectEl) {
     if (selectEl) selectEl.disabled = true;
-    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'status', id, status});
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'status', id, status});
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors, result.areas); }
         else { alert(result.error || t('common.send_failed')); if (selectEl) selectEl.disabled = false; }
@@ -9850,7 +9848,7 @@ function sectorTravelChanged(sel) {
 // to ever put a team on a sector post-creation.
 function sectorAdminSetTeam(id, teamId, selectEl) {
     if (selectEl) selectEl.disabled = true;
-    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'assign', id, team_id: teamId});
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'assign', id, team_id: teamId});
     // On foot or with a vehicle (v3.438.0), asked next to the team: what was
     // chosen if it was chosen, otherwise the way the new team itself moves.
     // Nothing goes with «—» (no team): there is nobody to travel.
@@ -9894,7 +9892,7 @@ function sectorDelete(id) {
     const gone = sectors.find(s => String(s.id) === String(id));
     const goneArea = gone ? areas.find(a => String(a.id) === String(gone.area_id)) : null;
     const ringRoutes = ringRoutesTiedTo(goneArea, gone ? [gone] : []);
-    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'delete', id});
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'delete', id});
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) {
             if (map) map.closePopup();
@@ -9907,7 +9905,7 @@ function sectorDelete(id) {
 }
 function sectorDeleteBuilding(id) {
     if (!confirm(t('sector.delete_confirm'))) return;
-    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'delete_building', id});
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'delete_building', id});
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors, result.areas); }
     });
@@ -10076,7 +10074,7 @@ var openDivideRingIntoSectors = async function(ringIndex, btnEl) {
     if (!await confirmRingEmptyOrReplace(ringIndex, pct)) return;
     if (btnEl) btnEl.disabled = true;
     const data = new URLSearchParams({
-        csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'create_area',
+        csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'create_area',
         geo: JSON.stringify(geo), label: t('missing_person.ring_sectors_area_label', {pct}),
         ring_index: ringIndex,
     });
@@ -10141,7 +10139,7 @@ var openDivideRingIntoSectors = async function(ringIndex, btnEl) {
 // var + async function expression for the same Annex B reason documented on
 // openAutoAssignForRing() below.
 var clearRingGenerated = async function(ringIndex, pct) {
-    const body = () => new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'clear_ring_generated', ring_index: ringIndex});
+    const body = () => new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'clear_ring_generated', ring_index: ringIndex});
     const [sectorResult, dispatchResult, routeResult] = await Promise.all([
         fetch('mission-sector.php', {method: 'POST', body: body()}).then(r => r.json()).catch(() => ({ok: false})),
         fetch('mission-dispatch.php', {method: 'POST', body: body()}).then(r => r.json()).catch(() => ({ok: false})),
@@ -10249,7 +10247,7 @@ var openAutoAssignForRing = async function(ringIndex, btnEl) {
         const areaLabel = t('missing_person.ring_auto_assign_area_label', {pct, team: team.label});
 
         const areaResult = await fetch('mission-sector.php', {method: 'POST', body: new URLSearchParams({
-            csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'create_area',
+            csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'create_area',
             geo: JSON.stringify(wedgeGeo), label: areaLabel, ring_index: ringIndex,
         })}).then(r => r.json()).catch(() => ({ok: false}));
         if (!areaResult.ok) {
@@ -10263,7 +10261,7 @@ var openAutoAssignForRing = async function(ringIndex, btnEl) {
         if (completedCount === 0) map.closePopup();
 
         const sectorResult = await fetch('mission-sector.php', {method: 'POST', body: new URLSearchParams({
-            csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'create',
+            csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'create',
             area_id: areaResult.id, label: areaLabel, geo: JSON.stringify(wedgeGeo), team_id: team.id,
         })}).then(r => r.json()).catch(() => ({ok: false}));
         if (!sectorResult.ok) {
@@ -10275,7 +10273,7 @@ var openAutoAssignForRing = async function(ringIndex, btnEl) {
         const routeWaypoints = sectorSearchLegPoints(center, innerRadius, radius, legCount, startBearingDeg, sweepDeg)
             .map(([lat, lng]) => ({lat, lng}));
         const routeResult = await fetch('mission-route.php', {method: 'POST', body: new URLSearchParams({
-            csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'create',
+            csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'create',
             team_id: team.id, title: t('missing_person.ring_auto_assign_route_label', {pct, team: team.label}),
             waypoints: JSON.stringify(routeWaypoints), is_closed_loop: '0', ring_index: ringIndex,
         })}).then(r => r.json()).catch(() => ({ok: false}));
@@ -10301,7 +10299,7 @@ function areaDelete(id) {
     const area = areas.find(a => String(a.id) === String(id));
     if (!confirm(t('sector.area_delete_confirm', {label: area ? area.label : '', count: area ? area.sector_count : 0}))) return;
     const ringRoutes = ringRoutesTiedTo(area, sectors.filter(s => String(s.area_id) === String(id)));
-    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'delete_area', id});
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'delete_area', id});
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) {
             if (map) map.closePopup();
@@ -10316,7 +10314,7 @@ function clearAreaSectors(id) {
     const area = areas.find(a => String(a.id) === String(id));
     if (!confirm(t('sector.clear_area_sectors_confirm', {count: area ? area.sector_count : 0}))) return;
     const ringRoutes = ringRoutesTiedTo(area, sectors.filter(s => String(s.area_id) === String(id)));
-    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'clear_area_sectors', id});
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'clear_area_sectors', id});
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) {
             if (map) map.closePopup();
@@ -10368,9 +10366,9 @@ document.getElementById('ringResetBtn')?.addEventListener('click', () => {
     const btn = document.getElementById('ringResetBtn');
     btn.disabled = true;
     Promise.all([
-        fetch('mission-sector.php', {method: 'POST', body: new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'clear_ring_generated'})}).then(r => r.json()),
-        fetch('mission-dispatch.php', {method: 'POST', body: new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'clear_ring_generated'})}).then(r => r.json()),
-        fetch('mission-route.php', {method: 'POST', body: new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'clear_ring_generated'})}).then(r => r.json()),
+        fetch('mission-sector.php', {method: 'POST', body: new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'clear_ring_generated'})}).then(r => r.json()),
+        fetch('mission-dispatch.php', {method: 'POST', body: new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'clear_ring_generated'})}).then(r => r.json()),
+        fetch('mission-route.php', {method: 'POST', body: new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'clear_ring_generated'})}).then(r => r.json()),
     ]).then(([sectorResult, dispatchResult, routeResult]) => {
         btn.disabled = false;
         if (map) map.closePopup();
@@ -10389,7 +10387,7 @@ document.getElementById('ringResetBtn')?.addEventListener('click', () => {
 document.getElementById('sectorsCardClearAllBtn')?.addEventListener('click', () => {
     const sectorTotal = areas.reduce((sum, a) => sum + a.sector_count, 0);
     if (!confirm(t('sector.clear_all_confirm', {areas: areas.length, sectors: sectorTotal}))) return;
-    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'clear_all_areas'});
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'clear_all_areas'});
     fetch('mission-sector.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
         if (result.ok) {
             if (map) map.closePopup();
@@ -10662,7 +10660,7 @@ restrictedAreaLayer?.on('popupopen', event => {
 function restrictedAreaDelete(id) {
     const area = restrictedAreas.find(a => String(a.id) === String(id));
     if (!confirm(t('restricted_area.delete_confirm', {label: area ? area.label : ''}))) return;
-    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'delete', id});
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'delete', id});
     fetch('mission-restricted-area.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) {
             if (map) map.closePopup();
@@ -10857,7 +10855,7 @@ function renderRestrictedAreaBreachesList(items) {
     }).join('');
     list.querySelectorAll('.restricted-area-ack-btn').forEach(btn => btn.addEventListener('click', () => {
         btn.disabled = true;
-        const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'acknowledge', id: btn.dataset.breachId});
+        const data = new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'acknowledge', id: btn.dataset.breachId});
         fetch('mission-restricted-area.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
             if (result.ok) {
                 // Acknowledging doesn't touch resolved_at/exited_at, so the
@@ -10871,7 +10869,7 @@ function renderRestrictedAreaBreachesList(items) {
     }));
     list.querySelectorAll('.restricted-area-resolve-btn').forEach(btn => btn.addEventListener('click', () => {
         btn.disabled = true;
-        const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'resolve', id: btn.dataset.breachId});
+        const data = new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'resolve', id: btn.dataset.breachId});
         fetch('mission-restricted-area.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
             if (result.ok) {
                 restrictedAreaBreachHistory = result.breaches;
@@ -11347,7 +11345,7 @@ map.on('click', e => {
                 const raw = document.getElementById('sectorBuildingFloorsInput').value.trim();
                 const floorCount = raw === '' ? 0 : parseInt(raw, 10);
                 if (!label || !Number.isInteger(floorCount) || floorCount < 0 || floorCount > 50) return;
-                const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'create_building', sector_id: sectorId, label, lat: latlng.lat, lng: latlng.lng, floor_count: floorCount});
+                const data = new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'create_building', sector_id: sectorId, label, lat: latlng.lat, lng: latlng.lng, floor_count: floorCount});
                 fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
                     map.closePopup();
                     if (result.ok) sectorRefreshAfter(result.sectors, result.areas);
@@ -11509,7 +11507,7 @@ function openMapContextMenu(point, touch) {
 // viewer has to read: every caller has something to show without them.
 function measureElevations(points) {
     const body = new URLSearchParams({
-        csrf_token: csrfToken, mission_id: '<?= $missionId ?>', action: 'elevation', points: JSON.stringify(points),
+        csrf_token: csrfToken, mission_id: String(WR_MISSION_ID), action: 'elevation', points: JSON.stringify(points),
     });
     return fetch('mission-measure.php', {method: 'POST', body})
         .then(r => r.ok ? r.json() : null)
@@ -11791,7 +11789,7 @@ function measureDraw(from, to) {
     if (!state.loading) return;
 
     const body = new URLSearchParams({
-        csrf_token: csrfToken, mission_id: '<?= $missionId ?>',
+        csrf_token: csrfToken, mission_id: String(WR_MISSION_ID),
         from_lat: from.lat, from_lng: from.lng, to_lat: to.lat, to_lng: to.lng,
     });
     fetch('mission-measure.php', {method: 'POST', body})
@@ -12004,7 +12002,7 @@ function measureNearest(point) {
     measureRenderNearest(state);
 
     const body = new URLSearchParams({
-        csrf_token: csrfToken, mission_id: '<?= $missionId ?>', action: 'nearest',
+        csrf_token: csrfToken, mission_id: String(WR_MISSION_ID), action: 'nearest',
         from: JSON.stringify(candidates.map(c => [c.lat, c.lng])), to_lat: point.lat, to_lng: point.lng,
     });
     fetch('mission-measure.php', {method: 'POST', body})
@@ -12190,7 +12188,7 @@ function measureTeamPairSelect(index) {
     if (!known) {
         s.routes[index] = 'loading';
         const body = new URLSearchParams({
-            csrf_token: csrfToken, mission_id: '<?= $missionId ?>',
+            csrf_token: csrfToken, mission_id: String(WR_MISSION_ID),
             from_lat: p.a_lat, from_lng: p.a_lng, to_lat: p.b_lat, to_lng: p.b_lng,
         });
         fetch('mission-measure.php', {method: 'POST', body})
@@ -12325,7 +12323,7 @@ function mapCommandIncident(point) {
         const buttons = form.querySelectorAll('button[type="submit"]');
         const body = new FormData(form);
         body.set('action', 'report');
-        body.set('mission_id', '<?= $missionId ?>');
+        body.set('mission_id', String(WR_MISSION_ID));
         const typeSelect = form.querySelector('[name="incident_type"]');
         const severitySelect = form.querySelector('[name="severity"]');
         const incident = {
@@ -12600,7 +12598,7 @@ function cpPopupContent() {
 // Every change goes through here, and the page adopts the command post the
 // server answers with.
 function cpPost(fields) {
-    const body = new URLSearchParams(Object.assign({csrf_token: csrfToken, mission_id: '<?= $missionId ?>'}, fields));
+    const body = new URLSearchParams(Object.assign({csrf_token: csrfToken, mission_id: String(WR_MISSION_ID)}, fields));
     return fetchWithTimeout('mission-command-post.php', {method: 'POST', body}, FIELD_POST_TIMEOUT_MS)
         .then(r => { if (!checkSessionAlive(r)) return null; return r.json(); })
         .then(res => {
@@ -12908,7 +12906,7 @@ function mpAdopt(res) {
 }
 
 function mpPost(fields) {
-    const body = new URLSearchParams(Object.assign({csrf_token: csrfToken, mission_id: '<?= $missionId ?>'}, fields));
+    const body = new URLSearchParams(Object.assign({csrf_token: csrfToken, mission_id: String(WR_MISSION_ID)}, fields));
     return fetchWithTimeout('mission-map-points.php', {method: 'POST', body}, FIELD_POST_TIMEOUT_MS)
         .then(r => { if (!checkSessionAlive(r)) return null; return r.json(); })
         .then(res => {
@@ -12924,7 +12922,7 @@ function mpPost(fields) {
 function mpRefresh() {
     if (mpRefreshing || !MP_VISIBLE) return;
     mpRefreshing = true;
-    const body = new URLSearchParams({csrf_token: csrfToken, mission_id: '<?= $missionId ?>', action: 'list'});
+    const body = new URLSearchParams({csrf_token: csrfToken, mission_id: String(WR_MISSION_ID), action: 'list'});
     fetchWithTimeout('mission-map-points.php', {method: 'POST', body}, FIELD_POST_TIMEOUT_MS)
         .then(r => { if (!checkSessionAlive(r)) return null; return r.json(); })
         .then(res => { if (res && res.ok) mpAdopt(res); })
@@ -13109,7 +13107,7 @@ function mpAssign(ids, teamId, btn) {
 // Take back an order that is still on its way: the dispatch's own withdrawal,
 // which tells the team it no longer stands.
 function mpWithdraw(dispatchId) {
-    const body = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: '<?= $missionId ?>', id: String(dispatchId)});
+    const body = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: String(WR_MISSION_ID), id: String(dispatchId)});
     return fetch('mission-dispatch.php', {method: 'POST', body}).then(r => r.json()).then(result => {
         if (!result.ok) { alert(result.error || t('common.failed')); return; }
         map.closePopup();
@@ -13577,7 +13575,7 @@ function sectorRefreshAfter(newSectors, newAreas) {
 // same two-step shape as Route Orders' own ack-then-depart.
 function sectorAcknowledge(id, btnEl) {
     if (btnEl) btnEl.disabled = true;
-    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'acknowledge', id});
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'acknowledge', id});
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors, result.areas); }
         else { alert(result.error || t('common.send_failed')); if (btnEl) btnEl.disabled = false; }
@@ -13590,7 +13588,7 @@ function sectorSelfAdvance(id, status, btnEl) {
     // advance" case stays exactly one click; the note is purely additive.
     const noteInput = btnEl ? btnEl.closest('.sector-advance-group')?.querySelector('.sector-advance-note') : null;
     const note = noteInput ? noteInput.value.trim() : '';
-    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'status', id, status});
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'status', id, status});
     if (note) data.set('note', note);
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors, result.areas); }
@@ -13599,7 +13597,7 @@ function sectorSelfAdvance(id, status, btnEl) {
 }
 function sectorFloorToggle(floorId, action, btnEl) {
     if (btnEl) btnEl.disabled = true;
-    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action, id: floorId});
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action, id: floorId});
     fetch('mission-sector.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
         if (result.ok) { if (map) map.closePopup(); sectorRefreshAfter(result.sectors, result.areas); }
         else { alert(result.error || t('common.send_failed')); if (btnEl) btnEl.disabled = false; }
@@ -14191,7 +14189,7 @@ sharedMarkerCluster.on('popupopen', event => {
                 return;
             }
             chargeBtn.disabled = true;
-            const data = new URLSearchParams({csrf_token: csrfToken, action: 'send', mission_id: <?= $missionId ?>, user_id: chargeBtn.dataset.userId});
+            const data = new URLSearchParams({csrf_token: csrfToken, action: 'send', mission_id: WR_MISSION_ID, user_id: chargeBtn.dataset.userId});
             fetch('mission-battery-alert.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
                 if (result.ok) { map.closePopup(); }
                 else { alert(result.error || t('common.send_failed')); chargeBtn.disabled = false; }
@@ -14565,7 +14563,7 @@ function enterTrailMode() {
     const teamId = document.getElementById('trailTeamSelect').value || '0';
     const includeAuto = document.getElementById('trailIncludeAuto').checked ? '1' : '0';
     const includeAdmin = document.getElementById('trailIncludeAdmin').checked;
-    const params = new URLSearchParams({mission_id: <?= $missionId ?>, team_id: teamId, include_auto: includeAuto});
+    const params = new URLSearchParams({mission_id: WR_MISSION_ID, team_id: teamId, include_auto: includeAuto});
     fetch('mission-track.php?' + params).then(r => r.json()).then(result => {
         if (!result.ok) { alert(result.error || t('trail.load_failed')); return; }
         if (!trailModeActive) {
@@ -14651,7 +14649,7 @@ function drawCoverageGapCells(sectorId) {
     });
 }
 function enterCoverageMode() {
-    fetch('mission-sector-coverage.php?mission_id=<?= $missionId ?>').then(r => r.json()).then(result => {
+    fetch('mission-sector-coverage.php?mission_id=' + WR_MISSION_ID).then(r => r.json()).then(result => {
         if (!result.ok) { alert(result.error || t('coverage.load_failed')); return; }
         sectorCoverageById = result.coverage || {};
         ringCoverageById = result.rings || {};
@@ -15031,7 +15029,7 @@ function renderMedia(items) {
     }));
     list.querySelectorAll('.media-delete-btn').forEach(btn => btn.addEventListener('click', () => {
         if (!confirm(t('media.delete_confirm'))) return;
-        const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: <?= $missionId ?>, id: btn.dataset.id});
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: WR_MISSION_ID, id: btn.dataset.id});
         fetch('mission-photo.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
             if (result.ok) { renderMedia(media = media.filter(m => String(m.id) !== btn.dataset.id)); mediaSignature = JSON.stringify(media); }
             else alert(result.error || t('common.delete_failed'));
@@ -15067,7 +15065,7 @@ function renderBroadcastPhotos(items) {
     }));
     list.querySelectorAll('.broadcast-photo-delete-btn').forEach(btn => btn.addEventListener('click', () => {
         if (!confirm(t('media.delete_confirm'))) return;
-        const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: <?= $missionId ?>, id: btn.dataset.id});
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete', mission_id: WR_MISSION_ID, id: btn.dataset.id});
         fetch('mission-photo.php', {method:'POST', body:data}).then(r => r.json()).then(result => {
             if (result.ok) { renderBroadcastPhotos(broadcastPhotos = broadcastPhotos.filter(p => String(p.id) !== btn.dataset.id)); }
             else alert(result.error || t('common.delete_failed'));
@@ -15197,7 +15195,7 @@ document.addEventListener('click', e => {
 function postOrderDecline(action, kind, id, extra, btn) {
     if (btn) btn.disabled = true;
     const data = new URLSearchParams(Object.assign({
-        csrf_token: csrfToken, mission_id: '<?= $missionId ?>', action: action, kind: kind, id: String(id),
+        csrf_token: csrfToken, mission_id: String(WR_MISSION_ID), action: action, kind: kind, id: String(id),
     }, extra || {}));
     return fetch('mission-decline.php', {method: 'POST', body: data}).then(response => {
         if (!checkSessionAlive(response)) return null;
@@ -15704,10 +15702,10 @@ function opIHaveATeam() { return opMyTeamId !== null; }
 // The «Δεν μπορώ» reason picker, when it is open: {key, reason, note}.
 let opDecline = null;
 // Orders put off with «Αργότερα», so a reload does not throw them back up.
-const OP_LATER_STORE = 'wrOpLater_<?= $missionId ?>';
+const OP_LATER_STORE = 'wrOpLater_' + WR_MISSION_ID;
 // The team this device last said «Κατάλαβα» to, so the team notice appears
 // once per team rather than on every load.
-const OP_TEAM_STORE = 'wrOpTeamSeen_<?= $missionId ?>';
+const OP_TEAM_STORE = 'wrOpTeamSeen_' + WR_MISSION_ID;
 // Who is on which team as of this page load — the poll only sends teams with
 // its first full payload, and the team notice has to be possible before then.
 const WR_TEAMS_AT_LOAD = <?= json_encode(array_values(array_map(fn($team) => [
@@ -17050,7 +17048,7 @@ document.addEventListener('keydown', e => {
 // rest of this page already uses (renderMyTasks, dispatch ack/receive, ...).
 
 function postRouteAction(action, id, extra) {
-    const data = new URLSearchParams(Object.assign({csrf_token: csrfToken, mission_id: '<?= $missionId ?>', action, id: String(id)}, extra || {}));
+    const data = new URLSearchParams(Object.assign({csrf_token: csrfToken, mission_id: String(WR_MISSION_ID), action, id: String(id)}, extra || {}));
     return fetchWithTimeout('mission-route.php', {method: 'POST', body: data}, FIELD_POST_TIMEOUT_MS).then(response => {
         if (!checkSessionAlive(response)) return null;
         return response.json();
@@ -17092,8 +17090,8 @@ function postRouteAction(action, id, extra) {
 // resolve) deliberately do NOT go through this — they're not the ones losing
 // signal in the field, and their own networkError already surfaces a clear
 // error for them same as before.
-const OFFLINE_QUEUE_KEY = 'wr_offline_queue_<?= $missionId ?>';
-const LEGACY_ROUTE_QUEUE_KEY = 'wr_route_queue_<?= $missionId ?>';
+const OFFLINE_QUEUE_KEY = 'wr_offline_queue_' + WR_MISSION_ID;
+const LEGACY_ROUTE_QUEUE_KEY = 'wr_route_queue_' + WR_MISSION_ID;
 
 // A sixth kind (v3.423.0), the only one that is not small JSON:
 //   kind:'media' → mission-photo.php  (a photo/video taken with no signal)
@@ -17344,7 +17342,7 @@ function afterQueuedMediaSent(item, uploaded) {
 // it can be written again, and its waiting bubble is removed.
 function sendQueuedChat(item) {
     return postQueuedForm('mission-chat.php', {
-        action: 'send', mission_id: '<?= $missionId ?>', team_id: item.teamId, message: item.text,
+        action: 'send', mission_id: String(WR_MISSION_ID), team_id: item.teamId, message: item.text,
         client_uuid: item.uuid, reported_at: item.at, queued: '1'
     }).then(result => {
         if (!result || result.networkError) return result;
@@ -17434,7 +17432,7 @@ function sendQueuedItem(item) {
     }
     if (item.kind === 'decline') {
         return postQueuedForm('mission-decline.php', {
-            mission_id: '<?= $missionId ?>', action: 'decline', kind: item.target, id: String(item.id),
+            mission_id: String(WR_MISSION_ID), action: 'decline', kind: item.target, id: String(item.id),
             reason: item.reason, note: item.note || ''
         });
     }
@@ -17468,7 +17466,7 @@ function sendQueuedItem(item) {
 // rather than a bare flag so a tab that dies mid-flush (phone kills the
 // browser — the exact scenario this whole feature exists for) can't wedge the
 // queue shut forever.
-const QUEUE_LOCK_KEY = 'wr_queue_lock_<?= $missionId ?>';
+const QUEUE_LOCK_KEY = 'wr_queue_lock_' + WR_MISSION_ID;
 const QUEUE_LOCK_TTL_MS = 30000;
 
 // One lock per lane (see flushQueue): a clip on its way up for minutes must not
@@ -17856,7 +17854,7 @@ function uploadWaypointMedia(waypointId, file, mediaType, statusEl) {
         if (statusEl) statusEl.textContent = t('media.uploading');
         setMediaProgress(0, t('media.uploading'));
         geoPromise.then(fix => {
-            const spec = VoMediaQueue.makeSpec({missionId: <?= (int) $missionId ?>, file: finalFile, fix, waypointId, capturedAt});
+            const spec = VoMediaQueue.makeSpec({missionId: WR_MISSION_ID, file: finalFile, fix, waypointId, capturedAt});
             sendMediaOrQueue(spec, pct => setMediaProgress(pct)).then(outcome => {
                 hideMediaProgressModal();
                 if (outcome.result && outcome.result.ok) {
@@ -18333,7 +18331,7 @@ let floorCandidates = null;
 let floorLoadTimer = null;
 
 function floorPost(fields) {
-    const body = new URLSearchParams({csrf_token: csrfToken, mission_id: '<?= $missionId ?>'});
+    const body = new URLSearchParams({csrf_token: csrfToken, mission_id: String(WR_MISSION_ID)});
     Object.keys(fields).forEach(k => {
         if (Array.isArray(fields[k])) fields[k].forEach(v => body.append(k + '[]', v)); else body.set(k, fields[k]);
     });
@@ -18460,7 +18458,7 @@ function floorBaselineApply(action) {
 // The page is the gateway (assets/js/mesh-gateway.js over Web Serial); what it
 // hears goes to mesh-ingest.php (includes/functions-mesh.php). Command staff only.
 function meshPost(fields) {
-    const body = new URLSearchParams({csrf_token: csrfToken, mission_id: '<?= $missionId ?>'});
+    const body = new URLSearchParams({csrf_token: csrfToken, mission_id: String(WR_MISSION_ID)});
     Object.keys(fields).forEach(k => body.set(k, fields[k]));
     return fetchWithTimeout('mesh-ingest.php', {method: 'POST', body}, FIELD_POST_TIMEOUT_MS)
         .then(r => { if (!checkSessionAlive(r)) return null; return r.json(); })
@@ -20080,7 +20078,7 @@ function renderPointsOfInterest(items) {
     if (!canManageIncidents) return;
     list.querySelectorAll('.poi-check-btn').forEach(btn => btn.addEventListener('click', () => {
         btn.disabled = true;
-        const data = new URLSearchParams({csrf_token: csrfToken, action: 'check_poi', mission_id: '<?= $missionId ?>', poi_id: btn.dataset.poiId});
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'check_poi', mission_id: String(WR_MISSION_ID), poi_id: btn.dataset.poiId});
         fetch('mission-photo.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
             if (result.ok) {
                 const item = pointsOfInterest.find(x => String(x.id) === btn.dataset.poiId);
@@ -21087,7 +21085,7 @@ function wireMediaInput(inputId, sentLabel) {
             setMediaProgress(0, t('media.uploading'));
             const thumbPromise = finalFile.type.startsWith('video/') ? captureVideoThumbnail(finalFile) : Promise.resolve(null);
             Promise.all([geoPromise, thumbPromise]).then(([fix, thumbBlob]) => {
-                const spec = VoMediaQueue.makeSpec({missionId: <?= (int) $missionId ?>, file: finalFile, thumb: thumbBlob, fix, capturedAt});
+                const spec = VoMediaQueue.makeSpec({missionId: WR_MISSION_ID, file: finalFile, thumb: thumbBlob, fix, capturedAt});
                 sendMediaOrQueue(spec, pct => setMediaProgress(pct)).then(outcome => {
                     hideMediaProgressModal();
                     const result = outcome.result;
@@ -21218,7 +21216,7 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
         // is always compressPhotoForUpload — no isVideo branch needed here.
         compressPhotoForUpload(stagedFile).then(finalFile => {
             const spec = VoMediaQueue.makeSpec({
-                missionId: <?= (int) $missionId ?>, file: finalFile, fix: stagedCoords,
+                missionId: WR_MISSION_ID, file: finalFile, fix: stagedCoords,
                 isPoi: true, note, capturedAt: stagedAt
             });
             sendMediaOrQueue(spec, pct => setMediaProgress(pct)).then(outcome => {
@@ -21294,9 +21292,9 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
 
 setTimeout(() => {
     // Which finished orders are faded, before the first draw of any of them (assets/js/war-room-done-orders.js).
-    wrDoneInit(<?= (int) $missionId ?>, MAP_LAYER_TOOLS_ENABLED);
+    wrDoneInit(WR_MISSION_ID, MAP_LAYER_TOOLS_ENABLED);
     // And which team's orders, and where the teams have been (assets/js/war-room-team-coverage.js), for command.
-    wrCovInit(<?= (int) $missionId ?>, MAP_LAYER_TOOLS_ENABLED);
+    wrCovInit(WR_MISSION_ID, MAP_LAYER_TOOLS_ENABLED);
     renderPins(pins); renderDispatches(dispatches); renderAnnotations(annotations); renderMedia(media); renderRouteLayer(routes); renderRoutesAdmin(routes); renderTeamDistances(teamDistances); renderIncidentLayer(missionIncidents); renderPoiLayer(pointsOfInterest); renderAreaLayer(areas); renderSectorLayer(sectors); renderSectorsList(sectors); renderRestrictedAreaLayer(restrictedAreas); renderRestrictedAreasList(restrictedAreas); renderRestrictedAreaBreachesList(restrictedAreaBreachHistory); renderMissingPersonMarker(missingPerson); renderSearchRingsLayer(missingPerson); renderWeatherControl(weather);
     renderMyTasks(myTasks);
     renderMySectors(sectors);
@@ -21525,7 +21523,7 @@ function voiceSendClip(blob, ext, heldMs) {
         const fd = new FormData();
         fd.append('csrf_token', csrfToken);
         fd.append('action', 'send');
-        fd.append('mission_id', '<?= $missionId ?>');
+        fd.append('mission_id', String(WR_MISSION_ID));
         fd.append('duration_ms', String(Math.round(heldMs)));
         if (fix) {
             fd.append('lat', String(fix.lat));
@@ -21621,7 +21619,7 @@ function renderVoiceMessages(items) {
     list.querySelectorAll('.voice-ack-btn').forEach(btn => btn.addEventListener('click', () => {
         btn.disabled = true;
         const data = new URLSearchParams({csrf_token: csrfToken, action: 'acknowledge',
-                                          mission_id: '<?= $missionId ?>', id: btn.dataset.id});
+                                          mission_id: String(WR_MISSION_ID), id: btn.dataset.id});
         fetch('mission-voice.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
             if (result.ok) {
                 voiceMessages = voiceMessages.filter(x => String(x.id) !== String(btn.dataset.id));
@@ -22389,7 +22387,7 @@ function dismissRestrictedAreaOverlay() {
     open.filter(b => b.is_mine).forEach(b => {
         fetch('mission-restricted-area.php', {
             method: 'POST',
-            body: new URLSearchParams({csrf_token: csrfToken, mission_id: <?= $missionId ?>, action: 'acknowledge', id: b.id}),
+            body: new URLSearchParams({csrf_token: csrfToken, mission_id: WR_MISSION_ID, action: 'acknowledge', id: b.id}),
         }).catch(() => {});
     });
     updateRestrictedAreaAlarmState(restrictedAreaBreaches);
@@ -22960,7 +22958,7 @@ function loadActivity() {
     activityInFlight = true;
     const activityAbort = new AbortController();
     const activityKiller = setTimeout(() => activityAbort.abort(), POLL_ABORT_MS);
-    fetch('mission-history.php?mission_id=<?= $missionId ?>', {signal: activityAbort.signal}).then(r => r.json()).then(data => {
+    fetch('mission-history.php?mission_id=' + WR_MISSION_ID, {signal: activityAbort.signal}).then(r => r.json()).then(data => {
         const list = document.getElementById('activityList');
         if (!data.ok || !data.events.length) {
             list.innerHTML = '<div class="text-muted small">' + t('activity.empty') + '</div>';
@@ -22996,7 +22994,7 @@ if (reportModalEl) {
         detailList.innerHTML = '';
         shortageSummaryBody.innerHTML = '<tr><td colspan="6" class="text-muted small">' + t('common.loading') + '</td></tr>';
         shortageDetailList.innerHTML = '';
-        fetch('mission-response-report.php?mission_id=<?= $missionId ?>').then(r => r.json()).then(data => {
+        fetch('mission-response-report.php?mission_id=' + WR_MISSION_ID).then(r => r.json()).then(data => {
             if (!data.ok) { summaryBody.innerHTML = `<tr><td colspan="6" class="text-danger small">${data.error}</td></tr>`; return; }
 
             summaryBody.innerHTML = data.summary.length ? data.summary.map(s => `
@@ -23077,7 +23075,7 @@ document.querySelectorAll('.participant-gps-check').forEach(box => {
         box.disabled = true;
         const body = new URLSearchParams({
             csrf_token: csrfToken,
-            mission_id: '<?= $missionId ?>',
+            mission_id: String(WR_MISSION_ID),
             user_id: uid,
             takes_part: wanted ? '1' : '0',
         });
@@ -23135,7 +23133,7 @@ const ROSTER_SIG = <?= json_encode($rosterSig) ?>;
 // ομάδα;»): every approved person, once, in a team or not. Command staff only;
 // the roster moving reloads the page, so this never goes stale.
 const ROSTER_PERSON_IDS = <?= json_encode($canManageWarRoom ? array_values(array_map('intval', array_keys($distinctApprovedById))) : []) ?>;
-const GPS_RELOAD_VIEW_KEY = 'wr-gps-reload-view-<?= $missionId ?>';
+const GPS_RELOAD_VIEW_KEY = 'wr-gps-reload-view-' + WR_MISSION_ID;
 const GPS_RELOAD_GRACE_MS = 3000;
 let gpsReloadDeadline = 0;
 let gpsReloadTimer = null;
@@ -23401,7 +23399,7 @@ function openSuggestReplacementModal(volunteerId, volunteerName) {
     list.innerHTML = header + `<p class="text-muted small">${t('common.loading')}</p>`;
     bootstrap.Modal.getOrCreateInstance(modalEl).show();
 
-    const body = new URLSearchParams({csrf_token: csrfToken, mission_id: '<?= $missionId ?>', volunteer_id: volunteerId});
+    const body = new URLSearchParams({csrf_token: csrfToken, mission_id: String(WR_MISSION_ID), volunteer_id: volunteerId});
     fetch('api-suggest-replacement.php', {method: 'POST', body}).then(r => r.json()).then(result => {
         if (result.error) {
             list.innerHTML = header + `<p class="text-danger small">${escapeHtml(result.error)}</p>`;
@@ -23885,7 +23883,7 @@ function sendGeolocationErrorToCommandPost(err) {
     lastGpsErrorReportAt = now;
     fetch('mission-gps-error.php', {
         method: 'POST',
-        body: new URLSearchParams({csrf_token: csrfToken, mission_id: '<?= $missionId ?>', code: String(code)}),
+        body: new URLSearchParams({csrf_token: csrfToken, mission_id: String(WR_MISSION_ID), code: String(code)}),
     }).catch(() => {});
 }
 
@@ -24131,7 +24129,7 @@ function sendGpsReasonToCommandPost(reason) {
     reportedNativeGpsReasons[reason] = now;
     fetch('mission-gps-error.php', {
         method: 'POST',
-        body: new URLSearchParams({csrf_token: csrfToken, mission_id: '<?= $missionId ?>', reason: reason}),
+        body: new URLSearchParams({csrf_token: csrfToken, mission_id: String(WR_MISSION_ID), reason: reason}),
     }).catch(() => {});
 }
 // v3.337.0: the phone makers whose own "autostart" switch kills the tracking
@@ -24974,7 +24972,7 @@ let assistantOverdueLastCount = 0;
 // situation is no worse than what was acknowledged, and comes back the moment
 // it gets worse. Reloading the page is not news, so the threshold is persisted
 // per device, the same rule the acknowledgement cards' own X follows.
-const OVERDUE_DISMISS_KEY = 'wr-overdue-dismissed-<?= (int) $missionId ?>';
+const OVERDUE_DISMISS_KEY = 'wr-overdue-dismissed-' + WR_MISSION_ID;
 let assistantOverdueDismissedAt = 0;
 try {
     assistantOverdueDismissedAt = parseInt(localStorage.getItem(OVERDUE_DISMISS_KEY) || '0', 10) || 0;
@@ -25133,7 +25131,7 @@ document.getElementById('assistantSeenBtn')?.addEventListener('click', function 
     btn.disabled = true;
     const body = new FormData();
     body.append('csrf_token', csrfToken);
-    body.append('mission_id', '<?= $missionId ?>');
+    body.append('mission_id', String(WR_MISSION_ID));
     body.append('action', 'seen');
     fetch('mission-assistant.php', {method: 'POST', body}).then(r => r.json()).then(res => {
         if (res && res.ok) {
@@ -25351,7 +25349,7 @@ function assistantAsk(presetQuestion) {
 
     const body = new FormData();
     body.append('csrf_token', csrfToken);
-    body.append('mission_id', '<?= $missionId ?>');
+    body.append('mission_id', String(WR_MISSION_ID));
     body.append('action', 'ask');
     body.append('question', question);
     body.append('history', JSON.stringify(assistantHistory.slice(-4)));
@@ -25727,7 +25725,7 @@ document.getElementById('assistantHandoverBtn')?.addEventListener('click', funct
 
     const body = new FormData();
     body.append('csrf_token', csrfToken);
-    body.append('mission_id', '<?= $missionId ?>');
+    body.append('mission_id', String(WR_MISSION_ID));
     body.append('action', 'handover');
 
     fetch('mission-assistant.php', {method: 'POST', body}).then(r => r.json())
@@ -25798,7 +25796,7 @@ document.querySelectorAll('textarea[data-ai-draft]').forEach(field => {
 
         const body = new FormData();
         body.append('csrf_token', csrfToken);
-        body.append('mission_id', '<?= $missionId ?>');
+        body.append('mission_id', String(WR_MISSION_ID));
         body.append('action', 'draft');
         body.append('kind', kind);
         body.append('rough', rough);
@@ -25938,7 +25936,7 @@ renderAssistant(assistantData);
 //
 // Server decides WHAT is outstanding; this decides only what is on screen.
 let ackTrackerCards = <?= json_encode($ackTrackerCards, JSON_UNESCAPED_UNICODE) ?>;
-const ACK_DISMISS_KEY = 'wr-ack-dismissed-<?= (int) $missionId ?>';
+const ACK_DISMISS_KEY = 'wr-ack-dismissed-' + WR_MISSION_ID;
 
 // Keys the coordinator has closed with X. Persisted per device, per mission:
 // closing a card is a judgement ("I have seen this, stop showing it to me")
@@ -25957,7 +25955,7 @@ try {
 // as three edits to one object rather than three pieces of state to keep in
 // agreement. Persisted per device, like the dismissals: a parked card is a
 // layout choice about one person's screen, not a fact about the operation.
-const ACK_POS_KEY = 'wr-ack-pos-<?= (int) $missionId ?>';
+const ACK_POS_KEY = 'wr-ack-pos-' + WR_MISSION_ID;
 let ackPositions = {};
 try {
     const stored = JSON.parse(localStorage.getItem(ACK_POS_KEY) || '{}');
@@ -27065,7 +27063,7 @@ function pollWarRoomData() {
     // The phone layout's unread chat badges ride this request (see cursorParam() in the chat code); null
     // everywhere else, and then no parameter is sent and the server sends nothing back.
     const chatCursors = window.wrChat ? window.wrChat.cursorParam() : null;
-    return fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId + '&payload_hash=' + encodeURIComponent(lastPayloadHash) + (chatCursors === null ? '' : '&chat_after=' + encodeURIComponent(chatCursors)), {signal: pollAbort.signal}).then(response => {
+    return fetch('war-room.php?id=' + WR_MISSION_ID + '&ajax=1&banner_after=' + bannerAfterId + '&payload_hash=' + encodeURIComponent(lastPayloadHash) + (chatCursors === null ? '' : '&chat_after=' + encodeURIComponent(chatCursors)), {signal: pollAbort.signal}).then(response => {
         // An old service worker's offline page is a failed connection
         // wearing a 200 — counted as one.
         if (isOfflineFallback(response)) throw new TypeError('offline fallback');
@@ -27434,7 +27432,7 @@ document.querySelectorAll('.team-form').forEach(form => {
     const chatForm = document.getElementById('chatSendForm');
     if (!chatMessagesEl || !chatForm) return;
 
-    const missionId = <?= $missionId ?>;
+    const missionId = WR_MISSION_ID;
     // Answers "which team am I on NOW?" for syncRoomTabs() below. Reads the
     // one top-level WR_MY_USER_ID rather than embedding a second copy.
     const myUserId = WR_MY_USER_ID;
@@ -28035,7 +28033,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         const combinedLabel = noteText && lastAddressLabel ? (noteText + ' — ' + lastAddressLabel) : (noteText || lastAddressLabel);
         if (!teamSelect.value) { alert(t('dispatch.pick_team_first')); return; }
         const data = new URLSearchParams({
-            csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>,
+            csrf_token: csrfToken, action: 'create', mission_id: WR_MISSION_ID,
             // «Όλες οι ομάδες» is 'all' here and no team to the endpoint.
             team_id: teamSelect.value === 'all' ? '' : teamSelect.value, type: type, geo: JSON.stringify(geo), label: combinedLabel,
             ring_index: pendingRingIndex ?? '',
@@ -28046,7 +28044,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         fetch('mission-dispatch.php', {method:'POST', body:data}).then(response => response.json()).then(result => {
             if (result.ok) {
                 bootstrap.Modal.getInstance(modalEl).hide();
-                fetch('war-room.php?id=<?= $missionId ?>&ajax=1&banner_after=' + bannerAfterId)
+                fetch('war-room.php?id=' + WR_MISSION_ID + '&ajax=1&banner_after=' + bannerAfterId)
                     .then(response => response.json())
                     .then(d => {
                         if (d.dispatches) renderDispatches(dispatches = d.dispatches);
@@ -28330,7 +28328,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         const posts = wedges.map((poly, i) => {
             const label = (labelInputs[i] ? labelInputs[i].value.trim() : '') || `${t('sector.wedge_label_placeholder', {letter: GREEK_LETTERS[i % GREEK_LETTERS.length]})}`;
             const data = new URLSearchParams({
-                csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>,
+                csrf_token: csrfToken, action: 'create', mission_id: WR_MISSION_ID,
                 area_id: currentArea.id, label, geo: JSON.stringify(poly),
             });
             // mission-sector.php's create action already accepts team_id and
@@ -28347,7 +28345,7 @@ document.querySelectorAll('.team-form').forEach(form => {
             // Re-sync from the server's own truth rather than trust any one
             // POST's own echoed payload — safer when several requests landed
             // concurrently and one of them failed partway through the batch.
-            fetch('mission-sector.php?mission_id=<?= $missionId ?>').then(r => r.json()).then(fresh => {
+            fetch('mission-sector.php?mission_id=' + WR_MISSION_ID).then(r => r.json()).then(fresh => {
                 if (fresh.ok) sectorRefreshAfter(fresh.sectors, fresh.areas);
                 if (failed) {
                     alert(failed.error || t('common.send_failed'));
@@ -28500,7 +28498,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         // Only the area, the size and the prefix are sent. The cell list stays
         // here — the server builds its own from the area it already has.
         const data = new URLSearchParams({
-            csrf_token: csrfToken, action: 'generate_grid', mission_id: <?= $missionId ?>,
+            csrf_token: csrfToken, action: 'generate_grid', mission_id: WR_MISSION_ID,
             area_id: currentArea.id, sector_size_m: gridSizeRange.value, prefix: gridPrefixInput.value,
         });
         fetch('mission-sector.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
@@ -28746,7 +28744,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         if (halves.length !== 2 || !currentSector) return;
         const label1 = labelInput1.value.trim() || t('sector.split_label_suffix', {label: currentSector.label, letter: 'Α'});
         const label2 = labelInput2.value.trim() || t('sector.split_label_suffix', {label: currentSector.label, letter: 'Β'});
-        const missionId = <?= $missionId ?>;
+        const missionId = WR_MISSION_ID;
         const originalId = currentSector.id;
         const areaId = currentSector.area_id;
         saveBtn.disabled = true;
@@ -29060,8 +29058,8 @@ document.querySelectorAll('.team-form').forEach(form => {
         // Without a seed this saves an area, exactly as it always did. With one it is a sector of
         // that area - given to the team when the seed carries one, which tells the team.
         const data = seed
-            ? new URLSearchParams({csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>, area_id: seed.areaId, label: label, geo: geo, team_id: seed.teamId || ''})
-            : new URLSearchParams({csrf_token: csrfToken, action: 'create_area', mission_id: <?= $missionId ?>, geo: geo, label: label});
+            ? new URLSearchParams({csrf_token: csrfToken, action: 'create', mission_id: WR_MISSION_ID, area_id: seed.areaId, label: label, geo: geo, team_id: seed.teamId || ''})
+            : new URLSearchParams({csrf_token: csrfToken, action: 'create_area', mission_id: WR_MISSION_ID, geo: geo, label: label});
         sendBtn.disabled = true;
         fetch('mission-sector.php', {method:'POST', body:data}).then(response => response.json()).then(result => {
             if (!result.ok) { fail(result.error); return; }
@@ -29303,7 +29301,7 @@ document.querySelectorAll('.team-form').forEach(form => {
             return;
         }
         const data = new URLSearchParams({
-            csrf_token: csrfToken, action: 'create', mission_id: <?= $missionId ?>,
+            csrf_token: csrfToken, action: 'create', mission_id: WR_MISSION_ID,
             geo: JSON.stringify(drawPoints), label: label, kind: kindSelect.value, shape: shapeSelect.value,
         });
         sendBtn.disabled = true;
@@ -30235,7 +30233,7 @@ function renderWaypointPanel() {
             return;
         }
         const data = new URLSearchParams({
-            csrf_token: csrfToken, action: 'create', mission_id: '<?= $missionId ?>',
+            csrf_token: csrfToken, action: 'create', mission_id: String(WR_MISSION_ID),
             team_id: teamSelect.value, title: titleInput.value.trim(), waypoints: JSON.stringify(payload),
             is_closed_loop: routeClosed ? '1' : '0', member_ids: JSON.stringify(memberIds),
             add_return_waypoint: document.getElementById('routeReturnToStartCheck').checked ? '1' : '0',
@@ -30286,7 +30284,7 @@ document.addEventListener('click', function (e) {
     btn.disabled = true;
     const data = new URLSearchParams({
         csrf_token: csrfToken,
-        mission_id: <?= $missionId ?>,
+        mission_id: WR_MISSION_ID,
         action: 'stop',
         stream_id: btn.dataset.streamId
     });
@@ -30385,7 +30383,7 @@ setInterval(function () {
 // other's role even if this file is tampered with.
 (function () {
     const el = id => document.getElementById(id);
-    const MISSION_ID = <?= $missionId ?>;
+    const MISSION_ID = WR_MISSION_ID;
     const MAX_SECONDS = <?= MISSION_LIVE_MAX_SECONDS ?>;
 
     // ── Field diagnostics: append ?livedebug=1 ──────────────────────────────

@@ -241,7 +241,7 @@ final class CompletedOrdersFadeTest extends TestCase
         // render, and a drawing made before the stored choice is read would be
         // thrown away at once.
         $page = $this->page();
-        $init = strpos($page, 'wrDoneInit(<?= (int) $missionId ?>, MAP_LAYER_TOOLS_ENABLED);');
+        $init = strpos($page, 'wrDoneInit(WR_MISSION_ID, MAP_LAYER_TOOLS_ENABLED);');
         $first = strpos($page, 'renderPins(pins); renderDispatches(dispatches);');
         $this->assertNotFalse($init);
         $this->assertNotFalse($first);

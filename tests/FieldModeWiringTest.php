@@ -57,7 +57,7 @@ final class FieldModeWiringTest extends TestCase
         $this->assertStringContainsString("'mission-decline.php'", $send);
         // And the same storage key as the live page.
         $this->assertStringContainsString("'wr_offline_queue_' + missionId", $js);
-        $this->assertStringContainsString("const OFFLINE_QUEUE_KEY = 'wr_offline_queue_<?= \$missionId ?>'", $wr);
+        $this->assertStringContainsString("const OFFLINE_QUEUE_KEY = 'wr_offline_queue_' + WR_MISSION_ID", $wr);
     }
 
     public function testTheSnapshotCarriesWhatTheFieldViewReads(): void

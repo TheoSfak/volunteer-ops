@@ -217,8 +217,8 @@ final class TeamCoverageFocusTest extends TestCase
     {
         $page = $this->source('war-room.php');
         $this->assertStringContainsString('assets/js/war-room-team-coverage.js', $page);
-        $done = strpos($page, 'wrDoneInit(<?= (int) $missionId ?>, MAP_LAYER_TOOLS_ENABLED);');
-        $cov = strpos($page, 'wrCovInit(<?= (int) $missionId ?>, MAP_LAYER_TOOLS_ENABLED);');
+        $done = strpos($page, 'wrDoneInit(WR_MISSION_ID, MAP_LAYER_TOOLS_ENABLED);');
+        $cov = strpos($page, 'wrCovInit(WR_MISSION_ID, MAP_LAYER_TOOLS_ENABLED);');
         $first = strpos($page, 'renderPins(pins); renderDispatches(dispatches);');
         $this->assertNotFalse($done);
         $this->assertNotFalse($cov);

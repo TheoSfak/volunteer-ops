@@ -318,7 +318,7 @@ final class FinishedOrdersToolsTest extends TestCase
         $done = $this->source('assets/js/war-room-done-orders.js');
         $this->assertStringContainsString('wrDoneFieldQuiet = !canChoose;', $done);
         $page = $this->source('war-room.php');
-        $this->assertMatchesRegularExpression('/wrDoneInit\(<\?= \(int\) \$missionId \?>, MAP_LAYER_TOOLS_ENABLED\);/', $page, 'the same flag that gates the layer tools for command');
+        $this->assertMatchesRegularExpression('/wrDoneInit\(WR_MISSION_ID, MAP_LAYER_TOOLS_ENABLED\);/', $page, 'the same flag that gates the layer tools for command');
     }
 
     public function testASectorIsNeverTakenOffTheFieldsMap(): void

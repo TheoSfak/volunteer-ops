@@ -153,9 +153,9 @@ final class WarRoomConsoleTest extends TestCase
         // Without a seed the window saves an AREA, as it always did; with one it saves a SECTOR of that area,
         // with the team when there is one. The old way (an area plus a whole-area sector) is gone.
         $this->assertSame(1, substr_count($page, "activeSeed = pendingAreaSeed;"));
-        $this->assertStringContainsString("action: 'create', mission_id: <?= \$missionId ?>, area_id: seed.areaId, label: label, geo: geo, team_id: seed.teamId || ''", $page);
-        $this->assertStringContainsString("action: 'create_area', mission_id: <?= \$missionId ?>, geo: geo, label: label", $page);
-        $this->assertStringNotContainsString("action: 'delete_area', mission_id: <?= \$missionId ?>, id: result.id", $page);
+        $this->assertStringContainsString("action: 'create', mission_id: WR_MISSION_ID, area_id: seed.areaId, label: label, geo: geo, team_id: seed.teamId || ''", $page);
+        $this->assertStringContainsString("action: 'create_area', mission_id: WR_MISSION_ID, geo: geo, label: label", $page);
+        $this->assertStringNotContainsString("action: 'delete_area', mission_id: WR_MISSION_ID, id: result.id", $page);
         // The area's outline is drawn dashed on the map, and the view closes on it.
         $this->assertStringContainsString('seedAreaLayer = L.polygon(seedArea.geo', $page);
         $this->assertStringContainsString('composerMap.fitBounds(seedAreaLayer.getBounds()', $page);
