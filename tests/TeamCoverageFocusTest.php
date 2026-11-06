@@ -249,14 +249,15 @@ final class TeamCoverageFocusTest extends TestCase
     public function testTheFocusIsTheSameHiddenTheFinishedOrdersUse(): void
     {
         $done = $this->source('assets/js/war-room-done-orders.js');
-        $this->assertStringContainsString('function wrDonePhase(ts, teamId) {', $done);
+        $this->assertStringContainsString('function wrDonePhase(ts, teamId, kind) {', $done);
         $this->assertStringContainsString("if (wrDoneFocusHides(teamId)) return 'hidden';", $done);
         $this->assertStringContainsString("if (wrDoneFocusHides(route.team_id)) return 'hidden';", $done);
-        $this->assertStringContainsString('wrDonePhase(i.completed_ts, i.team_id)', $done, 'so the redraw signature changes with the focus');
+        $this->assertStringContainsString('wrDonePhase(i.completed_ts, i.team_id, kind)', $done, 'so the redraw signature changes with the focus');
         $this->assertStringContainsString('wrDoneFocusHides(d.team_id)', $done, 'and the counter lists only what is on the map');
 
         $page = $this->source('war-room.php');
-        $this->assertSame(2, substr_count($page, 'wrDonePhase(item.completed_ts, item.team_id)'), 'a pin and a sector');
+        $this->assertSame(1, substr_count($page, "wrDonePhase(item.completed_ts, item.team_id, 'dispatch')"), 'a pin');
+        $this->assertSame(1, substr_count($page, "wrDonePhase(item.completed_ts, item.team_id, 'sector')"), 'and a sector');
         $this->assertStringContainsString("if (wrFocusTeam !== null) hidden.push(t('map.focus_hidden_item', {team: wrFocusLabel()}));", $page, 'never silent');
         $this->assertStringContainsString('wrFocusSet(null);', $page, '«Εμφάνιση όλων» ends it');
 

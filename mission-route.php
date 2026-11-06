@@ -325,6 +325,22 @@ if ($action === 'create') {
     exit;
 }
 
+// «Ξανάνοιγμα διαδρομής» (v3.443.0): command takes back the completion of a route that closed too soon or by
+// mistake; its last point is open again and the team is told.
+if ($action === 'reopen') {
+    if (!$canManageWarRoom) {
+        echo json_encode(['ok' => false, 'error' => t('dispatch.no_manage_permission')]);
+        exit;
+    }
+    $error = reopenMissionRoute($mission, (int) post('id'), (int) $userId);
+    if ($error !== null) {
+        echo json_encode(['ok' => false, 'error' => $error]);
+        exit;
+    }
+    echo json_encode(['ok' => true, 'routes' => loadRoutesForUser($missionId, $userId, $canManageWarRoom)]);
+    exit;
+}
+
 if ($action === 'cancel') {
     if (!$canManageWarRoom) {
         echo json_encode(['ok' => false, 'error' => t('dispatch.no_manage_permission')]);

@@ -257,6 +257,19 @@ if ($action === 'create') {
     exit;
 }
 
+// «Ξανάνοιγμα» (v3.443.0): command takes back an «Ολοκληρώθηκε» pressed by mistake or too soon. Past the
+// $canManageWarRoom gate above, so command only.
+if ($action === 'reopen') {
+    $error = reopenMissionDispatch($mission, (int) post('id'), (string) post('scope'), (int) $userId);
+    if ($error !== null) {
+        echo json_encode(['ok' => false, 'error' => $error]);
+        exit;
+    }
+    $dispatches = loadMissionDispatchesForUser($missionId, $userId, $canManageWarRoom, $isApprovedParticipant);
+    echo json_encode(['ok' => true, 'dispatches' => $dispatches]);
+    exit;
+}
+
 if ($action === 'delete') {
     $dispatchId = (int) post('id');
     $row = dbFetchOne("SELECT id FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$dispatchId, $missionId]);

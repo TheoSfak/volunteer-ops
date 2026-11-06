@@ -58,12 +58,25 @@ function wrDoneFocusHides(teamId) {
     return typeof wrFocusExcludes === 'function' && wrFocusExcludes(teamId);
 }
 
-// Which phase a dispatch or a sector is in, from the time its team finished it.
-function wrDonePhase(ts, teamId) {
+// The people in the field see what is running, not the record (v3.443.0): they have «Οι Εντολές μου» for their own
+// orders, so a finished point, area or route leaves their map once its ten bright minutes are over. A sector is
+// the exception - every team seeing what is already covered, so nobody searches it twice, is the whole point of
+// a sector - so it stays as its outline for everyone. The chip's list has a tick to show them all anyway.
+const WR_DONE_FIELD_KEY = 'wr_done_field_all_';   // + the mission id, in sessionStorage
+let wrDoneFieldQuiet = false;     // set by wrDoneInit for whoever cannot choose the mode (everyone but command)
+let wrDoneFieldShowAll = false;
+function wrDoneFieldHides(kind) {
+    return wrDoneFieldQuiet && !wrDoneFieldShowAll && kind !== 'sector';
+}
+
+// Which phase a dispatch, a sector or a route is in, from the time its team finished it. $kind is 'dispatch',
+// 'sector' or 'route'.
+function wrDonePhase(ts, teamId, kind) {
     if (wrDoneFocusHides(teamId)) return 'hidden';
     if (!ts || wrDoneMode === 'normal') return 'live';
     if (wrDoneMode === 'hidden') return 'hidden';
-    return wrDoneNowSec() - ts > WR_DONE_FRESH_SECONDS ? 'archived' : 'fresh';
+    if (wrDoneNowSec() - ts <= WR_DONE_FRESH_SECONDS) return 'fresh';
+    return wrDoneFieldHides(kind) ? 'hidden' : 'archived';
 }
 
 // Routes: an active one is live; a finished one is only on the map from
@@ -73,15 +86,15 @@ function wrDoneRoutePhase(route) {
     if (route.status === 'active') return 'live';
     if (route.status !== 'completed' || wrDoneMode === 'normal') return 'skip';
     if (wrDoneMode === 'hidden') return 'hidden';
-    return wrDonePhase(route.completed_ts || 1);
+    return wrDonePhase(route.completed_ts || 1, undefined, 'route');
 }
 
 // One character per item, for the render functions' "nothing changed" signatures.
-function wrDonePhaseSig(items) {
-    return wrDoneMode + ':' + (items || []).map(i => wrDonePhase(i.completed_ts, i.team_id)[0]).join('');
+function wrDonePhaseSig(items, kind) {
+    return wrDoneMode + (wrDoneFieldHides(kind) ? 'q' : '') + ':' + (items || []).map(i => wrDonePhase(i.completed_ts, i.team_id, kind)[0]).join('');
 }
 function wrDoneRoutesSig(items) {
-    return wrDoneMode + ':' + (items || []).map(r => wrDoneRoutePhase(r)[0]).join('');
+    return wrDoneMode + (wrDoneFieldHides('route') ? 'q' : '') + ':' + (items || []).map(r => wrDoneRoutePhase(r)[0]).join('');
 }
 // The lists as they are drawn: the present, or (time machine) as they stood at the moment looked at.
 function wrDoneView(kind) {
@@ -89,12 +102,24 @@ function wrDoneView(kind) {
     return kind === 'dispatch' ? wrTimeDispatches(dispatches) : kind === 'sector' ? wrTimeSectors(sectors) : wrTimeRoutes(routes);
 }
 function wrDoneAllSig() {
-    return wrDonePhaseSig(wrDoneView('dispatch')) + '|' + wrDonePhaseSig(wrDoneView('sector')) + '|' + wrDoneRoutesSig(wrDoneView('route'));
+    return wrDonePhaseSig(wrDoneView('dispatch'), 'dispatch') + '|' + wrDonePhaseSig(wrDoneView('sector'), 'sector') + '|' + wrDoneRoutesSig(wrDoneView('route'));
 }
 
 // ── Drawing ─────────────────────────────────────────────────────────────────
-function wrDoneDotIcon() {
-    return L.divIcon({className: 'wr-done-dot', html: '<i class="bi bi-check-lg"></i>', iconSize: [18, 18], iconAnchor: [9, 9]});
+function wrDoneDotIcon(withNote) {
+    return withNote
+        ? L.divIcon({className: 'wr-done-dot wr-done-note', html: '<i class="bi bi-chat-left-text-fill"></i>', iconSize: [22, 22], iconAnchor: [11, 11]})
+        : L.divIcon({className: 'wr-done-dot', html: '<i class="bi bi-check-lg"></i>', iconSize: [18, 18], iconAnchor: [9, 9]});
+}
+// What the team wrote when it finished this order (v3.443.0). The server sends it only to command and to that team
+// itself, so what is here is what this viewer may read. An order with one is NOT folded into the quiet tick: it
+// carries information («Αποχώρησε περιπατητικός»), so it stays brighter, with the words on hover.
+function wrDoneNote(item) {
+    const lines = (item.progress || []).filter(p => p.completed && p.note && (item.team_id ? p.scope === 't' + item.team_id : true));
+    return lines.length ? lines[lines.length - 1].note : null;
+}
+function wrDoneNoteTip(note) {
+    return '<br><i class="bi bi-chat-left-text-fill"></i> ' + escapeHtml(t('map.done_note_tip', {note: note.length > 140 ? note.slice(0, 139) + '…' : note}));
 }
 // Centred on the pin's head, 15 px above the point it marks.
 function wrDoneRingIcon() {
@@ -106,13 +131,17 @@ function wrDoneAddRing(item) {
 
 // An archived dispatch: the same popup as ever, none of the permanent label.
 function wrDoneDrawDispatch(item, popupHtml) {
-    const tip = escapeHtml(item.team_label) + ' · ✓ ' + escapeHtml(item.completed_display || '') + (item.label ? ' · ' + escapeHtml(item.label) : '');
+    const note = wrDoneNote(item);
+    const tip = escapeHtml(item.team_label) + ' · ✓ ' + escapeHtml(item.completed_display || '') + (item.label ? ' · ' + escapeHtml(item.label) : '')
+        + (note ? wrDoneNoteTip(note) : '');
     let layer = null;
     if (item.type === 'point') {
-        layer = L.marker([item.geo.lat, item.geo.lng], {icon: wrDoneDotIcon(), zIndexOffset: -200}).addTo(dispatchLayer).bindPopup(popupHtml);
+        layer = L.marker([item.geo.lat, item.geo.lng], {icon: wrDoneDotIcon(!!note), zIndexOffset: note ? -50 : -200}).addTo(dispatchLayer).bindPopup(popupHtml);
         layer.bindTooltip(tip, {direction: 'right', offset: [10, 0]});
     } else if (item.type === 'polygon') {
-        layer = L.polygon(item.geo, {color: '#7c3aed', weight: 1.5, opacity: 0.55, dashArray: '4,4', fillOpacity: 0.03}).addTo(dispatchLayer).bindPopup(popupHtml);
+        layer = L.polygon(item.geo, note
+            ? {color: '#d97706', weight: 2, opacity: 0.85, dashArray: '4,4', fillOpacity: 0.06}
+            : {color: '#7c3aed', weight: 1.5, opacity: 0.55, dashArray: '4,4', fillOpacity: 0.03}).addTo(dispatchLayer).bindPopup(popupHtml);
         markMapPickable(layer, {kind: 'dispatch', id: item.id, color: '#7c3aed',
             title: item.team_label + (item.label ? ' — ' + item.label : ''), sub: t('map_pick.kind_dispatch')});
         layer.bindTooltip(tip, {sticky: true});
@@ -132,7 +161,8 @@ function wrDoneSectorTip(item) {
 function wrDoneDrawRoute(route) {
     const color = route.team_color_bg || '#0d6efd';
     const head = '<strong>' + escapeHtml(route.team_label || '') + (route.title ? ' — ' + escapeHtml(route.title) : '') + '</strong>'
-        + (route.completed_at_display ? '<br><span class="small text-muted">✓ ' + escapeHtml(route.completed_at_display) + '</span>' : '');
+        + (route.completed_at_display ? '<br><span class="small text-muted">✓ ' + escapeHtml(route.completed_at_display) + '</span>' : '')
+        + (typeof routeReopenBtnHtml === 'function' ? routeReopenBtnHtml(route) : '');
     const coords = route.waypoints.map(w => [w.lat, w.lng]);
     if (route.is_closed_loop && coords.length >= 3) {
         L.polygon(coords, {color, weight: 2, opacity: 0.35, fillOpacity: 0, interactive: false}).addTo(routeLayer);
@@ -151,7 +181,7 @@ function wrDoneEntries() {
     const out = [];
     (wrDoneView('dispatch') || []).forEach(d => {
         if (!d.completed_ts || d.map_point_id || wrDoneFocusHides(d.team_id)) return;
-        out.push({kind: 'dispatch', id: d.id, ts: d.completed_ts, team: d.team_label || '', label: d.label || '', time: d.completed_display || ''});
+        out.push({kind: 'dispatch', id: d.id, ts: d.completed_ts, team: d.team_label || '', label: d.label || '', time: d.completed_display || '', note: !!wrDoneNote(d)});
     });
     (wrDoneView('sector') || []).forEach(s => {
         if (!s.completed_ts || wrDoneFocusHides(s.team_id)) return;
@@ -178,6 +208,8 @@ function wrDoneFindLayer(kind, id) {
 // Fly to a finished order and open what it says. The layers are rebuilt by the
 // poll, so the one to open is looked up again when the flight ends.
 function wrDoneFocus(kind, id) {
+    // A row of the list is a wish to see that order: if the field's quiet default has taken it off the map, it comes back.
+    if (wrDoneFieldHides(kind)) wrDoneFieldSet(true);
     if (typeof mapOverlayEnsureShown === 'function') mapOverlayEnsureShown(WR_DONE_KIND_OVERLAY[kind]);
     let bounds = null;
     if (kind === 'dispatch') {
@@ -196,6 +228,48 @@ function wrDoneFocus(kind, id) {
         const layer = wrDoneFindLayer(kind, id);
         if (layer && layer._map) layer.openPopup();
     });
+}
+
+// Hovering a row of the list lights that order up on the map (v3.443.0): an amber outline drawn from the same
+// lists the layers are drawn from (so it is right in the time machine too), on a layer of its own that is
+// never part of the order layers, so no redraw of them can leave it behind.
+let wrDoneHoverLayer = null;
+function wrDoneHoverOff() {
+    if (wrDoneHoverLayer) { wrDoneHoverLayer.remove(); wrDoneHoverLayer = null; }
+}
+function wrDoneHoverOn(kind, id) {
+    wrDoneHoverOff();
+    if (typeof map === 'undefined' || !map) return;
+    const find = list => (list || []).find(x => String(x.id) === String(id));
+    const style = {color: '#f59e0b', weight: 4, opacity: 0.95, interactive: false};
+    const shapes = [];
+    if (kind === 'dispatch') {
+        const d = find(wrDoneView('dispatch'));
+        if (!d) return;
+        shapes.push(d.type === 'point'
+            ? L.circleMarker([d.geo.lat, d.geo.lng], Object.assign({radius: 16, fill: false}, style))
+            : L.polygon(d.geo, Object.assign({fill: false}, style)));
+    } else if (kind === 'sector') {
+        const s = find(wrDoneView('sector'));
+        if (!s) return;
+        shapes.push(L.polygon(s.geo, Object.assign({fill: false}, style)));
+    } else {
+        const r = find(wrDoneView('route'));
+        if (!r || !r.waypoints.length) return;
+        const coords = r.waypoints.map(w => [w.lat, w.lng]);
+        if (coords.length > 1) shapes.push(L.polyline(coords, style));
+        coords.forEach(c => shapes.push(L.circleMarker(c, Object.assign({radius: 9, fill: false}, style))));
+    }
+    wrDoneHoverLayer = L.layerGroup(shapes).addTo(map);
+}
+
+// The field's tick «Εμφάνιση των ολοκληρωμένων εντολών στον χάρτη» (v3.443.0). A choice for this tab only.
+function wrDoneFieldSet(on) {
+    if (wrDoneFieldShowAll === !!on) return;
+    wrDoneFieldShowAll = !!on;
+    try { sessionStorage.setItem(WR_DONE_FIELD_KEY + wrDoneMissionId, on ? '1' : '0'); } catch (e) {}
+    wrDoneChipSig = null;
+    wrDoneRerender();
 }
 
 function wrDoneChipRefresh() {
@@ -226,26 +300,47 @@ function wrDoneChipRefresh() {
                     if (row) { wrDoneFocus(row.dataset.doneKind, row.dataset.doneId); return; }
                     if (ev.target.closest('[data-done-toggle]')) {
                         wrDoneListOpen = !wrDoneListOpen;
+                        wrDoneHoverOff();
                         wrDoneChipSig = null;
                         wrDoneChipRefresh();
                     }
+                });
+                // A row lit on the map while the pointer (or the keyboard) is on it.
+                const rowOf = ev => ev.target.closest ? ev.target.closest('[data-done-kind]') : null;
+                const over = ev => { const row = rowOf(ev); if (row) wrDoneHoverOn(row.dataset.doneKind, row.dataset.doneId); };
+                const out = ev => { const row = rowOf(ev); if (row && !(ev.relatedTarget && row.contains(ev.relatedTarget))) wrDoneHoverOff(); };
+                div.addEventListener('mouseover', over);
+                div.addEventListener('mouseout', out);
+                div.addEventListener('focusin', over);
+                div.addEventListener('focusout', out);
+                div.addEventListener('change', ev => {
+                    if (ev.target.matches && ev.target.matches('[data-done-field]')) wrDoneFieldSet(ev.target.checked);
                 });
                 return div;
             },
         });
         wrDoneChip = new Chip().addTo(map);
     }
-    const sig = entries.map(e => e.kind + e.id + e.time).join(',') + '|' + wrDoneListOpen;
+    const sig = entries.map(e => e.kind + e.id + e.time + (e.note ? 'n' : '')).join(',') + '|' + wrDoneListOpen + '|' + wrDoneFieldQuiet + wrDoneFieldShowAll;
     if (sig === wrDoneChipSig) return;
     wrDoneChipSig = sig;
-    const rows = wrDoneListOpen ? '<div class="wr-done-list">' + entries.map(e =>
+    wrDoneHoverOff();   // the rows below are about to be replaced; a pointer on one of them would not say it left
+    // For the people in the field the finished points, areas and routes are off the map (wrDoneFieldHides): a tick says
+    // so on the chip, and the list opens with the tick that brings them back.
+    const fieldQuiet = wrDoneFieldQuiet && entries.some(e => e.kind !== 'sector');
+    const fieldToggle = wrDoneFieldQuiet
+        ? `<label class="wr-done-field"><input type="checkbox" data-done-field ${wrDoneFieldShowAll ? 'checked' : ''}> <span>${escapeHtml(t('map.done_field_toggle'))}</span></label>`
+        : '';
+    const rows = wrDoneListOpen ? '<div class="wr-done-list">' + fieldToggle + entries.map(e =>
         `<button type="button" class="wr-done-row" data-done-kind="${e.kind}" data-done-id="${e.id}">`
         + `<i class="bi ${WR_DONE_KIND_ICON[e.kind]}"></i>`
         + `<span class="t">${escapeHtml([e.team, e.label].filter(Boolean).join(' · '))}</span>`
+        + (e.note ? '<i class="bi bi-chat-left-text-fill wr-done-note-ico"></i>' : '')
         + `<span class="m">${escapeHtml(wrDoneTimeLabel(e))}</span></button>`).join('') + '</div>' : '';
     wrDoneChip.getContainer().innerHTML = rows
         + `<button type="button" class="wr-done-btn" data-done-toggle aria-expanded="${wrDoneListOpen ? 'true' : 'false'}" title="${escapeHtml(t('map.done_list_title'))}">`
         + `<i class="bi bi-check-circle"></i><span>${escapeHtml(t('map.done_chip', {n: entries.length}))}</span>`
+        + (fieldQuiet && !wrDoneFieldShowAll ? `<i class="bi bi-eye-slash" title="${escapeHtml(t('map.done_field_note'))}"></i>` : '')
         + `<i class="bi bi-chevron-${wrDoneListOpen ? 'down' : 'up'} ms-auto"></i></button>`;
 }
 
@@ -279,9 +374,12 @@ function wrDoneTick() {
 // volunteer's tab must not start with a state it cannot undo.
 function wrDoneInit(missionId, canChoose) {
     wrDoneMissionId = missionId;
+    // Whoever cannot choose the mode - everyone but command - gets the field's quiet default (see wrDoneFieldHides).
+    wrDoneFieldQuiet = !canChoose;
     try {
         const stored = sessionStorage.getItem(WR_DONE_MODE_KEY + missionId);
         if (canChoose && WR_DONE_MODES.includes(stored)) wrDoneMode = stored;
+        if (wrDoneFieldQuiet) wrDoneFieldShowAll = sessionStorage.getItem(WR_DONE_FIELD_KEY + missionId) === '1';
     } catch (e) {}
     if (typeof map === 'undefined' || !map) return;
     if (canChoose) wrDoneAddMenu();

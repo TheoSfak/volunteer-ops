@@ -4813,6 +4813,64 @@ function advanceMissionDispatch(array $mission, int $dispatchId, int $userId, st
     return null;
 }
 
+/**
+ * «Ξανάνοιγμα» (v3.443.0): command takes back a «Ολοκληρώθηκε» a team pressed by mistake (or too soon) on a
+ * dispatch point/area. Only the finish goes - when the team left and arrived stay - and so does the note it
+ * wrote with it, so the order is a live one again on the team's map and in «Οι Εντολές μου». $scope is the
+ * progress line ('t<team id>', or 'u<user id>' for a volunteer with no team). The team is told. Command only:
+ * the caller has checked that. Returns null on success, else the error to show.
+ */
+function reopenMissionDispatch(array $mission, int $dispatchId, string $scope, int $userId): ?string {
+    $missionId = (int) $mission['id'];
+    if (!preg_match('/^[tu][0-9]{1,10}$/', $scope)) {
+        return t('common.invalid_request');
+    }
+    $dispatch = dbFetchOne("SELECT id, label, type FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$dispatchId, $missionId]);
+    if (!$dispatch) {
+        return t('common.not_found');
+    }
+    $line = dbFetchOne("SELECT completed_at FROM mission_dispatch_progress WHERE dispatch_id = ? AND scope_key = ?", [$dispatchId, $scope]);
+    if (!$line || !$line['completed_at']) {
+        return t('dispatch.reopen_not_completed');
+    }
+    $changed = dbExecute(
+        "UPDATE mission_dispatch_progress SET completed_at = NULL, completed_by = NULL, completed_note = NULL
+         WHERE dispatch_id = ? AND scope_key = ? AND completed_at IS NOT NULL",
+        [$dispatchId, $scope]
+    );
+    if (!$changed) {
+        return null;   // somebody else reopened it a moment ago
+    }
+    logAudit('reopen_mission_dispatch', 'mission_dispatch_points', $dispatchId, null, [
+        'mission_id' => $missionId, 'scope' => $scope, 'was_completed_at' => $line['completed_at'],
+    ]);
+
+    $recipientIds = [];
+    if ($scope[0] === 't') {
+        $recipientIds = array_map('intval', array_column(dbFetchAll(
+            "SELECT user_id FROM mission_team_members WHERE team_id = ? AND mission_id = ?", [(int) substr($scope, 1), $missionId]
+        ), 'user_id'));
+    } else {
+        $recipientIds = [(int) substr($scope, 1)];
+    }
+    $recipientIds = array_values(array_diff($recipientIds, [$userId]));
+    $langByUserId = getUserLanguages($recipientIds);
+    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    foreach ($recipientIds as $recipientId) {
+        $lang = $langByUserId[$recipientId] ?? DEFAULT_LANGUAGE;
+        $labelPart = $dispatch['label'] !== null && $dispatch['label'] !== '' ? ' «' . $dispatch['label'] . '»' : '';
+        // The code of a new order, so the existing notification settings govern this too.
+        sendNotification($recipientId, t('dispatch.reopen_notify_title', [], $lang),
+            t('dispatch.reopen_notify_message', ['label_part' => $labelPart, 'mission' => $mission['title']], $lang),
+            'warning', 'mission_dispatch_point', [
+                'url' => $warRoomUrl,
+                'tag' => 'dispatch-reopen-mission-' . $missionId,
+                'bannerMission' => $missionId,
+            ]);
+    }
+    return null;
+}
+
 // loadWaypointForAction() and currentWaypointSeq() moved here from
 // mission-route.php (v3.333.0), for mobile-order-ack.php and the arrival prompt.
 /**
@@ -5164,6 +5222,54 @@ function maybeCompleteRoute(int $routeId, int $actorId): bool {
     );
     logAudit('complete_mission_route', 'mission_routes', $routeId, null, ['mission_id' => $route['mission_id'], 'team_id' => $route['team_id']]);
     return true;
+}
+
+/**
+ * «Ξανάνοιγμα διαδρομής» (v3.443.0): command takes back the completion of a route that closed too soon or by
+ * mistake. A route completes by itself when its last point closes, so reopening is undoing that: the route is
+ * no longer completed, the point that closed it last (completed or skipped, latest time, the later stop on a
+ * tie) is open again, and the order behind the route is no longer fulfilled. Everything the team did before
+ * stays. The team is told. Command only: the caller has checked that. Returns null on success, else the error.
+ */
+function reopenMissionRoute(array $mission, int $routeId, int $userId): ?string {
+    $missionId = (int) $mission['id'];
+    $route = dbFetchOne("SELECT id, title, order_id, completed_at, cancelled_at FROM mission_routes WHERE id = ? AND mission_id = ?", [$routeId, $missionId]);
+    if (!$route) {
+        return t('common.not_found');
+    }
+    if ($route['cancelled_at'] || !$route['completed_at']) {
+        return t('route.reopen_not_completed');
+    }
+    $last = dbFetchOne(
+        "SELECT w.id FROM mission_route_waypoints w
+         JOIN mission_route_progress p ON p.waypoint_id = w.id
+         WHERE w.route_id = ? AND (p.completed_at IS NOT NULL OR p.skipped_at IS NOT NULL)
+         ORDER BY COALESCE(p.completed_at, p.skipped_at) DESC, w.seq DESC LIMIT 1",
+        [$routeId]
+    );
+    if ($last) {
+        dbExecute(
+            "UPDATE mission_route_progress
+             SET completed_at = NULL, completed_by = NULL, skipped_at = NULL, skipped_by = NULL, skip_reason = NULL,
+                 unlocked_at = NULL, unlocked_by = NULL
+             WHERE waypoint_id = ?",
+            [(int) $last['id']]
+        );
+    }
+    $changed = dbExecute("UPDATE mission_routes SET completed_at = NULL WHERE id = ? AND completed_at IS NOT NULL", [$routeId]);
+    if (!$changed) {
+        return null;   // somebody else reopened it a moment ago
+    }
+    if ($route['order_id']) {
+        dbExecute("UPDATE mission_order_recipients SET fulfilled_at = NULL WHERE order_id = ?", [(int) $route['order_id']]);
+    }
+    logAudit('reopen_mission_route', 'mission_routes', $routeId, null, [
+        'mission_id' => $missionId, 'was_completed_at' => $route['completed_at'], 'waypoint_id' => $last ? (int) $last['id'] : null,
+    ]);
+    // The code of a point skipped on the team's route: the closest existing notice of command changing a route's progress.
+    notifyRouteTeam($missionId, $routeId, $userId, 'mission_route_skipped', 'route.notify_reopened_title', [], 'route.notify_reopened_message',
+        ['title' => ($route['title'] !== null && $route['title'] !== '') ? $route['title'] : t('route.default_title'), 'mission' => $mission['title']]);
+    return null;
 }
 
 /**

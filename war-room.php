@@ -2842,6 +2842,12 @@ include __DIR__ . '/includes/header.php';
     .wr-done-row .bi { color: #7c3aed; }
     .wr-done-row .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .wr-done-row .m { color: #6c757d; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    /* v3.443.0: a finished point whose team wrote something stays brighter than the quiet tick (amber, a speech
+       bubble); the list marks it too; the field's list opens with the tick that brings the finished orders back. */
+    .wr-done-dot.wr-done-note { width: 22px; height: 22px; background: #fde68a; border-color: #d97706; color: #92400e; box-shadow: 0 0 0 3px rgba(245,158,11,.3); font-size: 11px; }
+    .wr-done-row .wr-done-note-ico { color: #d97706; font-size: .8em; }
+    .wr-done-field { display: flex; align-items: flex-start; gap: 6px; margin: 0; padding: 6px 10px; border-bottom: 1px solid #dee2e6; font-size: .75rem; color: #212529; background: #f8f9fa; cursor: pointer; }
+    .wr-done-btn .bi-eye-slash { color: #6c757d; }
     /* «Κάλυψη ομάδων» / «Εστίαση σε ομάδα» (v3.440.0, assets/js/war-room-team-coverage.js): a team's chip wears its own colour. */
     /* The two folded sections of the layers menu: a heading that opens, with what is on written on its own line. */
     .wr-menu-sum { display: flex; align-items: baseline; gap: 6px; cursor: pointer; list-style: none; padding-top: .3rem; padding-bottom: .3rem; }
@@ -9362,7 +9368,7 @@ function renderDispatches(items) {
     items = wrTimeDispatches(items);
     // The phase of every order is part of the signature: a finished order fades with the clock, not
     // with a new poll payload (assets/js/war-room-done-orders.js).
-    const sig = JSON.stringify(items) + '|' + wrDonePhaseSig(items);
+    const sig = JSON.stringify(items) + '|' + wrDonePhaseSig(items, 'dispatch');
     if (sig === dispatchesRenderedSig) return;
     dispatchesRenderedSig = sig;
 
@@ -9389,7 +9395,7 @@ function renderDispatches(items) {
         if (item.map_point_id) return;
         // Finished: live, just finished (green ring), archived (a small tick, no label) or, when
         // command chose «Κρυφά», not drawn at all.
-        const donePhase = wrDonePhase(item.completed_ts, item.team_id);
+        const donePhase = wrDonePhase(item.completed_ts, item.team_id, 'dispatch');
         if (donePhase === 'hidden') return;
         const acksHtml = item.acks.length
             ? '<div class="small text-success mt-1">' + item.acks.map(a => `✅ ${a.team_label !== '—' ? escapeHtml(a.team_label) + ' — ' : ''}${guestNameHtml(a.user_name, a.is_external, a.home_team_name, a.home_team_color_bg, a.home_team_color_fg, a.guest_country_code)}${k9BadgeHtml(a.user_id, true)}${captainBadgeHtml(a.user_id, true)} (${a.time})`).join('<br>') + '</div>'
@@ -9454,7 +9460,14 @@ function renderDispatches(items) {
               `${item.eta.source === 'straight_line' ? ' ' + escapeHtml(t('dispatch.eta_straight_line_suffix')) : ''}` +
               `${item.eta.is_stale ? ' ' + escapeHtml(t('dispatch.eta_stale_suffix')) : ''}</div>`
             : '';
-        const popupHtml = `<strong>${escapeHtml(item.team_label)}</strong>${item.label ? '<br>' + escapeHtml(item.label) : ''}` + dispatchIncidentHtml(item.incident) + etaHtml + (progressHtml || acksHtml) + declinesHtml + receiveHtml + ackHtml + directionsHtml +
+        // «Ξανάνοιγμα» (v3.443.0): command takes back a finish pressed by mistake or too soon - one button per team
+        // that finished it, so an order to every team can be reopened for just the one that did.
+        const finishedLines = item.can_delete ? (item.progress || []).filter(p => p.completed && p.scope) : [];
+        const reopenHtml = finishedLines.map(p =>
+            `<br><button type="button" class="btn btn-sm btn-outline-warning mt-1 dispatch-reopen-btn" data-id="${item.id}" data-scope="${escapeHtml(p.scope)}" data-team="${escapeHtml(p.label)}">`
+            + `<i class="bi bi-arrow-counterclockwise me-1"></i>${escapeHtml(finishedLines.length > 1 ? t('dispatch.reopen_btn_team', {team: p.label}) : t('dispatch.reopen_btn'))}</button>`
+        ).join('');
+        const popupHtml = `<strong>${escapeHtml(item.team_label)}</strong>${item.label ? '<br>' + escapeHtml(item.label) : ''}` + dispatchIncidentHtml(item.incident) + etaHtml + (progressHtml || acksHtml) + declinesHtml + receiveHtml + ackHtml + directionsHtml + reopenHtml +
             (item.can_delete ? `<br><button type="button" class="btn btn-sm btn-outline-danger mt-1 dispatch-delete-btn" data-id="${item.id}">${t('common.delete')}</button>` : '');
         let layer = null;
         if (donePhase === 'archived') {
@@ -9611,10 +9624,11 @@ function askCompletionReport(subject, hintKey) {
         textarea.focus();
     });
 }
-function sendDispatchAction(action, id, btnEl, note) {
+function sendDispatchAction(action, id, btnEl, note, extra) {
     if (btnEl) btnEl.disabled = true;
     const data = new URLSearchParams({csrf_token: csrfToken, action: action, mission_id: '<?= $missionId ?>', id: String(id)});
     if (note) data.set('note', note);
+    Object.keys(extra || {}).forEach(k => data.set(k, extra[k]));
     return fetch('mission-dispatch.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
         if (result.ok) {
             if (map) map.closePopup();
@@ -9697,6 +9711,10 @@ dispatchLayer.on('popupopen', event => {
             });
         });
     }
+    popupEl.querySelectorAll('.dispatch-reopen-btn').forEach(btn => btn.addEventListener('click', () => {
+        if (!confirm(t('dispatch.reopen_confirm', {team: btn.dataset.team}))) return;
+        sendDispatchAction('reopen', btn.dataset.id, btn, null, {scope: btn.dataset.scope});
+    }));
     const ackBtn = popupEl.querySelector('.dispatch-ack-btn');
     if (ackBtn) {
         ackBtn.addEventListener('click', () => postDispatchAction('ack', ackBtn.dataset.id, ackBtn));
@@ -10961,7 +10979,7 @@ function renderSectorLayer(items) {
     // every manage popup: every path that creates, renames or deletes a team
     // ends in location.reload(), so it cannot change under a live page.
     const sig = JSON.stringify(items) + '|' + coverageModeActive + '|' + JSON.stringify(sectorCoverageById)
-        + '|' + openSectorId + '|' + openBuildingId + '|' + wrDonePhaseSig(items);
+        + '|' + openSectorId + '|' + openBuildingId + '|' + wrDonePhaseSig(items, 'sector');
     if (sig === sectorsRenderedSig) return;
     sectorsRenderedSig = sig;
 
@@ -10972,7 +10990,7 @@ function renderSectorLayer(items) {
         // A finished sector is a record of ground covered, never deleted: bright for a few minutes,
         // then only its outline in its team's colour with no name, or nothing at all when command
         // chose «Κρυφά» (assets/js/war-room-done-orders.js). An open popup is never pulled away.
-        const donePhase = wrDonePhase(item.completed_ts, item.team_id);
+        const donePhase = wrDonePhase(item.completed_ts, item.team_id, 'sector');
         if (donePhase === 'hidden' && String(item.id) !== String(openSectorId)) return;
         if (String(item.id) !== String(openSectorId)) {
             const color = SECTOR_STATUS_HEX[item.status] || '#6c757d';
@@ -29396,7 +29414,7 @@ function renderRouteLayer(allRoutes) {
                     (wp.instructions ? `<br><span class="small">${escapeHtml(wp.instructions)}</span>` : '') +
                     (statusText ? `<br><span class="small text-muted">${statusText}</span>` : '') +
                     (wp.unlocked ? `<br><span class="small text-warning-emphasis"><i class="bi bi-unlock-fill me-1"></i>${escapeHtml(routeUnlockedText(wp))}</span>` : '') +
-                    waitingHtml + unlockHtml +
+                    waitingHtml + unlockHtml + routeReopenBtnHtml(route) +
                     '<br>' + navigationPairHtml(wp.lat, wp.lng, 'inline');
             }
             const marker = L.marker([wp.lat, wp.lng], {icon}).addTo(routeLayer).bindPopup(popupHtml, {minWidth: 220});
@@ -29426,8 +29444,25 @@ function renderRouteLayer(allRoutes) {
 // admin/command-staff popups render no buttons for these selectors to match
 // (see renderRouteLayer above), so this handler simply finds nothing and
 // does nothing on their popups.
+// «Ξανάνοιγμα διαδρομής» (v3.443.0): command takes back the completion of a route that closed too soon or by
+// mistake. Offered only on a completed route, to command - in a waypoint popup, in the faded record of a
+// finished route (assets/js/war-room-done-orders.js) and in the admin list.
+function routeReopenBtnHtml(route, extraClass) {
+    if (!route.can_manage || route.status !== 'completed') return '';
+    return `<br><button type="button" class="btn btn-sm btn-outline-warning mt-1 route-reopen-btn ${extraClass || ''}" data-id="${route.id}">`
+        + `<i class="bi bi-arrow-counterclockwise me-1"></i>${escapeHtml(t('route.reopen_btn'))}</button>`;
+}
+function routeReopen(btn) {
+    if (!confirm(t('route.reopen_confirm'))) return;
+    btn.disabled = true;
+    postRouteAction('reopen', btn.dataset.id, {}).then(result => {
+        if (result && result.ok) { if (map) map.closePopup(); }
+        else { alert((result && result.error) || t('common.failed')); btn.disabled = false; }
+    });
+}
 routeLayer.on('popupopen', event => {
     const popupEl = event.popup.getElement();
+    popupEl.querySelectorAll('.route-reopen-btn').forEach(btn => btn.addEventListener('click', () => routeReopen(btn)));
     const ackBtn = popupEl.querySelector('.route-ack-btn');
     if (ackBtn) ackBtn.addEventListener('click', () => routeAcknowledge(ackBtn.dataset.id, ackBtn.dataset.orderId, ackBtn));
     const departBtn = popupEl.querySelector('.route-depart-btn');
@@ -29594,6 +29629,7 @@ function renderRoutesAdmin(allRoutes) {
             </div>
             ${route.status === 'active' && route.declined ? `<div class="px-2 pb-2">${declineNoticeHtml('route', route.id, route.declined, !!route.can_decline)}</div>` : ''}
             ${route.status === 'active' ? routeUnlockRequestsHtml(route) : ''}
+            ${route.status === 'completed' && route.can_manage ? `<div class="px-2 pb-2">${routeReopenBtnHtml(route, 'w-100').replace(/^<br>/, '')}</div>` : ''}
             ${isExpanded ? `<div class="border-top p-2">${renderRouteAdminWaypointsList(route)}</div>` : ''}
         </div>`;
     };
@@ -29617,6 +29653,7 @@ function renderRoutesAdmin(allRoutes) {
         showCancelledRoutes = !showCancelledRoutes;
         renderRoutesAdmin(allRoutes);
     });
+    list.querySelectorAll('.route-reopen-btn').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); routeReopen(btn); }));
     list.querySelectorAll('.route-cancel-btn').forEach(btn => btn.addEventListener('click', e => {
         e.stopPropagation();
         if (!confirm(t('route.cancel_confirm'))) return;
