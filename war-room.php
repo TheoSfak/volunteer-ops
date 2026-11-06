@@ -7021,24 +7021,71 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/vitals-sensor.js?v=<?= APP_VERSION ?>"></script>
 <?php endif; ?>
 <script>const WR_MISSION_ID = <?= (int) $missionId ?>;</script>
+<?php $__wrStrings = loadLangStrings('war-room'); $__viewerLang = $user['language'] ?? DEFAULT_LANGUAGE; ?>
+<script>
+// What PHP works out for this request that the script below reads (the mission id is the line above).
+const WR_BOOT = {
+    csrf: '<?= csrfToken() ?>',
+    areaUnit: '<?= areaUnitSetting() ?>',
+    myUserId: <?= (int) $user['id'] ?>,
+    serverTime: <?= time() ?>,
+    jsLocale: <?= json_encode($__viewerLang === 'en' ? 'en-US' : 'el-GR') ?>,
+    canManage: <?= json_encode($canManageWarRoom) ?>,
+    canField: <?= json_encode($isApprovedParticipant || $canManageWarRoom) ?>,
+    mapPointLinkMax: <?= (int) MAP_POINT_LINK_MAX ?>,
+    commandPostNotifyMinM: <?= (int) COMMAND_POST_NOTIFY_MIN_M ?>,
+    pingStaleSeconds: <?= (int) warRoomPingStaleThresholdSeconds() ?>,
+    commandPostFollowSettleMin: <?= (int) round(COMMAND_POST_FOLLOW_SETTLE_S / 60) ?>,
+    radioChannel: <?= json_encode(trim((string) ($mission['radio_channel'] ?? '')), JSON_UNESCAPED_UNICODE) ?>,
+    weatherCompassOn: <?= json_encode($weatherCompassOn) ?>,
+    searchRingsOn: <?= json_encode($searchRingsOn) ?>,
+    lpbRingTable: <?= json_encode(LPB_RING_TABLE) ?>,
+    cardLabels: <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>,
+    osmLayerEnabled: <?= json_encode(getSetting('osm_layer_enabled', '1') === '1') ?>,
+    baseUrl: '<?= rtrim(BASE_URL, "/") ?>',
+    sectorStatusHex: <?= json_encode(array_map(fn($c) => MISSION_TYPE_COLOR_HEX[$c] ?? '#6c757d', SECTOR_STATUS_COLORS)) ?>,
+    measureWalkAvailable: <?= json_encode(trim((string) getSetting('google_maps_api_key', '')) !== '') ?>,
+    missionTitleHtml: '<?= h(addslashes($mission['title'])) ?>',
+    mapPointAssignMax: <?= (int) MAP_POINT_ASSIGN_MAX ?>,
+    mapPointMaxPerMission: <?= (int) MAP_POINT_MAX_PER_MISSION ?>,
+    lowBatteryPct: <?= (int) getSetting('war_room_low_battery_pct', '60') ?>,
+    maxShiftMinutes: <?= (int) getSetting('war_room_max_shift_minutes', '480') ?>,
+    chargeAlertThresholdPct: <?= CHARGE_ALERT_THRESHOLD_PCT ?>,
+    teamTransportIcons: <?= json_encode(teamTransportIconPaths()) ?>,
+    arrivalPromptRadiusM: <?= (int) ARRIVAL_PROMPT_RADIUS_M ?>,
+    viewerLang: <?= json_encode($__viewerLang) ?>,
+    myAssignmentId: <?= json_encode(!empty($myAssignments) ? (int) $myAssignments[0]['pr_id'] : null) ?>,
+    triageSizeupHazards: <?= json_encode(TRIAGE_SIZEUP_HAZARDS) ?>,
+    triageSizeupResources: <?= json_encode(TRIAGE_SIZEUP_RESOURCES) ?>,
+    triageSizeupAccess: <?= json_encode(TRIAGE_SIZEUP_ACCESS) ?>,
+    bannerSinceId: <?= $bannerSinceId ?>,
+    tickerMode: <?= json_encode($wrTickerMode) ?>,
+    autoPingCadenceMs: <?= (int) getSetting('war_room_auto_ping_seconds', '180') * 1000 ?>,
+    autoPingHighAccuracy: <?= getSetting('war_room_auto_ping_high_accuracy', '1') === '1' ? 'true' : 'false' ?>,
+    nativeSampleMs: <?= getSetting('war_room_native_sampling', '1') === '1' ? 1000 : 0 ?>,
+    nativeFullTracking: <?= getSetting('war_room_native_full_tracking', '0') === '1' ? 'true' : 'false' ?>,
+    maxPingAccuracyM: <?= (int) getSetting('war_room_max_ping_accuracy_m', '50') ?>,
+    appName: <?= json_encode(getSetting('app_name', 'VolunteerOps')) ?>,
+    gridMaxCells: <?= gridMaxCells() ?>,
+};
+</script>
 <script>
 <?php $__wrLight = wrLightScriptEnabled(); if ($__wrLight) { ob_start('wrStripJsLineComments'); } ?>
-const csrfToken = '<?= csrfToken() ?>';
+const csrfToken = WR_BOOT.csrf;
 // Settings → Γενικές → «Μονάδα Έκτασης». Consumed by areaTierForGroup()
 // in war-room-utils.js, which is why it is a bare global rather than a
 // property of something: that file has no access to anything this page
 // scopes, exactly as it already reads t().
-const AREA_UNIT_PREFERENCE = '<?= areaUnitSetting() ?>';
+const AREA_UNIT_PREFERENCE = WR_BOOT.areaUnit;
 // The viewer's own user id. First top-level mirror of it in this file - the
 // chat IIFE had the only copy, embedded at its own call site - and it is here
 // rather than duplicated again because renderTeamRosters() now needs it too,
 // to keep marking "my team" after a live roster change.
-const WR_MY_USER_ID = <?= (int) $user['id'] ?>;
+const WR_MY_USER_ID = WR_BOOT.myUserId;
 // The server's clock as this page was built, against this browser's: how far the browser's own
 // clock is out. The minutes since an order was finished (assets/js/war-room-done-orders.js) are
 // counted with it, so a phone whose clock is wrong does not fade things early or late.
-const WR_CLOCK_OFFSET = <?= time() ?> - Date.now() / 1000;
-<?php $__wrStrings = loadLangStrings('war-room'); $__viewerLang = $user['language'] ?? DEFAULT_LANGUAGE; ?>
+const WR_CLOCK_OFFSET = WR_BOOT.serverTime - Date.now() / 1000;
 const WR_STRINGS = <?= json_encode($__wrStrings[$__viewerLang] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 <?php if ($__wrLight && $__viewerLang === DEFAULT_LANGUAGE): /* the same table twice is 68 KB of gzip on every load: say it once */ ?>
 const WR_STRINGS_FALLBACK = WR_STRINGS;
@@ -7050,7 +7097,7 @@ function t(key, vars = {}) {
     for (const [k, v] of Object.entries(vars)) text = text.replaceAll('{' + k + '}', String(v));
     return text;
 }
-const jsLocale = <?= json_encode($__viewerLang === 'en' ? 'en-US' : 'el-GR') ?>;
+const jsLocale = WR_BOOT.jsLocale;
 
 // ── No request on this page waits forever ───────────────────────────────────
 // A request sent into a dead connection does not fail, it waits — until the
@@ -7326,25 +7373,25 @@ let missionIncidents = <?= json_encode($incidents) ?>;
 // shortageReportsList, which never renders for them at all) — this flag is what
 // hides the seen/resolve action buttons for everyone except command staff, since
 // the server already strips patient name/phone/notes from their copy of the data.
-const canManageIncidents = <?= json_encode($canManageWarRoom) ?>;
+const canManageIncidents = WR_BOOT.canManage;
 // Mass-casualty triage board (null on a mission that never had one). See the
 // triage section further down for what reads these.
 let triageState = <?= json_encode($triage, JSON_UNESCAPED_UNICODE) ?>;
-const TRIAGE_CAN_MANAGE = <?= json_encode($canManageWarRoom) ?>;
-const TRIAGE_CAN_FIELD = <?= json_encode($isApprovedParticipant || $canManageWarRoom) ?>;
+const TRIAGE_CAN_MANAGE = WR_BOOT.canManage;
+const TRIAGE_CAN_FIELD = WR_BOOT.canField;
 const TRIAGE_MISSION_ID = WR_MISSION_ID;
 // Server clock minus this device's clock, in seconds, measured once at load.
 // Ages on the board ("waiting 14′") come from server timestamps, and a phone
 // whose clock is five minutes out would otherwise show every red five
 // minutes fresher or staler than it is.
-const TRIAGE_CLOCK_OFFSET_S = <?= time() ?> - Math.floor(Date.now() / 1000);
+const TRIAGE_CLOCK_OFFSET_S = WR_BOOT.serverTime - Math.floor(Date.now() / 1000);
 let sosAlerts = <?= json_encode($sosAlerts) ?>;
 let voiceMessages = <?= json_encode($voiceMessages, JSON_UNESCAPED_UNICODE) ?>;
 // The Συντονιστικό (null until command places it). See renderCommandPost().
 let commandPost = <?= json_encode($commandPost, JSON_UNESCAPED_UNICODE) ?>;
 // Its own copy of canManageWarRoom: CAN_MANAGE_WAR_ROOM is declared further
 // down than the map code that first draws the command post.
-const CP_CAN_MANAGE = <?= json_encode($canManageWarRoom) ?>;
+const CP_CAN_MANAGE = WR_BOOT.canManage;
 // Σημεία χάρτη (v3.361.0): the imported reference points and their version.
 // Same early copy of the permission as above, for the same reason.
 let mapPoints = <?= json_encode($mapPoints, JSON_UNESCAPED_UNICODE) ?>;
@@ -7353,29 +7400,29 @@ let mapPointsVersion = <?= json_encode($mapPointsVersion) ?>;
 let mapPointRoute = <?= json_encode($mapPointRoute, JSON_UNESCAPED_UNICODE) ?>;
 const MP_VISIBLE = <?= json_encode($mapPointsVisible) ?>;
 const MP_ROUTING = <?= json_encode($mapPointsRouting) ?>;
-const MP_LINK_MAX = <?= (int) MAP_POINT_LINK_MAX ?>;
+const MP_LINK_MAX = WR_BOOT.mapPointLinkMax;
 const MP_CAN_MANAGE = CP_CAN_MANAGE;
 const MP_MAX_LIST_ROWS = 150;
 // A move shorter than this is announced to nobody (COMMAND_POST_NOTIFY_MIN_M).
-const CP_NOTIFY_MIN_M = <?= (int) COMMAND_POST_NOTIFY_MIN_M ?>;
+const CP_NOTIFY_MIN_M = WR_BOOT.commandPostNotifyMinM;
 // Following a device: past this the device's last fix counts as old — the
 // app's own definition of a stale position, the one every pin uses.
-const CP_FOLLOW_STALE_S = <?= (int) warRoomPingStaleThresholdSeconds() ?>;
+const CP_FOLLOW_STALE_S = WR_BOOT.pingStaleSeconds;
 // How long it must stand still somewhere new before everybody is told.
-const CP_FOLLOW_SETTLE_MIN = <?= (int) round(COMMAND_POST_FOLLOW_SETTLE_S / 60) ?>;
+const CP_FOLLOW_SETTLE_MIN = WR_BOOT.commandPostFollowSettleMin;
 // Shown in its popup: the channel command listens on, set with the briefing.
-const MISSION_RADIO_CHANNEL = <?= json_encode(trim((string) ($mission['radio_channel'] ?? '')), JSON_UNESCAPED_UNICODE) ?>;
+const MISSION_RADIO_CHANNEL = WR_BOOT.radioChannel;
 let pointsOfInterest = <?= json_encode($pointsOfInterest) ?>;
 let missingPerson = <?= json_encode($missingPerson) ?>;
 // weather can be non-null purely because exposureUrgencyOn fetched it for the
 // exposure card, even while the compass toggle itself is off — so the
 // compass control needs its own explicit flag, not just `if (weather)`.
-const weatherCompassEnabled = <?= json_encode($weatherCompassOn) ?>;
+const weatherCompassEnabled = WR_BOOT.weatherCompassOn;
 // LPB_RING_TABLE is the server-side PHP constant (includes/lpb-rings.php)
 // reused as-is, so the ring radii JS draws can never drift from the ones the
 // subject_category <select> was built from.
-const searchRingsEnabled = <?= json_encode($searchRingsOn) ?>;
-const LPB_RING_TABLE = <?= json_encode(LPB_RING_TABLE) ?>;
+const searchRingsEnabled = WR_BOOT.searchRingsOn;
+const LPB_RING_TABLE = WR_BOOT.lpbRingTable;
 let weather = <?= json_encode($weather) ?>;
 let exposureUrgency = <?= json_encode($exposureUrgency) ?>;
 let restrictedAreas = <?= json_encode($restrictedAreas) ?>;
@@ -7391,7 +7438,7 @@ let restrictedAreaBreachHistory = <?= json_encode($restrictedAreaBreachHistory) 
 // cases (initial load, live drag) where a corrective resize is still needed.
 let savedLayout = <?= json_encode($warRoomLayout) ?>;
 // id -> already-localized short label, for the show/hide checklist modal.
-let cardLabels = <?= json_encode(warRoomCardLabels(), JSON_UNESCAPED_UNICODE) ?>;
+let cardLabels = WR_BOOT.cardLabels;
 (function() {
     const zoneMain = document.getElementById('wrZoneMain');
     const zoneSidebar = document.getElementById('wrZoneSidebar');
@@ -8240,7 +8287,7 @@ function mapPickGroups() {
 // keeps the plain popup bindPopup() gave it and no list ever opens. The same
 // flag keeps the rest of the layers menu (which shapes to show, pin labels,
 // OpenStreetMap data) to command; everybody still gets the map-view choice.
-const MAP_LAYER_TOOLS_ENABLED = <?= json_encode($canManageWarRoom) ?>;
+const MAP_LAYER_TOOLS_ENABLED = WR_BOOT.canManage;
 function markMapPickable(layer, info) {
     if (!MAP_LAYER_TOOLS_ENABLED) return layer;
     layer._wrPick = info;
@@ -8538,7 +8585,7 @@ const PIN_TEAM_LABELS_KEY = 'wr_pin_team_labels';
 // alarm for a layer that starts off. Lines take no click (osmPane sits above
 // the sector fills and must never swallow a click meant for one) and points
 // are plain markers, so none of it joins «Τι υπάρχει εδώ;» (markMapPickable).
-const OSM_LAYER_ENABLED = <?= json_encode(getSetting('osm_layer_enabled', '1') === '1') ?>;
+const OSM_LAYER_ENABLED = WR_BOOT.osmLayerEnabled;
 const OSM_TILE = 20;            // tiles of 0.05 degrees, the same cut as includes/osm.php
 const OSM_CHUNK_COLS = 4;       // tiles per request, in a row
 const OSM_MAX_VIEW_TILES = 24;  // a view wider than this is asked to zoom in: a cold tile is a query to a public server, a few seconds each
@@ -9136,10 +9183,10 @@ function guestNameHtml(name, isExternal, teamName, teamColorBg, teamColorFg, cou
 }
 // Mirrors flagHtml() in includes/functions-warroom.php — real self-hosted SVG,
 // never emoji (Windows/Chrome renders flag emoji as literal "GR"/"GB" text).
-const FLAG_ASSET_BASE = '<?= rtrim(BASE_URL, "/") ?>/assets/flags/';
+const FLAG_ASSET_BASE = WR_BOOT.baseUrl + '/assets/flags/';
 // Absolute base for links that leave the app entirely (chat apps, email) —
 // must carry the install's subfolder, which location.origin does not.
-const MEDIA_LINK_BASE = '<?= rtrim(BASE_URL, "/") ?>';
+const MEDIA_LINK_BASE = WR_BOOT.baseUrl;
 function flagHtml(countryCode) {
     if (!countryCode || !/^[A-Za-z]{2}$/.test(countryCode)) return '';
     return `<img class="flag-icon" src="${FLAG_ASSET_BASE}${countryCode.toLowerCase()}.svg" alt="">`;
@@ -9751,7 +9798,7 @@ dispatchLayer.on('popupopen', event => {
 // function" the moment a map-less viewer was tested for real, not caught by
 // php -l (a JS runtime issue, not a PHP one) or by any of the full-view
 // testing done first.
-const SECTOR_STATUS_HEX = <?= json_encode(array_map(fn($c) => MISSION_TYPE_COLOR_HEX[$c] ?? '#6c757d', SECTOR_STATUS_COLORS)) ?>;
+const SECTOR_STATUS_HEX = WR_BOOT.sectorStatusHex;
 
 // Shared by both the map popup and the sidebar list row so the two never
 // drift apart. Deliberately NOT another red/yellow/green badge — that scale
@@ -11386,7 +11433,7 @@ const MEASURE_NAISMITH_MIN_ASCENT_M = 50;
 // Whether a walking route will be looked for at all (it needs the Google key).
 // Only the yes/no reaches the page, never the key. Known up front so the card's
 // rows do not rearrange themselves when the answer arrives.
-const MEASURE_WALK_AVAILABLE = <?= json_encode(trim((string) getSetting('google_maps_api_key', '')) !== '') ?>;
+const MEASURE_WALK_AVAILABLE = WR_BOOT.measureWalkAvailable;
 
 function mapGestureIsTouch(ev) {
     return !!ev && (ev.pointerType === 'touch' || !!ev._simulated
@@ -12373,7 +12420,7 @@ document.addEventListener('keydown', e => {
 // while there is no command post yet.
 if (missionLocation.lat) L.marker([missionLocation.lat, missionLocation.lng]).addTo(map).bindPopup(() => {
     const div = document.createElement('div');
-    div.innerHTML = '<strong>' + t('map.mission_point_label') + '</strong><br><?= h(addslashes($mission['title'])) ?><br>'
+    div.innerHTML = '<strong>' + t('map.mission_point_label') + '</strong><br>' + WR_BOOT.missionTitleHtml + '<br>'
         + navigationBtnHtml(missionLocation.lat, missionLocation.lng)
         + (CP_CAN_MANAGE && !commandPost
             ? `<button type="button" class="btn btn-sm btn-outline-dark w-100 mt-2" data-cp-here><i class="bi bi-house-gear-fill me-1"></i>${escapeHtml(t('cp.mission_point_btn'))}</button>`
@@ -13373,13 +13420,13 @@ function mpLinkClear() {
     const assignBtn = document.getElementById('mapPointsAssignBtn');
     if (assignBtn) {
         document.getElementById('mapPointsSelectAll').addEventListener('click', () => {
-            mpMatches().slice(0, <?= (int) MAP_POINT_ASSIGN_MAX ?>).forEach(p => mpSelected.add(p.id));
+            mpMatches().slice(0, WR_BOOT.mapPointAssignMax).forEach(p => mpSelected.add(p.id));
             mpRenderList();
         });
         document.getElementById('mapPointsSelectNone').addEventListener('click', () => { mpSelected.clear(); mpRenderList(); });
         assignBtn.addEventListener('click', () => {
             // In the order they are listed, which is the order they are sent in.
-            const ids = mapPoints.filter(p => mpSelected.has(p.id)).map(p => p.id).slice(0, <?= (int) MAP_POINT_ASSIGN_MAX ?>);
+            const ids = mapPoints.filter(p => mpSelected.has(p.id)).map(p => p.id).slice(0, WR_BOOT.mapPointAssignMax);
             mpAssign(ids, document.getElementById('mapPointsAssignTeam').value, assignBtn);
         });
     }
@@ -13460,7 +13507,7 @@ function mpLinkClear() {
                 ? t(res.duplicates > 0 ? 'mp.toast_imported_dupes' : 'mp.toast_imported', {n: res.added, dupes: res.duplicates})
                 : t('mp.toast_nothing_new');
             opToast(message);
-            if (res.overLimit) alert(t('mp.toast_over_limit', {max: <?= (int) MAP_POINT_MAX_PER_MISSION ?>}));
+            if (res.overLimit) alert(t('mp.toast_over_limit', {max: WR_BOOT.mapPointMaxPerMission}));
             text.value = '';
             // A clean import shows the result on the map at once; skipped
             // lines keep the box open so they can be read and fixed.
@@ -13825,13 +13872,13 @@ let pinsRenderedSig = null;
 // a pin can appear instead of drifting between two copies.
 // Configurable low-battery warning threshold (Settings → war_room_low_battery_pct).
 // Critical tier is always half the warning tier, not a second setting.
-const LOW_BATTERY_PCT = <?= (int) getSetting('war_room_low_battery_pct', '60') ?>;
+const LOW_BATTERY_PCT = WR_BOOT.lowBatteryPct;
 const CRITICAL_BATTERY_PCT = Math.floor(LOW_BATTERY_PCT / 2);
 // Configurable max-continuous-shift warning threshold (Settings →
 // war_room_max_shift_minutes). Critical tier is 1.5x the warning tier, not a
 // second setting — mirrors CRITICAL_BATTERY_PCT above, but INVERTED: higher
 // minutes is worse (battery's critical tier is lower pct = worse).
-const WR_MAX_SHIFT_MINUTES = <?= (int) getSetting('war_room_max_shift_minutes', '480') ?>;
+const WR_MAX_SHIFT_MINUTES = WR_BOOT.maxShiftMinutes;
 const WR_CRITICAL_SHIFT_MINUTES = Math.round(WR_MAX_SHIFT_MINUTES * 1.5);
 function fatigueHm(minutes) { return {h: Math.floor(minutes / 60), m: minutes % 60}; }
 // Three fixed tiers for the pin popup's battery badge (below) — deliberately
@@ -13906,19 +13953,19 @@ function accuracyInlineHtml(accuracyMeters) {
 // button): a stricter, "actually worth bothering them about it" bar.
 // Sourced from the real PHP constant (config.php) — mission-battery-alert.php
 // re-checks the exact same value server-side, never a second hardcoded copy.
-const CHARGE_ALERT_THRESHOLD_PCT = <?= CHARGE_ALERT_THRESHOLD_PCT ?>;
+const CHARGE_ALERT_THRESHOLD_PCT = WR_BOOT.chargeAlertThresholdPct;
 // First client-side gate needed for admin-only UI built entirely in JS —
 // every other admin branch is server-rendered PHP conditioned directly on
 // $canManageWarRoom around static HTML, but buildPinMarker()'s popup is
 // pure JS. The mission-battery-alert.php endpoint independently re-checks
 // canManageActionRoom() regardless — this only controls whether the button
 // renders, never trusted as the real gate.
-const CAN_MANAGE_WAR_ROOM = <?= json_encode($canManageWarRoom) ?>;
+const CAN_MANAGE_WAR_ROOM = WR_BOOT.canManage;
 
 // How a team moves, drawn (v3.357.0). The same list the server prints into the
 // team forms (teamTransportIconPaths() in functions-warroom.php), so the map
 // and the forms can never show different pictures for the same choice.
-const TEAM_TRANSPORT_ICONS = <?= json_encode(teamTransportIconPaths()) ?>;
+const TEAM_TRANSPORT_ICONS = WR_BOOT.teamTransportIcons;
 // A position is a map pin (v3.357.1): a team-coloured teardrop whose point is
 // the position, with the way the team moves drawn in its round head. It was a
 // 16px dot while it only had to say "here"; it now has to say on foot,
@@ -16591,7 +16638,7 @@ function opBuildMiniMap(m) {
 //
 // «Έφτασα» appears on it inside the radius the server asks «Έφτασες;» in
 // (checkArrivalPrompts()), for an order whose next step is arriving.
-const ARROW_ARRIVE_RADIUS_M = <?= (int) ARRIVAL_PROMPT_RADIUS_M ?>;
+const ARROW_ARRIVE_RADIUS_M = WR_BOOT.arrivalPromptRadiusM;
 let arrowState = null;
 
 function arrowScreenAngle() {
@@ -17586,11 +17633,11 @@ setInterval(flushQueue, 15000);
 const SNAPSHOT_KEY = 'wr_field_snapshot';
 const OFFLINE_CONTACTS = <?= json_encode($offlineContacts, JSON_UNESCAPED_UNICODE) ?>;
 const SNAPSHOT_MISSION = <?= json_encode(['id' => $missionId, 'title' => $mission['title'], 'location' => $mission['location'] ?? ''], JSON_UNESCAPED_UNICODE) ?>;
-const SNAPSHOT_LANG = <?= json_encode($__viewerLang) ?>;
+const SNAPSHOT_LANG = WR_BOOT.viewerLang;
 // The participation request SOS and «Έφτασα» are filed against
 // (volunteer-status.php). null for a viewer who is not a participant, who
 // then gets no SOS button on the offline field view.
-const SNAPSHOT_PR_ID = <?= json_encode(!empty($myAssignments) ? (int) $myAssignments[0]['pr_id'] : null) ?>;
+const SNAPSHOT_PR_ID = WR_BOOT.myAssignmentId;
 // Positions age by the minute, everything else by the event, so a quiet
 // mission rewrites localStorage once a minute for the team's dots and not
 // every 5 s poll.
@@ -18955,9 +19002,9 @@ function triageRowHtml(v) {
 // the card and on every triage screen, because the people walking in should
 // see them. The draft keeps what command typed through the board's rebuilds
 // (every poll) until it is saved.
-const TRIAGE_SIZEUP_HAZARDS = <?= json_encode(TRIAGE_SIZEUP_HAZARDS) ?>;
-const TRIAGE_SIZEUP_RESOURCES = <?= json_encode(TRIAGE_SIZEUP_RESOURCES) ?>;
-const TRIAGE_SIZEUP_ACCESS = <?= json_encode(TRIAGE_SIZEUP_ACCESS) ?>;
+const TRIAGE_SIZEUP_HAZARDS = WR_BOOT.triageSizeupHazards;
+const TRIAGE_SIZEUP_RESOURCES = WR_BOOT.triageSizeupResources;
+const TRIAGE_SIZEUP_ACCESS = WR_BOOT.triageSizeupAccess;
 let triageSizeupDraft = null;
 let triageSizeupOpen = false;
 let triageSizeupSavedAt = 0;
@@ -21325,14 +21372,14 @@ setTimeout(() => {
     saveFieldSnapshot();
 }, 200);
 
-let bannerAfterId = <?= $bannerSinceId ?>;
+let bannerAfterId = WR_BOOT.bannerSinceId;
 // notification id -> {el, timer} for every currently-showing banner row —
 // concurrent alerts each get their own row/timer instead of one message
 // overwriting another that's still scrolling.
 const activeBannerRows = new Map();
 // Settings → «Κυλιόμενα Κείμενα Action Room». 'static' is pure CSS (see the
 // block after the banner font size); only 'hidden' changes what gets drawn.
-const WR_TICKER_MODE = <?= json_encode($wrTickerMode) ?>;
+const WR_TICKER_MODE = WR_BOOT.tickerMode;
 // Persistent rows that stay up even when the ticker is set to hidden: each one
 // means somebody may be in danger right now — an SOS, a hazard-zone breach, an
 // unheard push-to-talk voice message. None of them has a close button either,
@@ -23622,7 +23669,7 @@ document.querySelectorAll('.send-ping').forEach(button => button.addEventListene
 // doesn't change send frequency — a separate local-only timer below still
 // decides when the ~3-minute cadence is actually due, preserving the exact
 // send/DB-write volume every existing source='auto' consumer already assumes.
-const AUTO_PING_CADENCE_MS = <?= (int) getSetting('war_room_auto_ping_seconds', '180') * 1000 ?>;
+const AUTO_PING_CADENCE_MS = WR_BOOT.autoPingCadenceMs;
 // Whether the passive capture may power up the GNSS receiver. Configurable
 // because it is a real battery-vs-truth trade, but it defaults ON: without
 // it the fix comes from Wi-Fi/cell trilateration, which in a built-up area
@@ -23636,12 +23683,12 @@ const AUTO_PING_CADENCE_MS = <?= (int) getSetting('war_room_auto_ping_seconds', 
 // reported position sat ~35m off where they actually were, and 7-15% of
 // every trail's points were byte-identical to the point before them. None
 // of that is survivable for deciding who is nearest to a casualty.
-const AUTO_PING_HIGH_ACCURACY = <?= getSetting('war_room_auto_ping_high_accuracy', '1') === '1' ? 'true' : 'false' ?>;
+const AUTO_PING_HIGH_ACCURACY = WR_BOOT.autoPingHighAccuracy;
 // Android app only (v3.337.0, Settings → Action Room): sample a fix every
 // second and send the best of each cadence, and optionally GNSS full
 // tracking. See handleLocationBatch() in the app's BackgroundGeolocationService.
-const NATIVE_SAMPLE_MS = <?= getSetting('war_room_native_sampling', '1') === '1' ? 1000 : 0 ?>;
-const NATIVE_FULL_TRACKING = <?= getSetting('war_room_native_full_tracking', '0') === '1' ? 'true' : 'false' ?>;
+const NATIVE_SAMPLE_MS = WR_BOOT.nativeSampleMs;
+const NATIVE_FULL_TRACKING = WR_BOOT.nativeFullTracking;
 // A fix older than this is not worth sending. watchPosition() hands us
 // whatever it last managed to acquire and goes on handing us that same
 // object once the OS stops producing new ones (phone in a pocket, screen
@@ -23794,7 +23841,7 @@ const SOS_GOOD_ENOUGH_M = 50;
 // The server's own gate, handed to the client so the volunteer can be told
 // exactly why nothing is being stored instead of being left to infer it from
 // a number. 0 means the gate is off.
-const WR_MAX_PING_ACCURACY_M = <?= (int) getSetting('war_room_max_ping_accuracy_m', '50') ?>;
+const WR_MAX_PING_ACCURACY_M = WR_BOOT.maxPingAccuracyM;
 // Past this, the phone is not making a bad GNSS fix — it is not using GNSS at
 // all. Android's "approximate location" permission answers with roughly a
 // kilometre and NEVER reports an error, so it cannot be caught on the error
@@ -24417,7 +24464,7 @@ function startNativeBackgroundTracking() {
             // the native service would post pings into a 404 anywhere else.
             const pingUrl = MEDIA_LINK_BASE + '/mobile-ping-location.php?shift_id=' + encodeURIComponent(shiftId);
             const startOptions = {
-                backgroundTitle: <?= json_encode(getSetting('app_name', 'VolunteerOps')) ?>,
+                backgroundTitle: WR_BOOT.appName,
                 backgroundMessage: t('bgtrack.notification_text'),
                 distanceFilter: 0, // periodic cadence comes from intervalMs below, not movement — a stationary volunteer still needs to stay visible to command staff
                 intervalMs: AUTO_PING_CADENCE_MS,
@@ -28373,7 +28420,7 @@ document.querySelectorAll('.team-form').forEach(form => {
     // pinned to tests/fixtures/grid-cases.json.
     // The CONFIGURED limit (Settings -> war_room_grid_max_cells), not
     // config.php's own ceiling — same number generate_grid enforces.
-    const MAX_GRID_CELLS = <?= gridMaxCells() ?>;
+    const MAX_GRID_CELLS = WR_BOOT.gridMaxCells;
     const linesPane = document.getElementById('divideSectorsLinesPane');
     const gridPane = document.getElementById('divideSectorsGridPane');
     const gridSizeRange = document.getElementById('gridSizeRange');

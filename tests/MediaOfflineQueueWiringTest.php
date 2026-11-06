@@ -63,7 +63,7 @@ final class MediaOfflineQueueWiringTest extends TestCase
         $page = $this->source('war-room.php');
         $utils = strpos($page, 'assets/js/war-room-utils.js');
         $queue = strpos($page, 'assets/js/media-queue.js');
-        $inline = strpos($page, "const csrfToken = '");
+        $inline = strpos($page, 'const csrfToken = WR_BOOT.csrf;');
         $this->assertNotFalse($queue);
         $this->assertGreaterThan($utils, $queue);
         $this->assertLessThan($inline, $queue, 'the inline script reads VoMediaQueue at load');

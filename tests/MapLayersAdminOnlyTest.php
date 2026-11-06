@@ -66,7 +66,8 @@ final class MapLayersAdminOnlyTest extends TestCase
 
     public function testTheRestOfTheMenuIsBuiltOnlyForCommand(): void
     {
-        $this->assertStringContainsString('const MAP_LAYER_TOOLS_ENABLED = <?= json_encode($canManageWarRoom) ?>;', $this->source);
+        $this->assertStringContainsString('const MAP_LAYER_TOOLS_ENABLED = WR_BOOT.canManage;', $this->source);
+        $this->assertStringContainsString('    canManage: <?= json_encode($canManageWarRoom) ?>,', $this->source, 'and that is the command gate');
         $this->assertSame(1, substr_count($this->source, 'const MAP_LAYER_TOOLS_ENABLED'));
         // Each builder of the menu's extra sections stops for anyone else, before it touches the menu.
         $overlays = substr($this->source, strpos($this->source, '(function addMapOverlayToggles() {'), 2600);
@@ -140,10 +141,11 @@ final class MapLayersAdminOnlyTest extends TestCase
     public function testTheLayerPickerOpensOnlyForCommand(): void
     {
         $this->assertStringContainsString(
-            'const MAP_LAYER_TOOLS_ENABLED = <?= json_encode($canManageWarRoom) ?>;',
+            'const MAP_LAYER_TOOLS_ENABLED = WR_BOOT.canManage;',
             $this->source,
             'the picker flag comes from the command gate'
         );
+        $this->assertStringContainsString('    canManage: <?= json_encode($canManageWarRoom) ?>,', $this->source, 'which is the command gate itself');
         $mark = $this->functionBody('function markMapPickable(layer, info) {');
         $this->assertStringContainsString('if (!MAP_LAYER_TOOLS_ENABLED) return layer;', $mark);
         // The early return comes first: nothing may be tagged or re-bound before it.

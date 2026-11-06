@@ -43,7 +43,8 @@ final class WarRoomBootTest extends TestCase
         $page = $this->page();
         $boot = "<script>const WR_MISSION_ID = <?= (int) \$missionId ?>;</script>\n";
         $this->assertSame(1, substr_count($page, $boot));
-        $this->assertStringContainsString($boot . "<script>\n<?php \$__wrLight = wrLightScriptEnabled();", $page, 'it runs before the script that reads it');
+        $this->assertStringContainsString($boot, $page);
+        $this->assertLessThan(strpos($page, "<script>\n<?php \$__wrLight = wrLightScriptEnabled();"), strpos($page, $boot), 'it runs before the script that reads it');
     }
 
     public function testNoScriptPrintsTheMissionIdItselfAnyMore(): void
@@ -76,5 +77,93 @@ final class WarRoomBootTest extends TestCase
         [$script] = $this->bigScripts();
         $this->assertDoesNotMatchRegularExpression("~'\\s*\\+\\s*WR_MISSION_ID\\s*(?:\\.|\\[|\\?\\.)~", $script);
         $this->assertDoesNotMatchRegularExpression("~(?:[*/%-])\\s*'[^'\\n]*'\\s*\\+\\s*WR_MISSION_ID~", $script);
+    }
+
+    // ── v3.447.0, step R1b: the single values and small tables PHP works out for the request ──────────────────
+
+    /** @return array<string,array{0:string,1:string}> key => [mode (bare|string), the PHP expression that is printed] */
+    private function bootEntries(): array
+    {
+        $page = $this->page();
+        $from = strpos($page, "const WR_BOOT = {\n");
+        $this->assertNotFalse($from, 'the page has a WR_BOOT object');
+        $from += strlen("const WR_BOOT = {\n");
+        $to = strpos($page, "\n};\n</script>", $from);
+        $this->assertNotFalse($to);
+        $entries = [];
+        foreach (explode("\n", substr($page, $from, $to - $from)) as $line) {
+            $this->assertSame(1, preg_match("~^    (\\w+): (?:'<\\?= (.+) \\?>'|<\\?= (.+) \\?>),\$~", $line, $m), 'a boot line is "key: <?= php ?>," (or the same inside quotes): ' . $line);
+            $entries[$m[1]] = isset($m[3]) && $m[3] !== '' ? ['bare', $m[3]] : ['string', $m[2]];
+        }
+        return $entries;
+    }
+
+    public function testTheBootObjectIsPrintedOnceBeforeTheScriptThatReadsIt(): void
+    {
+        $page = $this->page();
+        $this->assertSame(1, substr_count($page, 'const WR_BOOT = {'));
+        $boot = strpos($page, 'const WR_BOOT = {');
+        $this->assertLessThan(strpos($page, "<script>\n<?php \$__wrLight = wrLightScriptEnabled();"), $boot, 'before the big script');
+        // The language the boot's jsLocale and viewerLang read is worked out on the line right above the boot.
+        $lang = strpos($page, "\$__viewerLang = \$user['language'] ?? DEFAULT_LANGUAGE;");
+        $this->assertNotFalse($lang);
+        $this->assertLessThan($boot, $lang);
+        $this->assertSame(1, substr_count($page, "\$__viewerLang = \$user['language']"));
+    }
+
+    public function testEveryBootKeyIsReadAndEveryReadIsAKey(): void
+    {
+        $keys = array_keys($this->bootEntries());
+        $this->assertGreaterThanOrEqual(40, count($keys));
+        [$script] = $this->bigScripts();
+        preg_match_all('~(?<![A-Za-z0-9_])WR_BOOT\.(\w+)~', $script, $m);
+        $read = array_unique($m[1]);
+        $this->assertSame([], array_values(array_diff($read, $keys)), 'the script reads a key the boot does not have');
+        $this->assertSame([], array_values(array_diff($keys, $read)), 'the boot holds a key nothing reads');
+        $this->assertDoesNotMatchRegularExpression('~(?<![A-Za-z0-9_])WR_BOOT(?!\.\w)~', $script, 'only ever WR_BOOT.key');
+    }
+
+    public function testWhatTheBootPrintsIsNotPrintedInsideTheScriptAnyMore(): void
+    {
+        [$script] = $this->bigScripts();
+        foreach ($this->bootEntries() as $key => [, $php]) {
+            $this->assertStringNotContainsString('<?= ' . $php . ' ?>', $script, $key . ' is printed by the boot, not in the middle of the script');
+        }
+    }
+
+    public function testTheBootIsOnlyEverRead(): void
+    {
+        [$script] = $this->bigScripts();
+        $this->assertDoesNotMatchRegularExpression('~(?<![A-Za-z0-9_])WR_BOOT\.\w+\s*(?:[-+*/]?=(?!=)|\+\+|--)~', $script, 'never assigned to');
+        $this->assertDoesNotMatchRegularExpression('~(?:delete\s+WR_BOOT|Object\.(?:assign|defineProperty|freeze)\(\s*WR_BOOT)~', $script);
+        $this->assertDoesNotMatchRegularExpression("~'\\s*\\+\\s*WR_BOOT\\.\\w+\\s*(?:\\.|\\[|\\?\\.)~", $script, 'no method or index on a string built from a boot value');
+    }
+
+    public function testTheSpotsThatNeedAStringOrAnUnbrokenNumberStillGetOne(): void
+    {
+        $entries = $this->bootEntries();
+        // The four whose value is text inside quotes: a token, a unit, a base address, the mission's title.
+        $strings = array_keys(array_filter($entries, fn($e) => $e[0] === 'string'));
+        sort($strings);
+        $this->assertSame(['areaUnit', 'baseUrl', 'csrf', 'missionTitleHtml'], $strings);
+        // The title is the very literal the script used to hold: addslashes inside, html-escaped outside.
+        $this->assertSame("h(addslashes(\$mission['title']))", $entries['missionTitleHtml'][1]);
+        [$script] = $this->bigScripts();
+        $this->assertStringContainsString("'</strong><br>' + WR_BOOT.missionTitleHtml + '<br>'", $script);
+        $this->assertStringContainsString("const FLAG_ASSET_BASE = WR_BOOT.baseUrl + '/assets/flags/';", $script);
+        $this->assertStringContainsString('const csrfToken = WR_BOOT.csrf;', $script);
+        // The setting that turns the Android app's full tracking on is a JS boolean, not a string.
+        $this->assertSame("getSetting('war_room_native_full_tracking', '0') === '1' ? 'true' : 'false'", $entries['nativeFullTracking'][1]);
+        $this->assertSame('bare', $entries['nativeFullTracking'][0]);
+    }
+
+    public function testTheEchoesThatAreStillPrintedInPlaceOnlyGoDown(): void
+    {
+        // What is left in the first script after R1b (53, three of them over several lines): the two translation
+        // tables, the state of the mission (R1c) and the few inside PHP conditions (when those chunks move out). A
+        // new echo here is a new per-request value in the middle of the code; put it in the boot instead.
+        // Lower this number when R1c lands.
+        [$script] = $this->bigScripts();
+        $this->assertLessThanOrEqual(53, preg_match_all('~<\?=~', $script));
     }
 }

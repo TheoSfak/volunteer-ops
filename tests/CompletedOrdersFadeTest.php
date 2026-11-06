@@ -230,7 +230,8 @@ final class CompletedOrdersFadeTest extends TestCase
     {
         $page = $this->page();
         $this->assertStringContainsString('assets/js/war-room-done-orders.js', $page);
-        $this->assertMatchesRegularExpression('/const WR_CLOCK_OFFSET = <\?= time\(\) \?> - Date\.now\(\) \/ 1000;/', $page);
+        $this->assertMatchesRegularExpression('/const WR_CLOCK_OFFSET = WR_BOOT\.serverTime - Date\.now\(\) \/ 1000;/', $page);
+        $this->assertStringContainsString('    serverTime: <?= time() ?>,', $page, 'the server clock is printed once, by the boot');
         $this->assertStringContainsString('function wrDoneNowSec()', $this->script());
         $this->assertStringContainsString('WR_CLOCK_OFFSET', $this->script());
     }
