@@ -1316,6 +1316,10 @@ function loadDispatchProgress(array $dispatchIds): array {
             // minutes after this (v3.439.0), counted by the browser against its own clock,
             // so nothing in the payload may slide with the time of the request.
             'completed_ts' => $row['completed_at'] ? (int) strtotime($row['completed_at']) : null,
+            // The same for the first two steps (v3.441.0): the time machine of «Πορεία Ομάδων»
+            // shows an order as it stood at a moment of the past, step by step.
+            'departed_ts' => $row['departed_at'] ? (int) strtotime($row['departed_at']) : null,
+            'arrived_ts'  => $row['arrived_at'] ? (int) strtotime($row['arrived_at']) : null,
         ];
     }
     return $byDispatch;
@@ -1335,7 +1339,7 @@ function loadDispatchProgress(array $dispatchIds): array {
  */
 function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canManageWarRoom, bool $isApprovedParticipant): array {
     $rows = dbFetchAll(
-        "SELECT d.id, d.team_id, d.type, d.geo, d.label, d.ring_index, d.incident_id, d.map_point_id, d.travel_mode, mt.codename, mt.team_number, mt.color
+        "SELECT d.id, d.team_id, d.type, d.geo, d.label, d.ring_index, d.incident_id, d.map_point_id, d.travel_mode, d.created_at, mt.codename, mt.team_number, mt.color
          FROM mission_dispatch_points d
          LEFT JOIN mission_teams mt ON mt.id = d.team_id
          WHERE d.mission_id = ?
@@ -1476,6 +1480,9 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             'id'          => $dispatchId,
             'type'        => $row['type'],
             'geo'         => $geo,
+            // When it was sent, as a unix time (v3.441.0): the time machine hides an order that did
+            // not exist yet at the moment being looked at.
+            'sent_ts'     => (int) strtotime($row['created_at']),
             'eta'         => $eta,
             // Foot or vehicle, as the order was given (null = the team's own transport).
             'travel_mode' => normalizeTravelMode($row['travel_mode']),
@@ -1520,6 +1527,9 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             // other teams see each other's steps, not what was written.
             'progress'     => array_values(array_map(fn($p, $scope) => [
                 'label' => $p['label'], 'departed' => $p['departed'], 'arrived' => $p['arrived'], 'completed' => $p['completed'],
+                // Which team this line is (t<id>, or u<id> for a volunteer with none) and the three
+                // steps as unix times, for the time machine (v3.441.0).
+                'scope' => $scope, 'departed_ts' => $p['departed_ts'], 'arrived_ts' => $p['arrived_ts'], 'completed_ts' => $p['completed_ts'],
                 'note'  => ($canManageWarRoom || $scope === $myScopeKey) ? ($p['note'] ?? null) : null,
             ], $progress, array_keys($progress))),
             // And every team that said it cannot, with why.
@@ -1685,6 +1695,9 @@ function loadMissionSectorsForUser(int $missionId, int $userId, bool $canManageW
             'user_name'   => $l['user_name'],
             'team_label'  => $l['codename'] ? teamLabel($l['codename'], $l['team_number']) : null,
             'time'        => date('d/m H:i', strtotime($l['created_at'])),
+            // The same moment as a unix time (v3.441.0): what the time machine of «Πορεία Ομάδων»
+            // reads to tell what state the sector was in at any moment of the past.
+            'ts'          => (int) strtotime($l['created_at']),
         ];
     }
 
@@ -1767,6 +1780,7 @@ function loadMissionSectorsForUser(int $missionId, int $userId, bool $canManageW
             'all_buildings_complete' => $allBuildingsComplete,
             'status_log'             => $logBySector[$sectorId] ?? [],
             'created_at'             => date('d/m H:i', strtotime($row['created_at'])),
+            'created_ts'             => (int) strtotime($row['created_at']),
             'created_by_name'        => $row['created_by_name'],
         ];
     }, $rows);
@@ -2129,6 +2143,10 @@ function loadRoutesForUser(int $missionId, int $userId, bool $canManageWarRoom):
             'travel_mode'           => normalizeTravelMode($r['travel_mode']),
             'status'                => $r['cancelled_at'] ? 'cancelled' : ($r['completed_at'] ? 'completed' : 'active'),
             'created_at_display'    => date('d/m H:i', strtotime($r['created_at'])),
+            // Unix times of when it was given and when it was called off (v3.441.0), for the time
+            // machine: a route called off since was a live one before.
+            'created_ts'            => (int) strtotime($r['created_at']),
+            'cancelled_ts'          => $r['cancelled_at'] ? (int) strtotime($r['cancelled_at']) : null,
             'created_by_name'       => $r['created_by_name'],
             'completed_at_display'  => $r['completed_at'] ? date('d/m H:i', strtotime($r['completed_at'])) : null,
             // As a unix time (v3.439.0), for the live map's «ολοκληρωμένα» fade.

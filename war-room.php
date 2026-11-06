@@ -4723,6 +4723,10 @@ include __DIR__ . '/includes/header.php';
                             <input class="form-check-input" type="checkbox" id="trailCollapseStops" checked>
                             <label class="form-check-label small" for="trailCollapseStops"><?= t('trail.collapse_stops') ?></label>
                         </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="trailOrdersAsOf" checked>
+                            <label class="form-check-label small" for="trailOrdersAsOf"><?= t('timemachine.orders_toggle') ?></label>
+                        </div>
                     </div>
                     <div class="col-12 col-md-4">
                         <button type="button" class="btn btn-sm btn-primary w-100" id="trailApplyBtn"><i class="bi bi-funnel-fill me-1"></i><?= t('trail.apply_btn') ?></button>
@@ -4743,6 +4747,8 @@ include __DIR__ . '/includes/header.php';
                     <div class="col-auto">
                         <span class="small text-muted" id="trailScrubberTime" style="white-space:nowrap;"></span>
                     </div>
+                    <!-- What the orders were at the moment of the scrubber (assets/js/war-room-time-machine.js). -->
+                    <div class="col-12 small text-muted d-none" id="trailOrdersSummary"></div>
                 </div>
             </div>
             <?php endif; ?>
@@ -6990,6 +6996,7 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
 <?php endif; ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-ar.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-ar.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-team-arcs.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-team-arcs.js') ?>"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-time-machine.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-time-machine.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-team-coverage.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-team-coverage.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-done-orders.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-done-orders.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/triage.js?v=<?= APP_VERSION ?>"></script>
@@ -9347,6 +9354,9 @@ function dispatchIncidentHtml(inc) {
 let dispatchesRenderedSig = null;
 function renderDispatches(items) {
     refreshMyOrdersCard();
+    // Back in the past with the scrubber of «Πορεία Ομάδων»: the orders as they stood then, read-only
+    // (assets/js/war-room-time-machine.js). The list itself in the present.
+    items = wrTimeDispatches(items);
     // The phase of every order is part of the signature: a finished order fades with the clock, not
     // with a new poll payload (assets/js/war-room-done-orders.js).
     const sig = JSON.stringify(items) + '|' + wrDonePhaseSig(items);
@@ -10873,6 +10883,8 @@ function addSectorBuildingMarker(b, item) {
 
 function renderSectorLayer(items) {
     if (!sectorLayer || !sectorBuildingLayer) return;
+    // The sectors as they stood at the moment the scrubber of «Πορεία Ομάδων» is on (assets/js/war-room-time-machine.js).
+    items = wrTimeSectors(items);
 
     // A sector/building whose popup is open right now is left completely
     // untouched below — not removed, not rebuilt, not reopened — instead of
@@ -14410,6 +14422,9 @@ function renderTrailUpTo(trails, cutoffTs) {
     // of this function itself instead of a convention callers must remember
     // is the only way a future new call site can't accidentally skip it.
     renderTrailEventsUpTo(cutoffTs);
+    // And the orders on the map stand as they did at this instant too (assets/js/war-room-time-machine.js),
+    // for the same reason: one place, so no call site can move the trails and leave the orders behind.
+    wrTimeFollow(cutoffTs);
 }
 function renderTrail(trails) {
     renderTrailUpTo(trails, Infinity);
@@ -14548,6 +14563,7 @@ function exitTrailMode() {
     document.getElementById('trailReplayBar')?.classList.add('d-none');
     document.getElementById('trailEventsCard')?.classList.add('d-none');
     trailModeActive = false;
+    wrTimeSet(null);
     trailLayer.clearLayers();
     if (map.hasLayer(trailLayer)) map.removeLayer(trailLayer);
     sharedMarkerCluster.addLayers(currentPinMarkers);
@@ -14572,6 +14588,14 @@ if (trailModeToggleBtn) {
     // Folding stops only changes how the loaded fixes are drawn, so it redraws
     // them where the replay scrubber is rather than fetching the trail again.
     document.getElementById('trailCollapseStops')?.addEventListener('change', () => {
+        if (!trailModeActive) return;
+        const replayBar = document.getElementById('trailReplayBar');
+        const replaying = replayBar && !replayBar.classList.contains('d-none');
+        renderTrailUpTo(currentTrails, replaying ? Number(document.getElementById('trailScrubber').value) : Infinity);
+    });
+    // «Οι εντολές όπως ήταν εκείνη την ώρα»: ticking it or not changes only what the orders do, so the trail is
+    // drawn again where the scrubber is (the orders follow from that), as with the stops just above.
+    document.getElementById('trailOrdersAsOf')?.addEventListener('change', () => {
         if (!trailModeActive) return;
         const replayBar = document.getElementById('trailReplayBar');
         const replaying = replayBar && !replayBar.classList.contains('d-none');
@@ -29287,6 +29311,8 @@ function routeWaypointColor(wp, isCurrent) {
 let routeLayerRenderedSig = null;
 function renderRouteLayer(allRoutes) {
     if (!routeLayer) return;
+    // The routes as they stood at the moment the scrubber of «Πορεία Ομάδων» is on (assets/js/war-room-time-machine.js).
+    allRoutes = wrTimeRoutes(allRoutes);
     const sig = JSON.stringify(allRoutes) + '|' + wrDoneRoutesSig(allRoutes);
     if (sig === routeLayerRenderedSig) return;
     routeLayerRenderedSig = sig;

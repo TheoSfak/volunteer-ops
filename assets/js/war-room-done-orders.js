@@ -45,6 +45,9 @@ let wrDoneAppliedSig = null;
 let wrDoneChip = null, wrDoneListOpen = false, wrDoneChipSig = null, wrDoneHiddenCount = -1;
 
 function wrDoneNowSec() {
+    // Looking at the past (the time machine of «Πορεία Ομάδων», assets/js/war-room-time-machine.js): the moment
+    // looked at is "now", so an order finished by then fades by the same rules as it did on the live map.
+    if (typeof wrTimeNow === 'function' && wrTimeNow() !== null) return wrTimeNow();
     return Date.now() / 1000 + (typeof WR_CLOCK_OFFSET === 'number' ? WR_CLOCK_OFFSET : 0);
 }
 
@@ -80,8 +83,13 @@ function wrDonePhaseSig(items) {
 function wrDoneRoutesSig(items) {
     return wrDoneMode + ':' + (items || []).map(r => wrDoneRoutePhase(r)[0]).join('');
 }
+// The lists as they are drawn: the present, or (time machine) as they stood at the moment looked at.
+function wrDoneView(kind) {
+    if (typeof wrTimeNow !== 'function') return kind === 'dispatch' ? dispatches : kind === 'sector' ? sectors : routes;
+    return kind === 'dispatch' ? wrTimeDispatches(dispatches) : kind === 'sector' ? wrTimeSectors(sectors) : wrTimeRoutes(routes);
+}
 function wrDoneAllSig() {
-    return wrDonePhaseSig(dispatches) + '|' + wrDonePhaseSig(sectors) + '|' + wrDoneRoutesSig(routes);
+    return wrDonePhaseSig(wrDoneView('dispatch')) + '|' + wrDonePhaseSig(wrDoneView('sector')) + '|' + wrDoneRoutesSig(wrDoneView('route'));
 }
 
 // ── Drawing ─────────────────────────────────────────────────────────────────
@@ -141,15 +149,15 @@ function wrDoneDrawRoute(route) {
 // ── The list behind the counter ─────────────────────────────────────────────
 function wrDoneEntries() {
     const out = [];
-    (dispatches || []).forEach(d => {
+    (wrDoneView('dispatch') || []).forEach(d => {
         if (!d.completed_ts || d.map_point_id || wrDoneFocusHides(d.team_id)) return;
         out.push({kind: 'dispatch', id: d.id, ts: d.completed_ts, team: d.team_label || '', label: d.label || '', time: d.completed_display || ''});
     });
-    (sectors || []).forEach(s => {
+    (wrDoneView('sector') || []).forEach(s => {
         if (!s.completed_ts || wrDoneFocusHides(s.team_id)) return;
         out.push({kind: 'sector', id: s.id, ts: s.completed_ts, team: s.team_label || '', label: s.label || '', time: s.status_updated_at || ''});
     });
-    (routes || []).forEach(r => {
+    (wrDoneView('route') || []).forEach(r => {
         if (r.status !== 'completed' || wrDoneFocusHides(r.team_id)) return;
         out.push({kind: 'route', id: r.id, ts: r.completed_ts || 0, team: r.team_label || '', label: r.title || '', time: r.completed_at_display || ''});
     });

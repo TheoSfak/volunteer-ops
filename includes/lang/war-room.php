@@ -579,6 +579,13 @@ return [
         'map.cov_none' => 'Καμία ομάδα δεν έχει στίγματα ακόμη.',
         'map.cov_failed' => 'Δεν φορτώθηκε η κάλυψη των ομάδων.',
         'map.focus_hidden_item' => 'Μόνο η ομάδα {team}',
+        // The time machine of «Πορεία Ομάδων» (v3.441.0): the orders on the map as they stood at the scrubber's moment.
+        'timemachine.orders_toggle' => 'Οι εντολές όπως ήταν εκείνη την ώρα',
+        'timemachine.summary' => 'Εντολές στις {time} — σημεία/περιοχές: {d} (✓ {dc}) · τομείς: {s} (✓ {sc}) · διαδρομές: {r} (✓ {rc})',
+        'timemachine.summary_none' => 'Εντολές στις {time}: καμία ακόμη',
+        'timemachine.chip' => 'Εντολές όπως ήταν στις {time}',
+        'timemachine.chip_now' => 'Τώρα',
+        'timemachine.chip_now_title' => 'Επιστροφή στην τωρινή εικόνα',
         // Destination arcs (v3.437.0): the dial at the top of the arch from a team to where it was sent.
         'arc.eta' => 'ETA',
         'arc.minutes' => 'λεπτά',
@@ -3891,6 +3898,13 @@ return [
         'map.cov_none' => 'No team has any positions yet.',
         'map.cov_failed' => 'The team coverage did not load.',
         'map.focus_hidden_item' => 'Only team {team}',
+        // The time machine of «Πορεία Ομάδων» (v3.441.0): the orders on the map as they stood at the scrubber's moment.
+        'timemachine.orders_toggle' => 'Orders as they were at that time',
+        'timemachine.summary' => 'Orders at {time} — points/areas: {d} (✓ {dc}) · sectors: {s} (✓ {sc}) · routes: {r} (✓ {rc})',
+        'timemachine.summary_none' => 'Orders at {time}: none yet',
+        'timemachine.chip' => 'Orders as they were at {time}',
+        'timemachine.chip_now' => 'Now',
+        'timemachine.chip_now_title' => 'Back to the present picture',
         // Destination arcs (v3.437.0): the dial at the top of the arch from a team to where it was sent.
         'arc.eta' => 'ETA',
         'arc.minutes' => 'min',
