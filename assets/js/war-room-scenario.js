@@ -10,7 +10,9 @@
  *     plan can be read against the ground. A ghost is not an order: nobody but command ever sees one, and it is
  *     gone from the map the moment its phase is played, because the real order is there instead;
  *   - the «Στο σενάριο ▾» button of the point/area window, which puts the order being drawn into a phase
- *     instead of sending it.
+ *     instead of sending it;
+ *   - the team slots (v3.453.0): names for teams that may not exist yet, in the card, in the window's recipient
+ *     list, and in the dialog that play opens to ask which team is which.
  *
  * The plan is never part of the 5-second poll or of WR_BOOT: it is fetched here, once when the page opens and
  * again whenever the tab comes back to the front or an action changes it (every answer of mission-scenario.php
@@ -22,7 +24,7 @@
 (function () {
     const ENDPOINT = 'mission-scenario.php';
 
-    let scenario = {phases: []};
+    let scenario = {phases: [], slots: [], teams: []};
     let ghostLayer = null;
     let initialised = false;
     let busy = false;
@@ -54,8 +56,12 @@
     // ── Talking to the server ──────────────────────────────────────────────────────────────────────────────────
     function apply(fresh) {
         scenario = (fresh && Array.isArray(fresh.phases)) ? fresh : {phases: []};
+        if (!Array.isArray(scenario.slots)) scenario.slots = [];
+        if (!Array.isArray(scenario.teams)) scenario.teams = [];
         renderCard();
         drawGhosts();
+        // The point/area window keeps the slots in its recipient list (war-room.php).
+        document.dispatchEvent(new CustomEvent('wr-scenario-updated'));
     }
 
     function load() {
@@ -89,6 +95,7 @@
     }
     function itemTarget(item) {
         if (item.audience === 'all') return t('common.all_teams');
+        if (item.audience === 'slot') return (item.slot_label || '') + (item.team_label ? ' → ' + item.team_label : '');
         return item.team_label || t('scenario.team_gone');
     }
     function itemTitle(item) {
@@ -98,7 +105,9 @@
     // ── The card ───────────────────────────────────────────────────────────────────────────────────────────────
     function itemHtml(phase, item) {
         const icon = item.type === 'point' ? 'bi-geo-alt-fill' : 'bi-bounding-box';
-        const target = `<span class="badge ${item.team_missing ? 'bg-danger' : (item.audience === 'all' ? 'bg-warning text-dark' : 'bg-secondary')}">${esc(itemTarget(item))}</span>`;
+        const badgeClass = item.team_missing ? 'bg-danger'
+            : (item.audience === 'all' ? 'bg-warning text-dark' : (item.audience === 'slot' ? (item.unmapped ? 'bg-warning text-dark' : 'bg-info text-dark') : 'bg-secondary'));
+        const target = `<span class="badge ${badgeClass}">${esc(itemTarget(item))}</span>`;
         let status = '';
         if (item.sent) {
             status = `<div class="small text-success"><i class="bi bi-check-circle-fill me-1"></i>${esc(t('scenario.item_sent'))}</div>`;
@@ -106,6 +115,8 @@
             status = `<div class="small text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(item.error)}</div>`;
         } else if (item.team_missing) {
             status = `<div class="small text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(t('scenario.team_gone_hint'))}</div>`;
+        } else if (item.unmapped) {
+            status = `<div class="small text-muted"><i class="bi bi-hourglass-split me-1"></i>${esc(t('scenario.slot_unmapped_hint'))}</div>`;
         }
         const retry = (!item.sent && item.error && phase.played_at)
             ? `<button type="button" class="btn btn-outline-primary btn-sm py-0" data-sc="retry" data-item="${item.id}" title="${esc(t('scenario.retry_btn'))}"><i class="bi bi-arrow-repeat"></i></button>` : '';
@@ -141,15 +152,33 @@
         </div>`;
     }
 
+    // «Θέσεις ομάδων»: the names the plan gives to teams that may not exist yet, each with the team it stands for.
+    function slotsHtml() {
+        const teamOptions = selected => scenario.teams.map(team =>
+            `<option value="${team.id}"${String(team.id) === String(selected) ? ' selected' : ''}>${esc(team.label)}</option>`).join('');
+        const rows = scenario.slots.map(slot => `<div class="mb-2" data-slot="${slot.id}">
+            <div class="d-flex align-items-center gap-1">
+                <span class="flex-grow-1 small fw-semibold text-break">${esc(slot.label)}</span>
+                <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2" data-sc="delete-slot" data-slot="${slot.id}" title="${esc(t('scenario.slot_delete'))}"><i class="bi bi-x-lg"></i></button>
+            </div>
+            <select class="form-select form-select-sm mt-1" data-sc-map="${slot.id}" aria-label="${esc(slot.label)}">
+                <option value="">${esc(t('scenario.slot_no_team'))}</option>${teamOptions(slot.team_id)}
+            </select>
+        </div>`).join('');
+        return `<div class="wr-sc-slots mt-3 pt-2 border-top">
+            <div class="small fw-semibold">${esc(t('scenario.slots_title'))}</div>
+            <div class="small text-muted mb-2">${esc(t('scenario.slots_hint'))}</div>
+            ${rows}
+            <button type="button" class="btn btn-outline-secondary btn-sm w-100" data-sc="add-slot"><i class="bi bi-plus-lg me-1"></i>${esc(t('scenario.slot_add_btn'))}</button>
+        </div>`;
+    }
+
     function renderCard() {
         const body = document.getElementById('scenarioBody');
         if (!body) return;
         const add = `<button type="button" class="btn btn-outline-primary btn-sm w-100" data-sc="add-phase"><i class="bi bi-plus-lg me-1"></i>${esc(t('scenario.add_phase_btn'))}</button>`;
-        if (!scenario.phases.length) {
-            body.innerHTML = `<p class="small text-muted mb-2">${esc(t('scenario.empty'))}</p>${add}`;
-            return;
-        }
-        body.innerHTML = scenario.phases.map(phaseHtml).join('') + add;
+        const lead = scenario.phases.length ? scenario.phases.map(phaseHtml).join('') : `<p class="small text-muted mb-2">${esc(t('scenario.empty'))}</p>`;
+        body.innerHTML = lead + add + slotsHtml();
     }
 
     function findPhase(id) {
@@ -174,6 +203,110 @@
         const missing = pending.filter(i => i.team_missing).length;
         if (missing) text += '\n\n' + t('scenario.play_confirm_missing', {n: missing});
         return text;
+    }
+
+    // The slots the unsent orders of a phase go to that stand for no team yet: [{id, label}], each once.
+    function unmappedSlotsOf(phase) {
+        const out = [];
+        phase.items.forEach(item => {
+            if (!item.sent && item.audience === 'slot' && item.unmapped && !out.some(s => String(s.id) === String(item.slot_id))) {
+                out.push({id: item.slot_id, label: item.slot_label || ''});
+            }
+        });
+        return out;
+    }
+
+    // «Ποια ομάδα είναι ποια;»: resolves with {slotId: teamId} once every slot has a team, or null for «Ακύρωση».
+    // Built from the page's own report dialog look, appended to <body>, outside everything the poll rebuilds.
+    function askSlotMapping(phase, slots) {
+        if (document.querySelector('.wr-report-dialog')) return Promise.resolve(null);
+        return new Promise(resolve => {
+            const teams = scenario.teams;
+            const wrap = document.createElement('div');
+            wrap.className = 'wr-report-dialog';
+            wrap.setAttribute('role', 'dialog');
+            wrap.setAttribute('aria-modal', 'true');
+            const rows = slots.map(slot => `<div class="mb-2">
+                <label class="form-label small fw-semibold mb-1">${esc(slot.label)}</label>
+                <select class="form-select" data-map-slot="${slot.id}">
+                    <option value="">${esc(t('scenario.slot_pick_team'))}</option>
+                    ${teams.map(team => `<option value="${team.id}">${esc(team.label)}</option>`).join('')}
+                </select>
+            </div>`).join('');
+            wrap.innerHTML = `<div class="wr-report-box">
+                <div class="fw-semibold mb-1"><i class="bi bi-collection-play-fill text-primary me-1"></i>${esc(t('scenario.map_title'))}</div>
+                <div class="small text-muted mb-3">${esc(teams.length ? t('scenario.map_hint', {phase: phaseName(phase)}) : t('scenario.map_no_teams'))}</div>
+                ${teams.length ? rows : ''}
+                <div class="d-flex gap-2 mt-3">
+                    <button type="button" class="btn btn-outline-secondary flex-fill" data-map="cancel">${esc(t('common.cancel'))}</button>
+                    ${teams.length ? `<button type="button" class="btn btn-success flex-fill" data-map="ok" disabled><i class="bi bi-play-fill me-1"></i>${esc(t('scenario.map_confirm_btn'))}</button>` : ''}
+                </div>
+            </div>`;
+            const okBtn = wrap.querySelector('[data-map="ok"]');
+            const selects = [...wrap.querySelectorAll('select[data-map-slot]')];
+            const finish = value => {
+                document.removeEventListener('keydown', onKey, true);
+                wrap.remove();
+                resolve(value);
+            };
+            const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); finish(null); } };
+            selects.forEach(sel => sel.addEventListener('change', () => { okBtn.disabled = selects.some(x => !x.value); }));
+            wrap.querySelector('[data-map="cancel"]').addEventListener('click', () => finish(null));
+            if (okBtn) okBtn.addEventListener('click', () => {
+                if (selects.some(x => !x.value)) return;
+                const mapping = {};
+                selects.forEach(sel => { mapping[sel.dataset.mapSlot] = sel.value; });
+                finish(mapping);
+            });
+            document.addEventListener('keydown', onKey, true);
+            document.body.appendChild(wrap);
+            if (selects[0]) selects[0].focus();
+        });
+    }
+
+    // A new slot: asks for its name (the next free «Ομάδα Α», «Ομάδα Β»... is the suggestion) and resolves with
+    // its id, or null when the person said no or the server refused (and has already been told why).
+    function newSlot() {
+        const letters = t('scenario.slot_letters');
+        let suggestion = '';
+        for (let i = 0; i < 200; i++) {
+            suggestion = t('scenario.slot_default_label', {letter: i < letters.length ? letters.charAt(i) : String(i + 1)});
+            if (!scenario.slots.some(s => String(s.label).toLowerCase() === suggestion.toLowerCase())) break;
+        }
+        const label = prompt(t('scenario.slot_new_prompt'), suggestion);
+        if (label === null) return Promise.resolve(null);
+        return request('add_slot', {label: label})
+            .then(res => { if (res && res.ok) return res.slot_id; failed(res); return null; })
+            .catch(() => { alert(t('common.send_failed')); return null; });
+    }
+
+    // The slots as options of any recipient list (the point/area window's): one group at the end, the slots
+    // with the team each stands for, and «+ Νέα θέση ομάδας…». What is selected stays selected.
+    function fillSlotOptions(select) {
+        if (!select) return;
+        let group = select.querySelector('optgroup[data-sc-slots]');
+        if (!group) {
+            group = document.createElement('optgroup');
+            group.setAttribute('data-sc-slots', '1');
+            select.appendChild(group);
+        }
+        group.label = t('scenario.slot_option_group');
+        const keep = select.value;
+        group.innerHTML = scenario.slots.map(slot =>
+            `<option value="slot:${slot.id}">${esc(slot.label)}${slot.team_label ? ' → ' + esc(slot.team_label) : ''}</option>`
+        ).join('') + `<option value="slot:new">${esc(t('scenario.slot_option_new'))}</option>`;
+        if (keep && [...select.options].some(o => o.value === keep)) select.value = keep;
+    }
+
+    function onCardChange(e) {
+        const sel = e.target.closest('select[data-sc-map]');
+        if (!sel || busy) return;
+        busy = true;
+        sel.disabled = true;
+        request('map_slot', {slot_id: sel.dataset.scMap, team_id: sel.value})
+            .then(res => { if (!res || !res.ok) failed(res); })
+            .catch(() => alert(t('common.send_failed')))
+            .finally(() => { busy = false; sel.disabled = false; });
     }
 
     function onCardClick(e) {
@@ -203,6 +336,14 @@
 
         if (act === 'add-phase') {
             run('add_phase', {});
+        } else if (act === 'add-slot') {
+            busy = true;
+            newSlot().finally(() => { busy = false; });
+        } else if (act === 'delete-slot') {
+            const slot = scenario.slots.find(x => String(x.id) === String(el.dataset.slot));
+            if (!slot) return;
+            if (!confirm(t('scenario.slot_delete_confirm', {label: slot.label}))) return;
+            run('delete_slot', {slot_id: el.dataset.slot});
         } else if (act === 'rename') {
             const phase = findPhase(el.dataset.phase);
             if (!phase) return;
@@ -219,13 +360,28 @@
         } else if (act === 'play') {
             const phase = findPhase(el.dataset.phase);
             if (!phase) return;
-            if (!confirm(playConfirmText(phase))) return;
-            run('play_phase', {phase_id: el.dataset.phase}, res => {
+            const afterPlay = res => {
                 if (res.dispatches && typeof renderDispatches === 'function') renderDispatches(dispatches = res.dispatches);
                 if (res.failed > 0) {
                     const lines = (res.results || []).filter(r => !r.ok).map(r => '• ' + r.error);
                     alert(t('scenario.play_partial', {sent: res.sent, failed: res.failed}) + '\n\n' + lines.join('\n'));
                 }
+            };
+            const lacking = unmappedSlotsOf(phase);
+            if (!lacking.length) {
+                if (!confirm(playConfirmText(phase))) return;
+                run('play_phase', {phase_id: el.dataset.phase}, afterPlay);
+                return;
+            }
+            // Some order goes to a slot that stands for no team yet: ask which team is which, and send nothing
+            // until every one has an answer. The server refuses the phase too if it is ever asked without them.
+            busy = true;
+            askSlotMapping(phase, lacking).then(mapping => {
+                busy = false;
+                if (!mapping) return;
+                const fields = {phase_id: el.dataset.phase};
+                Object.keys(mapping).forEach(slotId => { fields['mapping[' + slotId + ']'] = mapping[slotId]; });
+                run('play_phase', fields, afterPlay);
             });
         } else if (act === 'retry') {
             run('retry_item', {item_id: el.dataset.item}, res => {
@@ -295,11 +451,14 @@
         initialised = true;
         injectCss();
         const body = document.getElementById('scenarioBody');
-        if (body) body.addEventListener('click', onCardClick);
+        if (body) {
+            body.addEventListener('click', onCardClick);
+            body.addEventListener('change', onCardChange);
+        }
         renderCard();
         load();
         document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
     }
 
-    window.wrScenario = {init: init, reload: load, menuHtml: menuHtml, stage: stage, phaseNumber: phaseNumber, drawGhostsInto: drawGhostsInto, phases: () => scenario.phases};
+    window.wrScenario = {init: init, reload: load, menuHtml: menuHtml, stage: stage, phaseNumber: phaseNumber, drawGhostsInto: drawGhostsInto, phases: () => scenario.phases, newSlot: newSlot, fillSlotOptions: fillSlotOptions};
 })();

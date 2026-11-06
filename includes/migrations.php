@@ -8046,6 +8046,35 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 204,
+            'description' => "Scenario team slots (v3.453.0): mission_scenario_slots holds the names a scenario gives to teams that may not exist yet («Ομάδα Α»), each with the real team it stands for once command has said which (team_id, NULL = none yet; the team being deleted sets it back to NULL), and mission_scenario_items gets slot_id so a slot cannot be deleted from under an order that goes to it. An order to a slot is sent to that team and to nobody else: a slot with no team is never read as every team.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS mission_scenario_slots (
+                    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    mission_id INT UNSIGNED NOT NULL,
+                    label VARCHAR(80) NOT NULL,
+                    team_id INT UNSIGNED NULL COMMENT 'The team this slot stands for; NULL = none chosen yet',
+                    created_by INT UNSIGNED NOT NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uq_scenario_slot_label (mission_id, label),
+                    FOREIGN KEY (mission_id) REFERENCES missions(id) ON DELETE CASCADE,
+                    FOREIGN KEY (team_id) REFERENCES mission_teams(id) ON DELETE SET NULL,
+                    FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                // information_schema, not dbColumnExists(): see migration 197.
+                $has = (int) dbFetchValue(
+                    "SELECT COUNT(*) FROM information_schema.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_scenario_items' AND COLUMN_NAME = 'slot_id'"
+                );
+                if ($has === 0) {
+                    dbExecute("ALTER TABLE mission_scenario_items
+                        ADD COLUMN slot_id INT UNSIGNED NULL COMMENT 'The slot the order goes to, if it goes to one' AFTER payload,
+                        ADD INDEX idx_scenario_item_slot (slot_id)");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

@@ -28025,9 +28025,31 @@ document.querySelectorAll('.team-form').forEach(form => {
     const scenarioBtn = document.getElementById('dispatchScenarioBtn');
     const scenarioMenu = document.getElementById('dispatchScenarioMenu');
     const scenarioStatus = document.getElementById('dispatchScenarioStatus');
-    function syncScenarioBtn() {
-        if (scenarioBtn) scenarioBtn.disabled = sendBtn.disabled;
+    // A place drawn: one point, or a closed shape of at least three.
+    function shapeReady() {
+        return drawPoints.length === 1 || (isClosed && drawPoints.length >= 3);
     }
+    // «Στο σενάριο» needs a place and a recipient, and the recipient may be a scenario slot (which «Αποστολή»
+    // may not: a slot is a name for a team, not a team).
+    function syncScenarioBtn() {
+        if (scenarioBtn) scenarioBtn.disabled = !shapeReady() || !teamSelect.value || teamSelect.value === 'slot:new';
+    }
+    // The scenario's team slots live in the recipient list as a group of their own.
+    function refreshSlotOptions() {
+        if (window.wrScenario) window.wrScenario.fillSlotOptions(teamSelect);
+    }
+    document.addEventListener('wr-scenario-updated', refreshSlotOptions);
+    teamSelect.addEventListener('change', () => {
+        if (teamSelect.value !== 'slot:new') return;
+        teamSelect.value = '';
+        if (!window.wrScenario) { updateSendState(); return; }
+        window.wrScenario.newSlot().then(id => {
+            refreshSlotOptions();
+            if (id) teamSelect.value = 'slot:' + id;
+            syncTravelSelect();
+            updateSendState();
+        });
+    });
 
     let dispatchMap = null;
     let refLayer = null;
@@ -28082,7 +28104,8 @@ document.querySelectorAll('.team-form').forEach(form => {
 
     // A place and a recipient: nothing goes to every team by default.
     function updateSendState() {
-        sendBtn.disabled = !(drawPoints.length === 1 || (isClosed && drawPoints.length >= 3)) || !teamSelect.value;
+        // A slot is only ever staged («Στο σενάριο»): sending to a name that stands for no team yet is not possible.
+        sendBtn.disabled = !shapeReady() || !teamSelect.value || teamSelect.value.indexOf('slot:') === 0;
         syncScenarioBtn();
     }
     teamSelect.addEventListener('change', updateSendState);
@@ -28233,7 +28256,8 @@ document.querySelectorAll('.team-form').forEach(form => {
             const choice = e.target.closest('[data-sc-phase]');
             if (!choice) return;
             e.preventDefault();
-            if (!window.wrScenario || sendBtn.disabled) return;
+            // Ready is what «Στο σενάριο» says, not what «Αποστολή» says: a slot can be staged but never sent.
+            if (!window.wrScenario || scenarioBtn.disabled) return;
             if (!teamSelect.value) { alert(t('dispatch.pick_team_first')); return; }
             const type = isClosed ? 'polygon' : 'point';
             const geo = type === 'point' ? {lat: drawPoints[0][0], lng: drawPoints[0][1]} : drawPoints;

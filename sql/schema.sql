@@ -3471,7 +3471,8 @@ CREATE TABLE IF NOT EXISTS `mission_scenario_items` (
     `mission_id` INT UNSIGNED NOT NULL,
     `seq` SMALLINT UNSIGNED NOT NULL DEFAULT 1,
     `kind` ENUM('dispatch') NOT NULL DEFAULT 'dispatch' COMMENT 'What kind of order; more kinds come with later steps',
-    `payload` TEXT NOT NULL COMMENT 'JSON: audience (team|all), team_id, type, geo, label, travel_mode',
+    `payload` TEXT NOT NULL COMMENT 'JSON: audience (team|all|slot), team_id, slot_id, type, geo, label, travel_mode',
+    `slot_id` INT UNSIGNED NULL COMMENT 'The slot the order goes to, if it goes to one (migration 204)',
     `sent_at` DATETIME NULL COMMENT 'When it went out as a live order',
     `sent_ref_id` INT UNSIGNED NULL COMMENT 'The live order it became (mission_dispatch_points.id); no foreign key',
     `last_error` VARCHAR(255) NULL COMMENT 'Why the last attempt to send it failed',
@@ -3479,8 +3480,24 @@ CREATE TABLE IF NOT EXISTS `mission_scenario_items` (
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX `idx_scenario_item_phase` (`phase_id`, `seq`),
     INDEX `idx_scenario_item_mission` (`mission_id`),
+    INDEX `idx_scenario_item_slot` (`slot_id`),
     FOREIGN KEY (`phase_id`) REFERENCES `mission_scenario_phases`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Scenario team slots - v3.453.0 (migration 204): the names a scenario gives to teams that may not exist yet,
+-- each with the real team it stands for once command has said which.
+CREATE TABLE IF NOT EXISTS `mission_scenario_slots` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `label` VARCHAR(80) NOT NULL,
+    `team_id` INT UNSIGNED NULL COMMENT 'The team this slot stands for; NULL = none chosen yet',
+    `created_by` INT UNSIGNED NOT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `uq_scenario_slot_label` (`mission_id`, `label`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

@@ -514,6 +514,279 @@ final class ScenarioTest extends TestCase
         $this->assertSame(2, $this->liveCount());
     }
 
+    // ── Slots: names for teams that do not exist yet ──────────────────────────────────────────────────────────────
+
+    private function slot(string $label = 'Ομάδα Α'): int
+    {
+        $r = addScenarioSlot($this->mission, $this->adminId, $label);
+        $this->assertTrue($r['ok'], (string) ($r['error'] ?? ''));
+        return $r['id'];
+    }
+
+    private function slotOrder(int $slot, array $over = []): array
+    {
+        return $over + $this->point(['team_id' => 'slot:' . $slot]);
+    }
+
+    public function testAnOrderCanBeWrittenDownForATeamThatDoesNotExistYet(): void
+    {
+        $slot = $this->slot('Ομάδα Α');
+        $phase = $this->phase();
+        $notes = $this->notificationCount();
+
+        $r = $this->stage($phase, $this->slotOrder($slot, ['travel_mode' => 'vehicle']));
+
+        $this->assertTrue($r['ok'], (string) ($r['error'] ?? ''));
+        $this->assertSame(0, $this->liveCount());
+        $this->assertSame($notes, $this->notificationCount());
+        $item = loadMissionScenario($this->missionId)['phases'][0]['items'][0];
+        $this->assertSame('slot', $item['audience']);
+        $this->assertSame($slot, $item['slot_id']);
+        $this->assertSame('Ομάδα Α', $item['slot_label']);
+        $this->assertTrue($item['unmapped']);
+        $this->assertNull($item['team_id']);
+        $this->assertNull($item['team_label']);
+        $this->assertFalse($item['team_missing']);
+        $this->assertSame('vehicle', $item['travel_mode'], 'the choice is kept for the team it becomes');
+        $this->assertSame($slot, (int) dbFetchValue("SELECT slot_id FROM mission_scenario_items WHERE id = ?", [$r['id']]));
+    }
+
+    public function testThePlanListsTheSlotsAndTheTeamsEvenBeforeThereIsAPhase(): void
+    {
+        $slot = $this->slot('Ομάδα Β');
+        mapScenarioSlot($this->mission, $slot, $this->secondTeamId, $this->adminId);
+
+        $plan = loadMissionScenario($this->missionId);
+
+        $this->assertSame([], $plan['phases']);
+        $this->assertSame(
+            [['id' => $slot, 'label' => 'Ομάδα Β', 'team_id' => $this->secondTeamId, 'team_label' => 'ΒΗΤΑ 2', 'mapped' => true]],
+            $plan['slots']
+        );
+        $this->assertEqualsCanonicalizing(['ΑΛΦΑ 1', 'ΒΗΤΑ 2'], array_column($plan['teams'], 'label'));
+    }
+
+    public function testAPhaseThatUsesASlotWithNoTeamIsRefusedBeforeItIsClaimedAndSendsNothing(): void
+    {
+        $slot = $this->slot();
+        $phase = $this->phase();
+        $this->stage($phase, $this->slotOrder($slot));
+        $this->stage($phase, $this->point());
+        $notes = $this->notificationCount();
+
+        $r = $this->play($phase);
+
+        $this->assertFalse($r['ok']);
+        $this->assertSame([['id' => $slot, 'label' => 'Ομάδα Α']], $r['unmapped'], 'the answer says which slots lack a team');
+        $this->assertSame(t('scenario.slots_unmapped', ['slots' => 'Ομάδα Α']), $r['error']);
+        $this->assertNull(loadMissionScenario($this->missionId)['phases'][0]['played_at'], 'still only a plan');
+        $this->assertSame(0, $this->liveCount(), 'not even the order that has a team went out');
+        $this->assertSame($notes, $this->notificationCount());
+        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_dispatch_points WHERE mission_id = ? AND team_id IS NULL", [$this->missionId]));
+    }
+
+    public function testPlayWithTheDialogsAnswerSendsToThatTeamOnlyAndTheChoiceStays(): void
+    {
+        $slot = $this->slot();
+        $one = $this->phase();
+        $two = $this->phase();
+        $this->stage($one, $this->slotOrder($slot, ['label' => 'Πρώτο']));
+        $this->stage($two, $this->slotOrder($slot, ['label' => 'Δεύτερο']));
+
+        $r = $this->play2($one, [$slot => $this->teamId]);
+
+        $this->assertTrue($r['ok'], (string) ($r['error'] ?? ''));
+        $row = dbFetchOne("SELECT * FROM mission_dispatch_points WHERE id = ?", [$r['results'][0]['dispatch_id']]);
+        $this->assertSame($this->teamId, (int) $row['team_id']);
+        $this->assertSame($this->members, $this->notifiedAbout((int) $row['id']), 'the team the slot became is told, and nobody else');
+        $this->assertSame($this->teamId, (int) dbFetchValue("SELECT team_id FROM mission_scenario_slots WHERE id = ?", [$slot]));
+
+        // The next phase needs no question: the slot already stands for a team.
+        $next = $this->play($two);
+        $this->assertTrue($next['ok']);
+        $this->assertSame($this->teamId, (int) dbFetchValue("SELECT team_id FROM mission_dispatch_points WHERE id = ?", [$next['results'][0]['dispatch_id']]));
+        $item = loadMissionScenario($this->missionId)['phases'][1]['items'][0];
+        $this->assertSame('ΑΛΦΑ 1', $item['team_label']);
+        $this->assertFalse($item['unmapped']);
+    }
+
+    private function play2(int $phaseId, array $mapping): array
+    {
+        return playScenarioPhase($this->mission, $phaseId, $this->adminId, 'Scenario Admin', $mapping);
+    }
+
+    public function testTheDialogOnlyFillsASlotThatHasNoTeam(): void
+    {
+        $slot = $this->slot();
+        mapScenarioSlot($this->mission, $slot, $this->teamId, $this->adminId);
+        $phase = $this->phase();
+        $this->stage($phase, $this->slotOrder($slot));
+
+        // A second coordinator's late answer must not move a slot a first one has already settled.
+        $r = $this->play2($phase, [$slot => $this->secondTeamId]);
+
+        $this->assertTrue($r['ok']);
+        $this->assertSame($this->teamId, (int) dbFetchValue("SELECT team_id FROM mission_dispatch_points WHERE id = ?", [$r['results'][0]['dispatch_id']]));
+        $this->assertSame($this->teamId, (int) dbFetchValue("SELECT team_id FROM mission_scenario_slots WHERE id = ?", [$slot]));
+    }
+
+    public function testAnAnswerNamingAnotherMissionsTeamOrSlotIsRefusedAndAppliesNothing(): void
+    {
+        $slot = $this->slot();
+        $other = ['id' => $this->otherMissionId, 'title' => 'Other'];
+        $foreignTeam = $this->makeTeam('ΔΕΛΤΑ', 9, $this->otherMissionId);
+        $foreignSlot = addScenarioSlot($other, $this->adminId, 'Ξένη')['id'];
+        $phase = $this->phase();
+        $this->stage($phase, $this->slotOrder($slot));
+
+        foreach ([
+            'a team of another mission' => [$slot => $foreignTeam],
+            'a slot of another mission' => [$foreignSlot => $this->teamId],
+            'no team at all' => [$slot => 0],
+            'a team that does not exist' => [$slot => 987654321],
+        ] as $why => $mapping) {
+            $r = $this->play2($phase, $mapping);
+            $this->assertFalse($r['ok'], $why);
+        }
+        $this->assertNull(dbFetchValue("SELECT team_id FROM mission_scenario_slots WHERE id = ?", [$slot]));
+        $this->assertNull(dbFetchValue("SELECT team_id FROM mission_scenario_slots WHERE id = ?", [$foreignSlot]));
+        $this->assertNull(loadMissionScenario($this->missionId)['phases'][0]['played_at']);
+        $this->assertSame(0, $this->liveCount());
+    }
+
+    public function testASlotWhoseTeamIsDeletedStandsForNoTeamAgain(): void
+    {
+        $doomed = $this->makeTeam('ΓΑΜΜΑ', 3);
+        $slot = $this->slot();
+        mapScenarioSlot($this->mission, $slot, $doomed, $this->adminId);
+        $phase = $this->phase();
+        $this->stage($phase, $this->slotOrder($slot));
+
+        dbExecute("DELETE FROM mission_teams WHERE id = ?", [$doomed]);
+
+        $this->assertNull(dbFetchValue("SELECT team_id FROM mission_scenario_slots WHERE id = ?", [$slot]));
+        $this->assertTrue(loadMissionScenario($this->missionId)['phases'][0]['items'][0]['unmapped']);
+        $r = $this->play($phase);
+        $this->assertFalse($r['ok']);
+        $this->assertSame(0, $this->liveCount());
+        $this->assertTrue($this->play2($phase, [$slot => $this->teamId])['ok'], 'asked again, and answered');
+    }
+
+    public function testASlotWithNoTeamIsNeverReadAsEveryTeam(): void
+    {
+        $geo = ['lat' => 35.1, 'lng' => 25.1];
+        $payload = ['audience' => 'slot', 'slot_id' => 7, 'type' => 'point', 'geo' => $geo, 'travel_mode' => 'vehicle'];
+
+        foreach ([[], [7 => null], [7 => 0], [8 => 5], ['7' => '']] as $map) {
+            $this->assertNull(scenarioDispatchInputFromPayload($payload, $map), 'map ' . json_encode($map));
+        }
+        $this->assertNull(scenarioDispatchInputFromPayload($payload), 'no map at all');
+        $input = scenarioDispatchInputFromPayload($payload, [7 => 41]);
+        $this->assertSame('41', $input['team_id']);
+        $this->assertSame('vehicle', $input['travel_mode']);
+        // A slot payload that names no slot, or an order that says slot but carries a team id, is not an order to anyone.
+        $this->assertNull(scenarioDispatchInputFromPayload(['audience' => 'slot', 'team_id' => 5, 'type' => 'point', 'geo' => $geo], [5 => 5]));
+    }
+
+    public function testTryingAgainAnOrderWhoseSlotHasNoTeamFailsAndSendsToNoOne(): void
+    {
+        $slot = $this->slot();
+        $phase = $this->phase();
+        $item = $this->stage($phase, $this->slotOrder($slot))['id'];
+        // The phase was played at a time the slot had a team, and the order failed for another reason since.
+        dbExecute("UPDATE mission_scenario_phases SET played_at = NOW(), played_by = ? WHERE id = ?", [$this->adminId, $phase]);
+        dbExecute("UPDATE mission_scenario_items SET last_error = 'earlier failure' WHERE id = ?", [$item]);
+
+        $r = retryScenarioItem($this->mission, $item, $this->adminId, 'x');
+
+        $this->assertTrue($r['ok']);
+        $this->assertFalse($r['item']['ok']);
+        $this->assertSame(t('scenario.item_slot_unmapped', ['slot' => 'Ομάδα Α']), $r['item']['error']);
+        $this->assertSame(0, $this->liveCount());
+        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_dispatch_points WHERE mission_id = ? AND team_id IS NULL", [$this->missionId]));
+    }
+
+    public function testSlotNamesAreTrimmedUniqueAndLimited(): void
+    {
+        $this->assertFalse(addScenarioSlot($this->mission, $this->adminId, '   ')['ok']);
+        $a = addScenarioSlot($this->mission, $this->adminId, "  Ομάδα   Α  ");
+        $this->assertTrue($a['ok']);
+        $this->assertSame('Ομάδα Α', dbFetchValue("SELECT label FROM mission_scenario_slots WHERE id = ?", [$a['id']]), 'spaces are tidied');
+        $dup = addScenarioSlot($this->mission, $this->adminId, 'ομάδα α');
+        $this->assertFalse($dup['ok'], 'the same name in another case is the same name');
+        $this->assertSame(t('scenario.slot_label_taken', ['label' => 'ομάδα α']), $dup['error']);
+        // Another mission may use the same name.
+        $this->assertTrue(addScenarioSlot(['id' => $this->otherMissionId, 'title' => 'x'], $this->adminId, 'Ομάδα Α')['ok']);
+        $long = addScenarioSlot($this->mission, $this->adminId, str_repeat('ω', 300));
+        $this->assertSame(SCENARIO_SLOT_LABEL_MAX, mb_strlen((string) dbFetchValue("SELECT label FROM mission_scenario_slots WHERE id = ?", [$long['id']])));
+        for ($i = 0; $i < SCENARIO_MAX_SLOTS; $i++) {
+            addScenarioSlot($this->mission, $this->adminId, 'Θέση ' . $i);
+        }
+        $this->assertFalse(addScenarioSlot($this->mission, $this->adminId, 'Μία ακόμα')['ok']);
+    }
+
+    public function testASlotCannotBeDeletedFromUnderAnOrderThatHasNotBeenSent(): void
+    {
+        $slot = $this->slot();
+        $phase = $this->phase();
+        $item = $this->stage($phase, $this->slotOrder($slot))['id'];
+
+        $this->assertSame(t('scenario.slot_in_use'), deleteScenarioSlot($this->mission, $slot, $this->adminId));
+        $this->assertNotNull(scenarioSlotRow($this->missionId, $slot));
+
+        $this->assertNull(deleteScenarioItem($this->mission, $item, $this->adminId));
+        $this->assertNull(deleteScenarioSlot($this->mission, $slot, $this->adminId));
+        $this->assertNull(scenarioSlotRow($this->missionId, $slot));
+        $this->assertSame(t('scenario.slot_not_found'), deleteScenarioSlot($this->mission, $slot, $this->adminId));
+    }
+
+    public function testASentOrderDoesNotHoldItsSlotAndTheCardStillNamesIt(): void
+    {
+        $slot = $this->slot('Ομάδα Γ');
+        $phase = $this->phase();
+        $this->stage($phase, $this->slotOrder($slot));
+        $this->assertTrue($this->play2($phase, [$slot => $this->teamId])['ok']);
+
+        $this->assertNull(deleteScenarioSlot($this->mission, $slot, $this->adminId));
+        $item = loadMissionScenario($this->missionId)['phases'][0]['items'][0];
+        $this->assertTrue($item['sent']);
+        $this->assertSame('Ομάδα Γ', $item['slot_label'], 'the name is kept in the order itself');
+    }
+
+    public function testMappingASlotChecksTheTeamAndCanTakeItBack(): void
+    {
+        $slot = $this->slot();
+        $foreignTeam = $this->makeTeam('ΔΕΛΤΑ', 9, $this->otherMissionId);
+
+        $this->assertSame(t('common.team_not_found'), mapScenarioSlot($this->mission, $slot, $foreignTeam, $this->adminId));
+        $this->assertSame(t('scenario.slot_not_found'), mapScenarioSlot($this->mission, 987654321, $this->teamId, $this->adminId));
+        $this->assertNull(mapScenarioSlot($this->mission, $slot, $this->teamId, $this->adminId));
+        $this->assertSame($this->teamId, (int) dbFetchValue("SELECT team_id FROM mission_scenario_slots WHERE id = ?", [$slot]));
+        $this->assertNull(mapScenarioSlot($this->mission, $slot, null, $this->adminId));
+        $this->assertNull(dbFetchValue("SELECT team_id FROM mission_scenario_slots WHERE id = ?", [$slot]));
+    }
+
+    public function testStagingToAnotherMissionsSlotOrAnInventedOneIsRefused(): void
+    {
+        $foreign = addScenarioSlot(['id' => $this->otherMissionId, 'title' => 'x'], $this->adminId, 'Ξένη')['id'];
+        $phase = $this->phase();
+
+        foreach (['slot:' . $foreign, 'slot:987654321', 'slot:0', 'slot:', 'slot:abc', 'slot:-1'] as $team) {
+            $this->assertFalse($this->stage($phase, $this->point(['team_id' => $team]))['ok'], $team);
+        }
+        $this->assertSame([], loadMissionScenario($this->missionId)['phases'][0]['items']);
+    }
+
+    public function testTheOrderToASlotIsCheckedLikeAnyOtherOrder(): void
+    {
+        $slot = $this->slot();
+        $phase = $this->phase();
+
+        $this->assertFalse($this->stage($phase, $this->slotOrder($slot, ['geo' => json_encode(['lat' => 0, 'lng' => 0])]))['ok']);
+        $this->assertFalse($this->stage($phase, $this->slotOrder($slot, ['type' => 'circle']))['ok']);
+        $this->assertTrue($this->stage($phase, $this->slotOrder($slot, ['type' => 'polygon', 'geo' => json_encode([[35.0, 24.8], [35.0, 24.9], [35.1, 24.9]])]))['ok']);
+    }
+
     // ── Where it may be read, and who may ask ───────────────────────────────────────────────────────────────
 
     public function testOnlyTheScenarioCodeReadsTheScenarioTables(): void
@@ -592,6 +865,22 @@ final class ScenarioTest extends TestCase
         $js = $this->source('assets/js/war-room-scenario.js');
         $this->assertStringContainsString("if (item.sent || !item.geo) return;", $js, 'a ghost is only ever an order not yet sent');
         $this->assertStringContainsString('mission-scenario.php', $js);
+    }
+
+    public function testStagingToASlotIsNotBlockedBySendButtonAndSendingToOneIsNot(): void
+    {
+        // Found with a real click (v3.453.0): the menu handler asked «Αποστολή» whether it was ready, and for a
+        // slot «Αποστολή» is rightly disabled, so choosing a phase did nothing at all.
+        $page = $this->source('war-room.php');
+        $menu = strpos($page, "scenarioMenu.addEventListener('click'");
+        $stage = strpos($page, 'window.wrScenario.stage(', (int) $menu);
+        $this->assertNotFalse($menu);
+        $this->assertNotFalse($stage);
+        $handler = substr($page, $menu, $stage - $menu);
+        $this->assertStringNotContainsString('sendBtn.disabled', $handler, 'the scenario button decides, not the send button');
+        $this->assertStringContainsString('scenarioBtn.disabled', $handler);
+        // And «Αποστολή» itself is never enabled for a slot: it is a name for a team, not a team.
+        $this->assertStringContainsString("teamSelect.value.indexOf('slot:') === 0", $page);
     }
 
     public function testBothBootstrapsLoadTheScenarioFile(): void

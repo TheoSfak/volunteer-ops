@@ -47,7 +47,7 @@ if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', 
 
 $action = post('action');
 $answer = fn(array $extra = []) => json_encode(['ok' => true, 'scenario' => loadMissionScenario($missionId)] + $extra);
-$fail = fn(string $error) => json_encode(['ok' => false, 'error' => $error, 'scenario' => loadMissionScenario($missionId)]);
+$fail = fn(string $error, array $extra = []) => json_encode(['ok' => false, 'error' => $error, 'scenario' => loadMissionScenario($missionId)] + $extra);
 
 if ($action === 'add_phase') {
     $result = addScenarioPhase($mission, (int) $userId, (string) post('title'));
@@ -105,10 +105,40 @@ if ($action === 'delete_item') {
     exit;
 }
 
+// Slots: the names a scenario gives to teams that may not exist yet, and which real team each stands for.
+if ($action === 'add_slot') {
+    $result = addScenarioSlot($mission, (int) $userId, (string) post('label'));
+    echo $result['ok'] ? $answer(['slot_id' => $result['id']]) : $fail($result['error']);
+    exit;
+}
+
+if ($action === 'map_slot') {
+    $teamRaw = trim((string) post('team_id'));
+    // '' = the slot stands for no team; anything else must be a real team's id (checked in mapScenarioSlot()).
+    $error = mapScenarioSlot($mission, (int) post('slot_id'), $teamRaw === '' ? null : (int) $teamRaw, (int) $userId);
+    echo $error === null ? $answer() : $fail($error);
+    exit;
+}
+
+if ($action === 'delete_slot') {
+    $error = deleteScenarioSlot($mission, (int) post('slot_id'), (int) $userId);
+    echo $error === null ? $answer() : $fail($error);
+    exit;
+}
+
 if ($action === 'play_phase') {
-    $result = playScenarioPhase($mission, (int) post('phase_id'), (int) $userId, (string) $user['name']);
+    // mapping[<slot id>] = <team id>: the answers of the dialog that play opens for slots with no team yet.
+    $mapping = [];
+    if (isset($_POST['mapping']) && is_array($_POST['mapping'])) {
+        foreach ($_POST['mapping'] as $slotId => $teamId) {
+            if (!is_array($teamId)) {
+                $mapping[(int) $slotId] = (int) $teamId;
+            }
+        }
+    }
+    $result = playScenarioPhase($mission, (int) post('phase_id'), (int) $userId, (string) $user['name'], $mapping);
     if (!$result['ok']) {
-        echo $fail($result['error']);
+        echo $fail($result['error'], isset($result['unmapped']) ? ['unmapped' => $result['unmapped']] : []);
         exit;
     }
     // The orders are live now: hand back the live list so the map shows them at once, not at the next poll.
