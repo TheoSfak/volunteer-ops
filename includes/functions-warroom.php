@@ -9024,7 +9024,7 @@ function loadUnacknowledgedVoiceMessagesForMission(int $missionId, int $limit = 
  */
 function loadMissionRestrictedAreasForUser(int $missionId): array {
     $rows = dbFetchAll(
-        "SELECT id, label, kind, shape, geo, created_at FROM mission_restricted_areas WHERE mission_id = ? ORDER BY created_at ASC",
+        "SELECT id, label, kind, shape, geo, created_at FROM mission_restricted_areas WHERE mission_id = ? ORDER BY created_at ASC, id ASC",
         [$missionId]
     );
     return array_map(fn($row) => [
@@ -9035,6 +9035,121 @@ function loadMissionRestrictedAreasForUser(int $missionId): array {
         'geo'        => json_decode($row['geo'], true),
         'created_at' => date('d/m H:i', strtotime($row['created_at'])),
     ], $rows);
+}
+
+/**
+ * The checks of a new restricted area (v3.458.0): the body of mission-restricted-area.php `create`, moved unchanged so
+ * that the window's save and a scenario's staged zone are held to the same rules. $input is the form as it is posted:
+ * label, kind (danger|cliff|forbidden; empty = danger), shape (polygon|line; empty = polygon) and geo, the JSON text of
+ * [[lat, lng], ...] (three points for a polygon, two for a line). Returns ['ok' => true, 'label' => text (trimmed, at
+ * most 255), 'kind' =>, 'shape' =>, 'geo' => [[float, float], ...]] or ['ok' => false, 'error' => text].
+ */
+function prepareMissionRestrictedArea(array $input): array {
+    $isValidLatLng = fn($lat, $lng) => is_numeric($lat) && is_numeric($lng)
+        && (float) $lat >= -90 && (float) $lat <= 90 && (float) $lng >= -180 && (float) $lng <= 180
+        && !((float) $lat === 0.0 && (float) $lng === 0.0);
+
+    $label = trim((string) ($input['label'] ?? ''));
+    if ($label === '') {
+        return ['ok' => false, 'error' => t('sector.invalid_label')];
+    }
+    $label = mb_substr($label, 0, 255);
+
+    // What the zone is: «Επικίνδυνη ζώνη», «Γκρεμός», «Απαγορευμένη». Every kind raises
+    // the same breach alarm; an unknown value is refused rather than guessed.
+    $kind = (string) (($input['kind'] ?? '') ?: 'danger');
+    if (!in_array($kind, ['danger', 'cliff', 'forbidden'], true)) {
+        return ['ok' => false, 'error' => t('common.invalid_request')];
+    }
+
+    // A polygon (an area) or an open line (an edge, a cliff). Nothing else, and a line needs two points.
+    $shape = (string) (($input['shape'] ?? '') ?: 'polygon');
+    if (!in_array($shape, ['polygon', 'line'], true)) {
+        return ['ok' => false, 'error' => t('common.invalid_request')];
+    }
+
+    $rawGeo = json_decode((string) ($input['geo'] ?? ''), true);
+    if (!is_array($rawGeo) || count($rawGeo) < ($shape === 'line' ? 2 : 3)) {
+        return ['ok' => false, 'error' => t($shape === 'line' ? 'restricted_area.line_needs_2_points' : 'dispatch.polygon_needs_3_points')];
+    }
+    foreach ($rawGeo as $pt) {
+        if (!is_array($pt) || !isset($pt[0], $pt[1]) || !$isValidLatLng($pt[0], $pt[1])) {
+            return ['ok' => false, 'error' => t('dispatch.invalid_point')];
+        }
+    }
+    $geo = array_map(fn($pt) => [(float) $pt[0], (float) $pt[1]], $rawGeo);
+
+    return ['ok' => true, 'label' => $label, 'kind' => $kind, 'shape' => $shape, 'geo' => $geo];
+}
+
+/**
+ * Makes a restricted area: the body of mission-restricted-area.php `create`, moved unchanged (v3.458.0). The window's
+ * save and a played scenario both come through here, so the zone, its audit entry and the breach alarm it arms are the
+ * same either way. $input is prepareMissionRestrictedArea()'s form. ['ok' => true, 'id' => the area's id] or
+ * ['ok' => false, 'error' => text].
+ */
+function createMissionRestrictedArea(array $mission, int $userId, array $input): array {
+    $missionId = (int) $mission['id'];
+    $prepared = prepareMissionRestrictedArea($input);
+    if (!$prepared['ok']) {
+        return $prepared;
+    }
+    $label = $prepared['label'];
+    $kind = $prepared['kind'];
+    $shape = $prepared['shape'];
+    $geo = $prepared['geo'];
+
+    $areaId = dbInsert(
+        "INSERT INTO mission_restricted_areas (mission_id, label, kind, shape, geo, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
+        [$missionId, $label, $kind, $shape, json_encode($geo), $userId]
+    );
+    logAudit('create_mission_restricted_area', 'mission_restricted_areas', $areaId, null, ['mission_id' => $missionId, 'kind' => $kind, 'shape' => $shape]);
+
+    return ['ok' => true, 'id' => (int) $areaId];
+}
+
+/**
+ * Takes a restricted area away: the body of mission-restricted-area.php `delete`, moved unchanged (v3.458.0), so that
+ * the window's delete and a scenario phase being withdrawn do the same. Null on success, else the error to show (the
+ * area is not this mission's, or the database refused).
+ */
+function deleteMissionRestrictedArea(array $mission, int $userId, int $areaId): ?string {
+    $missionId = (int) $mission['id'];
+    $area = dbFetchOne("SELECT id FROM mission_restricted_areas WHERE id = ? AND mission_id = ?", [$areaId, $missionId]);
+    if (!$area) {
+        return t('common.not_found');
+    }
+
+    // Force-resolve any currently-open breaches for this area before deleting
+    // it — auto-resolve, not auto-erase. restricted_area_id is ON DELETE SET
+    // NULL (not CASCADE), so the breach rows themselves survive as an audit
+    // trail (area_label was snapshotted at breach-creation time), but without
+    // this step a deleted zone would leave an orphaned OPEN alarm on
+    // someone's screen with nothing left that could ever auto-clear it.
+    // Its own transaction, unless the caller already has one (the tests run inside one; the endpoint never does).
+    $pdo = db();
+    $ownTransaction = !$pdo->inTransaction();
+    if ($ownTransaction) {
+        $pdo->beginTransaction();
+    }
+    try {
+        dbExecute(
+            "UPDATE mission_restricted_area_breaches SET resolved_at = NOW(), resolved_by = ? WHERE restricted_area_id = ? AND resolved_at IS NULL",
+            [$userId, $areaId]
+        );
+        dbExecute("DELETE FROM mission_restricted_areas WHERE id = ?", [$areaId]);
+        if ($ownTransaction) {
+            $pdo->commit();
+        }
+    } catch (Exception $e) {
+        if ($ownTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        return t('common.failed');
+    }
+    logAudit('delete_mission_restricted_area', 'mission_restricted_areas', $areaId, null, ['mission_id' => $missionId]);
+
+    return null;
 }
 
 /**

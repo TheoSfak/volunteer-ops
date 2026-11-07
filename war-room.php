@@ -6653,7 +6653,16 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                     </select>
                     <span class="badge text-bg-dark align-self-center d-none" id="restrictedAreaSizeReadout"></span>
                     <div class="ms-auto d-flex gap-2">
+                        <span class="small text-success align-self-center" id="restrictedAreaScenarioStatus" role="status"></span>
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="restrictedAreaClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
+                        <?php
+                        // «Στο σενάριο ▾» (v3.458.0): the zone drawn here goes into a phase of the scenario instead of being
+                        // made now. The menu is built by assets/js/war-room-scenario.js. A zone has no team to choose.
+                        ?>
+                        <div class="btn-group" id="restrictedAreaScenarioGroup">
+                            <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" id="restrictedAreaScenarioBtn" data-bs-toggle="dropdown" aria-expanded="false" title="<?= t('scenario.restricted_add_to_scenario_title') ?>" disabled><i class="bi bi-collection-play me-1"></i><?= t('scenario.add_to_scenario') ?></button>
+                            <ul class="dropdown-menu dropdown-menu-end" id="restrictedAreaScenarioMenu"></ul>
+                        </div>
                         <button type="button" class="btn btn-danger btn-sm" id="restrictedAreaSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('restricted_area.save_btn') ?></button>
                     </div>
                 </div>
@@ -29452,6 +29461,10 @@ document.querySelectorAll('.team-form').forEach(form => {
     const clearBtn = document.getElementById('restrictedAreaClearBtn');
     const sendBtn = document.getElementById('restrictedAreaSendBtn');
     const sizeReadout = document.getElementById('restrictedAreaSizeReadout');
+    // «Στο σενάριο» (v3.458.0): ready exactly when «Αποθήκευση» is. A zone has no team, so nothing else to choose.
+    const scenarioBtn = document.getElementById('restrictedAreaScenarioBtn');
+    const scenarioMenu = document.getElementById('restrictedAreaScenarioMenu');
+    const scenarioStatus = document.getElementById('restrictedAreaScenarioStatus');
 
     let composerMap = null;
     let refLayer = null;
@@ -29505,6 +29518,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         vertexMarkers = [];
         if (shapeLayer) { composerMap.removeLayer(shapeLayer); shapeLayer = null; }
         sendBtn.disabled = true;
+        if (scenarioBtn) scenarioBtn.disabled = true;
         updateSizeReadout();
     }
 
@@ -29519,6 +29533,7 @@ document.querySelectorAll('.team-form').forEach(form => {
 
     function updateSendState() {
         sendBtn.disabled = isLine() ? drawPoints.length < 2 : !(isClosed && drawPoints.length >= 3);
+        if (scenarioBtn) scenarioBtn.disabled = sendBtn.disabled;
     }
 
     function addDrawPoint(lat, lng) {
@@ -29619,6 +29634,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         labelInput.value = '';
         shapeSelect.value = 'polygon';
         kindSelect.value = 'danger';
+        if (scenarioStatus) scenarioStatus.textContent = '';
         syncShapeUi();
         document.removeEventListener('keydown', keydownHandler);
     });
@@ -29656,6 +29672,7 @@ document.querySelectorAll('.team-form').forEach(form => {
             geo: JSON.stringify(drawPoints), label: label, kind: kindSelect.value, shape: shapeSelect.value,
         });
         sendBtn.disabled = true;
+        if (scenarioBtn) scenarioBtn.disabled = true;
         fetch('mission-restricted-area.php', {method:'POST', body:data}).then(response => response.json()).then(result => {
             if (result.ok) {
                 bootstrap.Modal.getInstance(modalEl).hide();
@@ -29665,9 +29682,46 @@ document.querySelectorAll('.team-form').forEach(form => {
             } else {
                 alert(result.error || t('common.send_failed'));
                 sendBtn.disabled = false;
+                if (scenarioBtn) scenarioBtn.disabled = false;
             }
-        }).catch(() => { alert(t('common.send_failed')); sendBtn.disabled = false; });
+        }).catch(() => { alert(t('common.send_failed')); sendBtn.disabled = false; if (scenarioBtn) scenarioBtn.disabled = false; });
     });
+
+    // «Στο σενάριο ▾» (v3.458.0): the same zone «Αποθήκευση» would make, written into a phase instead. The window stays open
+    // for the next one; what was drawn and named is cleared, the kind and shape are kept.
+    if (scenarioBtn && scenarioMenu) {
+        scenarioBtn.addEventListener('show.bs.dropdown', () => {
+            scenarioMenu.innerHTML = window.wrScenario ? window.wrScenario.menuHtml() : '';
+        });
+        scenarioMenu.addEventListener('click', e => {
+            const choice = e.target.closest('[data-sc-phase]');
+            if (!choice) return;
+            e.preventDefault();
+            if (!window.wrScenario || scenarioBtn.disabled) return;
+            const label = labelInput.value.trim();
+            if (!label) {
+                alert(t('sector.invalid_label'));
+                return;
+            }
+            // Bootstrap's hide() does nothing for a disabled toggle, and the button is disabled below, so the menu is
+            // closed first: otherwise it stays open over the window after the zone has gone into the phase.
+            bootstrap.Dropdown.getOrCreateInstance(scenarioBtn).hide();
+            scenarioBtn.disabled = true;
+            window.wrScenario.stageRestricted(choice.dataset.scPhase, {
+                label: label, kind: kindSelect.value, shape: shapeSelect.value, geo: JSON.stringify(drawPoints),
+            }).then(res => {
+                if (res && res.ok) {
+                    const phase = window.wrScenario.phases().find(p => String(p.id) === String(res.phase_id));
+                    resetDrawing();
+                    labelInput.value = '';
+                    if (scenarioStatus && phase) scenarioStatus.textContent = t('scenario.staged_ok', {phase: t('scenario.phase_n', {n: phase.n}), n: phase.items.length});
+                }
+                updateSendState();
+            });
+        });
+        // A line about the last zone put in is only true until the next change.
+        labelInput.addEventListener('input', () => { if (scenarioStatus) scenarioStatus.textContent = ''; });
+    }
 })();
 
 // ── Route Order map layer (main live map) ───────────────────────────────────

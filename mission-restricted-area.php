@@ -117,84 +117,30 @@ if (!$canManageWarRoom) {
     echo json_encode(['ok' => false, 'error' => t('sector.no_manage_permission')]);
     exit;
 }
-$isValidLatLng = fn($lat, $lng) => is_numeric($lat) && is_numeric($lng)
-    && (float) $lat >= -90 && (float) $lat <= 90 && (float) $lng >= -180 && (float) $lng <= 180
-    && !((float) $lat === 0.0 && (float) $lng === 0.0);
-
 if ($action === 'create') {
-    $label = trim((string) post('label'));
-    if ($label === '') {
-        echo json_encode(['ok' => false, 'error' => t('sector.invalid_label')]);
-        exit;
-    }
-    $label = mb_substr($label, 0, 255);
-
-    // What the zone is: «Επικίνδυνη ζώνη», «Γκρεμός», «Απαγορευμένη». Every kind raises
-    // the same breach alarm; an unknown value is refused rather than guessed.
-    $kind = (string) (post('kind') ?: 'danger');
-    if (!in_array($kind, ['danger', 'cliff', 'forbidden'], true)) {
-        echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
-        exit;
-    }
-
-    // A polygon (an area) or an open line (an edge, a cliff). Nothing else, and a line needs two points.
-    $shape = (string) (post('shape') ?: 'polygon');
-    if (!in_array($shape, ['polygon', 'line'], true)) {
-        echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
+    // The checks and the row are in createMissionRestrictedArea() (includes/functions-warroom.php): a scenario's staged
+    // zone is made by the same function when its phase is played.
+    $result = createMissionRestrictedArea($mission, (int) $userId, [
+        'label' => post('label'),
+        'kind'  => post('kind'),
+        'shape' => post('shape'),
+        'geo'   => post('geo'),
+    ]);
+    if (!$result['ok']) {
+        echo json_encode(['ok' => false, 'error' => $result['error']]);
         exit;
     }
 
-    $rawGeo = json_decode((string) post('geo'), true);
-    if (!is_array($rawGeo) || count($rawGeo) < ($shape === 'line' ? 2 : 3)) {
-        echo json_encode(['ok' => false, 'error' => t($shape === 'line' ? 'restricted_area.line_needs_2_points' : 'dispatch.polygon_needs_3_points')]);
-        exit;
-    }
-    foreach ($rawGeo as $pt) {
-        if (!is_array($pt) || !isset($pt[0], $pt[1]) || !$isValidLatLng($pt[0], $pt[1])) {
-            echo json_encode(['ok' => false, 'error' => t('dispatch.invalid_point')]);
-            exit;
-        }
-    }
-    $geo = array_map(fn($pt) => [(float) $pt[0], (float) $pt[1]], $rawGeo);
-
-    $areaId = dbInsert(
-        "INSERT INTO mission_restricted_areas (mission_id, label, kind, shape, geo, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
-        [$missionId, $label, $kind, $shape, json_encode($geo), $userId]
-    );
-    logAudit('create_mission_restricted_area', 'mission_restricted_areas', $areaId, null, ['mission_id' => $missionId, 'kind' => $kind, 'shape' => $shape]);
-
-    echo json_encode(['ok' => true, 'id' => (int) $areaId, 'areas' => loadMissionRestrictedAreasForUser($missionId)]);
+    echo json_encode(['ok' => true, 'id' => (int) $result['id'], 'areas' => loadMissionRestrictedAreasForUser($missionId)]);
     exit;
 }
 
 if ($action === 'delete') {
-    $areaId = (int) post('id');
-    $area = dbFetchOne("SELECT id FROM mission_restricted_areas WHERE id = ? AND mission_id = ?", [$areaId, $missionId]);
-    if (!$area) {
-        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
+    $error = deleteMissionRestrictedArea($mission, (int) $userId, (int) post('id'));
+    if ($error !== null) {
+        echo json_encode(['ok' => false, 'error' => $error]);
         exit;
     }
-
-    // Force-resolve any currently-open breaches for this area before deleting
-    // it — auto-resolve, not auto-erase. restricted_area_id is ON DELETE SET
-    // NULL (not CASCADE), so the breach rows themselves survive as an audit
-    // trail (area_label was snapshotted at breach-creation time), but without
-    // this step a deleted zone would leave an orphaned OPEN alarm on
-    // someone's screen with nothing left that could ever auto-clear it.
-    db()->beginTransaction();
-    try {
-        dbExecute(
-            "UPDATE mission_restricted_area_breaches SET resolved_at = NOW(), resolved_by = ? WHERE restricted_area_id = ? AND resolved_at IS NULL",
-            [$userId, $areaId]
-        );
-        dbExecute("DELETE FROM mission_restricted_areas WHERE id = ?", [$areaId]);
-        db()->commit();
-    } catch (Exception $e) {
-        db()->rollBack();
-        echo json_encode(['ok' => false, 'error' => t('common.failed')]);
-        exit;
-    }
-    logAudit('delete_mission_restricted_area', 'mission_restricted_areas', $areaId, null, ['mission_id' => $missionId]);
 
     echo json_encode(['ok' => true]);
     exit;

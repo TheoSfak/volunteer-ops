@@ -57,6 +57,11 @@ $liveSectors = fn(array $results) => array_filter($results, fn($r) => ($r['kind'
 $liveRoutes = fn(array $results) => array_filter($results, fn($r) => ($r['kind'] ?? '') === 'route' && !empty($r['ok']))
     ? ['routes' => loadRoutesForUser($missionId, (int) $userId, true)]
     : [];
+// Likewise a play or a retry that has made restricted areas: the live list of zones, the one the restricted-area endpoint
+// answers with, so the map and the list show them at once (v3.458.0).
+$liveRestricted = fn(array $results) => array_filter($results, fn($r) => ($r['kind'] ?? '') === 'restricted' && !empty($r['ok']))
+    ? ['restricted_areas' => loadMissionRestrictedAreasForUser($missionId)]
+    : [];
 
 if ($action === 'add_phase') {
     $result = addScenarioPhase($mission, (int) $userId, (string) post('title'));
@@ -175,6 +180,38 @@ if ($action === 'add_route') {
     exit;
 }
 
+if ($action === 'add_restricted') {
+    // The restricted-area window's «Στο σενάριο» (v3.458.0): the zone drawn there goes into the phase instead of being made
+    // now. A zone has no team: the fields are the window's own (label, kind, shape, geo). As for add_item, a "new phase"
+    // made for a refused order is taken out again.
+    $phaseId = (int) post('phase_id');
+    $madePhase = false;
+    if ($phaseId === 0 && post('phase_id') === 'new') {
+        $made = addScenarioPhase($mission, (int) $userId, '');
+        if (!$made['ok']) {
+            echo $fail($made['error']);
+            exit;
+        }
+        $phaseId = (int) $made['id'];
+        $madePhase = true;
+    }
+    $result = addScenarioRestrictedItem($mission, $phaseId, (int) $userId, [
+        'label' => post('label'),
+        'kind'  => post('kind'),
+        'shape' => post('shape'),
+        'geo'   => post('geo'),
+    ]);
+    if (!$result['ok']) {
+        if ($madePhase) {
+            deleteScenarioPhase($mission, $phaseId, (int) $userId);
+        }
+        echo $fail($result['error']);
+        exit;
+    }
+    echo $answer(['item_id' => $result['id'], 'phase_id' => $phaseId]);
+    exit;
+}
+
 if ($action === 'add_order') {
     // The card's «Εντολή σε άτομα» (v3.457.0): a general order - a task, a spoken announcement, a broadcast message,
     // or a request for a location, a photo or a video - goes into the phase instead of out to people. team_id is a
@@ -255,7 +292,7 @@ if ($action === 'play_phase') {
         'failed'     => $result['failed'],
         'results'    => $result['results'],
         'dispatches' => loadMissionDispatchesForUser($missionId, (int) $userId, true, false),
-    ] + $liveSectors($result['results']) + $liveRoutes($result['results']));
+    ] + $liveSectors($result['results']) + $liveRoutes($result['results']) + $liveRestricted($result['results']));
     exit;
 }
 
@@ -275,6 +312,7 @@ if ($action === 'withdraw_phase') {
         'routes'     => loadRoutesForUser($missionId, (int) $userId, true),
         'sectors'    => loadMissionSectorsForUser($missionId, (int) $userId, true, false),
         'areas'      => loadMissionSearchAreasForUser($missionId, true),
+        'restricted_areas' => loadMissionRestrictedAreasForUser($missionId),
     ]);
     exit;
 }
@@ -288,7 +326,7 @@ if ($action === 'retry_item') {
     echo $answer([
         'item'       => $result['item'],
         'dispatches' => loadMissionDispatchesForUser($missionId, (int) $userId, true, false),
-    ] + $liveSectors([$result['item']]) + $liveRoutes([$result['item']]));
+    ] + $liveSectors([$result['item']]) + $liveRoutes([$result['item']]) + $liveRestricted([$result['item']]));
     exit;
 }
 

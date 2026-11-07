@@ -59,7 +59,11 @@ final class RestrictedAreaKindTest extends TestCase
 
     public function testTheEndpointValidatesTheKindBeforeInsertingAndLogsIt(): void
     {
-        $src = (string) file_get_contents(__DIR__ . '/../mission-restricted-area.php');
+        // v3.458.0: the endpoint's `create` body moved into prepare/createMissionRestrictedArea() (includes/functions-warroom.php).
+        $all = (string) file_get_contents(__DIR__ . '/../includes/functions-warroom.php');
+        $from = (int) strpos($all, 'function prepareMissionRestrictedArea(');
+        $src = substr($all, $from, (int) strpos($all, 'function deleteMissionRestrictedArea(') - $from);
+        $this->assertGreaterThan(0, $from);
         $this->assertStringContainsString("in_array(\$kind, ['danger', 'cliff', 'forbidden'], true)", $src);
         $this->assertStringContainsString('INSERT INTO mission_restricted_areas (mission_id, label, kind, shape, geo, created_by, created_at)', $src);
         $this->assertLessThan(
@@ -67,6 +71,9 @@ final class RestrictedAreaKindTest extends TestCase
             strpos($src, "in_array(\$kind"),
             'the kind is checked before the row is written'
         );
+        $endpoint = (string) file_get_contents(__DIR__ . '/../mission-restricted-area.php');
+        $this->assertStringContainsString('createMissionRestrictedArea($mission, (int) $userId', $endpoint);
+        $this->assertStringNotContainsString('INSERT INTO mission_restricted_areas', $endpoint, 'the endpoint no longer writes the zone itself');
     }
 
     public function testTheSchemaFileAndTheMigrationAgree(): void

@@ -132,7 +132,11 @@ final class RestrictedAreaLineTest extends TestCase
 
     public function testTheEndpointChecksTheShapeAndTheNumberOfPoints(): void
     {
-        $src = (string) file_get_contents(__DIR__ . '/../mission-restricted-area.php');
+        // v3.458.0: the checks moved with the endpoint's `create` body into prepare/createMissionRestrictedArea().
+        $all = (string) file_get_contents(__DIR__ . '/../includes/functions-warroom.php');
+        $from = (int) strpos($all, 'function prepareMissionRestrictedArea(');
+        $src = substr($all, $from, (int) strpos($all, 'function deleteMissionRestrictedArea(') - $from);
+        $this->assertGreaterThan(0, $from);
         $this->assertStringContainsString("in_array(\$shape, ['polygon', 'line'], true)", $src);
         $this->assertStringContainsString("count(\$rawGeo) < (\$shape === 'line' ? 2 : 3)", $src);
         $this->assertStringContainsString('INSERT INTO mission_restricted_areas (mission_id, label, kind, shape, geo, created_by, created_at)', $src);

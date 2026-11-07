@@ -8102,6 +8102,15 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 208,
+            'description' => "Scenario restricted areas (v3.458.0): a staged order can now be a restricted area (a danger zone, an edge, a forbidden place) as well - mission_scenario_items.kind grows from ENUM('dispatch','sector','route','order') to ENUM('dispatch','sector','route','order','restricted'). A restricted area's payload holds its label, kind (danger, cliff, forbidden), shape (polygon or line) and points; it has no team or slot, because a zone is for everybody. Re-running it changes nothing.",
+            'up' => function () {
+                dbExecute("ALTER TABLE mission_scenario_items
+                    MODIFY COLUMN kind ENUM('dispatch','sector','route','order','restricted') NOT NULL DEFAULT 'dispatch' COMMENT 'What kind of order: dispatch = a point or an area (sent as a mission_dispatch_points row), sector = a search sector (sent as a mission_search_sectors row), route = a patrol of waypoints (sent as a mission_routes row), order = a general order to people (sent as a mission_orders row), restricted = a restricted area (sent as a mission_restricted_areas row)'");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

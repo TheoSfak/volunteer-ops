@@ -3470,7 +3470,7 @@ CREATE TABLE IF NOT EXISTS `mission_scenario_items` (
     `phase_id` INT UNSIGNED NOT NULL,
     `mission_id` INT UNSIGNED NOT NULL,
     `seq` SMALLINT UNSIGNED NOT NULL DEFAULT 1,
-    `kind` ENUM('dispatch','sector','route','order') NOT NULL DEFAULT 'dispatch' COMMENT 'What kind of order: dispatch = a point or an area, sector = a search sector (migration 205), route = a patrol of waypoints (migration 206), order = a general order to people (migration 207)',
+    `kind` ENUM('dispatch','sector','route','order','restricted') NOT NULL DEFAULT 'dispatch' COMMENT 'What kind of order: dispatch = a point or an area, sector = a search sector (migration 205), route = a patrol of waypoints (migration 206), order = a general order to people (migration 207), restricted = a restricted area (migration 208)',
     `payload` TEXT NOT NULL COMMENT 'JSON: audience (team|all|slot; a sector or a route never all), team_id, slot_id, type, geo, label, travel_mode; a sector: area_id, area_label, label, geo; a route: label (its title), waypoints, is_closed_loop, add_return_waypoint, member_ids; an order: order_type, text',
     `slot_id` INT UNSIGNED NULL COMMENT 'The slot the order goes to, if it goes to one (migration 204)',
     `sent_at` DATETIME NULL COMMENT 'When it went out as a live order',

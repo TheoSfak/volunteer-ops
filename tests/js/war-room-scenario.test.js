@@ -74,6 +74,8 @@ async function load(scenario, answers = {}) {
         renderMyRoutes: (r) => calls.push(['renderMyRoutes', r]),
         renderRoutesAdmin: (r) => calls.push(['renderRoutesAdmin', r]),
         renderRouteLayer: (r) => calls.push(['renderRouteLayer', r]),
+        renderRestrictedAreaLayer: (r) => calls.push(['renderRestrictedAreaLayer', r]),
+        renderRestrictedAreasList: (r) => calls.push(['renderRestrictedAreasList', r]),
         fetch: async (url, opts) => {
             calls.push(['fetch', String(url), opts && opts.body ? String(opts.body) : null]);
             const action = opts && opts.body ? new URLSearchParams(String(opts.body)).get('action') : 'get';
@@ -495,4 +497,141 @@ test('declining the name of a new slot leaves the audience unchosen', async () =
     await settle();
     assert.doesNotMatch(body.innerHTML, /<option value="(all|slot:[0-9]+)" selected>/);
     assert.doesNotMatch(body.innerHTML, /<option value="slot:new" selected>/);
+});
+
+// ── Restricted areas (v3.458.0) ───────────────────────────────────────────────────────────────────────────────────
+// A zone is for everybody: audience 'none', no team, never "finished" (it stands), and the real one is bright red where
+// the staged one is a dull dashed ghost.
+const zone = (id, over = {}) => Object.assign({
+    id, kind: 'restricted', type: 'restricted', audience: 'none', team_id: null, team_label: null, team_missing: false,
+    slot_id: null, slot_label: null, unmapped: false, team_empty: false, area_missing: false, sent: false, error: null,
+    label: 'Ρέμα', restricted_kind: 'danger', shape: 'polygon', geo: [[35.0, 24.0], [35.1, 24.0], [35.1, 24.1]], state: null,
+}, over);
+const zonePhase = (items, played, prog) => ({
+    phases: [{id: 7, n: 1, title: null, played_at: played ? '2026-11-07 10:00:00' : null, played_label: '10:00', played_by_name: 'Admin', items, progress: played ? prog : null}],
+    slots: [], teams: [],
+});
+const standing = (over = {}) => Object.assign({total: 0, done: 0, open: 0, standing: 1, withdrawn: 0, failed: 0, complete: false, withdrawable: 1, can_withdraw: true}, over);
+
+test('a staged zone is a dull dashed polygon, or a dashed line for an edge, with the phase number; a made one leaves no ghost', async () => {
+    const {api, drawn} = await load(zonePhase([
+        zone(1),
+        zone(2, {shape: 'line', restricted_kind: 'cliff', geo: [[35.0, 24.0], [35.2, 24.2]]}),
+        zone(3, {sent: true, state: 'standing'}),
+        zone(4, {geo: [[35.0, 24.0], [35.1, 24.0]]}),
+    ], false));
+    drawn.length = 0;
+    api.drawGhostsInto({name: 'layer'});
+
+    const polygons = drawn.filter((d) => d.kind === 'polygon');
+    const lines = drawn.filter((d) => d.kind === 'polyline');
+    assert.equal(polygons.length, 1, 'only the zone with three points is a polygon; one already made is not drawn again');
+    assert.equal(polygons[0].args[1].dashArray, '4 5');
+    assert.equal(polygons[0].args[1].color, '#a05a5a', 'dull, not the bright red of the real zone');
+    assert.equal(lines.length, 1);
+    assert.deepEqual(lines[0].args[0], [[35.0, 24.0], [35.2, 24.2]]);
+    assert.equal(lines[0].args[1].dashArray, '4 5');
+    assert.equal(drawn.filter((d) => d.kind === 'marker').length, 2, 'one phase number each');
+});
+
+test('the card says what a zone is, that it is for everybody, and that it stands once made - never "team gone"', async () => {
+    const staged = await load(zonePhase([zone(1), zone(2, {shape: 'line', restricted_kind: 'cliff'})], false));
+    assert.match(staged.body.innerHTML, /scenario\.kind_restricted/);
+    assert.match(staged.body.innerHTML, /bi-exclamation-triangle-fill/);
+    assert.match(staged.body.innerHTML, /scenario\.target_everyone/);
+    assert.match(staged.body.innerHTML, /restricted_area\.kind_danger · restricted_area\.shape_polygon/);
+    assert.match(staged.body.innerHTML, /restricted_area\.kind_cliff · restricted_area\.shape_line/);
+    assert.doesNotMatch(staged.body.innerHTML, /scenario\.team_gone/);
+    assert.match(staged.body.innerHTML, /data-sc="goto"/, 'a staged zone has a place to go to');
+    assert.match(staged.body.innerHTML, /data-sc="delete-item"/);
+
+    const made = await load(zonePhase([zone(1, {sent: true, state: 'standing'})], true, standing()));
+    assert.match(made.body.innerHTML, /scenario\.state_standing/);
+    assert.doesNotMatch(made.body.innerHTML, /scenario\.state_open/);
+    assert.doesNotMatch(made.body.innerHTML, /data-sc="delete-item"/, 'a made zone is taken away by withdrawing the phase');
+    assert.doesNotMatch(made.body.innerHTML, /progress_badge/, 'a zone is not an order to finish: no 0/0 badge');
+});
+
+test('the restricted-area window stages a zone through add_restricted, with no team in it', async () => {
+    const {api, calls} = await load(plan([]), {add_restricted: {ok: true, phase_id: 7}});
+    const res = await api.stageRestricted('new', {label: 'Ρέμα', kind: 'cliff', shape: 'line', geo: '[[35,24],[35.1,24.1]]'});
+
+    assert.equal(res.ok, true);
+    const fields = new URLSearchParams(calls.filter((c) => c[0] === 'fetch' && c[2]).pop()[2]);
+    assert.equal(fields.get('action'), 'add_restricted');
+    assert.equal(fields.get('phase_id'), 'new');
+    assert.equal(fields.get('label'), 'Ρέμα');
+    assert.equal(fields.get('kind'), 'cliff');
+    assert.equal(fields.get('shape'), 'line');
+    assert.equal(fields.get('geo'), '[[35,24],[35.1,24.1]]');
+    assert.equal(fields.get('mission_id'), '83');
+    assert.equal(fields.has('team_id'), false);
+});
+
+test('play, retry and withdrawing put the zones on the map and in the list at once', async () => {
+    const live = [{id: 17, label: 'Ρέμα'}];
+    for (const [action, click, answer] of [
+        ['play_phase', {sc: 'play', phase: '7'}, {ok: true, sent: 1, failed: 0, results: [], restricted_areas: live}],
+        ['retry_item', {sc: 'retry', item: '1'}, {ok: true, item: {ok: true, kind: 'restricted'}, restricted_areas: live}],
+        ['withdraw_phase', {sc: 'withdraw', phase: '7'}, {ok: true, withdrawn: 1, failed: 0, results: [], restricted_areas: live}],
+    ]) {
+        const scenario = action === 'play_phase' ? zonePhase([zone(1)], false) : zonePhase([zone(1, action === 'retry_item' ? {error: 'x'} : {sent: true, state: 'standing'})], true, standing());
+        const {handlers, calls, ctx} = await load(scenario, {[action]: answer});
+        calls.length = 0;
+        await clickOn(handlers, click);
+        await settle();
+        assert.deepEqual(ctx.restrictedAreas, live, action);
+        assert.ok(calls.some((c) => c[0] === 'renderRestrictedAreaLayer' && c[1] === live), action + ' redraws the map layer');
+        assert.ok(calls.some((c) => c[0] === 'renderRestrictedAreasList' && c[1] === live), action + ' redraws the list');
+    }
+});
+
+test('an answer without zones leaves the page\'s zones alone', async () => {
+    const {handlers, calls, ctx} = await load(zonePhase([zone(1)], false), {play_phase: {ok: true, sent: 1, failed: 0, results: []}});
+    ctx.restrictedAreas = [{id: 5}];
+    calls.length = 0;
+    await clickOn(handlers, {sc: 'play', phase: '7'});
+    await settle();
+    assert.deepEqual(ctx.restrictedAreas, [{id: 5}]);
+    assert.equal(calls.filter((c) => c[0] === 'renderRestrictedAreaLayer').length, 0);
+});
+
+test('withdrawing says plainly that the phase\'s zones come off the map, and only when there are any', async () => {
+    const ask = async (prog, items) => {
+        const {handlers, calls, ctx} = await load(zonePhase(items, true, prog), {withdraw_phase: {ok: true, withdrawn: 1, failed: 0, results: []}});
+        ctx.confirm = (text) => { calls.push(['confirm', text]); return true; };
+        await clickOn(handlers, {sc: 'withdraw', phase: '7'});
+        await settle();
+        return calls.find((c) => c[0] === 'confirm')[1];
+    };
+    const withZone = await ask(standing(), [zone(1, {sent: true, state: 'standing'})]);
+    assert.match(withZone, /scenario\.withdraw_confirm_zones/);
+    assert.match(withZone, /"n":1\}/, 'the zone counts among what is taken back');
+    const without = await ask({total: 2, done: 1, open: 1, standing: 0, withdrawn: 0, failed: 0, complete: false, withdrawable: 1, can_withdraw: true}, [sentItem(1, 'open')]);
+    assert.doesNotMatch(without, /withdraw_confirm_zones/);
+});
+
+test('the zones warning comes before the question that closes the withdraw confirmation', async () => {
+    const {handlers, calls, ctx} = await load(zonePhase([zone(1, {sent: true, state: 'standing'})], true, standing()), {withdraw_phase: {ok: true, withdrawn: 1, failed: 0, results: []}});
+    const plain = ctx.t;
+    ctx.t = (key, vars) => (key === 'scenario.withdraw_confirm' ? 'HEAD\n\nTHE QUESTION?' : plain(key, vars));
+    ctx.confirm = (text) => { calls.push(['confirm', text]); return true; };
+    await clickOn(handlers, {sc: 'withdraw', phase: '7'});
+    await settle();
+    assert.equal(calls.find((c) => c[0] === 'confirm')[1], 'HEAD\n\nscenario.withdraw_confirm_zones\n\nTHE QUESTION?');
+});
+
+test('the play confirmation says a zone is for everybody, never an empty «προς:»', async () => {
+    const ask = async (items) => {
+        const {handlers, calls, ctx} = await load(zonePhase(items, false), {play_phase: {ok: true, sent: 1, failed: 0, results: []}});
+        ctx.confirm = (text) => { calls.push(['confirm', text]); return true; };
+        await clickOn(handlers, {sc: 'play', phase: '7'});
+        await settle();
+        return calls.find((c) => c[0] === 'confirm')[1];
+    };
+    const only = await ask([zone(1)]);
+    assert.match(only, /"orders":1,"targets":"scenario\.target_everyone"\}/);
+    assert.doesNotMatch(only, /common\.all_teams|scenario\.target_all\b/, 'not "every team": a zone is not an order to teams');
+    const mixed = await ask([zone(1), zone(3), Object.assign({}, TEAM, {id: 2, kind: 'dispatch', type: 'point', label: 'Σ', geo: {lat: 35, lng: 24}})]);
+    assert.match(mixed, /"orders":3,"targets":"scenario\.target_everyone, Alpha 1"\}/, 'each name once');
 });

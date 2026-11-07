@@ -19,6 +19,10 @@
  *     for a location, a photo or a video - goes into a phase from a small form in the card itself (the Action Room has
  *     no single window for them). It has no place on the map, so no ghost; it goes to a team, a slot, or everyone on
  *     duty when play is pressed, and the card counts people (✓2/5), not teams;
+ *   - the restricted-area window's «Στο σενάριο ▾» (v3.458.0): the zone drawn there (a danger zone, an edge, a forbidden
+ *     place; a polygon or a line) goes into a phase instead of being made now (stageRestricted). A zone is for everybody,
+ *     so it has no team or slot; it is a dashed red-grey ghost, and once played the card reads it as «Σε ισχύ» (it is
+ *     never "finished", so it does not count in the phase's «4/6 ✓»);
  *   - the team slots (v3.453.0): names for teams that may not exist yet, in the card, in the window's recipient
  *     list, and in the dialog that play opens to ask which team is which.
  *
@@ -55,6 +59,11 @@
         task: 'bi-clipboard-check-fill', speak: 'bi-megaphone-fill', message: 'bi-chat-left-text-fill',
         location: 'bi-crosshair', photo: 'bi-camera-fill', video: 'bi-camera-reels-fill'
     };
+    // What a restricted area is and how it is drawn (v3.458.0): the page's own words for them, spelled out one by one.
+    const RESTRICTED_KIND_KEYS = {
+        danger: 'restricted_area.kind_danger', cliff: 'restricted_area.kind_cliff', forbidden: 'restricted_area.kind_forbidden'
+    };
+    const RESTRICTED_SHAPE_KEYS = {polygon: 'restricted_area.shape_polygon', line: 'restricted_area.shape_line'};
     // What the «Εντολή σε άτομα» form holds while it is open. Kept here, not in the form, so a redraw of the card
     // (an action of another coordinator, the 20-second refresh) never loses what is being typed.
     let orderDraft = {open: false, type: 'task', text: '', to: '', phase: '', note: ''};
@@ -149,6 +158,15 @@
         renderRouteLayer(routes);
     }
 
+    // A play, a retry or a withdrawal that made or removed restricted areas answers with the live list of zones, the one the
+    // restricted-area endpoint answers with, so the map and the list show the change at once (v3.458.0).
+    function showNewRestricted(res) {
+        if (!res || !Array.isArray(res.restricted_areas) || typeof renderRestrictedAreaLayer !== 'function') return;
+        restrictedAreas = res.restricted_areas;
+        renderRestrictedAreaLayer(restrictedAreas);
+        if (typeof renderRestrictedAreasList === 'function') renderRestrictedAreasList(restrictedAreas);
+    }
+
     // ── Words ──────────────────────────────────────────────────────────────────────────────────────────────────
     function phaseName(phase) {
         return t('scenario.phase_n', {n: phase.n});
@@ -156,10 +174,13 @@
     function itemKind(item) {
         if (item.type === 'sector') return t('scenario.kind_sector');
         if (item.type === 'route') return t('scenario.kind_route');
+        if (item.type === 'restricted') return t('scenario.kind_restricted');
         if (item.type === 'order') return t(ORDER_LABEL_KEYS[item.order_type] || 'scenario.order_add_btn');
         return item.type === 'point' ? t('scenario.kind_point') : t('scenario.kind_area');
     }
     function itemTarget(item) {
+        // A restricted area is for everybody in the field; there is nobody to name (v3.458.0).
+        if (item.audience === 'none') return t('scenario.target_everyone');
         // An order to people that goes to «όλοι» goes to everybody on duty, not to every team.
         if (item.audience === 'all') return item.type === 'order' ? t('scenario.target_all_people') : t('common.all_teams');
         if (item.audience === 'slot') return (item.slot_label || '') + (item.team_label ? ' → ' + item.team_label : '');
@@ -184,6 +205,10 @@
         }
         if (item.state === 'withdrawn') {
             return `<div class="small text-muted"><i class="bi bi-slash-circle me-1"></i>${esc(t('scenario.state_withdrawn'))}</div>`;
+        }
+        // A zone is never finished: it stands until somebody takes it away.
+        if (item.state === 'standing') {
+            return `<div class="small text-danger"><i class="bi bi-shield-fill-exclamation me-1"></i>${esc(t('scenario.state_standing'))}</div>`;
         }
         if (item.state === 'open') {
             const key = isOrder ? (ackOnly ? 'scenario.state_open_ack' : 'scenario.state_open_people') : 'scenario.state_open_broadcast';
@@ -213,7 +238,8 @@
         const icon = item.type === 'point' ? 'bi-geo-alt-fill'
             : (item.type === 'sector' ? 'bi-grid-3x3-gap-fill'
                 : (item.type === 'route' ? 'bi-signpost-split-fill'
-                    : (item.type === 'order' ? (ORDER_ICONS[item.order_type] || 'bi-chat-left-text-fill') : 'bi-bounding-box')));
+                    : (item.type === 'restricted' ? 'bi-exclamation-triangle-fill'
+                        : (item.type === 'order' ? (ORDER_ICONS[item.order_type] || 'bi-chat-left-text-fill') : 'bi-bounding-box'))));
         const badgeClass = item.team_missing ? 'bg-danger'
             : (item.audience === 'all' ? 'bg-warning text-dark' : (item.audience === 'slot' ? (item.unmapped ? 'bg-warning text-dark' : 'bg-info text-dark') : 'bg-secondary'));
         const target = `<span class="badge ${badgeClass}">${esc(itemTarget(item))}</span>`;
@@ -245,6 +271,12 @@
         // A route says how many points it has, and whether the team is to return to where it started.
         if (item.type === 'route') {
             where = ` <span class="text-muted small">${esc(t('scenario.route_points', {n: item.point_count || 0}))}${item.return_to_start ? ' · ' + esc(t('scenario.route_return_hint')) : ''}</span>`;
+        }
+        // A restricted area says what it is («Γκρεμός · γραμμή») beside its name.
+        if (item.type === 'restricted') {
+            const kindText = RESTRICTED_KIND_KEYS[item.restricted_kind] ? t(RESTRICTED_KIND_KEYS[item.restricted_kind]) : '';
+            const shapeText = RESTRICTED_SHAPE_KEYS[item.shape] ? t(RESTRICTED_SHAPE_KEYS[item.shape]) : '';
+            where = ` <span class="text-muted small">${esc([kindText, shapeText].filter(Boolean).join(' · '))}</span>`;
         }
         return `<li class="wr-sc-item d-flex align-items-start gap-1${item.state === 'withdrawn' ? ' wr-sc-withdrawn' : ''}" data-item="${item.id}">
             <i class="bi ${icon} text-secondary mt-1"></i>
@@ -397,6 +429,7 @@
         const pending = phase.items.filter(i => !i.sent);
         const names = [];
         pending.forEach(i => {
+            // A restricted area is for everybody in the field, and the confirmation says so («προς: για όλους»).
             const label = i.audience === 'all' ? (i.type === 'order' ? t('scenario.target_all_people') : t('scenario.target_all')) : itemTarget(i);
             if (!names.includes(label)) names.push(label);
         });
@@ -603,6 +636,7 @@
                 if (res.dispatches && typeof renderDispatches === 'function') renderDispatches(dispatches = res.dispatches);
                 showNewSectors(res);
                 showNewRoutes(res);
+                showNewRestricted(res);
                 if (res.failed > 0) {
                     const lines = (res.results || []).filter(r => !r.ok).map(r => '• ' + r.error);
                     alert(t('scenario.play_partial', {sent: res.sent, failed: res.failed}) + '\n\n' + lines.join('\n'));
@@ -627,11 +661,20 @@
         } else if (act === 'withdraw') {
             const phase = findPhase(el.dataset.phase);
             if (!phase || !phase.progress) return;
-            if (!confirm(t('scenario.withdraw_confirm', {phase: phaseName(phase), n: phase.progress.withdrawable != null ? phase.progress.withdrawable : phase.progress.open}))) return;
+            let sure = t('scenario.withdraw_confirm', {phase: phaseName(phase), n: phase.progress.withdrawable != null ? phase.progress.withdrawable : phase.progress.open});
+            // A restricted area that stands is taken off the map by it: say so plainly (v3.458.0), before the question
+            // that closes the confirmation (its last paragraph).
+            if (phase.progress.standing > 0) {
+                const cut = sure.lastIndexOf('\n\n');
+                const note = t('scenario.withdraw_confirm_zones');
+                sure = cut < 0 ? sure + '\n\n' + note : sure.slice(0, cut) + '\n\n' + note + sure.slice(cut);
+            }
+            if (!confirm(sure)) return;
             run('withdraw_phase', {phase_id: el.dataset.phase}, res => {
                 if (res.dispatches && typeof renderDispatches === 'function') renderDispatches(dispatches = res.dispatches);
                 showNewSectors(res);
                 showNewRoutes(res);
+                showNewRestricted(res);
                 if (res.failed > 0) {
                     const lines = (res.results || []).filter(r => !r.ok).map(r => '• ' + r.error);
                     alert(t('scenario.withdraw_partial', {withdrawn: res.withdrawn, failed: res.failed}) + '\n\n' + lines.join('\n'));
@@ -642,6 +685,7 @@
                 if (res.dispatches && typeof renderDispatches === 'function') renderDispatches(dispatches = res.dispatches);
                 showNewSectors(res);
                 showNewRoutes(res);
+                showNewRestricted(res);
                 if (res.item && !res.item.ok) alert(res.item.error || t('common.send_failed'));
             });
         }
@@ -668,6 +712,20 @@
                     else if (item.geo.length >= 2) L.polyline(item.geo, style).bindTooltip(tip, {sticky: true}).addTo(layer);
                     item.geo.forEach(p => L.circleMarker(p, {radius: 3, color: '#6b7280', weight: 2, fillColor: '#f3f4f6', fillOpacity: 1, interactive: false}).addTo(layer));
                     L.marker(item.geo[0], {icon: pinIcon(phase.n), keyboard: false, zIndexOffset: -500}).bindTooltip(tip).addTo(layer);
+                } else if (item.type === 'restricted') {
+                    // A zone is drawn as the real one will be - a polygon, or an open line along an edge - but dashed and
+                    // dull: red-grey, with the phase number where it starts. (The real one is bright red.)
+                    if (!Array.isArray(item.geo) || !item.geo.length) return;
+                    const zoneStyle = {color: '#a05a5a', weight: 3, dashArray: '4 5'};
+                    if (item.shape === 'line') {
+                        if (item.geo.length < 2) return;
+                        L.polyline(item.geo, zoneStyle).bindTooltip(tip, {sticky: true}).addTo(layer);
+                        L.marker(item.geo[0], {icon: pinIcon(phase.n), keyboard: false, zIndexOffset: -500}).addTo(layer);
+                    } else if (item.geo.length >= 3) {
+                        const zone = L.polygon(item.geo, Object.assign({fillColor: '#dc3545', fillOpacity: 0.06}, zoneStyle))
+                            .bindTooltip(tip, {sticky: true}).addTo(layer);
+                        L.marker(zone.getBounds().getCenter(), {icon: pinIcon(phase.n), keyboard: false, interactive: false}).addTo(layer);
+                    }
                 } else if (item.type === 'point') {
                     L.marker([item.geo.lat, item.geo.lng], {icon: pinIcon(phase.n), keyboard: false, zIndexOffset: -500})
                         .bindTooltip(tip).addTo(layer);
@@ -726,6 +784,15 @@
             .catch(() => { alert(t('common.send_failed')); return {ok: false}; });
     }
 
+    // The restricted-area window's «Στο σενάριο»: the zone drawn there goes into the phase instead of being made now. fields =
+    // {label, kind: 'danger'|'cliff'|'forbidden', shape: 'polygon'|'line', geo: JSON text of [[lat, lng], ...]}. A zone has no
+    // team or slot. Resolves with the endpoint's answer (phase_id on success); a refusal has already been shown to the person.
+    function stageRestricted(phaseId, fields) {
+        return request('add_restricted', Object.assign({phase_id: String(phaseId)}, fields))
+            .then(res => { if (!res || !res.ok) failed(res); return res; })
+            .catch(() => { alert(t('common.send_failed')); return {ok: false}; });
+    }
+
     function phaseNumber(phaseId) {
         const p = findPhase(phaseId);
         return p ? p.n : null;
@@ -747,5 +814,5 @@
         setInterval(refreshProgress, REFRESH_MS);
     }
 
-    window.wrScenario = {init: init, reload: load, menuHtml: menuHtml, stage: stage, stageSectors: stageSectors, stageRoute: stageRoute, phaseNumber: phaseNumber, drawGhostsInto: drawGhostsInto, phases: () => scenario.phases, newSlot: newSlot, fillSlotOptions: fillSlotOptions};
+    window.wrScenario = {init: init, reload: load, menuHtml: menuHtml, stage: stage, stageSectors: stageSectors, stageRoute: stageRoute, stageRestricted: stageRestricted, phaseNumber: phaseNumber, drawGhostsInto: drawGhostsInto, phases: () => scenario.phases, newSlot: newSlot, fillSlotOptions: fillSlotOptions};
 })();

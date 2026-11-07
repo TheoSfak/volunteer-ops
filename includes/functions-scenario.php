@@ -65,6 +65,15 @@
  * read - has acknowledged it) and it is never taken back: «Ανάκληση φάσης» leaves it, as a delivered message cannot be
  * recalled by hand either.
  *
+ * RESTRICTED AREAS (v3.458.0). A staged order can also be a restricted area (kind 'restricted'): a danger zone, an edge such
+ * as a cliff, or a forbidden place, drawn as a polygon or a line, which raises the breach alarm for anyone whose GPS enters
+ * it. Play hands it to createMissionRestrictedArea() - the function the restricted-area window's save uses - so the zone,
+ * its audit entry and the alarm it arms are the ones a hand-drawn zone has, and prepareMissionRestrictedArea() checks it
+ * when it is staged. A zone has NO team, no slot and no «όλες οι ομάδες»: it is for everybody who is in the field, so there
+ * is nothing to widen (its audience reads 'none'). It is never finished - it stands until someone takes it away - so it
+ * does not count in a phase's progress; the card reads it as «Σε ισχύ», and «Ανάκληση φάσης» deletes it through
+ * deleteMissionRestrictedArea() (open breaches of it are resolved, exactly as by hand).
+ *
  * HOW FAR A PHASE HAS GOT (v3.456.0). Nothing about progress is stored: scenarioItemLiveStates() reads each sent order
  * from the live order itself (a point is finished when its team pressed «Ολοκληρώθηκε», a route when it is completed,
  * a sector when it is completed; an order that is gone, cancelled or taken off its team is withdrawn), and
@@ -184,8 +193,10 @@ function loadMissionScenario(int $missionId): array {
         $isSector = $row['kind'] === 'sector';
         $isRoute = $row['kind'] === 'route';
         $isOrder = $row['kind'] === 'order';
+        $isRestricted = $row['kind'] === 'restricted';
         $areaId = $isSector ? (int) ($payload['area_id'] ?? 0) : 0;
-        $audience = in_array($payload['audience'] ?? '', ['all', 'slot'], true) ? $payload['audience'] : 'team';
+        // A restricted area goes to nobody in particular: its audience is 'none', which is not "everybody" to widen to.
+        $audience = $isRestricted ? 'none' : (in_array($payload['audience'] ?? '', ['all', 'slot'], true) ? $payload['audience'] : 'team');
         $slotId = $audience === 'slot' ? (int) ($payload['slot_id'] ?? 0) : 0;
         $slot = $slotById[$slotId] ?? null;
         if ($audience === 'slot') {
@@ -205,11 +216,14 @@ function loadMissionScenario(int $missionId): array {
             'slot_id'      => $slotId ?: null,
             'slot_label'   => $audience === 'slot' ? ($slot['label'] ?? ($payload['slot_label'] ?? null)) : null,
             'unmapped'     => $audience === 'slot' && $teamLabelNow === null,
-            'type'         => $isSector ? 'sector' : ($isRoute ? 'route' : ($isOrder ? 'order' : ($payload['type'] ?? null))),
+            'type'         => $isSector ? 'sector' : ($isRoute ? 'route' : ($isOrder ? 'order' : ($isRestricted ? 'restricted' : ($payload['type'] ?? null)))),
             'geo'          => $isRoute ? scenarioRouteGhostPoints($payload) : ($isOrder ? null : ($payload['geo'] ?? null)),
             // An order to people has no place on the map; the words typed for it are what the card shows.
             'label'        => $isOrder ? ($payload['text'] ?? null) : ($payload['label'] ?? null),
             'order_type'   => $isOrder ? ($payload['order_type'] ?? null) : null,
+            // A restricted area's own words: what it is (danger, cliff, forbidden) and its shape (polygon, line).
+            'restricted_kind' => $isRestricted ? ($payload['kind'] ?? null) : null,
+            'shape'        => $isRestricted ? ($payload['shape'] ?? null) : null,
             'travel_mode'  => $payload['travel_mode'] ?? null,
             'area_id'      => $isSector ? $areaId : null,
             'area_label'   => $isSector ? ($areaLabels[$areaId] ?? ($payload['area_label'] ?? null)) : null,
@@ -220,10 +234,11 @@ function loadMissionScenario(int $missionId): array {
             'closed_loop'  => $isRoute ? !empty($payload['is_closed_loop']) : null,
             'return_to_start' => $isRoute ? !empty($payload['add_return_waypoint']) : null,
             'team_empty'   => $isRoute && $teamId > 0 && isset($teamLabels[(int) $teamId]) && empty($participantsByTeam[(int) $teamId]),
-            'dispatch_id'  => !$isSector && !$isRoute && !$isOrder && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
+            'dispatch_id'  => !$isSector && !$isRoute && !$isOrder && !$isRestricted && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'sector_id'    => $isSector && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'route_id'     => $isRoute && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'order_id'     => $isOrder && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
+            'restricted_id' => $isRestricted && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'error'        => $row['last_error'],
             'state'        => $states[(int) $row['id']]['state'] ?? null,
             'done_n'       => $states[(int) $row['id']]['done'] ?? null,
@@ -257,16 +272,17 @@ function loadMissionScenario(int $missionId): array {
  *     it on); an order to every team when ALL the teams that have people have (done/of say how many); OPEN until
  *     then; WITHDRAWN when the live order is gone;
  *   - a route is DONE when it is completed, WITHDRAWN when it is cancelled or gone, else OPEN;
- *   - a sector is DONE when its status is completed, WITHDRAWN when it is gone or has been taken off its team, else OPEN.
+ *   - a sector is DONE when its status is completed, WITHDRAWN when it is gone or has been taken off its team, else OPEN;
+ *   - a restricted area is never done: it is STANDING (in force) while it exists, WITHDRAWN when it is gone.
  * A «Δεν μπορώ» does not finish anything: the order stays open. Reopening a finished order makes it open again.
  */
 function scenarioItemLiveStates(int $missionId, array $items): array {
-    $byKind = ['dispatch' => [], 'route' => [], 'sector' => [], 'order' => []];
+    $byKind = ['dispatch' => [], 'route' => [], 'sector' => [], 'order' => [], 'restricted' => []];
     foreach ($items as $row) {
         if ($row['sent_at'] === null || $row['sent_ref_id'] === null) {
             continue;
         }
-        $kind = in_array($row['kind'], ['route', 'sector', 'order'], true) ? $row['kind'] : 'dispatch';
+        $kind = in_array($row['kind'], ['route', 'sector', 'order', 'restricted'], true) ? $row['kind'] : 'dispatch';
         $byKind[$kind][(int) $row['id']] = (int) $row['sent_ref_id'];
     }
     $out = [];
@@ -315,6 +331,18 @@ function scenarioItemLiveStates(int $missionId, array $items): array {
         }
     }
 
+    if ($byKind['restricted']) {
+        // A zone is never finished: it stands until it is taken away.
+        $refs = array_values(array_unique($byKind['restricted']));
+        $live = [];
+        foreach (dbFetchAll("SELECT id FROM mission_restricted_areas WHERE mission_id = ? AND id IN (" . $in($refs) . ")", array_merge([$missionId], $refs)) as $r) {
+            $live[(int) $r['id']] = true;
+        }
+        foreach ($byKind['restricted'] as $itemId => $ref) {
+            $out[$itemId] = ['state' => isset($live[$ref]) ? 'standing' : 'withdrawn', 'done' => null, 'of' => null];
+        }
+    }
+
     if ($byKind['order']) {
         // An order to people is DONE when everybody it went to has done what it asked - the same rule as the
         // acknowledgement panel's «finished»: for a task, a location, a photo or a video that is the thing itself
@@ -352,10 +380,12 @@ function scenarioItemLiveStates(int $missionId, array $items): array {
  * The progress of a PLAYED phase, from its items as loadMissionScenario() builds them: total = the orders that still
  * count (everything but the ones taken back; an order that failed to go counts, so the phase is not "finished"
  * while one is waiting for a retry), done = finished ones, open = sent and still under way, withdrawn, failed, and
- * complete (every order that still counts is finished). can_withdraw is true while any order is still open.
+ * complete (every order that still counts is finished). A restricted area that is in force is `standing`: it is not an order
+ * that can be finished, so it is not in total (a phase is complete when its other orders are), but it can be taken back.
+ * can_withdraw is true while any order is still open or any zone stands.
  */
 function scenarioPhaseProgress(array $items): array {
-    $done = $open = $withdrawn = $failed = $withdrawable = 0;
+    $done = $open = $withdrawn = $failed = $withdrawable = $standing = 0;
     foreach ($items as $item) {
         $state = $item['state'] ?? null;
         if ($state === 'done') {
@@ -366,6 +396,9 @@ function scenarioPhaseProgress(array $items): array {
             if (($item['kind'] ?? '') !== 'order') {
                 $withdrawable++;
             }
+        } elseif ($state === 'standing') {
+            $standing++;
+            $withdrawable++;
         } elseif ($state === 'withdrawn') {
             $withdrawn++;
         } elseif (!$item['sent']) {
@@ -374,7 +407,7 @@ function scenarioPhaseProgress(array $items): array {
     }
     $total = $done + $open + $failed;
     return [
-        'total' => $total, 'done' => $done, 'open' => $open, 'withdrawn' => $withdrawn, 'failed' => $failed,
+        'total' => $total, 'done' => $done, 'open' => $open, 'standing' => $standing, 'withdrawn' => $withdrawn, 'failed' => $failed,
         'complete' => $total > 0 && $done === $total,
         'withdrawable' => $withdrawable,
         'can_withdraw' => $withdrawable > 0,
@@ -772,6 +805,52 @@ function addScenarioOrderItem(array $mission, int $phaseId, int $userId, array $
     return ['ok' => true, 'id' => $id];
 }
 
+/**
+ * Writes a restricted area into a phase. $input is the restricted-area window's form: label, kind (danger|cliff|forbidden),
+ * shape (polygon|line) and geo (JSON text of [[lat, lng], ...]). There is no team or slot here: a zone is for everybody in the
+ * field. Checked by prepareMissionRestrictedArea(), exactly as making it would be, so a zone that could never be made (no
+ * name, three points missing, one outside the map) is refused when it is written down. The payload keeps the kind and the
+ * shape as words - never the window's empty defaults - so playing it never has to guess. A phase that has been played takes
+ * no more orders. ['ok' => true, 'id' => n] or ['ok' => false, 'error' => text].
+ */
+function addScenarioRestrictedItem(array $mission, int $phaseId, int $userId, array $input): array {
+    $missionId = (int) $mission['id'];
+    $phase = scenarioPhaseRow($missionId, $phaseId);
+    if (!$phase) {
+        return ['ok' => false, 'error' => t('scenario.phase_not_found')];
+    }
+    if ($phase['played_at'] !== null) {
+        return ['ok' => false, 'error' => t('scenario.phase_closed_for_orders')];
+    }
+    if ((int) dbFetchValue("SELECT COUNT(*) FROM mission_scenario_items WHERE phase_id = ?", [$phaseId]) >= SCENARIO_MAX_ITEMS_PER_PHASE) {
+        return ['ok' => false, 'error' => t('scenario.too_many_orders', ['max' => SCENARIO_MAX_ITEMS_PER_PHASE])];
+    }
+
+    $prepared = prepareMissionRestrictedArea([
+        'label' => $input['label'] ?? '',
+        'kind'  => $input['kind'] ?? '',
+        'shape' => $input['shape'] ?? '',
+        'geo'   => $input['geo'] ?? '',
+    ]);
+    if (!$prepared['ok']) {
+        return $prepared;
+    }
+
+    $payload = [
+        'label' => $prepared['label'],
+        'kind'  => $prepared['kind'],
+        'shape' => $prepared['shape'],
+        'geo'   => $prepared['geo'],
+    ];
+    $seq = 1 + (int) dbFetchValue("SELECT COALESCE(MAX(seq), 0) FROM mission_scenario_items WHERE phase_id = ?", [$phaseId]);
+    $id = (int) dbInsert(
+        "INSERT INTO mission_scenario_items (phase_id, mission_id, seq, kind, payload, slot_id, created_by, created_at) VALUES (?, ?, ?, 'restricted', ?, NULL, ?, NOW())",
+        [$phaseId, $missionId, $seq, json_encode($payload, JSON_UNESCAPED_UNICODE), $userId]
+    );
+    logAudit('stage_scenario_item', 'mission_scenario_items', $id, null, ['mission_id' => $missionId, 'phase_id' => $phaseId, 'type' => 'restricted', 'kind' => $payload['kind'], 'shape' => $payload['shape']]);
+    return ['ok' => true, 'id' => $id];
+}
+
 /** Takes one staged order off the plan. Null on success. */
 function deleteScenarioItem(array $mission, int $itemId, int $userId): ?string {
     $missionId = (int) $mission['id'];
@@ -874,6 +953,27 @@ function scenarioRouteInputFromPayload($payload, array $slotTeams = []): ?array 
 }
 
 /**
+ * What createMissionRestrictedArea() takes, built from a staged zone's payload, or null when the payload cannot be read as
+ * one. The restricted area's twin of the other payload readers, minus the audience (a zone has none): the label must be
+ * words, the kind and the shape must be named in the payload (an unnamed kind is not quietly "danger"), and the geo must be
+ * a list. Anything else is null, and the item fails with «δεν διαβάζεται» rather than making a zone nobody asked for.
+ */
+function scenarioRestrictedInputFromPayload($payload): ?array {
+    if (!is_array($payload) || trim((string) ($payload['label'] ?? '')) === '' || !is_array($payload['geo'] ?? null)) {
+        return null;
+    }
+    if (!in_array($payload['kind'] ?? '', ['danger', 'cliff', 'forbidden'], true) || !in_array($payload['shape'] ?? '', ['polygon', 'line'], true)) {
+        return null;
+    }
+    return [
+        'label' => (string) $payload['label'],
+        'kind'  => (string) $payload['kind'],
+        'shape' => (string) $payload['shape'],
+        'geo'   => json_encode($payload['geo']),
+    ];
+}
+
+/**
  * What createScenarioOrder() takes, built from a staged general order's payload, or null when the payload cannot be
  * read as one. The general order's twin of scenarioDispatchInputFromPayload(), with the same rule: the audience 'all'
  * (every person on duty at the moment of sending) is read ONLY when the payload says so in words; an audience 'team'
@@ -951,16 +1051,17 @@ function createScenarioOrder(array $mission, int $userId, array $input): array {
 
 /**
  * Sends one staged order - a point or an area through createMissionDispatch(), a sector through
- * createMissionSector(), a route through createMissionRoute(), an order to people through createScenarioOrder() - and
- * writes down what came of it. Returns ['item_id' => n, 'kind' => 'dispatch'|'sector'|'route'|'order', 'ok' => bool,
- * 'dispatch_id' => n|null (the live order, for a point or an area), 'sector_id' => n|null (for a sector), 'route_id' =>
- * n|null (for a route), 'order_id' => n|null (for an order to people), 'error' => text|null]. Never throws: an item
+ * createMissionSector(), a route through createMissionRoute(), an order to people through createScenarioOrder(), a
+ * restricted area through createMissionRestrictedArea() - and writes down what came of it. Returns ['item_id' => n,
+ * 'kind' => 'dispatch'|'sector'|'route'|'order'|'restricted', 'ok' => bool, 'dispatch_id' => n|null (the live order, for a
+ * point or an area), 'sector_id' => n|null (for a sector), 'route_id' => n|null (for a route), 'order_id' => n|null (for an
+ * order to people), 'restricted_id' => n|null (for a restricted area), 'error' => text|null]. Never throws: an item
  * that blows up is a failed item, not an aborted phase. A sector whose search area has been deleted since fails with
  * that reason and creates nothing.
  */
 function scenarioSendItem(array $mission, array $item, int $userId, string $userName): array {
     $itemId = (int) $item['id'];
-    $kind = in_array($item['kind'] ?? 'dispatch', ['sector', 'route', 'order'], true) ? $item['kind'] : 'dispatch';
+    $kind = in_array($item['kind'] ?? 'dispatch', ['sector', 'route', 'order', 'restricted'], true) ? $item['kind'] : 'dispatch';
     $isSector = $kind === 'sector';
     $payload = json_decode((string) $item['payload'], true);
     $slotTeams = scenarioSlotTeamMap((int) $mission['id']);
@@ -968,6 +1069,7 @@ function scenarioSendItem(array $mission, array $item, int $userId, string $user
         'sector' => scenarioSectorInputFromPayload($payload, $slotTeams),
         'route' => scenarioRouteInputFromPayload($payload, $slotTeams),
         'order' => scenarioOrderInputFromPayload($payload, $slotTeams),
+        'restricted' => scenarioRestrictedInputFromPayload($payload),
         default => scenarioDispatchInputFromPayload($payload, $slotTeams),
     };
     if ($input === null) {
@@ -982,6 +1084,7 @@ function scenarioSendItem(array $mission, array $item, int $userId, string $user
                 'sector' => createMissionSector($mission, $userId, $input),
                 'route' => createMissionRoute($mission, $userId, $input),
                 'order' => createScenarioOrder($mission, $userId, $input),
+                'restricted' => createMissionRestrictedArea($mission, $userId, $input),
                 default => createMissionDispatch($mission, $userId, $userName, $input),
             };
         } catch (Throwable $e) {
@@ -1000,12 +1103,13 @@ function scenarioSendItem(array $mission, array $item, int $userId, string $user
             'sector_id' => $isSector ? (int) $result['id'] : null,
             'route_id' => $kind === 'route' ? (int) $result['id'] : null,
             'order_id' => $kind === 'order' ? (int) $result['id'] : null,
+            'restricted_id' => $kind === 'restricted' ? (int) $result['id'] : null,
             'error' => null,
         ];
     }
     $error = mb_substr((string) $result['error'], 0, 250);
     dbExecute("UPDATE mission_scenario_items SET last_error = ? WHERE id = ?", [$error, $itemId]);
-    return ['item_id' => $itemId, 'kind' => $kind, 'ok' => false, 'dispatch_id' => null, 'sector_id' => null, 'route_id' => null, 'order_id' => null, 'error' => $error];
+    return ['item_id' => $itemId, 'kind' => $kind, 'ok' => false, 'dispatch_id' => null, 'sector_id' => null, 'route_id' => null, 'order_id' => null, 'restricted_id' => null, 'error' => $error];
 }
 
 /**
@@ -1111,7 +1215,9 @@ function retryScenarioItem(array $mission, int $itemId, int $userId, string $use
  * and the people still on their way are told), a route is cancelled (cancelMissionRoute: its team is told), a sector
  * is taken off its team (assignMissionSector with no team: the sector stays on the map as an unassigned one and the
  * team is told). Orders that are already finished stay as they are - they are a fact, there is nothing to stop - and
- * so do orders already taken back. The phase stays played and its orders read «ανακλήθηκε»; nothing is sent again.
+ * so do orders already taken back. A restricted area that stands is taken away too (deleteMissionRestrictedArea(): open
+ * breaches of it are resolved, as when a coordinator deletes the zone by hand). The phase stays played and its orders read
+ * «ανακλήθηκε»; nothing is sent again.
  * Several orders to one team are told in one notice (sectors and points) or one per route, as by hand.
  * Returns ['ok' => false, 'error' => text], or ['ok' => true, 'withdrawn' => n, 'failed' => n, 'results' => [['item_id'
  * =>, 'kind' =>, 'ok' =>, 'error' =>], ...]].
@@ -1133,7 +1239,7 @@ function withdrawScenarioPhase(array $mission, int $phaseId, int $userId): array
     $states = scenarioItemLiveStates($missionId, $rows);
     // A general order to people (kind 'order') is not among them: once a message or a task has reached a phone there
     // is nothing to take back, and the Action Room has no way to do it by hand either.
-    $open = array_values(array_filter($rows, fn($r) => $r['kind'] !== 'order' && ($states[(int) $r['id']]['state'] ?? '') === 'open'));
+    $open = array_values(array_filter($rows, fn($r) => $r['kind'] !== 'order' && in_array($states[(int) $r['id']]['state'] ?? '', ['open', 'standing'], true)));
     if (!$open) {
         return ['ok' => false, 'error' => t('scenario.withdraw_nothing')];
     }
@@ -1174,6 +1280,8 @@ function withdrawScenarioPhase(array $mission, int $phaseId, int $userId): array
                         $sectorLines[$personId][] = $line;
                     }
                 }
+            } elseif ($row['kind'] === 'restricted') {
+                $error = deleteMissionRestrictedArea($mission, $userId, $ref);
             } else {
                 continue;
             }

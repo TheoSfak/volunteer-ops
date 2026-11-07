@@ -1652,8 +1652,8 @@ final class ScenarioTest extends TestCase
         $src = $this->source('mission-scenario.php');
         $this->assertStringContainsString("fn(\$r) => (\$r['kind'] ?? '') === 'route' && !empty(\$r['ok'])", $src);
         $this->assertStringContainsString("'routes' => loadRoutesForUser(\$missionId, (int) \$userId, true)", $src);
-        $this->assertStringContainsString("+ \$liveRoutes(\$result['results']));", $src, 'play');
-        $this->assertStringContainsString("+ \$liveRoutes([\$result['item']]));", $src, 'retry');
+        $this->assertStringContainsString("+ \$liveRoutes(\$result['results'])", $src, 'play');
+        $this->assertStringContainsString("+ \$liveRoutes([\$result['item']])", $src, 'retry');
         $add = substr($src, (int) strpos($src, "if (\$action === 'add_route') {"), 1800);
         $this->assertStringContainsString('addScenarioRouteItem($mission, $phaseId, (int) $userId, [', $add);
         foreach (['team_id', 'title', 'waypoints', 'is_closed_loop', 'add_return_waypoint', 'member_ids', 'travel_mode'] as $field) {
@@ -1741,12 +1741,12 @@ final class ScenarioTest extends TestCase
 
         $p = $this->playedPhaseOf($made['phase']);
         $this->assertSame('open', $p['items'][0]['state']);
-        $this->assertSame(['total' => 1, 'done' => 0, 'open' => 1, 'withdrawn' => 0, 'failed' => 0, 'complete' => false, 'withdrawable' => 1, 'can_withdraw' => true], $p['progress']);
+        $this->assertSame(['total' => 1, 'done' => 0, 'open' => 1, 'standing' => 0, 'withdrawn' => 0, 'failed' => 0, 'complete' => false, 'withdrawable' => 1, 'can_withdraw' => true], $p['progress']);
 
         recordDispatchProgress($made['dispatch'], $this->teamId, $this->members[0], 'complete');
         $p = $this->playedPhaseOf($made['phase']);
         $this->assertSame('done', $p['items'][0]['state']);
-        $this->assertSame(['total' => 1, 'done' => 1, 'open' => 0, 'withdrawn' => 0, 'failed' => 0, 'complete' => true, 'withdrawable' => 0, 'can_withdraw' => false], $p['progress']);
+        $this->assertSame(['total' => 1, 'done' => 1, 'open' => 0, 'standing' => 0, 'withdrawn' => 0, 'failed' => 0, 'complete' => true, 'withdrawable' => 0, 'can_withdraw' => false], $p['progress']);
 
         dbExecute("UPDATE mission_dispatch_progress SET completed_at = NULL, completed_by = NULL WHERE dispatch_id = ?", [$made['dispatch']]);
         $this->assertSame('open', $this->playedPhaseOf($made['phase'])['items'][0]['state'], 'a reopened order is under way again');
@@ -1884,7 +1884,7 @@ final class ScenarioTest extends TestCase
         $p = $this->playedPhaseOf($phase);
         $this->assertNotNull($p['played_at'], 'the phase stays played');
         $this->assertSame(['done', 'withdrawn', 'withdrawn', 'withdrawn', 'withdrawn'], array_column($p['items'], 'state'));
-        $this->assertSame(['total' => 1, 'done' => 1, 'open' => 0, 'withdrawn' => 4, 'failed' => 0, 'complete' => true, 'withdrawable' => 0, 'can_withdraw' => false], $p['progress']);
+        $this->assertSame(['total' => 1, 'done' => 1, 'open' => 0, 'standing' => 0, 'withdrawn' => 4, 'failed' => 0, 'complete' => true, 'withdrawable' => 0, 'can_withdraw' => false], $p['progress']);
 
         $again = withdrawScenarioPhase($this->mission, $phase, $this->adminId);
         $this->assertFalse($again['ok'], 'a second press has nothing left to take back');
@@ -2013,7 +2013,7 @@ final class ScenarioTest extends TestCase
         // POSTs need the CSRF token before any action.
         $csrf = strpos($src, "hash_equals(\$_SESSION['csrf_token']");
         $this->assertNotFalse($csrf);
-        foreach (['add_phase', 'rename_phase', 'delete_phase', 'add_item', 'add_sectors', 'add_route', 'add_order', 'delete_item', 'play_phase', 'withdraw_phase', 'retry_item'] as $action) {
+        foreach (['add_phase', 'rename_phase', 'delete_phase', 'add_item', 'add_sectors', 'add_route', 'add_order', 'add_restricted', 'delete_item', 'play_phase', 'withdraw_phase', 'retry_item'] as $action) {
             $this->assertGreaterThan($csrf, strpos($src, "'$action'"), "$action is after the CSRF check");
         }
         // The same open-mission gate as the dispatch endpoint.

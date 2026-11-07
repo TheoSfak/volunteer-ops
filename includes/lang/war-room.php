@@ -3382,7 +3382,7 @@ return [
         // «Σενάριο» (v3.452.0): includes/functions-scenario.php, mission-scenario.php, assets/js/war-room-scenario.js
         'scenario.card_title' => 'Σενάριο',
         'scenario.note' => 'Γράψε από πριν τις εντολές της άσκησης σε φάσεις και στείλε κάθε φάση όταν έρθει η ώρα της, με το ▶. Τίποτα δεν φεύγει μόνο του και το σενάριο το βλέπει μόνο η διοίκηση.',
-        'scenario.empty' => 'Δεν υπάρχει σενάριο ακόμα. Φτιάξε μια φάση, ή πάτα «Στο σενάριο» στο παράθυρο αποστολής σημείου ή περιοχής, στο παράθυρο χωρισμού σε τομείς ή στο παράθυρο διαδρομής, ή γράψε εντολή προς άτομα με το «Εντολή σε άτομα».',
+        'scenario.empty' => 'Δεν υπάρχει σενάριο ακόμα. Φτιάξε μια φάση, ή πάτα «Στο σενάριο» στο παράθυρο αποστολής σημείου ή περιοχής, στο παράθυρο χωρισμού σε τομείς, στο παράθυρο διαδρομής ή στο παράθυρο απαγορευμένης περιοχής, ή γράψε εντολή προς άτομα με το «Εντολή σε άτομα».',
         'scenario.phase_n' => 'Φάση {n}',
         'scenario.new_phase_n' => 'Νέα φάση (Φάση {n})',
         'scenario.add_phase_btn' => 'Νέα φάση',
@@ -3512,6 +3512,11 @@ return [
         'scenario.state_open_ack' => 'Στάλθηκε · ✓{done}/{of} το έλαβαν',
         'scenario.state_done_ack' => 'Το έλαβαν όλοι',
         'scenario.order_no_withdraw' => 'Οι εντολές προς άτομα (μηνύματα, εργασίες) δεν ανακαλούνται.',
+        'scenario.kind_restricted' => 'Απαγορευμένη περιοχή',
+        'scenario.target_everyone' => 'για όλους',
+        'scenario.state_standing' => 'Σε ισχύ',
+        'scenario.restricted_add_to_scenario_title' => 'Βάζει την απαγορευμένη περιοχή σε φάση του σεναρίου, χωρίς να την ορίσει τώρα',
+        'scenario.withdraw_confirm_zones' => 'Οι απαγορευμένες περιοχές της φάσης σβήνονται από τον χάρτη (οι ανοιχτές παραβιάσεις τους κλείνουν).',
     ],
     'en' => [
         'common.mission_not_found' => 'Mission not found.',
@@ -6778,7 +6783,7 @@ return [
         // Scenario (v3.452.0): includes/functions-scenario.php, mission-scenario.php, assets/js/war-room-scenario.js
         'scenario.card_title' => 'Scenario',
         'scenario.note' => 'Write the exercise orders down in phases beforehand and send each phase when its time comes, with ▶. Nothing goes out by itself and only command staff can see the scenario.',
-        'scenario.empty' => 'There is no scenario yet. Make a phase, or press "Add to scenario" in the point or area window, in the window that divides an area into sectors, or in the route window, or write an order to people with "Order to people".',
+        'scenario.empty' => 'There is no scenario yet. Make a phase, or press "Add to scenario" in the point or area window, in the window that divides an area into sectors, in the route window or in the restricted-area window, or write an order to people with "Order to people".',
         'scenario.phase_n' => 'Phase {n}',
         'scenario.new_phase_n' => 'New phase (Phase {n})',
         'scenario.add_phase_btn' => 'New phase',
@@ -6908,5 +6913,10 @@ return [
         'scenario.state_open_ack' => 'Sent · ✓{done}/{of} received it',
         'scenario.state_done_ack' => 'Everyone received it',
         'scenario.order_no_withdraw' => 'Orders to people (messages, tasks) cannot be withdrawn.',
+        'scenario.kind_restricted' => 'Restricted area',
+        'scenario.target_everyone' => 'everyone',
+        'scenario.state_standing' => 'In force',
+        'scenario.restricted_add_to_scenario_title' => 'Puts the restricted area into a phase of the scenario without making it now',
+        'scenario.withdraw_confirm_zones' => 'The phase\'s restricted areas are removed from the map (their open breaches are closed).',
     ],
 ];
