@@ -342,3 +342,157 @@ test('an answer that is the same as the card already shows does not redraw it', 
     assert.equal(redraws, 0, 'a select or a typed name in the card survives the refresh');
     void ctx;
 });
+
+// ── General orders to people (v3.457.0) ─────────────────────────────────────────────────────────────────────────
+
+const orderItem = (id, orderType, over = {}) => Object.assign({}, TEAM, {
+    id, kind: 'order', type: 'order', order_type: orderType, label: 'Πηγαίνετε στο σημείο Α', geo: null,
+}, over);
+const field = (name, value) => ({target: {closest: (sel) => (sel === '[data-sc-o]' || sel === `[data-sc-o="${name}"]` ? {dataset: {scO: name}, value} : null)}});
+
+test('an order to people shows its kind, its words and who it goes to, has no place on the map and no link to it', async () => {
+    const {body, api, drawn} = await load(plan([
+        orderItem(1, 'task'),
+        orderItem(2, 'message', {audience: 'all', team_label: null, label: 'Μ'.repeat(90)}),
+        orderItem(3, 'photo', {label: null}),
+    ]));
+    const html = body.innerHTML;
+    assert.match(html, /scenario\.order_type_task/);
+    assert.match(html, /scenario\.order_type_message/);
+    assert.match(html, /scenario\.order_type_photo/);
+    assert.match(html, /bi-clipboard-check-fill/);
+    assert.match(html, /bi-chat-left-text-fill/);
+    assert.match(html, /bi-camera-fill/);
+    assert.match(html, /scenario\.target_all_people/, 'everybody on duty, not every team');
+    assert.doesNotMatch(html, /common\.all_teams/);
+    assert.doesNotMatch(html, /data-sc="goto"/, 'there is nowhere on the map to go');
+    assert.match(html, /«Πηγαίνετε στο σημείο Α»/);
+    assert.doesNotMatch(html, /Μ{80}/, 'long words are cut for the card');
+    drawn.length = 0;
+    api.drawGhostsInto({});
+    assert.equal(drawn.length, 0, 'no ghost');
+});
+
+test('a message or an announcement is finished by being received, the others by being done, and the counts are people', async () => {
+    const open = (type, extra = {}) => orderItem(1, type, Object.assign({sent: true, state: 'open', done_n: 1, of_n: 4}, extra));
+    const text = async (item) => (await load(twoPhases({items: [item]}, {}))).body.innerHTML;
+
+    assert.match(await text(open('message')), /scenario\.state_open_ack\{"done":1,"of":4\}/);
+    assert.match(await text(open('speak')), /scenario\.state_open_ack/);
+    assert.match(await text(open('task')), /scenario\.state_open_people\{"done":1,"of":4\}/);
+    assert.match(await text(open('photo')), /scenario\.state_open_people/);
+    assert.doesNotMatch(await text(open('task')), /state_open_broadcast/, 'not "teams"');
+    assert.match(await text(open('message', {state: 'done'})), /scenario\.state_done_ack/);
+    assert.match(await text(open('task', {state: 'done'})), /scenario\.state_done</);
+});
+
+test('an order under way cannot be withdrawn: the card says so and offers no button when only orders are open', async () => {
+    const onlyOrders = await load(twoPhases({
+        items: [orderItem(1, 'message', {sent: true, state: 'open', done_n: 0, of_n: 2})],
+        progress: progress({open: 1, total: 1, withdrawable: 0, can_withdraw: false}),
+    }, {}));
+    assert.doesNotMatch(onlyOrders.body.innerHTML, /data-sc="withdraw"/);
+    assert.match(onlyOrders.body.innerHTML, /data-sc-no-withdraw="1"/);
+    assert.match(onlyOrders.body.innerHTML, /scenario\.order_no_withdraw/);
+
+    // With a point as well, the button is there and its question counts only what it can take back.
+    const mixed = await load(twoPhases({
+        items: [orderItem(1, 'message', {sent: true, state: 'open', done_n: 0, of_n: 2}), sentItem(2, 'open')],
+        progress: progress({open: 2, total: 2, withdrawable: 1, can_withdraw: true}),
+    }, {}));
+    assert.match(mixed.body.innerHTML, /data-sc="withdraw" data-phase="7"/);
+    mixed.ctx.confirm = (t) => { mixed.calls.push(['confirm', t]); return false; };
+    await clickOn(mixed.handlers, {sc: 'withdraw', phase: '7'});
+    assert.match(mixed.calls.find((c) => c[0] === 'confirm')[1], /"n":1\}$/, 'one order can be taken back, not two');
+});
+
+test('the order form opens, keeps what is typed through a redraw, drops the words for a request, and sends what was filled in', async () => {
+    const scenario = Object.assign(twoPhases({}, {}), {teams: [{id: 39, label: 'Alpha 1'}], slots: [{id: 3, label: 'Ομάδα Α', team_id: null, team_label: null}]});
+    const {handlers, body, calls} = await load(scenario, {add_order: {ok: true, phase_id: 8}});
+    assert.match(body.innerHTML, /data-sc="order-open"/);
+    assert.doesNotMatch(body.innerHTML, /data-sc-orderform/);
+
+    await clickOn(handlers, {sc: 'order-open'});
+    assert.match(body.innerHTML, /data-sc-orderform="1"/);
+    assert.match(body.innerHTML, /<textarea[^>]*data-sc-o="text"/, 'a task has words');
+    assert.match(body.innerHTML, /<option value="all"[^>]*>\s*scenario\.target_all_people/);
+    assert.match(body.innerHTML, /<option value="39"[^>]*>Alpha 1/);
+    assert.match(body.innerHTML, /<option value="slot:3"[^>]*>Ομάδα Α/);
+    assert.match(body.innerHTML, /<option value="8" selected>/, 'the first phase that has not gone');
+
+    // Typed words survive anything that redraws the card (here: the choice of the audience).
+    handlers.input({target: {closest: (sel) => (sel === '[data-sc-o="text"]' ? {value: 'Αναφορά στη βάση'} : null)}});
+    await handlers.change(field('to', 'all'));
+    await handlers.change(field('type', 'task'));
+    assert.match(body.innerHTML, /Αναφορά στη βάση<\/textarea>/);
+    assert.match(body.innerHTML, /<option value="all" selected>/);
+
+    calls.length = 0;
+    await clickOn(handlers, {sc: 'order-stage'});
+    await settle();
+    const post = calls.filter((c) => c[0] === 'fetch' && c[2]).pop();
+    const sent = new URLSearchParams(post[2]);
+    assert.equal(sent.get('action'), 'add_order');
+    assert.equal(sent.get('phase_id'), '8');
+    assert.equal(sent.get('order_type'), 'task');
+    assert.equal(sent.get('text'), 'Αναφορά στη βάση');
+    assert.equal(sent.get('team_id'), 'all');
+    assert.match(body.innerHTML, /data-sc-order-note="1"/, 'it says where the order went');
+    assert.match(body.innerHTML, /scenario\.order_staged\{"n":2\}/);
+    assert.doesNotMatch(body.innerHTML, />Αναφορά στη βάση<\/textarea>/, 'the words are cleared for the next order');
+
+    // A request has no words: the box goes away.
+    await handlers.change(field('type', 'location'));
+    assert.doesNotMatch(body.innerHTML, /data-sc-o="text"/);
+    await clickOn(handlers, {sc: 'order-cancel'});
+    assert.doesNotMatch(body.innerHTML, /data-sc-orderform/);
+});
+
+test('a refused order is shown to the person, keeps the form as it was, and asks for no phase it does not have', async () => {
+    const refusal = {ok: false, error: 'Διάλεξε σε ποιους πηγαίνει η εντολή'};
+    const {handlers, calls, body} = await load(plan([]), {add_order: refusal});
+    await clickOn(handlers, {sc: 'order-open'});
+    handlers.input({target: {closest: () => ({value: 'Κείμενο'})}});
+    await clickOn(handlers, {sc: 'order-stage'});
+    await settle();
+    assert.deepEqual(calls.filter((c) => c[0] === 'alert').pop(), ['alert', refusal.error]);
+    assert.match(body.innerHTML, /data-sc-orderform="1"/);
+    assert.match(body.innerHTML, /Κείμενο<\/textarea>/, 'nothing typed is lost');
+    const post = calls.filter((c) => c[0] === 'fetch' && c[2]).pop();
+    assert.equal(new URLSearchParams(post[2]).get('phase_id'), '7', 'the phase the plan has');
+});
+
+test('typing in the order form is not torn down by the progress refresh', async () => {
+    const {timers, doc, calls} = await load(twoPhases({items: [sentItem(1, 'open')]}, {}), {});
+    doc.activeElement = {inCard: true, tagName: 'TEXTAREA'};
+    calls.length = 0;
+    timers[0]();
+    await settle();
+    assert.equal(calls.filter((c) => c[0] === 'fetch').length, 0, 'while someone types, the card does not even ask');
+});
+
+test('a new team slot can be made from the order form and is the one chosen afterwards', async () => {
+    const scenario = Object.assign(twoPhases({}, {}), {teams: [], slots: [{id: 5, label: 'Ομάδα Α', team_id: null, team_label: null}]});
+    const {handlers, body, ctx, calls} = await load(scenario, {add_slot: {ok: true, slot_id: 5}});
+    await clickOn(handlers, {sc: 'order-open'});
+    ctx.prompt = (question, suggestion) => { calls.push(['prompt', suggestion]); return 'Ομάδα Α'; };
+    await handlers.change(field('to', 'slot:new'));
+    await settle();
+    await settle();
+    const asked = calls.filter((c) => c[0] === 'fetch' && c[2]).pop();
+    assert.equal(new URLSearchParams(asked[2]).get('action'), 'add_slot');
+    assert.equal(new URLSearchParams(asked[2]).get('label'), 'Ομάδα Α');
+    assert.match(body.innerHTML, /<option value="slot:5" selected>/, 'the slot just made is the audience');
+});
+
+test('declining the name of a new slot leaves the audience unchosen', async () => {
+    const scenario = Object.assign(twoPhases({}, {}), {teams: [], slots: []});
+    const {handlers, body, ctx} = await load(scenario, {});
+    await clickOn(handlers, {sc: 'order-open'});
+    ctx.prompt = () => null;
+    await handlers.change(field('to', 'slot:new'));
+    await settle();
+    await settle();
+    assert.doesNotMatch(body.innerHTML, /<option value="(all|slot:[0-9]+)" selected>/);
+    assert.doesNotMatch(body.innerHTML, /<option value="slot:new" selected>/);
+});

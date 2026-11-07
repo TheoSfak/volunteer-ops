@@ -306,11 +306,7 @@ if (isPost()) {
         if (empty($requestedIds)) {
             setFlash('warning', t('common.select_active_volunteer'));
         } else {
-            createMissionOrderAndNotify(
-                $missionId, $mission['title'], 'location', $user['id'], $requestedIds,
-                'order.location.title', [], null, 'order.location.message', ['mission' => $mission['title']]
-            );
-            logAudit('request_mission_location', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
+            sendMissionGeneralOrder($mission, (int) $user['id'], 'location', $requestedIds);
             setFlash('success', t('order.location.sent_flash', ['count' => count($requestedIds)]));
         }
         redirect('war-room.php?id=' . $missionId);
@@ -325,11 +321,7 @@ if (isPost()) {
         if (empty($requestedIds)) {
             setFlash('warning', t('common.select_active_volunteer'));
         } else {
-            createMissionOrderAndNotify(
-                $missionId, $mission['title'], 'photo', $user['id'], $requestedIds,
-                'order.photo.title', [], null, 'order.photo.message', ['mission' => $mission['title']]
-            );
-            logAudit('request_mission_photo', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
+            sendMissionGeneralOrder($mission, (int) $user['id'], 'photo', $requestedIds);
             setFlash('success', t('order.photo.sent_flash', ['count' => count($requestedIds)]));
         }
         redirect('war-room.php?id=' . $missionId);
@@ -344,11 +336,7 @@ if (isPost()) {
         if (empty($requestedIds)) {
             setFlash('warning', t('common.select_active_volunteer'));
         } else {
-            createMissionOrderAndNotify(
-                $missionId, $mission['title'], 'video', $user['id'], $requestedIds,
-                'order.video.title', [], null, 'order.video.message', ['mission' => $mission['title']]
-            );
-            logAudit('request_mission_video', 'missions', $missionId, null, ['recipient_ids' => $requestedIds]);
+            sendMissionGeneralOrder($mission, (int) $user['id'], 'video', $requestedIds);
             setFlash('success', t('order.video.sent_flash', ['count' => count($requestedIds)]));
         }
         redirect('war-room.php?id=' . $missionId);
@@ -400,8 +388,7 @@ if (isPost()) {
             redirect('war-room.php?id=' . $missionId);
         }
 
-        $taskText = trim((string) post('task_text'));
-        $taskText = mb_substr($taskText, 0, 500);
+        $taskText = missionGeneralOrderText((string) post('task_text'));
 
         $requestedIds = resolveRequestedActiveRecipients($missionId);
 
@@ -410,12 +397,7 @@ if (isPost()) {
         } elseif (empty($requestedIds)) {
             setFlash('warning', t('common.select_active_volunteer'));
         } else {
-            createMissionOrderAndNotify(
-                $missionId, $mission['title'], 'task', $user['id'], $requestedIds,
-                'order.task.title', ['mission' => $mission['title']], $taskText, '', [],
-                $taskText
-            );
-            logAudit('request_mission_task', 'missions', $missionId, null, ['recipient_ids' => $requestedIds, 'task_text' => $taskText]);
+            sendMissionGeneralOrder($mission, (int) $user['id'], 'task', $requestedIds, $taskText);
             setFlash('success', t('order.task.sent_flash', ['count' => count($requestedIds)]));
         }
         redirect('war-room.php?id=' . $missionId);
@@ -433,8 +415,7 @@ if (isPost()) {
         // Same 500 as a task order. It is also about as much as anyone will
         // hold from one spoken pass — roughly forty seconds of Greek read at
         // announcement pace.
-        $speakText = trim((string) post('speak_text'));
-        $speakText = mb_substr($speakText, 0, 500);
+        $speakText = missionGeneralOrderText((string) post('speak_text'));
 
         $requestedIds = resolveRequestedActiveRecipients($missionId);
 
@@ -443,18 +424,10 @@ if (isPost()) {
         } elseif (empty($requestedIds)) {
             setFlash('warning', t('common.select_active_volunteer'));
         } else {
-            createMissionOrderAndNotify(
-                $missionId, $mission['title'], 'speak', $user['id'], $requestedIds,
-                'order.speak.title', ['mission' => $mission['title']], $speakText, '', [],
-                // alarmStyle is the existing "what should the banner DO when it
-                // lands" channel (return_to_base uses it for the red-screen
-                // siren). Reused rather than adding a second flag beside it:
-                // it already survives the trip through sendNotification's
-                // pushData, the notifications row and the war-room poll, which
-                // is the whole journey this needs to make.
-                $speakText, 'speak'
-            );
-            logAudit('request_mission_speak', 'missions', $missionId, null, ['recipient_ids' => $requestedIds, 'speak_text' => $speakText]);
+            // The alarmStyle 'speak' (what the banner DOES when it lands) is part of the order's spec in
+            // missionGeneralOrderSpec(): it already survives the trip through sendNotification's pushData, the
+            // notifications row and the war-room poll, which is the whole journey this needs to make.
+            sendMissionGeneralOrder($mission, (int) $user['id'], 'speak', $requestedIds, $speakText);
             setFlash('success', t('order.speak.sent_flash', ['count' => count($requestedIds)]));
         }
         redirect('war-room.php?id=' . $missionId);
@@ -464,8 +437,7 @@ if (isPost()) {
             redirect('war-room.php?id=' . $missionId);
         }
 
-        $broadcastText = trim((string) post('global_message_text'));
-        $broadcastText = mb_substr($broadcastText, 0, 500);
+        $broadcastText = missionGeneralOrderText((string) post('global_message_text'));
 
         // Optional reference photo (e.g. a missing person's photo relayed to
         // the coordination center) — broadcast alongside the text to every
@@ -517,11 +489,9 @@ if (isPost()) {
                 [(int) $user['id']]
             ));
 
-            $orderId = createMissionOrderAndNotify(
-                $missionId, $mission['title'], 'message', $user['id'], $recipientIds,
-                'global_message.title', ['mission' => $mission['title']], $broadcastText !== '' ? $broadcastText : t('global_message.photo_only_text'), '', [],
-                $broadcastText !== '' ? $broadcastText : null
-            );
+            $orderId = sendMissionGeneralOrder(
+                $mission, (int) $user['id'], 'message', $recipientIds, $broadcastText, ['has_photo' => $photoUpload !== null]
+            )['order_id'];
 
             if ($photoUpload !== null) {
                 dbInsert(
@@ -531,7 +501,6 @@ if (isPost()) {
                 );
             }
 
-            logAudit('global_message_war_room', 'missions', $missionId, null, ['message' => $broadcastText, 'has_photo' => $photoUpload !== null]);
             setFlash('success', t('global_message.sent_flash', ['count' => count($recipientIds)]));
         }
         redirect('war-room.php?id=' . $missionId);

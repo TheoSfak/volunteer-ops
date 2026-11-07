@@ -175,6 +175,38 @@ if ($action === 'add_route') {
     exit;
 }
 
+if ($action === 'add_order') {
+    // The card's «Εντολή σε άτομα» (v3.457.0): a general order - a task, a spoken announcement, a broadcast message,
+    // or a request for a location, a photo or a video - goes into the phase instead of out to people. team_id is a
+    // team's id, 'slot:<id>' or the word 'all' (every person on duty when it is sent); an empty audience is refused.
+    // As for add_item, a "new phase" made for a refused order is taken out again.
+    $phaseId = (int) post('phase_id');
+    $madePhase = false;
+    if ($phaseId === 0 && post('phase_id') === 'new') {
+        $made = addScenarioPhase($mission, (int) $userId, '');
+        if (!$made['ok']) {
+            echo $fail($made['error']);
+            exit;
+        }
+        $phaseId = (int) $made['id'];
+        $madePhase = true;
+    }
+    $result = addScenarioOrderItem($mission, $phaseId, (int) $userId, [
+        'order_type' => post('order_type'),
+        'text'       => post('text'),
+        'team_id'    => post('team_id'),
+    ]);
+    if (!$result['ok']) {
+        if ($madePhase) {
+            deleteScenarioPhase($mission, $phaseId, (int) $userId);
+        }
+        echo $fail($result['error']);
+        exit;
+    }
+    echo $answer(['item_id' => $result['id'], 'phase_id' => $phaseId]);
+    exit;
+}
+
 if ($action === 'delete_item') {
     $error = deleteScenarioItem($mission, (int) post('item_id'), (int) $userId);
     echo $error === null ? $answer() : $fail($error);

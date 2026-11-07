@@ -8093,6 +8093,15 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 207,
+            'description' => "Scenario general orders (v3.457.0): a staged order can now be an order to people - a request for a location, a photo or a video, a task, a spoken announcement, a broadcast message - as well: mission_scenario_items.kind grows from ENUM('dispatch','sector','route') to ENUM('dispatch','sector','route','order'). Such an order's payload holds the order type, the words typed for it (task, announcement, message) and who it goes to: a team, a slot, or every person on duty. Re-running it changes nothing.",
+            'up' => function () {
+                dbExecute("ALTER TABLE mission_scenario_items
+                    MODIFY COLUMN kind ENUM('dispatch','sector','route','order') NOT NULL DEFAULT 'dispatch' COMMENT 'What kind of order: dispatch = a point or an area (sent as a mission_dispatch_points row), sector = a search sector (sent as a mission_search_sectors row), route = a patrol of waypoints (sent as a mission_routes row), order = a general order to people (sent as a mission_orders row)'");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

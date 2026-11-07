@@ -53,6 +53,18 @@
  * where the team is (the optional «επιστροφή στην αφετηρία» waypoint is its last ping). Both are asked when the route
  * is SENT; the card says beforehand when a team has nobody in the Action Room (team_empty) and play warns.
  *
+ * GENERAL ORDERS (v3.457.0). A staged order can also be an order to PEOPLE (kind 'order'): a task, a spoken announcement, a
+ * broadcast message, or a request for a location, a photo or a video, for a real team, a slot, or - the one place a plan may
+ * say «όλοι» - every person on duty when it is sent. Play hands it to sendMissionGeneralOrder() - the function the Action
+ * Room's own buttons now send through - so the order, its recipients, the audit entry and the notifications are the ones a
+ * coordinator's button makes. Who is on duty is only known on the day, so the recipients are chosen at SEND
+ * (scenarioOrderRecipients(): the team's members among those on duty, or all of them) and an order nobody would receive
+ * FAILS, with a retry, rather than being recorded as sent. scenarioOrderInputFromPayload() has the same never-widened rule
+ * as the others: 'all' only when the payload says so in words; a missing team or a slot that stands for none is null. Its
+ * progress is read from the live order (everyone has done what it asked, or - for a message, which nothing can see being
+ * read - has acknowledged it) and it is never taken back: «Ανάκληση φάσης» leaves it, as a delivered message cannot be
+ * recalled by hand either.
+ *
  * HOW FAR A PHASE HAS GOT (v3.456.0). Nothing about progress is stored: scenarioItemLiveStates() reads each sent order
  * from the live order itself (a point is finished when its team pressed «Ολοκληρώθηκε», a route when it is completed,
  * a sector when it is completed; an order that is gone, cancelled or taken off its team is withdrawn), and
@@ -171,6 +183,7 @@ function loadMissionScenario(int $missionId): array {
         }
         $isSector = $row['kind'] === 'sector';
         $isRoute = $row['kind'] === 'route';
+        $isOrder = $row['kind'] === 'order';
         $areaId = $isSector ? (int) ($payload['area_id'] ?? 0) : 0;
         $audience = in_array($payload['audience'] ?? '', ['all', 'slot'], true) ? $payload['audience'] : 'team';
         $slotId = $audience === 'slot' ? (int) ($payload['slot_id'] ?? 0) : 0;
@@ -192,9 +205,11 @@ function loadMissionScenario(int $missionId): array {
             'slot_id'      => $slotId ?: null,
             'slot_label'   => $audience === 'slot' ? ($slot['label'] ?? ($payload['slot_label'] ?? null)) : null,
             'unmapped'     => $audience === 'slot' && $teamLabelNow === null,
-            'type'         => $isSector ? 'sector' : ($isRoute ? 'route' : ($payload['type'] ?? null)),
-            'geo'          => $isRoute ? scenarioRouteGhostPoints($payload) : ($payload['geo'] ?? null),
-            'label'        => $payload['label'] ?? null,
+            'type'         => $isSector ? 'sector' : ($isRoute ? 'route' : ($isOrder ? 'order' : ($payload['type'] ?? null))),
+            'geo'          => $isRoute ? scenarioRouteGhostPoints($payload) : ($isOrder ? null : ($payload['geo'] ?? null)),
+            // An order to people has no place on the map; the words typed for it are what the card shows.
+            'label'        => $isOrder ? ($payload['text'] ?? null) : ($payload['label'] ?? null),
+            'order_type'   => $isOrder ? ($payload['order_type'] ?? null) : null,
             'travel_mode'  => $payload['travel_mode'] ?? null,
             'area_id'      => $isSector ? $areaId : null,
             'area_label'   => $isSector ? ($areaLabels[$areaId] ?? ($payload['area_label'] ?? null)) : null,
@@ -205,9 +220,10 @@ function loadMissionScenario(int $missionId): array {
             'closed_loop'  => $isRoute ? !empty($payload['is_closed_loop']) : null,
             'return_to_start' => $isRoute ? !empty($payload['add_return_waypoint']) : null,
             'team_empty'   => $isRoute && $teamId > 0 && isset($teamLabels[(int) $teamId]) && empty($participantsByTeam[(int) $teamId]),
-            'dispatch_id'  => !$isSector && !$isRoute && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
+            'dispatch_id'  => !$isSector && !$isRoute && !$isOrder && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'sector_id'    => $isSector && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'route_id'     => $isRoute && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
+            'order_id'     => $isOrder && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'error'        => $row['last_error'],
             'state'        => $states[(int) $row['id']]['state'] ?? null,
             'done_n'       => $states[(int) $row['id']]['done'] ?? null,
@@ -245,12 +261,12 @@ function loadMissionScenario(int $missionId): array {
  * A «Δεν μπορώ» does not finish anything: the order stays open. Reopening a finished order makes it open again.
  */
 function scenarioItemLiveStates(int $missionId, array $items): array {
-    $byKind = ['dispatch' => [], 'route' => [], 'sector' => []];
+    $byKind = ['dispatch' => [], 'route' => [], 'sector' => [], 'order' => []];
     foreach ($items as $row) {
         if ($row['sent_at'] === null || $row['sent_ref_id'] === null) {
             continue;
         }
-        $kind = in_array($row['kind'], ['route', 'sector'], true) ? $row['kind'] : 'dispatch';
+        $kind = in_array($row['kind'], ['route', 'sector', 'order'], true) ? $row['kind'] : 'dispatch';
         $byKind[$kind][(int) $row['id']] = (int) $row['sent_ref_id'];
     }
     $out = [];
@@ -298,6 +314,37 @@ function scenarioItemLiveStates(int $missionId, array $items): array {
             $out[$itemId] = ['state' => $live[$ref] ?? 'withdrawn', 'done' => null, 'of' => null];
         }
     }
+
+    if ($byKind['order']) {
+        // An order to people is DONE when everybody it went to has done what it asked - the same rule as the
+        // acknowledgement panel's «finished»: for a task, a location, a photo or a video that is the thing itself
+        // (fulfilled_at); for a message or a spoken announcement, which nothing can observe being heard, the
+        // acknowledgement («Ελήφθη») is the completion. done/of count people. WITHDRAWN here only means there is
+        // nobody left to wait for (the order or every recipient row is gone, e.g. a removed visitor).
+        $refs = array_values(array_unique($byKind['order']));
+        $types = [];
+        foreach (dbFetchAll("SELECT id, order_type FROM mission_orders WHERE mission_id = ? AND id IN (" . $in($refs) . ")", array_merge([$missionId], $refs)) as $r) {
+            $types[(int) $r['id']] = (string) $r['order_type'];
+        }
+        $people = [];
+        foreach (dbFetchAll(
+            "SELECT order_id, COUNT(*) AS n, SUM(fulfilled_at IS NOT NULL) AS fulfilled, SUM(acknowledged_at IS NOT NULL) AS acked
+             FROM mission_order_recipients WHERE order_id IN (" . $in($refs) . ") GROUP BY order_id",
+            $refs
+        ) as $r) {
+            $people[(int) $r['order_id']] = ['of' => (int) $r['n'], 'fulfilled' => (int) $r['fulfilled'], 'acked' => (int) $r['acked']];
+        }
+        foreach ($byKind['order'] as $itemId => $ref) {
+            $type = $types[$ref] ?? null;
+            $of = $people[$ref]['of'] ?? 0;
+            if ($type === null || $of === 0) {
+                $out[$itemId] = ['state' => 'withdrawn', 'done' => null, 'of' => null];
+                continue;
+            }
+            $doneN = in_array($type, ACK_TRACKER_FULFIL_TYPES, true) ? $people[$ref]['fulfilled'] : $people[$ref]['acked'];
+            $out[$itemId] = ['state' => $doneN >= $of ? 'done' : 'open', 'done' => $doneN, 'of' => $of];
+        }
+    }
     return $out;
 }
 
@@ -308,13 +355,17 @@ function scenarioItemLiveStates(int $missionId, array $items): array {
  * complete (every order that still counts is finished). can_withdraw is true while any order is still open.
  */
 function scenarioPhaseProgress(array $items): array {
-    $done = $open = $withdrawn = $failed = 0;
+    $done = $open = $withdrawn = $failed = $withdrawable = 0;
     foreach ($items as $item) {
         $state = $item['state'] ?? null;
         if ($state === 'done') {
             $done++;
         } elseif ($state === 'open') {
             $open++;
+            // An order to people (a message, a task...) cannot be taken back once it has been delivered.
+            if (($item['kind'] ?? '') !== 'order') {
+                $withdrawable++;
+            }
         } elseif ($state === 'withdrawn') {
             $withdrawn++;
         } elseif (!$item['sent']) {
@@ -325,7 +376,8 @@ function scenarioPhaseProgress(array $items): array {
     return [
         'total' => $total, 'done' => $done, 'open' => $open, 'withdrawn' => $withdrawn, 'failed' => $failed,
         'complete' => $total > 0 && $done === $total,
-        'can_withdraw' => $open > 0,
+        'withdrawable' => $withdrawable,
+        'can_withdraw' => $withdrawable > 0,
     ];
 }
 
@@ -649,6 +701,77 @@ function addScenarioRouteItem(array $mission, int $phaseId, int $userId, array $
     return ['ok' => true, 'id' => $id];
 }
 
+/**
+ * The general orders a scenario may carry, in the order the card offers them: a task, a spoken announcement, a
+ * broadcast message, and a request for a location, a photo or a video. (The stream request and the end-of-operation
+ * recall are not among them: see missionGeneralOrderSpec().)
+ */
+const SCENARIO_ORDER_TYPES = ['task', 'speak', 'message', 'location', 'photo', 'video'];
+
+/**
+ * Writes a general order - to people, not to a place - into a phase. $input is the card's form: order_type (one of
+ * SCENARIO_ORDER_TYPES), text (the words of a task, an announcement or a message; required for those three, ignored
+ * for the others), team_id (a team's id, 'slot:<id>' for a slot of this scenario, or the word 'all' for every person
+ * on duty when the order is sent - anything else, the empty string included, is REFUSED: an empty audience is not
+ * "everybody"). Checked as sending it would be (the type, the words, a team of this mission), so an order that could
+ * never be sent is refused when it is written down. A phase that has been played takes no more orders.
+ * ['ok' => true, 'id' => n] or ['ok' => false, 'error' => text].
+ */
+function addScenarioOrderItem(array $mission, int $phaseId, int $userId, array $input): array {
+    $missionId = (int) $mission['id'];
+    $phase = scenarioPhaseRow($missionId, $phaseId);
+    if (!$phase) {
+        return ['ok' => false, 'error' => t('scenario.phase_not_found')];
+    }
+    if ($phase['played_at'] !== null) {
+        return ['ok' => false, 'error' => t('scenario.phase_closed_for_orders')];
+    }
+    if ((int) dbFetchValue("SELECT COUNT(*) FROM mission_scenario_items WHERE phase_id = ?", [$phaseId]) >= SCENARIO_MAX_ITEMS_PER_PHASE) {
+        return ['ok' => false, 'error' => t('scenario.too_many_orders', ['max' => SCENARIO_MAX_ITEMS_PER_PHASE])];
+    }
+
+    $type = (string) ($input['order_type'] ?? '');
+    $spec = in_array($type, SCENARIO_ORDER_TYPES, true) ? missionGeneralOrderSpec($type) : null;
+    if ($spec === null) {
+        return ['ok' => false, 'error' => t('scenario.order_type_unknown')];
+    }
+    $text = $spec['text'] ? missionGeneralOrderText((string) ($input['text'] ?? '')) : '';
+    if ($spec['text'] && $text === '') {
+        return ['ok' => false, 'error' => t($spec['empty_key'])];
+    }
+
+    $who = scenarioParseAudience($missionId, (string) ($input['team_id'] ?? ''), true);
+    if ($who === null) {
+        return ['ok' => false, 'error' => t('scenario.order_needs_audience')];
+    }
+    if (isset($who['error'])) {
+        return ['ok' => false, 'error' => $who['error']];
+    }
+    $audience = $who['audience'];
+    $slot = $who['slot'];
+    if ($audience === 'team' && !dbFetchValue("SELECT 1 FROM mission_teams WHERE id = ? AND mission_id = ?", [(int) $who['team_input'], $missionId])) {
+        return ['ok' => false, 'error' => t('common.team_not_found')];
+    }
+
+    $payload = [
+        'audience'   => $audience,
+        'team_id'    => $audience === 'team' ? (int) $who['team_input'] : null,
+        'order_type' => $type,
+        'text'       => $text,
+    ];
+    if ($audience === 'slot') {
+        $payload['slot_id'] = (int) $slot['id'];
+        $payload['slot_label'] = $slot['label'];
+    }
+    $seq = 1 + (int) dbFetchValue("SELECT COALESCE(MAX(seq), 0) FROM mission_scenario_items WHERE phase_id = ?", [$phaseId]);
+    $id = (int) dbInsert(
+        "INSERT INTO mission_scenario_items (phase_id, mission_id, seq, kind, payload, slot_id, created_by, created_at) VALUES (?, ?, ?, 'order', ?, ?, ?, NOW())",
+        [$phaseId, $missionId, $seq, json_encode($payload, JSON_UNESCAPED_UNICODE), $slot ? (int) $slot['id'] : null, $userId]
+    );
+    logAudit('stage_scenario_item', 'mission_scenario_items', $id, null, ['mission_id' => $missionId, 'phase_id' => $phaseId, 'type' => 'order:' . $type, 'audience' => $audience, 'team_id' => $payload['team_id'], 'slot_id' => $payload['slot_id'] ?? null]);
+    return ['ok' => true, 'id' => $id];
+}
+
 /** Takes one staged order off the plan. Null on success. */
 function deleteScenarioItem(array $mission, int $itemId, int $userId): ?string {
     $missionId = (int) $mission['id'];
@@ -751,22 +874,100 @@ function scenarioRouteInputFromPayload($payload, array $slotTeams = []): ?array 
 }
 
 /**
+ * What createScenarioOrder() takes, built from a staged general order's payload, or null when the payload cannot be
+ * read as one. The general order's twin of scenarioDispatchInputFromPayload(), with the same rule: the audience 'all'
+ * (every person on duty at the moment of sending) is read ONLY when the payload says so in words; an audience 'team'
+ * without a real team id is null, and so is a slot that stands for no team ($slotTeams: slot id => team id, as
+ * scenarioSlotTeamMap() gives it) - never "everybody". An order type that is not one of SCENARIO_ORDER_TYPES, and the
+ * words of a task, an announcement or a message that are empty, are null too. Returns ['order_type' =>, 'text' =>,
+ * 'audience' => 'all'|'team', 'team_id' => int|null].
+ */
+function scenarioOrderInputFromPayload($payload, array $slotTeams = []): ?array {
+    if (!is_array($payload)) {
+        return null;
+    }
+    $type = (string) ($payload['order_type'] ?? '');
+    $spec = in_array($type, SCENARIO_ORDER_TYPES, true) ? missionGeneralOrderSpec($type) : null;
+    if ($spec === null) {
+        return null;
+    }
+    $text = $spec['text'] ? missionGeneralOrderText((string) ($payload['text'] ?? '')) : '';
+    if ($spec['text'] && $text === '') {
+        return null;
+    }
+    $audience = $payload['audience'] ?? '';
+    if ($audience === 'all') {
+        $teamId = null;
+    } elseif ($audience === 'team' && (int) ($payload['team_id'] ?? 0) > 0) {
+        $teamId = (int) $payload['team_id'];
+    } elseif ($audience === 'slot' && (int) ($slotTeams[(int) ($payload['slot_id'] ?? 0)] ?? 0) > 0) {
+        $teamId = (int) $slotTeams[(int) $payload['slot_id']];
+    } else {
+        return null;
+    }
+    return ['order_type' => $type, 'text' => $text, 'audience' => $teamId === null ? 'all' : 'team', 'team_id' => $teamId];
+}
+
+/**
+ * Who a staged general order goes to at the moment it is sent (the people are only known on the day): everybody on duty
+ * who takes part in the Action Room (activeMissionRecipientIds(), the one definition of "on duty"), or - for a team -
+ * those of its members among them. A broadcast message never goes back to the person who sends it, exactly as the
+ * Action Room's own «Καθολικό μήνυμα» does. $input is scenarioOrderInputFromPayload()'s answer.
+ */
+function scenarioOrderRecipients(int $missionId, int $userId, array $input): array {
+    $ids = activeMissionRecipientIds($missionId);
+    if ($input['audience'] === 'team') {
+        $members = array_map('intval', array_column(
+            dbFetchAll("SELECT user_id FROM mission_team_members WHERE mission_id = ? AND team_id = ?", [$missionId, (int) $input['team_id']]),
+            'user_id'
+        ));
+        $ids = array_values(array_intersect($ids, $members));
+    }
+    if ($input['order_type'] === 'message') {
+        $ids = array_values(array_diff($ids, [$userId]));
+    }
+    return $ids;
+}
+
+/**
+ * Sends a staged general order the way a coordinator's own button does (sendMissionGeneralOrder()). A team that is no
+ * longer in the mission fails with that reason, and so does an order nobody on duty would receive: an order that
+ * reached nobody is not a sent order (the Action Room's own buttons warn «Επιλέξτε τουλάχιστον έναν εθελοντή με
+ * ενεργή βάρδια» and send nothing), and the card offers to try it again. ['ok' => true, 'id' => the order's id] or
+ * ['ok' => false, 'error' => text].
+ */
+function createScenarioOrder(array $mission, int $userId, array $input): array {
+    $missionId = (int) $mission['id'];
+    if ($input['audience'] === 'team' && !dbFetchValue("SELECT 1 FROM mission_teams WHERE id = ? AND mission_id = ?", [(int) $input['team_id'], $missionId])) {
+        return ['ok' => false, 'error' => t('common.team_not_found')];
+    }
+    $ids = scenarioOrderRecipients($missionId, $userId, $input);
+    if (!$ids) {
+        return ['ok' => false, 'error' => t('scenario.order_nobody')];
+    }
+    $sent = sendMissionGeneralOrder($mission, $userId, $input['order_type'], $ids, $input['text']);
+    return ['ok' => true, 'id' => $sent['order_id']];
+}
+
+/**
  * Sends one staged order - a point or an area through createMissionDispatch(), a sector through
- * createMissionSector(), a route through createMissionRoute() - and writes down what came of it. Returns ['item_id' =>
- * n, 'kind' => 'dispatch'|'sector'|'route', 'ok' => bool, 'dispatch_id' => n|null (the live order, for a point or an
- * area), 'sector_id' => n|null (for a sector), 'route_id' => n|null (for a route), 'error' => text|null]. Never
- * throws: an item that blows up is a failed item, not an aborted phase. A sector whose search area has been deleted
- * since fails with that reason and creates nothing.
+ * createMissionSector(), a route through createMissionRoute(), an order to people through createScenarioOrder() - and
+ * writes down what came of it. Returns ['item_id' => n, 'kind' => 'dispatch'|'sector'|'route'|'order', 'ok' => bool,
+ * 'dispatch_id' => n|null (the live order, for a point or an area), 'sector_id' => n|null (for a sector), 'route_id' =>
+ * n|null (for a route), 'order_id' => n|null (for an order to people), 'error' => text|null]. Never throws: an item
+ * that blows up is a failed item, not an aborted phase. A sector whose search area has been deleted since fails with
+ * that reason and creates nothing.
  */
 function scenarioSendItem(array $mission, array $item, int $userId, string $userName): array {
     $itemId = (int) $item['id'];
-    $kind = in_array($item['kind'] ?? 'dispatch', ['sector', 'route'], true) ? $item['kind'] : 'dispatch';
+    $kind = in_array($item['kind'] ?? 'dispatch', ['sector', 'route', 'order'], true) ? $item['kind'] : 'dispatch';
     $isSector = $kind === 'sector';
     $payload = json_decode((string) $item['payload'], true);
     $slotTeams = scenarioSlotTeamMap((int) $mission['id']);
     $input = match ($kind) {
         'sector' => scenarioSectorInputFromPayload($payload, $slotTeams),
         'route' => scenarioRouteInputFromPayload($payload, $slotTeams),
+        'order' => scenarioOrderInputFromPayload($payload, $slotTeams),
         default => scenarioDispatchInputFromPayload($payload, $slotTeams),
     };
     if ($input === null) {
@@ -780,6 +981,7 @@ function scenarioSendItem(array $mission, array $item, int $userId, string $user
             $result = match ($kind) {
                 'sector' => createMissionSector($mission, $userId, $input),
                 'route' => createMissionRoute($mission, $userId, $input),
+                'order' => createScenarioOrder($mission, $userId, $input),
                 default => createMissionDispatch($mission, $userId, $userName, $input),
             };
         } catch (Throwable $e) {
@@ -797,12 +999,13 @@ function scenarioSendItem(array $mission, array $item, int $userId, string $user
             'dispatch_id' => $kind === 'dispatch' ? (int) $result['id'] : null,
             'sector_id' => $isSector ? (int) $result['id'] : null,
             'route_id' => $kind === 'route' ? (int) $result['id'] : null,
+            'order_id' => $kind === 'order' ? (int) $result['id'] : null,
             'error' => null,
         ];
     }
     $error = mb_substr((string) $result['error'], 0, 250);
     dbExecute("UPDATE mission_scenario_items SET last_error = ? WHERE id = ?", [$error, $itemId]);
-    return ['item_id' => $itemId, 'kind' => $kind, 'ok' => false, 'dispatch_id' => null, 'sector_id' => null, 'route_id' => null, 'error' => $error];
+    return ['item_id' => $itemId, 'kind' => $kind, 'ok' => false, 'dispatch_id' => null, 'sector_id' => null, 'route_id' => null, 'order_id' => null, 'error' => $error];
 }
 
 /**
@@ -928,7 +1131,9 @@ function withdrawScenarioPhase(array $mission, int $phaseId, int $userId): array
         [$phaseId, $missionId]
     );
     $states = scenarioItemLiveStates($missionId, $rows);
-    $open = array_values(array_filter($rows, fn($r) => ($states[(int) $r['id']]['state'] ?? '') === 'open'));
+    // A general order to people (kind 'order') is not among them: once a message or a task has reached a phone there
+    // is nothing to take back, and the Action Room has no way to do it by hand either.
+    $open = array_values(array_filter($rows, fn($r) => $r['kind'] !== 'order' && ($states[(int) $r['id']]['state'] ?? '') === 'open'));
     if (!$open) {
         return ['ok' => false, 'error' => t('scenario.withdraw_nothing')];
     }
@@ -937,7 +1142,7 @@ function withdrawScenarioPhase(array $mission, int $phaseId, int $userId): array
     $results = [];
     $dispatchItems = [];
     foreach ($open as $row) {
-        if (!in_array($row['kind'], ['route', 'sector'], true)) {
+        if ($row['kind'] === 'dispatch') {
             $dispatchItems[(int) $row['sent_ref_id']] = (int) $row['id'];
         }
     }

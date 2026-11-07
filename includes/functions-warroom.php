@@ -7984,6 +7984,74 @@ function createMissionOrderAndNotify(
     return (int) $orderId;
 }
 
+/** The longest text a task, a spoken announcement or a broadcast message may carry (about forty seconds of Greek read aloud). */
+const MISSION_GENERAL_ORDER_TEXT_MAX = 500;
+
+/** What a coordinator typed for a general order: trimmed and cut to MISSION_GENERAL_ORDER_TEXT_MAX characters. */
+function missionGeneralOrderText(string $raw): string {
+    return mb_substr(trim($raw), 0, MISSION_GENERAL_ORDER_TEXT_MAX);
+}
+
+/**
+ * The GENERAL ORDERS (v3.457.0): the orders a coordinator sends to people rather than to a place - a request for a
+ * location, a photo or a video, a task, a spoken announcement, a broadcast message. They were six near-identical
+ * blocks in war-room.php; all that differs between them is data, so it is here once and both the Action Room's own
+ * buttons and a scenario's play (includes/functions-scenario.php) send through sendMissionGeneralOrder().
+ *   title_key / message_key : the notification copy (`text` types carry the typed words instead of a message_key)
+ *   text                    : the order carries words the coordinator typed
+ *   empty_key               : the warning when those words are empty (null: no words)
+ *   alarm                   : the banner's alarmStyle ('speak' makes the phone read it out)
+ *   audit / audit_text      : the audit action, and the audit key the words are written under
+ * 'live' (it opens a stream row of its own) and 'return_to_base' (the end-of-operation siren) are deliberately not
+ * general orders and are sent by their own handlers. Null for any other type.
+ */
+function missionGeneralOrderSpec(string $type): ?array {
+    static $specs = [
+        'location' => ['title_key' => 'order.location.title', 'message_key' => 'order.location.message', 'text' => false, 'empty_key' => null, 'alarm' => null, 'audit' => 'request_mission_location', 'audit_text' => null],
+        'photo'    => ['title_key' => 'order.photo.title', 'message_key' => 'order.photo.message', 'text' => false, 'empty_key' => null, 'alarm' => null, 'audit' => 'request_mission_photo', 'audit_text' => null],
+        'video'    => ['title_key' => 'order.video.title', 'message_key' => 'order.video.message', 'text' => false, 'empty_key' => null, 'alarm' => null, 'audit' => 'request_mission_video', 'audit_text' => null],
+        'task'     => ['title_key' => 'order.task.title', 'message_key' => '', 'text' => true, 'empty_key' => 'order.task.empty_warning', 'alarm' => null, 'audit' => 'request_mission_task', 'audit_text' => 'task_text'],
+        'speak'    => ['title_key' => 'order.speak.title', 'message_key' => '', 'text' => true, 'empty_key' => 'order.speak.empty_warning', 'alarm' => 'speak', 'audit' => 'request_mission_speak', 'audit_text' => 'speak_text'],
+        'message'  => ['title_key' => 'global_message.title', 'message_key' => '', 'text' => true, 'empty_key' => 'global_message.empty_warning', 'alarm' => null, 'audit' => 'global_message_war_room', 'audit_text' => 'message'],
+    ];
+    return $specs[$type] ?? null;
+}
+
+/**
+ * Sends a general order to $recipientIds (already chosen by the caller) and writes the audit entry: the one place
+ * the six order types become a mission_orders row, its recipients and their notifications. $text is what the
+ * coordinator typed (already through missionGeneralOrderText()); only a broadcast message may be empty, when it
+ * carries a photo instead (the recipients then read the photo-only line). $auditExtra is added to a message's audit
+ * data (the handler says whether a photo went with it). Returns ['order_id' => n, 'count' => recipients].
+ * Throws InvalidArgumentException for a type that is not a general order.
+ */
+function sendMissionGeneralOrder(array $mission, int $userId, string $type, array $recipientIds, string $text = '', array $auditExtra = []): array {
+    $spec = missionGeneralOrderSpec($type);
+    if ($spec === null) {
+        throw new InvalidArgumentException('Not a general order: ' . $type);
+    }
+    $missionId = (int) $mission['id'];
+    $missionTitle = (string) $mission['title'];
+    if ($spec['text']) {
+        $orderId = createMissionOrderAndNotify(
+            $missionId, $missionTitle, $type, $userId, $recipientIds,
+            $spec['title_key'], ['mission' => $missionTitle], ($type === 'message' && $text === '') ? t('global_message.photo_only_text') : $text, '', [],
+            $text !== '' ? $text : null, $spec['alarm']
+        );
+        $audit = $type === 'message'
+            ? ['message' => $text] + $auditExtra
+            : ['recipient_ids' => $recipientIds, $spec['audit_text'] => $text];
+    } else {
+        $orderId = createMissionOrderAndNotify(
+            $missionId, $missionTitle, $type, $userId, $recipientIds,
+            $spec['title_key'], [], null, $spec['message_key'], ['mission' => $missionTitle]
+        );
+        $audit = ['recipient_ids' => $recipientIds];
+    }
+    logAudit($spec['audit'], 'missions', $missionId, null, $audit);
+    return ['order_id' => $orderId, 'count' => count($recipientIds)];
+}
+
 /**
  * Guest Mission Debrief: one-time invite to every guest approved-participant
  * of $missionId who doesn't already have a mission_guest_debriefs row for it.

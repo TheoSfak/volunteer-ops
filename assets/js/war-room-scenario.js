@@ -15,6 +15,10 @@
  *     card names the search area it is cut from;
  *   - the route window's «Στο σενάριο ▾» (v3.455.0): the route drawn there goes into a phase instead of out to a team
  *     (stageRoute); a staged route is a grey dashed line through its waypoints with the phase number at its start;
+ *   - the card's «Εντολή σε άτομα» (v3.457.0): a general order - a task, a spoken announcement, a message, or a request
+ *     for a location, a photo or a video - goes into a phase from a small form in the card itself (the Action Room has
+ *     no single window for them). It has no place on the map, so no ghost; it goes to a team, a slot, or everyone on
+ *     duty when play is pressed, and the card counts people (✓2/5), not teams;
  *   - the team slots (v3.453.0): names for teams that may not exist yet, in the card, in the window's recipient
  *     list, and in the dialog that play opens to ask which team is which.
  *
@@ -37,6 +41,23 @@
     // so the card asks again now and then - only while the tab is in front, nobody is choosing in the card and there is
     // something to wait for. It redraws only when the answer differs, so a select being used is never torn down.
     const REFRESH_MS = 20000;
+
+    // The general orders a phase may carry (v3.457.0): orders to people rather than to a place. The three that carry
+    // words are the first three; the others are a request for a location, a photo or a video.
+    const ORDER_TYPES = ['task', 'speak', 'message', 'location', 'photo', 'video'];
+    const ORDER_TEXT_TYPES = ['task', 'speak', 'message'];
+    // The words for each kind, spelled out one by one so a missing string is found by name.
+    const ORDER_LABEL_KEYS = {
+        task: 'scenario.order_type_task', speak: 'scenario.order_type_speak', message: 'scenario.order_type_message',
+        location: 'scenario.order_type_location', photo: 'scenario.order_type_photo', video: 'scenario.order_type_video'
+    };
+    const ORDER_ICONS = {
+        task: 'bi-clipboard-check-fill', speak: 'bi-megaphone-fill', message: 'bi-chat-left-text-fill',
+        location: 'bi-crosshair', photo: 'bi-camera-fill', video: 'bi-camera-reels-fill'
+    };
+    // What the «Εντολή σε άτομα» form holds while it is open. Kept here, not in the form, so a redraw of the card
+    // (an action of another coordinator, the 20-second refresh) never loses what is being typed.
+    let orderDraft = {open: false, type: 'task', text: '', to: '', phase: '', note: ''};
 
     function esc(value) {
         return escapeHtml(String(value == null ? '' : value));
@@ -90,7 +111,7 @@
         if (document.hidden || busy || !underWay()) return;
         const body = document.getElementById('scenarioBody');
         const active = document.activeElement;
-        if (body && active && body.contains(active) && (active.tagName === 'SELECT' || active.tagName === 'INPUT')) return;
+        if (body && active && body.contains(active) && (active.tagName === 'SELECT' || active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
         fetch(ENDPOINT + '?mission_id=' + encodeURIComponent(WR_MISSION_ID))
             .then(r => r.json())
             .then(res => { if (res && res.ok && !busy && JSON.stringify(res.scenario) !== lastJson) apply(res.scenario); })
@@ -135,29 +156,38 @@
     function itemKind(item) {
         if (item.type === 'sector') return t('scenario.kind_sector');
         if (item.type === 'route') return t('scenario.kind_route');
+        if (item.type === 'order') return t(ORDER_LABEL_KEYS[item.order_type] || 'scenario.order_add_btn');
         return item.type === 'point' ? t('scenario.kind_point') : t('scenario.kind_area');
     }
     function itemTarget(item) {
-        if (item.audience === 'all') return t('common.all_teams');
+        // An order to people that goes to «όλοι» goes to everybody on duty, not to every team.
+        if (item.audience === 'all') return item.type === 'order' ? t('scenario.target_all_people') : t('common.all_teams');
         if (item.audience === 'slot') return (item.slot_label || '') + (item.team_label ? ' → ' + item.team_label : '');
         return item.team_label || t('scenario.team_gone');
     }
     function itemTitle(item) {
-        return item.label ? itemKind(item) + ' «' + item.label + '»' : itemKind(item);
+        // The words of an order to people can be long: the card shows the beginning.
+        const label = (item.type === 'order' && item.label && String(item.label).length > 60) ? String(item.label).slice(0, 57) + '…' : item.label;
+        return label ? itemKind(item) + ' «' + label + '»' : itemKind(item);
     }
 
     // ── The card ───────────────────────────────────────────────────────────────────────────────────────────────
     // How an order that was sent stands now (v3.456.0), read from the live order by the server: finished, under way
     // (with how many teams have finished it when it went to every team), or taken back.
     function stateLine(item) {
+        // A message or a spoken announcement is finished when everybody has acknowledged it; the other orders to
+        // people when everybody has done what they asked (v3.457.0). Counts are people, not teams.
+        const isOrder = item.type === 'order';
+        const ackOnly = isOrder && (item.order_type === 'message' || item.order_type === 'speak');
         if (item.state === 'done') {
-            return `<div class="small text-success"><i class="bi bi-check-circle-fill me-1"></i>${esc(t('scenario.state_done'))}</div>`;
+            return `<div class="small text-success"><i class="bi bi-check-circle-fill me-1"></i>${esc(t(ackOnly ? 'scenario.state_done_ack' : 'scenario.state_done'))}</div>`;
         }
         if (item.state === 'withdrawn') {
             return `<div class="small text-muted"><i class="bi bi-slash-circle me-1"></i>${esc(t('scenario.state_withdrawn'))}</div>`;
         }
         if (item.state === 'open') {
-            const text = item.of_n ? t('scenario.state_open_broadcast', {done: item.done_n || 0, of: item.of_n}) : t('scenario.state_open');
+            const key = isOrder ? (ackOnly ? 'scenario.state_open_ack' : 'scenario.state_open_people') : 'scenario.state_open_broadcast';
+            const text = item.of_n ? t(key, {done: item.done_n || 0, of: item.of_n}) : t('scenario.state_open');
             return `<div class="small text-primary"><i class="bi bi-hourglass-split me-1"></i>${esc(text)}</div>`;
         }
         return `<div class="small text-success"><i class="bi bi-check-circle-fill me-1"></i>${esc(t('scenario.item_sent'))}</div>`;
@@ -181,7 +211,9 @@
 
     function itemHtml(phase, item) {
         const icon = item.type === 'point' ? 'bi-geo-alt-fill'
-            : (item.type === 'sector' ? 'bi-grid-3x3-gap-fill' : (item.type === 'route' ? 'bi-signpost-split-fill' : 'bi-bounding-box'));
+            : (item.type === 'sector' ? 'bi-grid-3x3-gap-fill'
+                : (item.type === 'route' ? 'bi-signpost-split-fill'
+                    : (item.type === 'order' ? (ORDER_ICONS[item.order_type] || 'bi-chat-left-text-fill') : 'bi-bounding-box')));
         const badgeClass = item.team_missing ? 'bg-danger'
             : (item.audience === 'all' ? 'bg-warning text-dark' : (item.audience === 'slot' ? (item.unmapped ? 'bg-warning text-dark' : 'bg-info text-dark') : 'bg-secondary'));
         const target = `<span class="badge ${badgeClass}">${esc(itemTarget(item))}</span>`;
@@ -203,7 +235,8 @@
             ? `<button type="button" class="btn btn-outline-primary btn-sm py-0" data-sc="retry" data-item="${item.id}" title="${esc(t('scenario.retry_btn'))}"><i class="bi bi-arrow-repeat"></i></button>` : '';
         const del = !item.sent
             ? `<button type="button" class="btn btn-outline-danger btn-sm py-0" data-sc="delete-item" data-item="${item.id}" title="${esc(t('scenario.item_delete'))}"><i class="bi bi-x-lg"></i></button>` : '';
-        const goto = item.sent
+        // An order to people has no place on the map to show.
+        const goto = (item.sent || item.type === 'order')
             ? `<span>${esc(itemTitle(item))}</span>`
             : `<a href="#" class="wr-sc-goto" data-sc="goto" data-item="${item.id}" title="${esc(t('scenario.show_on_map'))}">${esc(itemTitle(item))}</a>`;
         // A sector says which search area it is cut from (the area may be gone: then the line below says so).
@@ -237,8 +270,11 @@
         } else if (pr && pr.withdrawn > 0) {
             badge = ` <span class="badge bg-secondary">${esc(t('scenario.state_withdrawn'))}</span>`;
         }
-        const withdraw = (pr && pr.can_withdraw)
-            ? `<div class="mt-1"><button type="button" class="btn btn-outline-danger btn-sm w-100" data-sc="withdraw" data-phase="${phase.id}" title="${esc(t('scenario.withdraw_title'))}"><i class="bi bi-arrow-counterclockwise me-1"></i>${esc(t('scenario.withdraw_btn'))}</button></div>` : '';
+        // An order to people that is still under way cannot be taken back: the card says so beside the button.
+        const stuckOrders = played && phase.items.some(i => i.type === 'order' && i.state === 'open');
+        const withdraw = ((pr && pr.can_withdraw)
+            ? `<div class="mt-1"><button type="button" class="btn btn-outline-danger btn-sm w-100" data-sc="withdraw" data-phase="${phase.id}" title="${esc(t('scenario.withdraw_title'))}"><i class="bi bi-arrow-counterclockwise me-1"></i>${esc(t('scenario.withdraw_btn'))}</button></div>` : '')
+            + (stuckOrders ? `<div class="small text-muted mt-1" data-sc-no-withdraw="1">${esc(t('scenario.order_no_withdraw'))}</div>` : '');
         const ready = readyHint(phase);
         return `<div class="wr-sc-phase ${played ? 'wr-sc-played' : ''}${ready ? ' wr-sc-ready' : ''}" data-phase="${phase.id}">
             <div class="d-flex align-items-center gap-1">
@@ -272,6 +308,70 @@
         </div>`;
     }
 
+    // ── «Εντολή σε άτομα» (v3.457.0) ───────────────────────────────────────────────────────────────────────────
+    // The phase the form will use: the person's choice while it is still a phase that can take orders, else the first
+    // phase that has not been played, else a new one.
+    function orderPhase() {
+        const open = scenario.phases.filter(p => !p.played_at);
+        if (orderDraft.phase === 'new') return 'new';
+        if (orderDraft.phase && open.some(p => String(p.id) === String(orderDraft.phase))) return String(orderDraft.phase);
+        return open.length ? String(open[0].id) : 'new';
+    }
+
+    function orderFormHtml() {
+        if (!orderDraft.open) {
+            return `<button type="button" class="btn btn-outline-primary btn-sm w-100 mt-2" data-sc="order-open" title="${esc(t('scenario.order_add_title'))}"><i class="bi bi-chat-left-text me-1"></i>${esc(t('scenario.order_add_btn'))}</button>`;
+        }
+        const d = orderDraft;
+        const typeOptions = ORDER_TYPES.map(k => `<option value="${k}"${d.type === k ? ' selected' : ''}>${esc(t(ORDER_LABEL_KEYS[k]))}</option>`).join('');
+        const words = ORDER_TEXT_TYPES.includes(d.type)
+            ? `<label class="form-label small fw-semibold mb-1 mt-2">${esc(t('scenario.order_text_label'))}</label>
+               <textarea class="form-control form-control-sm" rows="3" maxlength="500" data-sc-o="text" placeholder="${esc(t('scenario.order_text_placeholder'))}">${esc(d.text)}</textarea>` : '';
+        const teamOptions = scenario.teams.map(team => `<option value="${team.id}"${String(d.to) === String(team.id) ? ' selected' : ''}>${esc(team.label)}</option>`).join('');
+        const slotOptions = scenario.slots.map(slot =>
+            `<option value="slot:${slot.id}"${d.to === 'slot:' + slot.id ? ' selected' : ''}>${esc(slot.label)}${slot.team_label ? ' → ' + esc(slot.team_label) : ''}</option>`).join('')
+            + `<option value="slot:new">${esc(t('scenario.slot_option_new'))}</option>`;
+        const chosenPhase = orderPhase();
+        const phaseOptions = scenario.phases.filter(p => !p.played_at).map(p =>
+            `<option value="${p.id}"${String(p.id) === chosenPhase ? ' selected' : ''}>${esc(phaseName(p))}${p.title ? ' · ' + esc(p.title) : ''}</option>`).join('')
+            + `<option value="new"${chosenPhase === 'new' ? ' selected' : ''}>${esc(t('scenario.new_phase_n', {n: scenario.phases.length + 1}))}</option>`;
+        return `<div class="wr-sc-orderform mt-2 border rounded p-2" data-sc-orderform="1">
+            <label class="form-label small fw-semibold mb-1">${esc(t('scenario.order_type_label'))}</label>
+            <select class="form-select form-select-sm" data-sc-o="type">${typeOptions}</select>
+            ${words}
+            <label class="form-label small fw-semibold mb-1 mt-2">${esc(t('scenario.order_to_label'))}</label>
+            <select class="form-select form-select-sm" data-sc-o="to">
+                <option value="">${esc(t('scenario.order_to_pick'))}</option>
+                <option value="all"${d.to === 'all' ? ' selected' : ''}>${esc(t('scenario.target_all_people'))}</option>
+                ${teamOptions}
+                <optgroup label="${esc(t('scenario.slot_option_group'))}">${slotOptions}</optgroup>
+            </select>
+            <label class="form-label small fw-semibold mb-1 mt-2">${esc(t('scenario.order_phase_label'))}</label>
+            <select class="form-select form-select-sm" data-sc-o="phase">${phaseOptions}</select>
+            <div class="small text-muted mt-2">${esc(t('scenario.order_hint'))}</div>
+            ${d.note ? `<div class="small text-success mt-1" data-sc-order-note="1"><i class="bi bi-check-circle-fill me-1"></i>${esc(d.note)}</div>` : ''}
+            <div class="d-flex gap-2 mt-2">
+                <button type="button" class="btn btn-outline-secondary btn-sm flex-fill" data-sc="order-cancel">${esc(t('common.cancel'))}</button>
+                <button type="button" class="btn btn-primary btn-sm flex-fill" data-sc="order-stage"><i class="bi bi-collection-play me-1"></i>${esc(t('scenario.order_stage_btn'))}</button>
+            </div>
+        </div>`;
+    }
+
+    // A field of the form changed: remember it. The kind decides whether there are words to type, so it redraws; a
+    // new slot is asked for by name and, once made, is the one chosen.
+    function onOrderField(el) {
+        const field = el.dataset.scO;
+        if (field !== 'type' && field !== 'to' && field !== 'phase' && field !== 'text') return;
+        orderDraft[field] = el.value;
+        orderDraft.note = '';
+        if (field === 'type') {
+            renderCard();
+        } else if (field === 'to' && el.value === 'slot:new') {
+            busy = true;
+            newSlot().then(id => { orderDraft.to = id ? 'slot:' + id : ''; }).finally(() => { busy = false; renderCard(); });
+        }
+    }
+
     function renderCard() {
         const body = document.getElementById('scenarioBody');
         if (!body) return;
@@ -279,7 +379,7 @@
         const lead = scenario.phases.length ? scenario.phases.map(phaseHtml).join('') : `<p class="small text-muted mb-2">${esc(t('scenario.empty'))}</p>`;
         const hintToggle = scenario.phases.length > 1
             ? `<label class="d-flex align-items-start gap-1 small text-muted mt-2"><input type="checkbox" class="form-check-input mt-1" data-sc-hint="1"${hintEnabled() ? ' checked' : ''}><span>${esc(t('scenario.hint_toggle'))}</span></label>` : '';
-        body.innerHTML = lead + add + hintToggle + slotsHtml();
+        body.innerHTML = lead + add + orderFormHtml() + hintToggle + slotsHtml();
     }
 
     function findPhase(id) {
@@ -297,7 +397,7 @@
         const pending = phase.items.filter(i => !i.sent);
         const names = [];
         pending.forEach(i => {
-            const label = i.audience === 'all' ? t('scenario.target_all') : itemTarget(i);
+            const label = i.audience === 'all' ? (i.type === 'order' ? t('scenario.target_all_people') : t('scenario.target_all')) : itemTarget(i);
             if (!names.includes(label)) names.push(label);
         });
         let text = t('scenario.play_confirm', {phase: phaseName(phase), orders: pending.length, targets: names.join(', ')});
@@ -403,7 +503,18 @@
         if (keep && [...select.options].some(o => o.value === keep)) select.value = keep;
     }
 
+    // The words of an order being typed are kept as they are typed, so nothing that redraws the card loses them.
+    function onCardInput(e) {
+        const field = e.target.closest('[data-sc-o="text"]');
+        if (field) orderDraft.text = field.value;
+    }
+
     function onCardChange(e) {
+        const orderField = e.target.closest('[data-sc-o]');
+        if (orderField) {
+            onOrderField(orderField);
+            return;
+        }
         const hint = e.target.closest('input[data-sc-hint]');
         if (hint) {
             setHintEnabled(hint.checked);
@@ -448,6 +559,22 @@
 
         if (act === 'add-phase') {
             run('add_phase', {});
+        } else if (act === 'order-open') {
+            orderDraft.open = true;
+            orderDraft.note = '';
+            renderCard();
+        } else if (act === 'order-cancel') {
+            orderDraft.open = false;
+            orderDraft.note = '';
+            renderCard();
+        } else if (act === 'order-stage') {
+            // The server checks all of it (the kind, the words, who it goes to) and says what is wrong in words.
+            run('add_order', {phase_id: orderPhase(), order_type: orderDraft.type, text: orderDraft.text, team_id: orderDraft.to}, res => {
+                orderDraft.text = '';
+                orderDraft.phase = String(res.phase_id);
+                orderDraft.note = t('scenario.order_staged', {n: phaseNumber(res.phase_id)});
+                renderCard();
+            });
         } else if (act === 'add-slot') {
             busy = true;
             newSlot().finally(() => { busy = false; });
@@ -500,7 +627,7 @@
         } else if (act === 'withdraw') {
             const phase = findPhase(el.dataset.phase);
             if (!phase || !phase.progress) return;
-            if (!confirm(t('scenario.withdraw_confirm', {phase: phaseName(phase), n: phase.progress.open}))) return;
+            if (!confirm(t('scenario.withdraw_confirm', {phase: phaseName(phase), n: phase.progress.withdrawable != null ? phase.progress.withdrawable : phase.progress.open}))) return;
             run('withdraw_phase', {phase_id: el.dataset.phase}, res => {
                 if (res.dispatches && typeof renderDispatches === 'function') renderDispatches(dispatches = res.dispatches);
                 showNewSectors(res);
@@ -612,6 +739,7 @@
         if (body) {
             body.addEventListener('click', onCardClick);
             body.addEventListener('change', onCardChange);
+            body.addEventListener('input', onCardInput);
         }
         renderCard();
         load();
