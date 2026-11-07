@@ -23,6 +23,11 @@
  *     place; a polygon or a line) goes into a phase instead of being made now (stageRestricted). A zone is for everybody,
  *     so it has no team or slot; it is a dashed red-grey ghost, and once played the card reads it as «Σε ισχύ» (it is
  *     never "finished", so it does not count in the phase's «4/6 ✓»);
+ *   - the search-area window's «Στο σενάριο ▾» (v3.459.0): the area drawn there goes into a phase instead of being made now
+ *     (stageArea). An area has no team, slot or «όλες οι ομάδες» (it is a boundary, not an order to anybody); it is a grey
+ *     ghost polygon, and once made the card reads it as «Σε ισχύ» and says that taking the phase back leaves it on the
+ *     map. Its row on the card has «Τομείς», which opens the division window on it: the sectors cut there are written down
+ *     against that area ('item:<id>') and play makes the area first;
  *   - the team slots (v3.453.0): names for teams that may not exist yet, in the card, in the window's recipient
  *     list, and in the dialog that play opens to ask which team is which.
  *
@@ -175,6 +180,7 @@
         if (item.type === 'sector') return t('scenario.kind_sector');
         if (item.type === 'route') return t('scenario.kind_route');
         if (item.type === 'restricted') return t('scenario.kind_restricted');
+        if (item.type === 'search_area') return t('scenario.kind_search_area');
         if (item.type === 'order') return t(ORDER_LABEL_KEYS[item.order_type] || 'scenario.order_add_btn');
         return item.type === 'point' ? t('scenario.kind_point') : t('scenario.kind_area');
     }
@@ -205,6 +211,11 @@
         }
         if (item.state === 'withdrawn') {
             return `<div class="small text-muted"><i class="bi bi-slash-circle me-1"></i>${esc(t('scenario.state_withdrawn'))}</div>`;
+        }
+        // A search area is never finished either, but it is not a danger: it stands, and taking the phase back leaves it on
+        // the map (its sectors are what the phase takes back). The line says so in a calm colour (v3.459.0).
+        if (item.state === 'standing' && item.type === 'search_area') {
+            return `<div class="small text-primary"><i class="bi bi-bounding-box me-1"></i>${esc(t('scenario.state_standing'))} <span class="text-muted">· ${esc(t('scenario.area_stays_hint'))}</span></div>`;
         }
         // A zone is never finished: it stands until somebody takes it away.
         if (item.state === 'standing') {
@@ -265,9 +276,15 @@
         const goto = (item.sent || item.type === 'order')
             ? `<span>${esc(itemTitle(item))}</span>`
             : `<a href="#" class="wr-sc-goto" data-sc="goto" data-item="${item.id}" title="${esc(t('scenario.show_on_map'))}">${esc(itemTitle(item))}</a>`;
-        // A sector says which search area it is cut from (the area may be gone: then the line below says so).
-        let where = (item.type === 'sector' && item.area_label)
-            ? ` <span class="text-muted small">${esc(t('scenario.sector_in_area', {area: item.area_label}))}</span>` : '';
+        // A sector says which search area it is cut from (the area may be gone: then the line below says so). An area the
+        // scenario itself still has to make says in which phase (v3.459.0).
+        let where = '';
+        if (item.type === 'sector' && item.area_label) {
+            const inArea = item.area_staged
+                ? t('scenario.sector_in_staged_area', {area: item.area_label, phase: t('scenario.phase_n', {n: item.area_phase_n || ''})})
+                : t('scenario.sector_in_area', {area: item.area_label});
+            where = ` <span class="text-muted small">${esc(inArea)}</span>`;
+        }
         // A route says how many points it has, and whether the team is to return to where it started.
         if (item.type === 'route') {
             where = ` <span class="text-muted small">${esc(t('scenario.route_points', {n: item.point_count || 0}))}${item.return_to_start ? ' · ' + esc(t('scenario.route_return_hint')) : ''}</span>`;
@@ -278,9 +295,16 @@
             const shapeText = RESTRICTED_SHAPE_KEYS[item.shape] ? t(RESTRICTED_SHAPE_KEYS[item.shape]) : '';
             where = ` <span class="text-muted small">${esc([kindText, shapeText].filter(Boolean).join(' · '))}</span>`;
         }
+        // A search area is a boundary and not an order to anybody: no «→ προς:» for it. Until it is made it has «Τομείς»,
+        // which opens the division window on it (the sectors cut there go into the scenario, against this area).
+        const isArea = item.type === 'search_area';
+        const recipient = isArea ? '' : ` <i class="bi bi-arrow-right-short"></i> ${target}`;
+        // The button goes under the words, not beside them: the card is narrow, and a button in the row squeezes the name.
+        const divide = (isArea && !item.sent)
+            ? `<div class="mt-1"><button type="button" class="btn btn-outline-primary btn-sm py-0" data-sc="divide-area" data-item="${item.id}" title="${esc(t('scenario.area_divide_title'))}"><i class="bi bi-grid-3x3-gap me-1"></i>${esc(t('scenario.area_divide_btn'))}</button></div>` : '';
         return `<li class="wr-sc-item d-flex align-items-start gap-1${item.state === 'withdrawn' ? ' wr-sc-withdrawn' : ''}" data-item="${item.id}">
             <i class="bi ${icon} text-secondary mt-1"></i>
-            <span class="flex-grow-1">${goto}${where} <i class="bi bi-arrow-right-short"></i> ${target}${status}</span>
+            <span class="flex-grow-1">${goto}${where}${recipient}${status}${divide}</span>
             ${retry}${del}
         </li>`;
     }
@@ -429,6 +453,9 @@
         const pending = phase.items.filter(i => !i.sent);
         const names = [];
         pending.forEach(i => {
+            // A search area goes to nobody: it names no recipient (v3.459.0). Unless it is all the phase has, in which case the
+            // line has to say something, and the area is on the map for everybody it concerns: «για όλους».
+            if (i.type === 'search_area' && pending.some(o => o.type !== 'search_area')) return;
             // A restricted area is for everybody in the field, and the confirmation says so («προς: για όλους»).
             const label = i.audience === 'all' ? (i.type === 'order' ? t('scenario.target_all_people') : t('scenario.target_all')) : itemTarget(i);
             if (!names.includes(label)) names.push(label);
@@ -590,7 +617,14 @@
             }).catch(() => alert(t('common.send_failed'))).finally(() => { busy = false; el.disabled = false; });
         };
 
-        if (act === 'add-phase') {
+        if (act === 'divide-area') {
+            // «Τομείς» on an area the scenario has still to make (v3.459.0): the division window opens on it. The sectors cut
+            // there are written down against this area (item:<id>), not made. The page's own function, as for a live area.
+            const hit = findItem(el.dataset.item);
+            if (!hit || hit.item.type !== 'search_area' || hit.item.sent || !Array.isArray(hit.item.geo) || hit.item.geo.length < 3) return;
+            if (typeof openDivideSectorsForStagedArea !== 'function') return;
+            openDivideSectorsForStagedArea({item_id: hit.item.id, label: hit.item.label || '', geo: hit.item.geo});
+        } else if (act === 'add-phase') {
             run('add_phase', {});
         } else if (act === 'order-open') {
             orderDraft.open = true;
@@ -702,7 +736,8 @@
         scenario.phases.forEach(phase => {
             phase.items.forEach(item => {
                 if (item.sent || !item.geo) return;
-                const tip = [phaseName(phase), itemTitle(item), '→ ' + itemTarget(item)].join(' · ') + ' — ' + t('scenario.ghost_not_sent');
+                // A search area goes to nobody, so its tooltip has no «→ …» part (v3.459.0).
+                const tip = (item.type === 'search_area' ? [phaseName(phase), itemTitle(item)] : [phaseName(phase), itemTitle(item), '→ ' + itemTarget(item)]).join(' · ') + ' — ' + t('scenario.ghost_not_sent');
                 if (item.type === 'route') {
                     // A dashed line through the waypoints (back to the first one when the route is a loop), a dot at each
                     // waypoint, and the phase number where it starts.
@@ -793,6 +828,16 @@
             .catch(() => { alert(t('common.send_failed')); return {ok: false}; });
     }
 
+    // The search-area window's «Στο σενάριο»: the area drawn there goes into the phase instead of being made now, so that
+    // sectors can be written down against it (the «Τομείς» button of its row). fields = {label, geo: JSON text of
+    // [[lat, lng], ...]}. An area has no team, slot or «όλες οι ομάδες». Resolves with the endpoint's answer (phase_id on
+    // success); a refusal has already been shown to the person.
+    function stageArea(phaseId, fields) {
+        return request('add_area', Object.assign({phase_id: String(phaseId)}, fields))
+            .then(res => { if (!res || !res.ok) failed(res); return res; })
+            .catch(() => { alert(t('common.send_failed')); return {ok: false}; });
+    }
+
     function phaseNumber(phaseId) {
         const p = findPhase(phaseId);
         return p ? p.n : null;
@@ -814,5 +859,5 @@
         setInterval(refreshProgress, REFRESH_MS);
     }
 
-    window.wrScenario = {init: init, reload: load, menuHtml: menuHtml, stage: stage, stageSectors: stageSectors, stageRoute: stageRoute, stageRestricted: stageRestricted, phaseNumber: phaseNumber, drawGhostsInto: drawGhostsInto, phases: () => scenario.phases, newSlot: newSlot, fillSlotOptions: fillSlotOptions};
+    window.wrScenario = {init: init, reload: load, menuHtml: menuHtml, stage: stage, stageSectors: stageSectors, stageRoute: stageRoute, stageRestricted: stageRestricted, stageArea: stageArea, phaseNumber: phaseNumber, drawGhostsInto: drawGhostsInto, phases: () => scenario.phases, newSlot: newSlot, fillSlotOptions: fillSlotOptions};
 })();

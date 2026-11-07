@@ -6506,6 +6506,8 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                     </ul>
                     <div id="divideSectorsLinesPane" class="d-flex flex-column gap-2 flex-grow-1" style="min-height:0;">
                         <div class="small text-muted" id="divideSectorsHint"><?= t('sector.hub_hint') ?></div>
+                        <?php // Shown only when the window was opened on an area of the scenario that is still to be made (v3.459.0). ?>
+                        <div class="small text-primary d-none" id="divideStagedNote"><i class="bi bi-collection-play me-1"></i><?= t('scenario.divide_staged_note') ?></div>
                         <div id="divideSectorsWedgeList" class="flex-grow-1" style="overflow-y:auto;min-height:0;"></div>
                         <div class="d-flex gap-2">
                             <button type="button" class="btn btn-outline-secondary btn-sm" id="divideSectorsClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
@@ -6611,7 +6613,18 @@ $teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamI
                          exist, since two points enclose nothing. -->
                     <span class="badge text-bg-dark align-self-center d-none" id="areaSizeReadout"></span>
                     <div class="ms-auto d-flex gap-2">
+                        <span class="small text-success align-self-center" id="areaScenarioStatus" role="status"></span>
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="areaClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
+                        <?php
+                        // «Στο σενάριο ▾» (v3.459.0): the area drawn here goes into a phase of the scenario instead of being
+                        // made now, so that sectors can be written down against it. The menu is built by
+                        // assets/js/war-room-scenario.js. An area has no team to choose. Not offered while the window is
+                        // drawing a SECTOR inside an existing area (then «Αποθήκευση» saves a sector, not an area).
+                        ?>
+                        <div class="btn-group" id="areaScenarioGroup">
+                            <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" id="areaScenarioBtn" data-bs-toggle="dropdown" aria-expanded="false" title="<?= t('scenario.area_add_to_scenario_title') ?>" disabled><i class="bi bi-collection-play me-1"></i><?= t('scenario.add_to_scenario') ?></button>
+                            <ul class="dropdown-menu dropdown-menu-end" id="areaScenarioMenu"></ul>
+                        </div>
                         <button type="button" class="btn btn-success btn-sm" id="areaSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('sector.area_save_btn') ?></button>
                     </div>
                 </div>
@@ -7422,6 +7435,10 @@ let areas = WR_BOOT.areas;
 // map block has already thrown "is not defined" once this session —
 // caught via a live shown.bs.modal test, not visible from php -l.
 let pendingDivideAreaId = null;
+// Same cross-scope requirement as pendingDivideAreaId just above (v3.459.0): set by
+// openDivideSectorsForStagedArea() and read by the divideSectorsModal IIFE. Null, or {item_id, label, geo} - a search area
+// of the scenario that has not been made yet, which the division window cuts into sectors that go into the scenario.
+let pendingDivideStagedArea = null;
 // Same cross-scope requirement as pendingDivideAreaId just above — set by
 // openSplitSectorModal() (inside the map block) and read by the
 // splitSectorModal IIFE (a separate top-level scope further down the file).
@@ -10100,6 +10117,17 @@ function sectorDeleteBuilding(id) {
 // scoped block is invisible to a sibling scope outside it.
 function openDivideSectorsForArea(areaId) {
     pendingDivideAreaId = areaId;
+    pendingDivideStagedArea = null;
+    const modalEl = document.getElementById('divideSectorsModal');
+    if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+// The same window on a search area of the scenario that does not exist yet (v3.459.0): called from the «Τομείς» button
+// of its row on the scenario card (assets/js/war-room-scenario.js). There is no area to cut sectors from yet, so the window
+// can only write the pieces into the scenario («Στο σενάριο»), against that area (item:<id>), and play makes the area first.
+function openDivideSectorsForStagedArea(stagedArea) {
+    if (!stagedArea || !Array.isArray(stagedArea.geo) || stagedArea.geo.length < 3) return;
+    pendingDivideAreaId = null;
+    pendingDivideStagedArea = {item_id: stagedArea.item_id, label: String(stagedArea.label || ''), geo: stagedArea.geo};
     const modalEl = document.getElementById('divideSectorsModal');
     if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
 }
@@ -28589,8 +28617,11 @@ document.querySelectorAll('.team-form').forEach(form => {
     function syncDivideButtons() {
         const values = Array.from(wedgeListEl.querySelectorAll('.wedge-team-select')).map(sel => sel.value);
         const hasSlot = values.some(v => v.indexOf('slot:') === 0);
-        saveBtn.disabled = values.length === 0 || hasSlot;
-        saveBtn.title = hasSlot ? t('scenario.sector_slot_save_hint') : '';
+        // On an area of the scenario that does not exist yet (v3.459.0) there is nothing to make sectors in: only the
+        // scenario can take the pieces, so «Αποθήκευση Τομέων» stays off whatever the rows say.
+        const staged = !!(currentArea && currentArea.staged);
+        saveBtn.disabled = staged || values.length === 0 || hasSlot;
+        saveBtn.title = staged ? t('scenario.divide_staged_note') : (hasSlot ? t('scenario.sector_slot_save_hint') : '');
         if (scenarioBtn) {
             const lacking = values.some(v => v === '' || v === 'slot:new');
             scenarioBtn.disabled = values.length === 0 || lacking || !window.wrScenario;
@@ -28638,7 +28669,7 @@ document.querySelectorAll('.team-form').forEach(form => {
 
     saveBtn.addEventListener('click', () => {
         const wedges = computeWedges();
-        if (!wedges.length || !currentArea) return;
+        if (!wedges.length || !currentArea || currentArea.staged) return;
         const labelInputs = wedgeListEl.querySelectorAll('.wedge-label-input');
         const teamSelects = wedgeListEl.querySelectorAll('.wedge-team-select');
         // A slot is only ever staged («Στο σενάριο»): the button is disabled for one, and this is the same rule once more.
@@ -28702,7 +28733,10 @@ document.querySelectorAll('.team-form').forEach(form => {
             // closed first: otherwise it stays open over the window after the order has gone into the phase.
             bootstrap.Dropdown.getOrCreateInstance(scenarioBtn).hide();
             scenarioBtn.disabled = true;
-            window.wrScenario.stageSectors(choice.dataset.scPhase, currentArea.id, sectors).then(res => {
+            // An area of the scenario that is still to be made is named as 'item:<id>': the server writes the pieces against
+            // that item and play makes the area first (v3.459.0).
+            const areaRef = currentArea.staged ? 'item:' + currentArea.item_id : currentArea.id;
+            window.wrScenario.stageSectors(choice.dataset.scPhase, areaRef, sectors).then(res => {
                 if (res && res.ok) {
                     const phase = window.wrScenario.phases().find(p => String(p.id) === String(res.phase_id));
                     wipeRows = true;
@@ -28853,7 +28887,7 @@ document.querySelectorAll('.team-form').forEach(form => {
     gridSizeRange.addEventListener('input', renderGridPreview);
 
     gridCreateBtn.addEventListener('click', () => {
-        if (!currentArea) return;
+        if (!currentArea || currentArea.staged) return; // the grid is cut by the server from a stored area (v3.459.0)
         gridCreateBtn.disabled = true;
         // Only the area, the size and the prefix are sent. The cell list stays
         // here — the server builds its own from the area it already has.
@@ -28873,8 +28907,21 @@ document.querySelectorAll('.team-form').forEach(form => {
     });
 
     modalEl.addEventListener('shown.bs.modal', () => {
-        currentArea = areas.find(a => a.id === pendingDivideAreaId) || null;
+        const stagedArea = pendingDivideStagedArea;
+        pendingDivideStagedArea = null;
+        // An area of the scenario has no id yet (v3.459.0): {id: null, item_id, staged: true}. Everything that needs a stored
+        // area (saving the sectors now, the grid) checks `staged` first.
+        currentArea = stagedArea
+            ? {id: null, item_id: stagedArea.item_id, label: stagedArea.label, geo: stagedArea.geo, staged: true}
+            : (areas.find(a => a.id === pendingDivideAreaId) || null);
         pendingDivideAreaId = null;
+        // The grid divides a stored area on the server, and the note says why nothing is made now: both only for an area
+        // of the scenario.
+        const isStaged = !!(currentArea && currentArea.staged);
+        const divideTabs = document.getElementById('divideSectorsTabs');
+        if (divideTabs) divideTabs.classList.toggle('d-none', isStaged);
+        const stagedNote = document.getElementById('divideStagedNote');
+        if (stagedNote) stagedNote.classList.toggle('d-none', !isStaged);
         // The header is written by setAreaHeader(), called from whichever pane
         // is showing — resetDivision() below reaches it through renderWedges().
         if (!composerMap) {
@@ -29172,6 +29219,11 @@ document.querySelectorAll('.team-form').forEach(form => {
     const clearBtn = document.getElementById('areaClearBtn');
     const sendBtn = document.getElementById('areaSendBtn');
     const sizeReadout = document.getElementById('areaSizeReadout');
+    // «Στο σενάριο» (v3.459.0): ready exactly when «Αποθήκευση» is, except while the window draws a sector of an existing
+    // area (activeSeed): then it saves a sector and not an area, and an area is all this button can put into a phase.
+    const scenarioBtn = document.getElementById('areaScenarioBtn');
+    const scenarioMenu = document.getElementById('areaScenarioMenu');
+    const scenarioStatus = document.getElementById('areaScenarioStatus');
 
     let composerMap = null;
     let refLayer = null;
@@ -29234,6 +29286,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         vertexMarkers = [];
         if (shapeLayer) { composerMap.removeLayer(shapeLayer); shapeLayer = null; }
         sendBtn.disabled = true;
+        if (scenarioBtn) scenarioBtn.disabled = true;
         updateSizeReadout();
     }
 
@@ -29253,6 +29306,7 @@ document.querySelectorAll('.team-form').forEach(form => {
     // always a boundary, so Save only enables once closed with ≥3 vertices.
     function updateSendState() {
         sendBtn.disabled = !(isClosed && drawPoints.length >= 3);
+        if (scenarioBtn) scenarioBtn.disabled = sendBtn.disabled || !!activeSeed;
     }
 
     function addDrawPoint(lat, lng) {
@@ -29376,6 +29430,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         labelInput.value = '';
         labelInput.placeholder = defaultPlaceholder;
         activeSeed = null;
+        if (scenarioStatus) scenarioStatus.textContent = '';
         if (seedAreaLayer) { composerMap.removeLayer(seedAreaLayer); seedAreaLayer = null; }
         titleEl.innerHTML = defaultTitleHtml;
         sendBtn.innerHTML = defaultSendHtml;
@@ -29407,7 +29462,7 @@ document.querySelectorAll('.team-form').forEach(form => {
         }
         const geo = JSON.stringify(drawPoints);
         const seed = activeSeed;
-        const fail = message => { alert(message || t('common.send_failed')); sendBtn.disabled = false; };
+        const fail = message => { alert(message || t('common.send_failed')); sendBtn.disabled = false; updateSendState(); };
         // A sector belongs inside its area. Going a little over the edge is how people really trace
         // one, so only a sector with most of its corners outside is worth a question.
         const seedArea = seed ? areas.find(a => String(a.id) === String(seed.areaId)) : null;
@@ -29421,6 +29476,7 @@ document.querySelectorAll('.team-form').forEach(form => {
             ? new URLSearchParams({csrf_token: csrfToken, action: 'create', mission_id: WR_MISSION_ID, area_id: seed.areaId, label: label, geo: geo, team_id: seed.teamId || ''})
             : new URLSearchParams({csrf_token: csrfToken, action: 'create_area', mission_id: WR_MISSION_ID, geo: geo, label: label});
         sendBtn.disabled = true;
+        if (scenarioBtn) scenarioBtn.disabled = true;
         fetch('mission-sector.php', {method:'POST', body:data}).then(response => response.json()).then(result => {
             if (!result.ok) { fail(result.error); return; }
             bootstrap.Modal.getInstance(modalEl).hide();
@@ -29431,6 +29487,41 @@ document.querySelectorAll('.team-form').forEach(form => {
                 : new CustomEvent('wr-area-created', {detail: {id: result.id, label: label}}));
         }).catch(() => fail());
     });
+
+    // «Στο σενάριο ▾» (v3.459.0): the same area «Αποθήκευση» would make, written into a phase instead, so that sectors can be
+    // written down against it (the «Τομείς» button of its row on the card). The window stays open for the next one; the
+    // drawing and the name are cleared.
+    if (scenarioBtn && scenarioMenu) {
+        scenarioBtn.addEventListener('show.bs.dropdown', () => {
+            scenarioMenu.innerHTML = window.wrScenario ? window.wrScenario.menuHtml() : '';
+        });
+        scenarioMenu.addEventListener('click', e => {
+            const choice = e.target.closest('[data-sc-phase]');
+            if (!choice) return;
+            e.preventDefault();
+            if (!window.wrScenario || scenarioBtn.disabled || activeSeed) return;
+            const label = labelInput.value.trim();
+            if (!label) {
+                alert(t('sector.invalid_label'));
+                return;
+            }
+            // Bootstrap's hide() does nothing for a disabled toggle, and the button is disabled below, so the menu is
+            // closed first: otherwise it stays open over the window after the area has gone into the phase.
+            bootstrap.Dropdown.getOrCreateInstance(scenarioBtn).hide();
+            scenarioBtn.disabled = true;
+            window.wrScenario.stageArea(choice.dataset.scPhase, {label: label, geo: JSON.stringify(drawPoints)}).then(res => {
+                if (res && res.ok) {
+                    const phase = window.wrScenario.phases().find(p => String(p.id) === String(res.phase_id));
+                    resetDrawing();
+                    labelInput.value = '';
+                    if (scenarioStatus && phase) scenarioStatus.textContent = t('scenario.staged_ok', {phase: t('scenario.phase_n', {n: phase.n}), n: phase.items.length});
+                }
+                updateSendState();
+            });
+        });
+        // A line about the last area put in is only true until the next change.
+        labelInput.addEventListener('input', () => { if (scenarioStatus) scenarioStatus.textContent = ''; });
+    }
 })();
 
 // Restricted-area composer — structural clone of the searchAreaMapModal IIFE

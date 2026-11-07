@@ -501,7 +501,7 @@ final class ScenarioRestrictedTest extends TestCase
     public function testTheKindColumnKnowsRestrictedInTheSchemaTheMigrationAndTheTestDatabase(): void
     {
         $this->assertGreaterThanOrEqual(208, DB_SCHEMA_VERSION);
-        $this->assertStringContainsString("`kind` ENUM('dispatch','sector','route','order','restricted')", $this->source('sql/schema.sql'));
+        $this->assertStringContainsString("`kind` ENUM('dispatch','sector','route','order','restricted'", $this->source('sql/schema.sql'));
         $this->assertStringContainsString("'version'     => 208,", $this->source('includes/migrations.php'));
         $this->assertStringContainsString("MODIFY COLUMN kind ENUM('dispatch','sector','route','order','restricted')", $this->source('includes/migrations.php'));
         $type = (string) dbFetchValue("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_scenario_items' AND COLUMN_NAME = 'kind'");

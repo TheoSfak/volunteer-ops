@@ -635,3 +635,164 @@ test('the play confirmation says a zone is for everybody, never an empty «πρ�
     const mixed = await ask([zone(1), zone(3), Object.assign({}, TEAM, {id: 2, kind: 'dispatch', type: 'point', label: 'Σ', geo: {lat: 35, lng: 24}})]);
     assert.match(mixed, /"orders":3,"targets":"scenario\.target_everyone, Alpha 1"\}/, 'each name once');
 });
+
+// ── Search areas (v3.459.0) ───────────────────────────────────────────────────────────────────────────────────────
+// An area is a boundary, not an order to anybody: audience 'none', no team, never finished (it stands), and it is the ground
+// the sectors of a later piece of the plan are cut from. Taking the phase back leaves it on the map.
+const searchArea = (id, over = {}) => Object.assign({
+    id, kind: 'area', type: 'search_area', audience: 'none', team_id: null, team_label: null, team_missing: false,
+    slot_id: null, slot_label: null, unmapped: false, team_empty: false, area_missing: false, sent: false, error: null,
+    label: 'Κοίτη', geo: [[35.0, 24.0], [35.1, 24.0], [35.1, 24.1]], state: null,
+}, over);
+const stagedSector = (id, over = {}) => Object.assign({}, TEAM, {
+    id, kind: 'sector', type: 'sector', label: 'Τομέας Α', geo: [[35.0, 24.0], [35.1, 24.0], [35.1, 24.1]],
+    area_id: null, area_label: 'Κοίτη', area_missing: false, area_item_id: 1, area_staged: true, area_phase_n: 1,
+}, over);
+
+test('the search-area window stages an area through add_area, with no team in it', async () => {
+    const {api, calls} = await load(plan([]), {add_area: {ok: true, phase_id: 7}});
+    assert.equal(typeof api.stageArea, 'function');
+    const res = await api.stageArea('new', {label: 'Κοίτη', geo: '[[35,24],[35.1,24],[35.1,24.1]]'});
+
+    assert.equal(res.ok, true);
+    const fields = new URLSearchParams(calls.filter((c) => c[0] === 'fetch' && c[2]).pop()[2]);
+    assert.equal(fields.get('action'), 'add_area');
+    assert.equal(fields.get('phase_id'), 'new');
+    assert.equal(fields.get('label'), 'Κοίτη');
+    assert.equal(fields.get('geo'), '[[35,24],[35.1,24],[35.1,24.1]]');
+    assert.equal(fields.get('mission_id'), '83');
+    assert.equal(fields.has('team_id'), false);
+    assert.equal(fields.has('ring_index'), false, 'a staged area is a hand-drawn one');
+});
+
+test('a refused area is shown to the person and the answer is handed back', async () => {
+    const {api, calls} = await load(plan([]), {add_area: {ok: false, error: 'Χρειάζονται τουλάχιστον 3 σημεία.'}});
+    const res = await api.stageArea('7', {label: 'Κοίτη', geo: '[]'});
+    assert.equal(res.ok, false);
+    assert.ok(calls.some((c) => c[0] === 'alert' && c[1] === 'Χρειάζονται τουλάχιστον 3 σημεία.'));
+});
+
+test('the card says what an area is, names no recipient, and an unsent one has «Τομείς» and a delete button', async () => {
+    const {body} = await load(zonePhase([searchArea(1)], false));
+    assert.match(body.innerHTML, /scenario\.kind_search_area/);
+    assert.match(body.innerHTML, /bi-bounding-box/);
+    assert.doesNotMatch(body.innerHTML, /scenario\.target_everyone|common\.all_teams|scenario\.team_gone/, 'an area goes to nobody');
+    assert.doesNotMatch(body.innerHTML, /bi-arrow-right-short/, 'no «→ προς» for it');
+    assert.match(body.innerHTML, /data-sc="divide-area" data-item="1"/);
+    assert.match(body.innerHTML, /scenario\.area_divide_btn/);
+    assert.match(body.innerHTML, /data-sc="goto"/);
+    assert.match(body.innerHTML, /data-sc="delete-item"/);
+});
+
+test('a made area stands calmly: no «Τομείς», no delete, no red shield, and it says that withdrawing leaves it', async () => {
+    const prog = {total: 0, done: 0, open: 0, standing: 0, withdrawn: 0, failed: 0, complete: false, withdrawable: 0, can_withdraw: false};
+    const {body} = await load(zonePhase([searchArea(1, {sent: true, state: 'standing', search_area_id: 12})], true, prog));
+    assert.match(body.innerHTML, /scenario\.state_standing/);
+    assert.match(body.innerHTML, /scenario\.area_stays_hint/);
+    assert.doesNotMatch(body.innerHTML, /bi-shield-fill-exclamation/, 'it is not a danger zone');
+    assert.doesNotMatch(body.innerHTML, /data-sc="divide-area"/);
+    assert.doesNotMatch(body.innerHTML, /data-sc="delete-item"/);
+    assert.doesNotMatch(body.innerHTML, /progress_badge/, 'an area is not an order to finish: no 0/0 badge');
+    assert.doesNotMatch(body.innerHTML, /data-sc="withdraw"/, 'nothing in the phase can be taken back');
+});
+
+test('«Τομείς» opens the division window on the staged area with its item, name and points', async () => {
+    const {handlers, ctx} = await load(zonePhase([searchArea(1)], false));
+    const opened = [];
+    ctx.openDivideSectorsForStagedArea = (area) => opened.push(area);
+    await clickOn(handlers, {sc: 'divide-area', item: '1'});
+    // Objects made inside the vm context have another Array.prototype: compare them as JSON.
+    assert.equal(JSON.stringify(opened), JSON.stringify([{item_id: 1, label: 'Κοίτη', geo: [[35.0, 24.0], [35.1, 24.0], [35.1, 24.1]]}]));
+});
+
+test('«Τομείς» does nothing for an area that is already made, an item that is gone, or an area with no outline', async () => {
+    const {handlers, ctx} = await load(zonePhase([searchArea(1, {sent: true, state: 'standing'}), searchArea(2, {geo: [[35, 24]]})], false));
+    const opened = [];
+    ctx.openDivideSectorsForStagedArea = (area) => opened.push(area);
+    await clickOn(handlers, {sc: 'divide-area', item: '1'});
+    await clickOn(handlers, {sc: 'divide-area', item: '2'});
+    await clickOn(handlers, {sc: 'divide-area', item: '99'});
+    assert.deepEqual(opened, []);
+});
+
+test('a sector says which staged area it is cut from and in which phase; one cut from a made area says only the area', async () => {
+    const staged = await load(zonePhase([searchArea(1), stagedSector(2)], false));
+    assert.match(staged.body.innerHTML, /scenario\.sector_in_staged_area\{"area":"Κοίτη","phase":"scenario\.phase_n\{\\"n\\":1\}"\}/);
+    assert.doesNotMatch(staged.body.innerHTML, /scenario\.sector_in_area/);
+
+    const live = await load(zonePhase([stagedSector(2, {area_staged: false, area_item_id: null, area_phase_n: null, area_id: 12})], false));
+    assert.match(live.body.innerHTML, /scenario\.sector_in_area\{"area":"Κοίτη"\}/);
+    assert.doesNotMatch(live.body.innerHTML, /sector_in_staged_area/);
+});
+
+test('a sector whose staged area was taken off the plan says the area is gone', async () => {
+    const {body} = await load(zonePhase([stagedSector(2, {area_staged: false, area_missing: true, area_phase_n: null})], false));
+    assert.match(body.innerHTML, /scenario\.area_gone_hint/);
+});
+
+test('a staged area is a dashed grey polygon with the phase number and no «→» in its tooltip; a made one leaves no ghost', async () => {
+    const tips = [];
+    const {api, drawn, ctx} = await load(zonePhase([searchArea(1), searchArea(2, {sent: true, state: 'standing'})], false));
+    const shapeOf = ctx.L.polygon;
+    ctx.L.polygon = (...args) => {
+        const chain = shapeOf(...args);
+        const bind = chain.bindTooltip;
+        chain.bindTooltip = (text, ...rest) => { tips.push(text); return bind(text, ...rest); };
+        return chain;
+    };
+    drawn.length = 0;
+    api.drawGhostsInto({name: 'layer'});
+
+    const polygons = drawn.filter((d) => d.kind === 'polygon');
+    assert.equal(polygons.length, 1);
+    assert.equal(polygons[0].args[1].dashArray, '7 6');
+    assert.equal(drawn.filter((d) => d.kind === 'marker').length, 1, 'one phase number');
+    assert.equal(tips.length, 1);
+    assert.match(tips[0], /scenario\.phase_n/);
+    assert.match(tips[0], /scenario\.kind_search_area/);
+    assert.doesNotMatch(tips[0], /→/);
+});
+
+test('the play confirmation names no recipient for an area beside other orders, and «για όλους» when the area is all there is', async () => {
+    const ask = async (items) => {
+        const {handlers, calls, ctx} = await load(zonePhase(items, false), {play_phase: {ok: true, sent: 1, failed: 0, results: []}});
+        ctx.confirm = (text) => { calls.push(['confirm', text]); return true; };
+        await clickOn(handlers, {sc: 'play', phase: '7'});
+        await settle();
+        return calls.find((c) => c[0] === 'confirm')[1];
+    };
+    const alone = await ask([searchArea(1)]);
+    assert.match(alone, /"orders":1,"targets":"scenario\.target_everyone"\}/);
+    const withSector = await ask([searchArea(1), stagedSector(2)]);
+    assert.match(withSector, /"orders":2,"targets":"Alpha 1"\}/, 'only the sector\'s team');
+});
+
+test('play and retry put an area they made on the map at once, through the sector pair of lists', async () => {
+    const sectors = [{id: 3}];
+    const areas = [{id: 12, label: 'Κοίτη'}];
+    for (const [action, click, answer, scenario] of [
+        ['play_phase', {sc: 'play', phase: '7'}, {ok: true, sent: 1, failed: 0, results: [], sectors, areas}, zonePhase([searchArea(1)], false)],
+        ['retry_item', {sc: 'retry', item: '1'}, {ok: true, item: {ok: true, kind: 'area'}, sectors, areas}, zonePhase([searchArea(1, {error: 'x'})], true, standing({standing: 0}))],
+    ]) {
+        const {handlers, calls, ctx} = await load(scenario, {[action]: answer});
+        ctx.sectorRefreshAfter = (s, a) => calls.push(['sectorRefreshAfter', s, a]);
+        calls.length = 0;
+        await clickOn(handlers, click);
+        await settle();
+        const hit = calls.find((c) => c[0] === 'sectorRefreshAfter');
+        assert.ok(hit, action + ' redraws sectors and areas');
+        assert.deepEqual([hit[1], hit[2]], [sectors, areas], action);
+    }
+});
+
+test('withdrawing a phase that holds only an area and its sectors does not claim that zones are removed', async () => {
+    const prog = {total: 2, done: 0, open: 2, standing: 0, withdrawn: 0, failed: 0, complete: false, withdrawable: 2, can_withdraw: true};
+    const items = [searchArea(1, {sent: true, state: 'standing'}), stagedSector(2, {sent: true, state: 'open', area_staged: false, area_id: 12})];
+    const {handlers, calls, ctx} = await load(zonePhase(items, true, prog), {withdraw_phase: {ok: true, withdrawn: 2, failed: 0, results: []}});
+    ctx.confirm = (text) => { calls.push(['confirm', text]); return true; };
+    await clickOn(handlers, {sc: 'withdraw', phase: '7'});
+    await settle();
+    const text = calls.find((c) => c[0] === 'confirm')[1];
+    assert.doesNotMatch(text, /withdraw_confirm_zones/);
+    assert.match(text, /"n":2\}/);
+});

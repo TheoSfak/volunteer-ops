@@ -8111,6 +8111,15 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 209,
+            'description' => "Scenario search areas (v3.459.0): a staged order can now be a search area (the outer polygon a search zone is divided into sectors from) as well - mission_scenario_items.kind grows from ENUM('dispatch','sector','route','order','restricted') to ENUM('dispatch','sector','route','order','restricted','area'). A search area's payload holds its label and points; it has no team or slot, because an area is a boundary and not an order to anyone. A staged sector may name a staged area of the same scenario (area_item_id in its payload) instead of an area that exists. Re-running it changes nothing.",
+            'up' => function () {
+                dbExecute("ALTER TABLE mission_scenario_items
+                    MODIFY COLUMN kind ENUM('dispatch','sector','route','order','restricted','area') NOT NULL DEFAULT 'dispatch' COMMENT 'What kind of order: dispatch = a point or an area (sent as a mission_dispatch_points row), sector = a search sector (sent as a mission_search_sectors row), route = a patrol of waypoints (sent as a mission_routes row), order = a general order to people (sent as a mission_orders row), restricted = a restricted area (sent as a mission_restricted_areas row), area = a search area (sent as a mission_search_areas row)'");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

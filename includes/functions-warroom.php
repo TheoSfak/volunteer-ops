@@ -1606,7 +1606,7 @@ function loadMissionSearchAreasForUser(int $missionId, bool $canManageWarRoom): 
          FROM mission_search_areas a
          LEFT JOIN users cu ON cu.id = a.created_by
          WHERE a.mission_id = ?
-         ORDER BY a.created_at",
+         ORDER BY a.created_at, a.id",
         [$missionId]
     );
     if (empty($rows)) {
@@ -6029,8 +6029,12 @@ function notifySectorAssigned(int $missionId, string $missionTitle, int $teamId,
  * ('' = no team), geo (JSON text of [[lat, lng], ...]). Returns ['ok' => false, 'error' => <text to show>], or
  * ['ok' => true, 'label' => string, 'area_id' => int, 'area_label' => string, 'team_id' => int|null, 'team_label' =>
  * string|null, 'geo' => [[lat, lng], ...]].
+ *
+ * $stagedArea (v3.459.0) is only for a scenario that is writing a sector down for a search area it has not made yet:
+ * ['label' => the staged area's name] stands in for the search area row (and area_id comes back 0). Everything else is
+ * checked as always.
  */
-function prepareMissionSector(array $mission, array $input): array {
+function prepareMissionSector(array $mission, array $input, ?array $stagedArea = null): array {
     $missionId = (int) $mission['id'];
     $label = trim((string) ($input['label'] ?? ''));
     if ($label === '') {
@@ -6039,7 +6043,12 @@ function prepareMissionSector(array $mission, array $input): array {
     $label = mb_substr($label, 0, 255);
 
     $areaId = (int) ($input['area_id'] ?? 0);
-    $area = dbFetchOne("SELECT id, label FROM mission_search_areas WHERE id = ? AND mission_id = ?", [$areaId, $missionId]);
+    // A sector a scenario writes down for a search area that the scenario has not made yet (v3.459.0): there is no row to
+    // look for, so the area is the staged one ($stagedArea = ['label' => its name]) and its id is 0 until play makes it.
+    // Nothing that makes a sector passes this.
+    $area = $stagedArea !== null
+        ? ['id' => 0, 'label' => (string) ($stagedArea['label'] ?? '')]
+        : dbFetchOne("SELECT id, label FROM mission_search_areas WHERE id = ? AND mission_id = ?", [$areaId, $missionId]);
     if (!$area) {
         return ['ok' => false, 'error' => t('sector.area_not_found')];
     }
@@ -6125,6 +6134,77 @@ function createMissionSector(array $mission, int $userId, array $input): array {
     }
 
     return ['ok' => true, 'id' => (int) $sectorId];
+}
+
+/**
+ * Everything createMissionSearchArea() checks about a search area, and nothing it does (v3.459.0): the checks of
+ * mission-sector.php's `create_area`, moved here unchanged so that the window's save and a scenario's staged area are held
+ * to the same rules. Pure: it reads nothing and writes nothing. The checks run in the order the endpoint always ran
+ * them, so a form with two mistakes gets the same message it always got.
+ *
+ * $input is what the form posts, as post() returns it: label, geo (JSON text of [[lat, lng], ...], at least three points),
+ * ring_index ('' = a hand-drawn area; 0-3 matches LPB_RING_TABLE's own [25,50,75,95] index and is set only by the ring
+ * shortcuts of the page, which back the "reset ring assignments" bulk-clear). Returns ['ok' => false, 'error' => text],
+ * or ['ok' => true, 'label' => text (trimmed, at most 255), 'geo' => [[float, float], ...], 'ring_index' => int|null].
+ */
+function prepareMissionSearchArea(array $input): array {
+    $label = trim((string) ($input['label'] ?? ''));
+    if ($label === '') {
+        return ['ok' => false, 'error' => t('sector.invalid_label')];
+    }
+    $label = mb_substr($label, 0, 255);
+
+    $rawGeo = json_decode((string) ($input['geo'] ?? ''), true);
+    if (!is_array($rawGeo) || count($rawGeo) < 3) {
+        return ['ok' => false, 'error' => t('dispatch.polygon_needs_3_points')];
+    }
+    $isValidLatLng = fn($lat, $lng) => is_numeric($lat) && is_numeric($lng)
+        && (float) $lat >= -90 && (float) $lat <= 90 && (float) $lng >= -180 && (float) $lng <= 180
+        && !((float) $lat === 0.0 && (float) $lng === 0.0);
+    foreach ($rawGeo as $pt) {
+        if (!is_array($pt) || !isset($pt[0], $pt[1]) || !$isValidLatLng($pt[0], $pt[1])) {
+            return ['ok' => false, 'error' => t('dispatch.invalid_point')];
+        }
+    }
+    $geo = array_map(fn($pt) => [(float) $pt[0], (float) $pt[1]], $rawGeo);
+
+    // 0-3, matching LPB_RING_TABLE's own [25,50,75,95] index — set only by
+    // the war-room.php ring shortcuts (openDivideRingIntoSectors(),
+    // openAutoAssignForRing()), null for a hand-drawn area. Backs the
+    // "reset ring assignments" bulk-clear (see clear_ring_generated).
+    $ringIndexRaw = $input['ring_index'] ?? null;
+    $ringIndex = ($ringIndexRaw !== '' && $ringIndexRaw !== null) ? (int) $ringIndexRaw : null;
+    if ($ringIndex !== null && ($ringIndex < 0 || $ringIndex > 3)) {
+        return ['ok' => false, 'error' => t('common.invalid_request')];
+    }
+
+    return ['ok' => true, 'label' => $label, 'geo' => $geo, 'ring_index' => $ringIndex];
+}
+
+/**
+ * Command draws a search area: the outer polygon that is later divided into sectors. This is the body of
+ * mission-sector.php's `create_area` (v3.459.0), moved here unchanged so that anything else that has to make the very same
+ * area - a step of a scenario - goes through the same checks and writes the same row and audit entry as a hand-drawn
+ * one. Command only: the caller has checked that. The endpoint adds the lists it answers with; this does not.
+ *
+ * $input is the form's: see prepareMissionSearchArea(). Returns ['ok' => true, 'id' => <area id>] or ['ok' => false,
+ * 'error' => <text to show>].
+ */
+function createMissionSearchArea(array $mission, int $userId, array $input): array {
+    $prepared = prepareMissionSearchArea($input);
+    if (!$prepared['ok']) {
+        return $prepared;
+    }
+    $missionId = (int) $mission['id'];
+    $ringIndex = $prepared['ring_index'];
+
+    $areaId = dbInsert(
+        "INSERT INTO mission_search_areas (mission_id, label, geo, ring_index, created_by, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
+        [$missionId, $prepared['label'], json_encode($prepared['geo']), $ringIndex, $userId]
+    );
+    logAudit('create_mission_search_area', 'mission_search_areas', $areaId, null, ['mission_id' => $missionId, 'ring_index' => $ringIndex]);
+
+    return ['ok' => true, 'id' => (int) $areaId];
 }
 
 /**

@@ -268,44 +268,18 @@ if (!$canManageWarRoom) {
 }
 
 if ($action === 'create_area') {
-    $label = trim((string) post('label'));
-    if ($label === '') {
-        echo json_encode(['ok' => false, 'error' => t('sector.invalid_label')]);
-        exit;
-    }
-    $label = mb_substr($label, 0, 255);
-
-    $rawGeo = json_decode((string) post('geo'), true);
-    if (!is_array($rawGeo) || count($rawGeo) < 3) {
-        echo json_encode(['ok' => false, 'error' => t('dispatch.polygon_needs_3_points')]);
-        exit;
-    }
-    foreach ($rawGeo as $pt) {
-        if (!is_array($pt) || !isset($pt[0], $pt[1]) || !$isValidLatLng($pt[0], $pt[1])) {
-            echo json_encode(['ok' => false, 'error' => t('dispatch.invalid_point')]);
-            exit;
-        }
-    }
-    $geo = array_map(fn($pt) => [(float) $pt[0], (float) $pt[1]], $rawGeo);
-
-    // 0-3, matching LPB_RING_TABLE's own [25,50,75,95] index — set only by
-    // the war-room.php ring shortcuts (openDivideRingIntoSectors(),
-    // openAutoAssignForRing()), null for a hand-drawn area. Backs the
-    // "reset ring assignments" bulk-clear (see clear_ring_generated below).
-    $ringIndexRaw = post('ring_index');
-    $ringIndex = ($ringIndexRaw !== '' && $ringIndexRaw !== null) ? (int) $ringIndexRaw : null;
-    if ($ringIndex !== null && ($ringIndex < 0 || $ringIndex > 3)) {
-        echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
+    // The checks and the insert are createMissionSearchArea() (v3.459.0), the function a scenario makes an area with too.
+    $made = createMissionSearchArea($mission, (int) $userId, [
+        'label'      => post('label'),
+        'geo'        => post('geo'),
+        'ring_index' => post('ring_index'),
+    ]);
+    if (!$made['ok']) {
+        echo json_encode(['ok' => false, 'error' => $made['error']]);
         exit;
     }
 
-    $areaId = dbInsert(
-        "INSERT INTO mission_search_areas (mission_id, label, geo, ring_index, created_by, created_at) VALUES (?, ?, ?, ?, ?, NOW())",
-        [$missionId, $label, json_encode($geo), $ringIndex, $userId]
-    );
-    logAudit('create_mission_search_area', 'mission_search_areas', $areaId, null, ['mission_id' => $missionId, 'ring_index' => $ringIndex]);
-
-    echo json_encode(['ok' => true, 'id' => (int) $areaId] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
+    echo json_encode(['ok' => true, 'id' => (int) $made['id']] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
 }
 

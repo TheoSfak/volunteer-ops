@@ -1176,7 +1176,8 @@ final class ScenarioTest extends TestCase
         // The map has to show a sector the moment play made it, not at the next poll: the answer carries the pair
         // of lists the sector endpoint answers with, and only when a sector was made.
         $src = $this->source('mission-scenario.php');
-        $this->assertStringContainsString("fn(\$r) => (\$r['kind'] ?? '') === 'sector' && !empty(\$r['ok'])", $src);
+        // ...and also when a search area was (v3.459.0): the pair carries the areas too.
+        $this->assertStringContainsString("fn(\$r) => in_array(\$r['kind'] ?? '', ['sector', 'area'], true) && !empty(\$r['ok'])", $src);
         $this->assertStringContainsString("'sectors' => loadMissionSectorsForUser(\$missionId, (int) \$userId, true, false), 'areas' => loadMissionSearchAreasForUser(\$missionId, true)", $src);
         $this->assertStringContainsString("] + \$liveSectors(\$result['results'])", $src, 'play');
         $this->assertStringContainsString("] + \$liveSectors([\$result['item']])", $src, 'retry');
@@ -1192,9 +1193,11 @@ final class ScenarioTest extends TestCase
         $js = substr($page, $start, 22000);
         // «Στο σενάριο» needs a team or a slot for every piece: never an empty one, never the unfinished "new slot" row.
         $this->assertStringContainsString("const lacking = values.some(v => v === '' || v === 'slot:new');", $js);
-        $this->assertStringContainsString('window.wrScenario.stageSectors(choice.dataset.scPhase, currentArea.id, sectors)', $js);
+        // ...against the live area, or (v3.459.0) against the scenario's own area named as item:<id>.
+        $this->assertStringContainsString("const areaRef = currentArea.staged ? 'item:' + currentArea.item_id : currentArea.id;", $js);
+        $this->assertStringContainsString('window.wrScenario.stageSectors(choice.dataset.scPhase, areaRef, sectors)', $js);
         // «Αποθήκευση Τομέων» makes sectors now, so it refuses a slot - disabled, and once more in its handler.
-        $this->assertStringContainsString("saveBtn.disabled = values.length === 0 || hasSlot;", $js);
+        $this->assertStringContainsString("saveBtn.disabled = staged || values.length === 0 || hasSlot;", $js);
         $this->assertStringContainsString("if (Array.from(teamSelects).some(sel => sel.value.indexOf('slot:') === 0)) return;", $js);
         // The window's ghosts: what is already staged is drawn under the division.
         $this->assertStringContainsString('window.wrScenario.drawGhostsInto(refLayer)', $js);
@@ -2013,7 +2016,7 @@ final class ScenarioTest extends TestCase
         // POSTs need the CSRF token before any action.
         $csrf = strpos($src, "hash_equals(\$_SESSION['csrf_token']");
         $this->assertNotFalse($csrf);
-        foreach (['add_phase', 'rename_phase', 'delete_phase', 'add_item', 'add_sectors', 'add_route', 'add_order', 'add_restricted', 'delete_item', 'play_phase', 'withdraw_phase', 'retry_item'] as $action) {
+        foreach (['add_phase', 'rename_phase', 'delete_phase', 'add_item', 'add_sectors', 'add_route', 'add_order', 'add_restricted', 'add_area', 'delete_item', 'play_phase', 'withdraw_phase', 'retry_item'] as $action) {
             $this->assertGreaterThan($csrf, strpos($src, "'$action'"), "$action is after the CSRF check");
         }
         // The same open-mission gate as the dispatch endpoint.

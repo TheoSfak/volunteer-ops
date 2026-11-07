@@ -74,6 +74,19 @@
  * does not count in a phase's progress; the card reads it as «Σε ισχύ», and «Ανάκληση φάσης» deletes it through
  * deleteMissionRestrictedArea() (open breaches of it are resolved, exactly as by hand).
  *
+ * SEARCH AREAS (v3.459.0). A staged order can also be a search area (kind 'area', type 'search_area'): the outer polygon a search
+ * zone is later divided into sectors from. Play hands it to createMissionSearchArea() - the function the search-area window's
+ * save uses - and prepareMissionSearchArea() checks it when it is staged. An area has no team, slot or «όλες οι ομάδες»
+ * (audience 'none'); it is never finished, so it does not count in a phase's progress and the card reads it as «Σε ισχύ».
+ * What an area is FOR is the sectors on it, and that is why it is in a plan at all: a sector can be written down against an
+ * area that does not exist yet (payload area_item_id = the plan's own item, instead of area_id) and play makes the area first.
+ * That reference is the one place an item of the plan depends on another, so it has rules: the area has to be in the same
+ * phase as the sector or an earlier one (items play in order); at play the sector is cut from the live area the item became
+ * (scenarioResolveStagedSectorArea()) and, if the area was taken off the plan, was not sent yet or failed to be made, the sector
+ * FAILS with that reason - it is never cut from another area; and a staged area that unsent sectors still name cannot be taken
+ * off the plan, nor can the phase that holds it (deleteScenarioItem(), deleteScenarioPhase()). Taking a phase back never
+ * deletes an area, because deleting it deletes its sectors: the sectors are taken off their teams and the area stays on the map.
+ *
  * HOW FAR A PHASE HAS GOT (v3.456.0). Nothing about progress is stored: scenarioItemLiveStates() reads each sent order
  * from the live order itself (a point is finished when its team pressed «Ολοκληρώθηκε», a route when it is completed,
  * a sector when it is completed; an order that is gone, cancelled or taken off its team is withdrawn), and
@@ -164,6 +177,25 @@ function loadMissionScenario(int $missionId): array {
         }
     }
 
+    // The search areas the scenario itself writes down (v3.459.0), for the sectors that name one instead of an area that
+    // exists, and the number of each phase ("Φάση n", the position in the list) to say where such an area is.
+    $areaItems = [];
+    foreach ($items as $row) {
+        if ($row['kind'] === 'area') {
+            $areaPayload = json_decode((string) $row['payload'], true);
+            $areaItems[(int) $row['id']] = [
+                'label'    => is_array($areaPayload) ? (string) ($areaPayload['label'] ?? '') : '',
+                'sent'     => $row['sent_at'] !== null && $row['sent_ref_id'] !== null,
+                'ref'      => $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
+                'phase_id' => (int) $row['phase_id'],
+            ];
+        }
+    }
+    $phaseNumbers = [];
+    foreach ($phases as $i => $phase) {
+        $phaseNumbers[(int) $phase['id']] = $i + 1;
+    }
+
     // The people of each team who take part in the Action Room, for the routes that go to a team: a route with
     // nobody to receive it fails at play, and the card says so beforehand.
     $participantsByTeam = [];
@@ -194,9 +226,36 @@ function loadMissionScenario(int $missionId): array {
         $isRoute = $row['kind'] === 'route';
         $isOrder = $row['kind'] === 'order';
         $isRestricted = $row['kind'] === 'restricted';
+        $isSearchArea = $row['kind'] === 'area';
         $areaId = $isSector ? (int) ($payload['area_id'] ?? 0) : 0;
-        // A restricted area goes to nobody in particular: its audience is 'none', which is not "everybody" to widen to.
-        $audience = $isRestricted ? 'none' : (in_array($payload['audience'] ?? '', ['all', 'slot'], true) ? $payload['audience'] : 'team');
+        // A sector may name a search area the scenario makes (area_item_id) instead of one that exists (area_id): then the
+        // card says which, whether it is still to be made (area_staged, and in which phase) or gone, and a sector whose
+        // area has been made points at the live area.
+        $areaItemId = $isSector ? (int) ($payload['area_item_id'] ?? 0) : 0;
+        $areaStaged = false;
+        $areaPhaseN = null;
+        $areaLabel = $isSector ? ($areaLabels[$areaId] ?? ($payload['area_label'] ?? null)) : null;
+        $areaMissing = $isSector && !isset($areaLabels[$areaId]);
+        if ($areaItemId > 0) {
+            $areaItem = $areaItems[$areaItemId] ?? null;
+            if ($areaItem === null) {
+                $areaId = 0;
+                $areaLabel = $payload['area_label'] ?? null;
+                $areaMissing = true;
+            } elseif ($areaItem['sent']) {
+                $areaId = (int) $areaItem['ref'];
+                $areaLabel = $areaItem['label'];
+                $areaMissing = !isset($areaLabels[$areaId]);
+            } else {
+                $areaId = 0;
+                $areaLabel = $areaItem['label'];
+                $areaMissing = false;
+                $areaStaged = true;
+                $areaPhaseN = $phaseNumbers[$areaItem['phase_id']] ?? null;
+            }
+        }
+        // A restricted area and a search area go to nobody in particular: their audience is 'none', which is not "everybody" to widen to.
+        $audience = ($isRestricted || $isSearchArea) ? 'none' : (in_array($payload['audience'] ?? '', ['all', 'slot'], true) ? $payload['audience'] : 'team');
         $slotId = $audience === 'slot' ? (int) ($payload['slot_id'] ?? 0) : 0;
         $slot = $slotById[$slotId] ?? null;
         if ($audience === 'slot') {
@@ -216,7 +275,7 @@ function loadMissionScenario(int $missionId): array {
             'slot_id'      => $slotId ?: null,
             'slot_label'   => $audience === 'slot' ? ($slot['label'] ?? ($payload['slot_label'] ?? null)) : null,
             'unmapped'     => $audience === 'slot' && $teamLabelNow === null,
-            'type'         => $isSector ? 'sector' : ($isRoute ? 'route' : ($isOrder ? 'order' : ($isRestricted ? 'restricted' : ($payload['type'] ?? null)))),
+            'type'         => $isSector ? 'sector' : ($isRoute ? 'route' : ($isOrder ? 'order' : ($isRestricted ? 'restricted' : ($isSearchArea ? 'search_area' : ($payload['type'] ?? null))))),
             'geo'          => $isRoute ? scenarioRouteGhostPoints($payload) : ($isOrder ? null : ($payload['geo'] ?? null)),
             // An order to people has no place on the map; the words typed for it are what the card shows.
             'label'        => $isOrder ? ($payload['text'] ?? null) : ($payload['label'] ?? null),
@@ -225,16 +284,21 @@ function loadMissionScenario(int $missionId): array {
             'restricted_kind' => $isRestricted ? ($payload['kind'] ?? null) : null,
             'shape'        => $isRestricted ? ($payload['shape'] ?? null) : null,
             'travel_mode'  => $payload['travel_mode'] ?? null,
-            'area_id'      => $isSector ? $areaId : null,
-            'area_label'   => $isSector ? ($areaLabels[$areaId] ?? ($payload['area_label'] ?? null)) : null,
-            'area_missing' => $isSector && !isset($areaLabels[$areaId]),
+            'area_id'      => $isSector ? ($areaId ?: null) : null,
+            'area_label'   => $areaLabel,
+            'area_missing' => $areaMissing,
+            // A sector that names a search area of the scenario: which one, whether it is still to be made, and in which phase.
+            'area_item_id' => $areaItemId ?: null,
+            'area_staged'  => $areaStaged,
+            'area_phase_n' => $areaPhaseN,
             'sent'         => $row['sent_at'] !== null,
             'sent_at'      => $row['sent_at'],
             'point_count'  => $isRoute ? count(is_array($payload['waypoints'] ?? null) ? $payload['waypoints'] : []) : null,
             'closed_loop'  => $isRoute ? !empty($payload['is_closed_loop']) : null,
             'return_to_start' => $isRoute ? !empty($payload['add_return_waypoint']) : null,
             'team_empty'   => $isRoute && $teamId > 0 && isset($teamLabels[(int) $teamId]) && empty($participantsByTeam[(int) $teamId]),
-            'dispatch_id'  => !$isSector && !$isRoute && !$isOrder && !$isRestricted && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
+            'dispatch_id'  => !$isSector && !$isRoute && !$isOrder && !$isRestricted && !$isSearchArea && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
+            'search_area_id' => $isSearchArea && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'sector_id'    => $isSector && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'route_id'     => $isRoute && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'order_id'     => $isOrder && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
@@ -277,12 +341,12 @@ function loadMissionScenario(int $missionId): array {
  * A «Δεν μπορώ» does not finish anything: the order stays open. Reopening a finished order makes it open again.
  */
 function scenarioItemLiveStates(int $missionId, array $items): array {
-    $byKind = ['dispatch' => [], 'route' => [], 'sector' => [], 'order' => [], 'restricted' => []];
+    $byKind = ['dispatch' => [], 'route' => [], 'sector' => [], 'order' => [], 'restricted' => [], 'area' => []];
     foreach ($items as $row) {
         if ($row['sent_at'] === null || $row['sent_ref_id'] === null) {
             continue;
         }
-        $kind = in_array($row['kind'], ['route', 'sector', 'order', 'restricted'], true) ? $row['kind'] : 'dispatch';
+        $kind = in_array($row['kind'], ['route', 'sector', 'order', 'restricted', 'area'], true) ? $row['kind'] : 'dispatch';
         $byKind[$kind][(int) $row['id']] = (int) $row['sent_ref_id'];
     }
     $out = [];
@@ -343,6 +407,18 @@ function scenarioItemLiveStates(int $missionId, array $items): array {
         }
     }
 
+    if ($byKind['area']) {
+        // A search area is never finished either - its sectors are - so it is STANDING while it exists.
+        $refs = array_values(array_unique($byKind['area']));
+        $live = [];
+        foreach (dbFetchAll("SELECT id FROM mission_search_areas WHERE mission_id = ? AND id IN (" . $in($refs) . ")", array_merge([$missionId], $refs)) as $r) {
+            $live[(int) $r['id']] = true;
+        }
+        foreach ($byKind['area'] as $itemId => $ref) {
+            $out[$itemId] = ['state' => isset($live[$ref]) ? 'standing' : 'withdrawn', 'done' => null, 'of' => null];
+        }
+    }
+
     if ($byKind['order']) {
         // An order to people is DONE when everybody it went to has done what it asked - the same rule as the
         // acknowledgement panel's «finished»: for a task, a location, a photo or a video that is the thing itself
@@ -397,8 +473,13 @@ function scenarioPhaseProgress(array $items): array {
                 $withdrawable++;
             }
         } elseif ($state === 'standing') {
-            $standing++;
-            $withdrawable++;
+            // A search area stands too, but it is no order that can be finished and taking a phase back never deletes it
+            // (it is the ground its sectors are on): it is in none of the counts. `standing` is the zones that taking the
+            // phase back DELETES, and the card's confirmation says so.
+            if (($item['kind'] ?? '') !== 'area') {
+                $standing++;
+                $withdrawable++;
+            }
         } elseif ($state === 'withdrawn') {
             $withdrawn++;
         } elseif (!$item['sent']) {
@@ -460,6 +541,16 @@ function deleteScenarioPhase(array $mission, int $phaseId, int $userId): ?string
     $phase = scenarioPhaseRow($missionId, $phaseId);
     if (!$phase) {
         return t('scenario.phase_not_found');
+    }
+    // A search area of this phase that sectors of ANOTHER phase are waiting for cannot go with it: those sectors would be
+    // left with an area that is nowhere (v3.459.0). Sectors of this very phase go with it.
+    foreach (dbFetchAll("SELECT id, payload FROM mission_scenario_items WHERE phase_id = ? AND mission_id = ? AND kind = 'area'", [$phaseId, $missionId]) as $areaRow) {
+        foreach (scenarioUnsentSectorsOfStagedArea($missionId, (int) $areaRow['id']) as $waiting) {
+            if ($waiting['phase_id'] !== $phaseId) {
+                $areaPayload = json_decode((string) $areaRow['payload'], true);
+                return t('scenario.phase_area_in_use', ['area' => is_array($areaPayload) ? (string) ($areaPayload['label'] ?? '') : '']);
+            }
+        }
     }
     dbExecute("DELETE FROM mission_scenario_phases WHERE id = ? AND mission_id = ?", [$phaseId, $missionId]);
     dbExecute("UPDATE mission_scenario_phases SET seq = seq - 1 WHERE mission_id = ? AND seq > ?", [$missionId, (int) $phase['seq']]);
@@ -569,7 +660,7 @@ function addScenarioDispatchItem(array $mission, int $phaseId, int $userId, arra
  * two points) is refused when it is written down. A phase that has been played takes no more orders.
  * ['ok' => true, 'count' => n] or ['ok' => false, 'error' => text] with nothing written.
  */
-function addScenarioSectorItems(array $mission, int $phaseId, int $userId, int $areaId, array $sectors): array {
+function addScenarioSectorItems(array $mission, int $phaseId, int $userId, int $areaId, array $sectors, int $areaItemId = 0): array {
     $missionId = (int) $mission['id'];
     $phase = scenarioPhaseRow($missionId, $phaseId);
     if (!$phase) {
@@ -577,6 +668,22 @@ function addScenarioSectorItems(array $mission, int $phaseId, int $userId, int $
     }
     if ($phase['played_at'] !== null) {
         return ['ok' => false, 'error' => t('scenario.phase_closed_for_orders')];
+    }
+    // The sectors may be cut from a search area the scenario itself makes ($areaItemId, v3.459.0) rather than from one that
+    // exists. If that area has been made since it was written down it is a real area now and they are cut from it as
+    // always; if not, they are written down against the staged one, and play makes the area first.
+    $stagedArea = null;
+    if ($areaItemId > 0) {
+        $ref = scenarioStagedAreaForSector($missionId, $phase, $areaItemId);
+        if (isset($ref['error'])) {
+            return ['ok' => false, 'error' => $ref['error']];
+        }
+        if (isset($ref['live_area_id'])) {
+            $areaId = $ref['live_area_id'];
+            $areaItemId = 0;
+        } else {
+            $stagedArea = ['label' => $ref['label']];
+        }
     }
     $sectors = array_values($sectors);
     if (!$sectors) {
@@ -610,7 +717,7 @@ function addScenarioSectorItems(array $mission, int $phaseId, int $userId, int $
             'area_id' => $areaId,
             'team_id' => $who['team_input'],
             'geo'     => is_array($geo) ? json_encode($geo) : (string) $geo,
-        ]);
+        ], $stagedArea);
         if (!$prepared['ok']) {
             return $refuse($prepared['error']);
         }
@@ -622,6 +729,11 @@ function addScenarioSectorItems(array $mission, int $phaseId, int $userId, int $
             'label'      => $prepared['label'],
             'geo'        => $prepared['geo'],
         ];
+        if ($stagedArea !== null) {
+            // The area is named by the plan's own item, not by an id: there is none yet. Play looks the item up.
+            unset($payload['area_id']);
+            $payload['area_item_id'] = $areaItemId;
+        }
         if ($who['audience'] === 'slot') {
             $payload['slot_id'] = (int) $who['slot']['id'];
             $payload['slot_label'] = $who['slot']['label'];
@@ -641,8 +753,59 @@ function addScenarioSectorItems(array $mission, int $phaseId, int $userId, int $
         "INSERT INTO mission_scenario_items (phase_id, mission_id, seq, kind, payload, slot_id, created_by, created_at) VALUES " . implode(', ', $values),
         $params
     );
-    logAudit('stage_scenario_sectors', 'mission_scenario_items', $firstId, null, ['mission_id' => $missionId, 'phase_id' => $phaseId, 'area_id' => $areaId, 'count' => count($rows)]);
+    logAudit('stage_scenario_sectors', 'mission_scenario_items', $firstId, null, ['mission_id' => $missionId, 'phase_id' => $phaseId, 'area_id' => $stagedArea !== null ? null : $areaId, 'area_item_id' => $stagedArea !== null ? $areaItemId : null, 'count' => count($rows)]);
     return ['ok' => true, 'count' => count($rows)];
+}
+
+/**
+ * Where a sector written down in $sectorPhase may be cut from when it names the scenario's own search area $areaItemId
+ * (v3.459.0): ['error' => text] when there is no such area in this scenario, or when it is in a LATER phase than the sector
+ * (play makes things phase by phase and in order, so the area has to come first); ['live_area_id' => n] when the area has been
+ * made already (it is a real search area now, and the sectors are written against that one); else ['label' => the staged
+ * area's name], meaning the sectors are written against the staged area and play makes the area first.
+ */
+function scenarioStagedAreaForSector(int $missionId, array $sectorPhase, int $areaItemId): array {
+    $row = dbFetchOne(
+        "SELECT i.id, i.phase_id, i.payload, i.sent_at, i.sent_ref_id FROM mission_scenario_items i
+         WHERE i.id = ? AND i.mission_id = ? AND i.kind = 'area'",
+        [$areaItemId, $missionId]
+    );
+    if (!$row) {
+        return ['error' => t('scenario.area_item_not_found')];
+    }
+    $payload = json_decode((string) $row['payload'], true);
+    $label = is_array($payload) ? (string) ($payload['label'] ?? '') : '';
+    if ($row['sent_at'] !== null && $row['sent_ref_id'] !== null) {
+        return ['live_area_id' => (int) $row['sent_ref_id']];
+    }
+    $areaPhase = scenarioPhaseRow($missionId, (int) $row['phase_id']);
+    if ($areaPhase && ((int) $areaPhase['seq'] > (int) $sectorPhase['seq'] || ((int) $areaPhase['seq'] === (int) $sectorPhase['seq'] && (int) $areaPhase['id'] > (int) $sectorPhase['id']))) {
+        return ['error' => t('scenario.sector_before_area', ['area' => $label, 'phase' => t('scenario.phase_n', ['n' => scenarioPhaseNumber($missionId, $areaPhase)])])];
+    }
+    return ['label' => $label];
+}
+
+/** The number shown for a phase ("Φάση n"): its place in the list. $phase is a row of scenarioPhaseRow(). */
+function scenarioPhaseNumber(int $missionId, array $phase): int {
+    return 1 + (int) dbFetchValue(
+        "SELECT COUNT(*) FROM mission_scenario_phases WHERE mission_id = ? AND (seq < ? OR (seq = ? AND id < ?))",
+        [$missionId, (int) $phase['seq'], (int) $phase['seq'], (int) $phase['id']]
+    );
+}
+
+/**
+ * The sectors of this scenario that have not been sent and are cut from the scenario's own search area $areaItemId: [['id' =>
+ * the sector item, 'phase_id' => its phase], ...]. A staged area with any of them cannot be taken off the plan (v3.459.0).
+ */
+function scenarioUnsentSectorsOfStagedArea(int $missionId, int $areaItemId): array {
+    $out = [];
+    foreach (dbFetchAll("SELECT id, phase_id, payload FROM mission_scenario_items WHERE mission_id = ? AND kind = 'sector' AND sent_at IS NULL", [$missionId]) as $row) {
+        $payload = json_decode((string) $row['payload'], true);
+        if (is_array($payload) && (int) ($payload['area_item_id'] ?? 0) === $areaItemId) {
+            $out[] = ['id' => (int) $row['id'], 'phase_id' => (int) $row['phase_id']];
+        }
+    }
+    return $out;
 }
 
 /** A staged route's waypoints as [[lat, lng], ...] for the map, or null when it has none. */
@@ -851,12 +1014,62 @@ function addScenarioRestrictedItem(array $mission, int $phaseId, int $userId, ar
     return ['ok' => true, 'id' => $id];
 }
 
+/**
+ * Writes a search area into a phase (v3.459.0). $input is the search-area window's form: label and geo (JSON text of [[lat,
+ * lng], ...], at least three points). There is no team or slot here: an area is a boundary, not an order to anyone; and no ring
+ * index, which only the page's ring shortcuts set on an area they make themselves. Checked by prepareMissionSearchArea(),
+ * exactly as making it would be, so an area that could never be made (no name, two points, one outside the map) is refused
+ * when it is written down. Sectors written down later can be cut from it (addScenarioSectorItems() with its item id), and
+ * play makes the area before them. A phase that has been played takes no more orders. ['ok' => true, 'id' => n] or ['ok' =>
+ * false, 'error' => text].
+ */
+function addScenarioAreaItem(array $mission, int $phaseId, int $userId, array $input): array {
+    $missionId = (int) $mission['id'];
+    $phase = scenarioPhaseRow($missionId, $phaseId);
+    if (!$phase) {
+        return ['ok' => false, 'error' => t('scenario.phase_not_found')];
+    }
+    if ($phase['played_at'] !== null) {
+        return ['ok' => false, 'error' => t('scenario.phase_closed_for_orders')];
+    }
+    if ((int) dbFetchValue("SELECT COUNT(*) FROM mission_scenario_items WHERE phase_id = ?", [$phaseId]) >= SCENARIO_MAX_ITEMS_PER_PHASE) {
+        return ['ok' => false, 'error' => t('scenario.too_many_orders', ['max' => SCENARIO_MAX_ITEMS_PER_PHASE])];
+    }
+
+    $prepared = prepareMissionSearchArea([
+        'label'      => $input['label'] ?? '',
+        'geo'        => $input['geo'] ?? '',
+        'ring_index' => '',
+    ]);
+    if (!$prepared['ok']) {
+        return $prepared;
+    }
+
+    $payload = ['label' => $prepared['label'], 'geo' => $prepared['geo']];
+    $seq = 1 + (int) dbFetchValue("SELECT COALESCE(MAX(seq), 0) FROM mission_scenario_items WHERE phase_id = ?", [$phaseId]);
+    $id = (int) dbInsert(
+        "INSERT INTO mission_scenario_items (phase_id, mission_id, seq, kind, payload, slot_id, created_by, created_at) VALUES (?, ?, ?, 'area', ?, NULL, ?, NOW())",
+        [$phaseId, $missionId, $seq, json_encode($payload, JSON_UNESCAPED_UNICODE), $userId]
+    );
+    logAudit('stage_scenario_item', 'mission_scenario_items', $id, null, ['mission_id' => $missionId, 'phase_id' => $phaseId, 'type' => 'search_area']);
+    return ['ok' => true, 'id' => $id];
+}
+
 /** Takes one staged order off the plan. Null on success. */
 function deleteScenarioItem(array $mission, int $itemId, int $userId): ?string {
     $missionId = (int) $mission['id'];
-    $item = dbFetchOne("SELECT id, phase_id, sent_at FROM mission_scenario_items WHERE id = ? AND mission_id = ?", [$itemId, $missionId]);
+    $item = dbFetchOne("SELECT id, phase_id, kind, payload, sent_at FROM mission_scenario_items WHERE id = ? AND mission_id = ?", [$itemId, $missionId]);
     if (!$item) {
         return t('scenario.item_not_found');
+    }
+    // A search area that sectors still waiting to be sent are cut from cannot be taken off the plan: they would have no
+    // area to be made in (v3.459.0). Like a slot in use, it is refused until those sectors are gone.
+    if ($item['kind'] === 'area') {
+        $waiting = scenarioUnsentSectorsOfStagedArea($missionId, $itemId);
+        if ($waiting) {
+            $areaPayload = json_decode((string) $item['payload'], true);
+            return t('scenario.area_in_use', ['area' => is_array($areaPayload) ? (string) ($areaPayload['label'] ?? '') : '', 'n' => count($waiting)]);
+        }
     }
     dbExecute("DELETE FROM mission_scenario_items WHERE id = ? AND mission_id = ?", [$itemId, $missionId]);
     logAudit('delete_scenario_item', 'mission_scenario_items', $itemId, null, ['mission_id' => $missionId, 'phase_id' => (int) $item['phase_id'], 'was_sent' => $item['sent_at'] !== null]);
@@ -974,6 +1187,50 @@ function scenarioRestrictedInputFromPayload($payload): ?array {
 }
 
 /**
+ * What createMissionSearchArea() takes, built from a staged search area's payload, or null when the payload cannot be read as
+ * one (v3.459.0). The area's twin of scenarioRestrictedInputFromPayload(): no audience to widen, the label must be words and
+ * the geo a list. The ring index is always empty: a staged area is a hand-drawn one. Anything else is null, and the item
+ * fails with «δεν διαβάζεται» rather than making an area nobody asked for.
+ */
+function scenarioAreaInputFromPayload($payload): ?array {
+    if (!is_array($payload) || trim((string) ($payload['label'] ?? '')) === '' || !is_array($payload['geo'] ?? null)) {
+        return null;
+    }
+    return [
+        'label'      => (string) $payload['label'],
+        'geo'        => json_encode($payload['geo']),
+        'ring_index' => '',
+    ];
+}
+
+/**
+ * The live search area a staged sector is to be cut from, when its payload names one of the scenario's own areas
+ * (area_item_id, v3.459.0): ['area_id' => the id of the area that item became] once that area has been made, else ['error' =>
+ * text] - the area was taken off the plan, or has not been made (its phase has not been played, or its sending failed and is
+ * waiting for a retry). Never another area, and never a guess: the sector fails and says why.
+ */
+function scenarioResolveStagedSectorArea(int $missionId, array $payload): array {
+    $name = (string) ($payload['area_label'] ?? '');
+    $row = dbFetchOne(
+        "SELECT i.id, i.phase_id, i.payload, i.sent_at, i.sent_ref_id, p.seq, p.id AS pid FROM mission_scenario_items i
+         JOIN mission_scenario_phases p ON p.id = i.phase_id
+         WHERE i.id = ? AND i.mission_id = ? AND i.kind = 'area'",
+        [(int) ($payload['area_item_id'] ?? 0), $missionId]
+    );
+    if (!$row) {
+        return ['error' => t('scenario.item_area_item_gone', ['area' => $name])];
+    }
+    $areaPayload = json_decode((string) $row['payload'], true);
+    if (is_array($areaPayload) && trim((string) ($areaPayload['label'] ?? '')) !== '') {
+        $name = (string) $areaPayload['label'];
+    }
+    if ($row['sent_at'] === null || $row['sent_ref_id'] === null) {
+        return ['error' => t('scenario.item_area_not_made', ['area' => $name, 'phase' => t('scenario.phase_n', ['n' => scenarioPhaseNumber($missionId, ['id' => $row['pid'], 'seq' => $row['seq']])])])];
+    }
+    return ['area_id' => (int) $row['sent_ref_id']];
+}
+
+/**
  * What createScenarioOrder() takes, built from a staged general order's payload, or null when the payload cannot be
  * read as one. The general order's twin of scenarioDispatchInputFromPayload(), with the same rule: the audience 'all'
  * (every person on duty at the moment of sending) is read ONLY when the payload says so in words; an audience 'team'
@@ -1061,18 +1318,33 @@ function createScenarioOrder(array $mission, int $userId, array $input): array {
  */
 function scenarioSendItem(array $mission, array $item, int $userId, string $userName): array {
     $itemId = (int) $item['id'];
-    $kind = in_array($item['kind'] ?? 'dispatch', ['sector', 'route', 'order', 'restricted'], true) ? $item['kind'] : 'dispatch';
+    $kind = in_array($item['kind'] ?? 'dispatch', ['sector', 'route', 'order', 'restricted', 'area'], true) ? $item['kind'] : 'dispatch';
     $isSector = $kind === 'sector';
     $payload = json_decode((string) $item['payload'], true);
     $slotTeams = scenarioSlotTeamMap((int) $mission['id']);
+    // A sector written down against a search area the scenario makes (v3.459.0) is cut from the live area that item became:
+    // looked up here, now, so a phase that makes the area and its sectors together has the area before the first sector
+    // (they play in order). If the area is not there, the sector fails and says why; it is never cut from any other area.
+    $areaError = null;
+    if ($isSector && is_array($payload) && (int) ($payload['area_item_id'] ?? 0) > 0) {
+        $resolved = scenarioResolveStagedSectorArea((int) $mission['id'], $payload);
+        if (isset($resolved['error'])) {
+            $areaError = $resolved['error'];
+        } else {
+            $payload['area_id'] = $resolved['area_id'];
+        }
+    }
     $input = match ($kind) {
         'sector' => scenarioSectorInputFromPayload($payload, $slotTeams),
         'route' => scenarioRouteInputFromPayload($payload, $slotTeams),
         'order' => scenarioOrderInputFromPayload($payload, $slotTeams),
         'restricted' => scenarioRestrictedInputFromPayload($payload),
+        'area' => scenarioAreaInputFromPayload($payload),
         default => scenarioDispatchInputFromPayload($payload, $slotTeams),
     };
-    if ($input === null) {
+    if ($areaError !== null) {
+        $result = ['ok' => false, 'error' => $areaError];
+    } elseif ($input === null) {
         $result = ['ok' => false, 'error' => is_array($payload) && ($payload['audience'] ?? '') === 'slot'
             ? t('scenario.item_slot_unmapped', ['slot' => (string) ($payload['slot_label'] ?? '')])
             : t('scenario.item_unreadable')];
@@ -1085,6 +1357,7 @@ function scenarioSendItem(array $mission, array $item, int $userId, string $user
                 'route' => createMissionRoute($mission, $userId, $input),
                 'order' => createScenarioOrder($mission, $userId, $input),
                 'restricted' => createMissionRestrictedArea($mission, $userId, $input),
+                'area' => createMissionSearchArea($mission, $userId, $input),
                 default => createMissionDispatch($mission, $userId, $userName, $input),
             };
         } catch (Throwable $e) {
@@ -1104,12 +1377,13 @@ function scenarioSendItem(array $mission, array $item, int $userId, string $user
             'route_id' => $kind === 'route' ? (int) $result['id'] : null,
             'order_id' => $kind === 'order' ? (int) $result['id'] : null,
             'restricted_id' => $kind === 'restricted' ? (int) $result['id'] : null,
+            'search_area_id' => $kind === 'area' ? (int) $result['id'] : null,
             'error' => null,
         ];
     }
     $error = mb_substr((string) $result['error'], 0, 250);
     dbExecute("UPDATE mission_scenario_items SET last_error = ? WHERE id = ?", [$error, $itemId]);
-    return ['item_id' => $itemId, 'kind' => $kind, 'ok' => false, 'dispatch_id' => null, 'sector_id' => null, 'route_id' => null, 'order_id' => null, 'restricted_id' => null, 'error' => $error];
+    return ['item_id' => $itemId, 'kind' => $kind, 'ok' => false, 'dispatch_id' => null, 'sector_id' => null, 'route_id' => null, 'order_id' => null, 'restricted_id' => null, 'search_area_id' => null, 'error' => $error];
 }
 
 /**
@@ -1239,11 +1513,13 @@ function withdrawScenarioPhase(array $mission, int $phaseId, int $userId): array
     $states = scenarioItemLiveStates($missionId, $rows);
     // A general order to people (kind 'order') is not among them: once a message or a task has reached a phone there
     // is nothing to take back, and the Action Room has no way to do it by hand either.
-    $open = array_values(array_filter($rows, fn($r) => $r['kind'] !== 'order' && in_array($states[(int) $r['id']]['state'] ?? '', ['open', 'standing'], true)));
+    // Nor is a search area (v3.459.0): it is the ground its sectors lie on, and deleting it would delete them - the sectors
+    // are taken off their teams, the area stays on the map.
+    $open = array_values(array_filter($rows, fn($r) => !in_array($r['kind'], ['order', 'area'], true) && in_array($states[(int) $r['id']]['state'] ?? '', ['open', 'standing'], true)));
     if (!$open) {
         return ['ok' => false, 'error' => t('scenario.withdraw_nothing')];
     }
-    $phaseNumber = 1 + (int) dbFetchValue("SELECT COUNT(*) FROM mission_scenario_phases WHERE mission_id = ? AND (seq < ? OR (seq = ? AND id < ?))", [$missionId, (int) $phase['seq'], (int) $phase['seq'], $phaseId]);
+    $phaseNumber = scenarioPhaseNumber($missionId, $phase);
 
     $results = [];
     $dispatchItems = [];

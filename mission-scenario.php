@@ -50,7 +50,8 @@ $answer = fn(array $extra = []) => json_encode(['ok' => true, 'scenario' => load
 $fail = fn(string $error, array $extra = []) => json_encode(['ok' => false, 'error' => $error, 'scenario' => loadMissionScenario($missionId)] + $extra);
 // The sectors a play or a retry has just made are live now: hand back the live list (the same pair the sector
 // endpoint answers with) so the map shows them at once, not at the next poll. Only when one was made.
-$liveSectors = fn(array $results) => array_filter($results, fn($r) => ($r['kind'] ?? '') === 'sector' && !empty($r['ok']))
+// A search area made by play (v3.459.0) is handed back the same way: the pair carries it.
+$liveSectors = fn(array $results) => array_filter($results, fn($r) => in_array($r['kind'] ?? '', ['sector', 'area'], true) && !empty($r['ok']))
     ? ['sectors' => loadMissionSectorsForUser($missionId, (int) $userId, true, false), 'areas' => loadMissionSearchAreasForUser($missionId, true)]
     : [];
 // Likewise a play or a retry that has sent routes: the live list of routes, the one the route endpoint answers with.
@@ -129,9 +130,13 @@ if ($action === 'add_sectors') {
         $phaseId = (int) $made['id'];
         $madePhase = true;
     }
+    // area_id is the id of a search area that exists, or - for an area the scenario itself makes (v3.459.0) -
+    // 'item:<id>' naming the staged area item the sectors are cut from.
+    $areaRef = trim((string) post('area_id'));
+    $areaItemId = preg_match('/^item:([1-9][0-9]{0,9})$/', $areaRef, $areaMatch) ? (int) $areaMatch[1] : 0;
     $sectors = json_decode((string) post('sectors'), true);
     $result = is_array($sectors)
-        ? addScenarioSectorItems($mission, $phaseId, (int) $userId, (int) post('area_id'), $sectors)
+        ? addScenarioSectorItems($mission, $phaseId, (int) $userId, $areaItemId > 0 ? 0 : (int) $areaRef, $sectors, $areaItemId)
         : ['ok' => false, 'error' => t('common.invalid_request')];
     if (!$result['ok']) {
         if ($madePhase) {
@@ -199,6 +204,36 @@ if ($action === 'add_restricted') {
         'label' => post('label'),
         'kind'  => post('kind'),
         'shape' => post('shape'),
+        'geo'   => post('geo'),
+    ]);
+    if (!$result['ok']) {
+        if ($madePhase) {
+            deleteScenarioPhase($mission, $phaseId, (int) $userId);
+        }
+        echo $fail($result['error']);
+        exit;
+    }
+    echo $answer(['item_id' => $result['id'], 'phase_id' => $phaseId]);
+    exit;
+}
+
+if ($action === 'add_area') {
+    // The search-area window's «Στο σενάριο» (v3.459.0): the area drawn there goes into the phase instead of being made now,
+    // so that sectors can be written down against it. An area has no team: the fields are the window's own (label, geo). As
+    // for add_item, a "new phase" made for a refused order is taken out again.
+    $phaseId = (int) post('phase_id');
+    $madePhase = false;
+    if ($phaseId === 0 && post('phase_id') === 'new') {
+        $made = addScenarioPhase($mission, (int) $userId, '');
+        if (!$made['ok']) {
+            echo $fail($made['error']);
+            exit;
+        }
+        $phaseId = (int) $made['id'];
+        $madePhase = true;
+    }
+    $result = addScenarioAreaItem($mission, $phaseId, (int) $userId, [
+        'label' => post('label'),
         'geo'   => post('geo'),
     ]);
     if (!$result['ok']) {
