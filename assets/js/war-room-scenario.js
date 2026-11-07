@@ -99,7 +99,10 @@
             '.wr-sc-item .badge{white-space:normal;text-align:left}',
             '.wr-sc-item > button{flex-shrink:0}',
             '.wr-sc-goto{text-decoration:none;color:inherit;cursor:pointer}',
-            '.wr-sc-goto:hover{text-decoration:underline}'
+            '.wr-sc-goto:hover{text-decoration:underline}',
+            '.wr-sc-child{margin-left:14px;border-left:2px solid rgba(128,128,128,.35);padding-left:6px}',
+            '.wr-sc-waits{margin-top:6px;padding:6px 8px;border:1px dashed rgba(178,106,0,.6);border-radius:6px}',
+            '.wr-sc-wait + .wr-sc-wait{margin-top:6px;padding-top:6px;border-top:1px solid rgba(128,128,128,.25)}'
         ].join('\n');
         document.head.appendChild(style);
     }
@@ -119,12 +122,14 @@
     function load() {
         return fetch(ENDPOINT + '?mission_id=' + encodeURIComponent(WR_MISSION_ID))
             .then(r => r.json())
-            .then(res => { if (res && res.ok) apply(res.scenario); return res; })
+            .then(res => { if (res && res.ok) { apply(res.scenario); showReleased(res); } return res; })
             .catch(() => null);
     }
 
+    // Something is under way while a played phase has an open order - or an order waiting for its team (v3.461.0): then the card keeps
+    // refreshing, and each refresh is also the safety net that sends what a missed completion left waiting.
     function underWay() {
-        return scenario.phases.some(p => p.played_at && p.progress && p.progress.open > 0);
+        return scenario.phases.some(p => p.played_at && p.progress && (p.progress.open > 0 || p.progress.waiting > 0));
     }
     function refreshProgress() {
         if (document.hidden || busy || !underWay()) return;
@@ -133,7 +138,7 @@
         if (body && active && body.contains(active) && (active.tagName === 'SELECT' || active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
         fetch(ENDPOINT + '?mission_id=' + encodeURIComponent(WR_MISSION_ID))
             .then(r => r.json())
-            .then(res => { if (res && res.ok && !busy && JSON.stringify(res.scenario) !== lastJson) apply(res.scenario); })
+            .then(res => { if (res && res.ok && !busy) { if (JSON.stringify(res.scenario) !== lastJson) apply(res.scenario); showReleased(res); } })
             .catch(() => null);
     }
 
@@ -150,6 +155,15 @@
 
     function failed(res) {
         alert((res && res.error) || t('common.send_failed'));
+    }
+
+    // A refresh that sent what had been waiting for a team (v3.461.0) answers with the live lists, like a play, so the new orders are on
+    // the map at once and not at the next poll.
+    function showReleased(res) {
+        if (!res || !res.released || !res.released.length) return;
+        if (res.dispatches && typeof renderDispatches === 'function') renderDispatches(dispatches = res.dispatches);
+        showNewSectors(res);
+        showNewRoutes(res);
     }
 
     // A play or a retry that made sectors answers with the live list of sectors and areas, the pair the sector
@@ -212,6 +226,23 @@
         // people when everybody has done what they asked (v3.457.0). Counts are people, not teams.
         const isOrder = item.type === 'order';
         const ackOnly = isOrder && (item.order_type === 'message' || item.order_type === 'speak');
+        // Waiting for its team to finish the earlier phases, or its wait was cancelled, or it was split into one order per team (v3.461.0).
+        if (item.state === 'waiting') {
+            const w = item.wait;
+            if (!w || !w.phase_n) {
+                return `<div class="small" style="color:#b26a00"><i class="bi bi-hourglass-split me-1"></i>${esc(t('scenario.state_waiting_generic'))}</div>`;
+            }
+            const text = t(w.cant ? 'scenario.state_waiting_cant' : 'scenario.state_waiting', {team: w.team_label || item.team_label || '', phase: t('scenario.phase_n', {n: w.phase_n}), done: w.done, of: w.of});
+            return w.cant
+                ? `<div class="small text-danger"><i class="bi bi-exclamation-octagon-fill me-1"></i>${esc(text)}</div>`
+                : `<div class="small" style="color:#b26a00"><i class="bi bi-hourglass-split me-1"></i>${esc(text)}</div>`;
+        }
+        if (item.state === 'cancelled') {
+            return `<div class="small text-muted"><i class="bi bi-slash-circle me-1"></i>${esc(t('scenario.state_cancelled'))}</div>`;
+        }
+        if (item.state === 'expanded') {
+            return `<div class="small text-muted"><i class="bi bi-diagram-2 me-1"></i>${esc(t('scenario.state_split'))}</div>`;
+        }
         if (item.state === 'done') {
             return `<div class="small text-success"><i class="bi bi-check-circle-fill me-1"></i>${esc(t(ackOnly ? 'scenario.state_done_ack' : 'scenario.state_done'))}</div>`;
         }
@@ -266,6 +297,12 @@
         const target = `<span class="badge ${badgeClass}">${esc(itemTarget(item))}</span>`;
         let status = '';
         if (item.sent) {
+            status = stateLine(item);
+            // An order that waited says how it went out: by itself when its team finished, or by «Στείλε τώρα» (v3.461.0).
+            if (item.release_mode && item.released_label) {
+                status += `<div class="small text-muted"><i class="bi bi-send-check me-1"></i>${esc(t(item.release_mode === 'auto' ? 'scenario.state_released_auto' : 'scenario.state_released_manual', {time: item.released_label}))}</div>`;
+            }
+        } else if (item.state === 'waiting' || item.state === 'cancelled') {
             status = stateLine(item);
         } else if (item.error) {
             status = `<div class="small text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(item.error)}</div>`;
@@ -330,11 +367,33 @@
         // (v3.460.0). Also under the words, for the same reason.
         const addBuilding = (item.type === 'sector' && !item.sent && Array.isArray(item.geo) && item.geo.length >= 3)
             ? `<div class="mt-1"><button type="button" class="btn btn-outline-primary btn-sm py-0" data-sc="add-building" data-item="${item.id}" title="${esc(t('scenario.building_add_title'))}"><i class="bi bi-building-add me-1"></i>${esc(t('scenario.building_add_btn'))}</button></div>` : '';
-        return `<li class="wr-sc-item d-flex align-items-start gap-1${item.state === 'withdrawn' ? ' wr-sc-withdrawn' : ''}" data-item="${item.id}">
+        return `<li class="wr-sc-item d-flex align-items-start gap-1${item.state === 'withdrawn' || item.state === 'cancelled' ? ' wr-sc-withdrawn' : ''}${item.parent_item_id ? ' wr-sc-child' : ''}" data-item="${item.id}">
             <i class="bi ${icon} text-secondary mt-1"></i>
             <span class="flex-grow-1">${goto}${where}${recipient}${status}${divide}${addBuilding}</span>
             ${retry}${del}
         </li>`;
+    }
+
+    // «Αναμονή ανά ομάδα» (v3.461.0): under a played phase, one row for each team whose orders are held back, or whose wait was cancelled,
+    // with the two overrides command always has: send them now, or cancel the wait.
+    function waitsHtml(phase) {
+        const waits = Array.isArray(phase.waits) ? phase.waits : [];
+        if (!waits.length) return '';
+        const rows = waits.map(w => {
+            let text;
+            if (w.cancelled) {
+                text = t('scenario.wait_row_cancelled', {team: w.team_label, n: w.n});
+            } else if (!w.phase_n) {
+                text = w.team_label + ' · ' + t('scenario.state_waiting_generic') + ' · ' + w.n;
+            } else {
+                text = t(w.cant ? 'scenario.wait_row_cant' : 'scenario.wait_row', {team: w.team_label, phase: t('scenario.phase_n', {n: w.phase_n}), done: w.done, of: w.of, n: w.n});
+            }
+            const cls = w.cant ? 'text-danger fw-semibold' : (w.cancelled ? 'text-muted' : '');
+            const now = `<button type="button" class="btn btn-outline-success btn-sm py-0" data-sc="release-now" data-phase="${phase.id}" data-team="${w.team_id}" data-cancelled="${w.cancelled ? 1 : 0}" title="${esc(t('scenario.release_now_title'))}"><i class="bi bi-send me-1"></i>${esc(t('scenario.release_now_btn'))}</button>`;
+            const cancel = w.cancelled ? '' : `<button type="button" class="btn btn-outline-secondary btn-sm py-0" data-sc="cancel-wait" data-phase="${phase.id}" data-team="${w.team_id}" title="${esc(t('scenario.cancel_wait_title'))}"><i class="bi bi-x-circle me-1"></i>${esc(t('scenario.cancel_wait_btn'))}</button>`;
+            return `<div class="wr-sc-wait" data-wait-team="${w.team_id}"><div class="small ${cls}">${esc(text)}</div><div class="d-flex flex-wrap gap-1 mt-1">${now}${cancel}</div></div>`;
+        }).join('');
+        return `<div class="wr-sc-waits" data-sc-waits="1"><div class="small fw-semibold mb-1"><i class="bi bi-hourglass-split me-1"></i>${esc(t('scenario.waits_title'))}</div>${rows}</div>`;
     }
 
     function phaseHtml(phase) {
@@ -367,7 +426,7 @@
                 <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2" data-sc="delete-phase" data-phase="${phase.id}" title="${esc(t('scenario.phase_delete'))}"><i class="bi bi-trash"></i></button>
             </div>
             ${ready}${play ? `<div class="mt-1">${play}</div>` : ''}
-            ${playedLine}${withdraw}${items}
+            ${playedLine}${waitsHtml(phase)}${withdraw}${items}
         </div>`;
     }
 
@@ -498,6 +557,17 @@
         if (noSector) text += '\n\n' + t('scenario.play_confirm_sector_missing', {n: noSector});
         const noPeople = pending.filter(i => i.team_empty).length;
         if (noPeople) text += '\n\n' + t('scenario.play_confirm_team_empty', {n: noPeople});
+        // Who gets their orders at once and who waits until they have finished the earlier phases (v3.461.0), right after the first paragraph.
+        const pv = phase.release_preview;
+        if (pv && Array.isArray(pv.wait) && pv.wait.length) {
+            const lines = [];
+            if (pv.now.length) lines.push(t('scenario.play_confirm_now', {teams: pv.now.map(x => x.team_label).join(', ')}));
+            lines.push(t('scenario.play_confirm_wait', {teams: pv.wait.map(x => x.cant
+                ? t('scenario.play_confirm_wait_cant', {team: x.team_label})
+                : t('scenario.play_confirm_wait_team', {team: x.team_label, phase: t('scenario.phase_n', {n: x.phase_n}), done: x.done, of: x.of})).join(', ')}));
+            const cut = text.indexOf('\n\n');
+            text = cut < 0 ? text + '\n\n' + lines.join('\n') : text.slice(0, cut) + '\n\n' + lines.join('\n') + text.slice(cut);
+        }
         return text;
     }
 
@@ -741,6 +811,16 @@
                 const note = t('scenario.withdraw_confirm_zones');
                 sure = cut < 0 ? sure + '\n\n' + note : sure.slice(0, cut) + '\n\n' + note + sure.slice(cut);
             }
+            // Orders of this phase that are only waiting for their team are cancelled with it, and orders of LATER phases that wait for this one
+            // are not held back by it any more once it is taken back: both are said before the question (v3.461.0).
+            const extra = [];
+            if (phase.progress.waiting > 0) extra.push(t('scenario.withdraw_confirm_waits', {n: phase.progress.waiting}));
+            const later = scenario.phases.filter(p => p.n > phase.n).reduce((n, p) => n + (p.items || []).filter(i => i.state === 'waiting' && i.wait && i.wait.phase_n === phase.n).length, 0);
+            if (later > 0) extra.push(t('scenario.withdraw_confirm_later', {n: later}));
+            if (extra.length) {
+                const cut = sure.lastIndexOf('\n\n');
+                sure = cut < 0 ? sure + '\n\n' + extra.join('\n\n') : sure.slice(0, cut) + '\n\n' + extra.join('\n\n') + sure.slice(cut);
+            }
             if (!confirm(sure)) return;
             run('withdraw_phase', {phase_id: el.dataset.phase}, res => {
                 if (res.dispatches && typeof renderDispatches === 'function') renderDispatches(dispatches = res.dispatches);
@@ -752,6 +832,29 @@
                     alert(t('scenario.withdraw_partial', {withdrawn: res.withdrawn, failed: res.failed}) + '\n\n' + lines.join('\n'));
                 }
             });
+        } else if (act === 'release-now') {
+            // «Στείλε τώρα» (v3.461.0): the team's orders go now, without waiting for it to finish. A team that has not finished is asked about;
+            // one whose wait was cancelled is not (command already decided about it).
+            const phase = findPhase(el.dataset.phase);
+            const wait = phase && (phase.waits || []).find(w => String(w.team_id) === String(el.dataset.team) && (w.cancelled ? '1' : '0') === el.dataset.cancelled);
+            if (!wait) return;
+            if (!wait.cancelled && wait.phase_n && !confirm(t('scenario.release_now_confirm', {team: wait.team_label, phase: t('scenario.phase_n', {n: wait.phase_n}), done: wait.done, of: wait.of}))) return;
+            run('release_now', {phase_id: el.dataset.phase, team_id: el.dataset.team}, res => {
+                if (res.dispatches && typeof renderDispatches === 'function') renderDispatches(dispatches = res.dispatches);
+                showNewSectors(res);
+                showNewRoutes(res);
+                showNewRestricted(res);
+                if (res.failed > 0) {
+                    const lines = (res.results || []).filter(r => !r.ok).map(r => '• ' + r.error);
+                    alert(t('scenario.play_partial', {sent: res.sent, failed: res.failed}) + '\n\n' + lines.join('\n'));
+                }
+            });
+        } else if (act === 'cancel-wait') {
+            const phase = findPhase(el.dataset.phase);
+            const wait = phase && (phase.waits || []).find(w => String(w.team_id) === String(el.dataset.team) && !w.cancelled);
+            if (!wait) return;
+            if (!confirm(t('scenario.cancel_wait_confirm', {team: wait.team_label}))) return;
+            run('cancel_wait', {phase_id: el.dataset.phase, team_id: el.dataset.team});
         } else if (act === 'retry') {
             run('retry_item', {item_id: el.dataset.item}, res => {
                 if (res.dispatches && typeof renderDispatches === 'function') renderDispatches(dispatches = res.dispatches);

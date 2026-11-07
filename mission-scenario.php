@@ -35,7 +35,18 @@ if (!$canManageWarRoom) {
 
 // ── GET: the plan ──────────────────────────────────────────────────────────
 if (!isPost()) {
-    echo json_encode(['ok' => true, 'scenario' => loadMissionScenario($missionId)]);
+    // The safety net of the per-team release (v3.461.0): every refresh of the card first sends what has been waiting for a team that
+    // has finished since (a completion this request missed, an order taken back), so a miss heals while somebody watches. What it sent
+    // comes back with the live lists, like a play, so the map shows it at once.
+    $released = scenarioAfterOrderFinished($missionId);
+    $live = $released ? [
+        'released'   => $released,
+        'dispatches' => loadMissionDispatchesForUser($missionId, (int) $userId, true, false),
+        'sectors'    => loadMissionSectorsForUser($missionId, (int) $userId, true, false),
+        'areas'      => loadMissionSearchAreasForUser($missionId, true),
+        'routes'     => loadRoutesForUser($missionId, (int) $userId, true),
+    ] : [];
+    echo json_encode(['ok' => true, 'scenario' => loadMissionScenario($missionId)] + $live);
     exit;
 }
 
@@ -52,11 +63,11 @@ $fail = fn(string $error, array $extra = []) => json_encode(['ok' => false, 'err
 // endpoint answers with) so the map shows them at once, not at the next poll. Only when one was made.
 // A search area made by play (v3.459.0) is handed back the same way: the pair carries it. So is a building (v3.460.0): the sectors
 // of the pair carry their buildings and floors.
-$liveSectors = fn(array $results) => array_filter($results, fn($r) => in_array($r['kind'] ?? '', ['sector', 'area', 'building'], true) && !empty($r['ok']))
+$liveSectors = fn(array $results) => array_filter($results, fn($r) => in_array($r['kind'] ?? '', ['sector', 'area', 'building'], true) && !empty($r['ok']) && empty($r['waiting']))
     ? ['sectors' => loadMissionSectorsForUser($missionId, (int) $userId, true, false), 'areas' => loadMissionSearchAreasForUser($missionId, true)]
     : [];
 // Likewise a play or a retry that has sent routes: the live list of routes, the one the route endpoint answers with.
-$liveRoutes = fn(array $results) => array_filter($results, fn($r) => ($r['kind'] ?? '') === 'route' && !empty($r['ok']))
+$liveRoutes = fn(array $results) => array_filter($results, fn($r) => ($r['kind'] ?? '') === 'route' && !empty($r['ok']) && empty($r['waiting']))
     ? ['routes' => loadRoutesForUser($missionId, (int) $userId, true)]
     : [];
 // Likewise a play or a retry that has made restricted areas: the live list of zones, the one the restricted-area endpoint
@@ -359,10 +370,37 @@ if ($action === 'play_phase') {
     // The orders are live now: hand back the live list so the map shows them at once, not at the next poll.
     echo $answer([
         'sent'       => $result['sent'],
+        'waiting'    => $result['waiting'],
         'failed'     => $result['failed'],
         'results'    => $result['results'],
         'dispatches' => loadMissionDispatchesForUser($missionId, (int) $userId, true, false),
     ] + $liveSectors($result['results']) + $liveRoutes($result['results']) + $liveRestricted($result['results']));
+    exit;
+}
+
+if ($action === 'release_now') {
+    // «Στείλε τώρα» (v3.461.0): sends what a played phase holds back for one team (team_id) - or for all of them when team_id is empty -
+    // without waiting for the team to finish, including orders whose wait was cancelled.
+    $teamRaw = trim((string) post('team_id'));
+    $result = sendScenarioWaitingNow($mission, (int) post('phase_id'), $teamRaw === '' ? null : (int) $teamRaw, (int) $userId, (string) $user['name']);
+    if (!$result['ok']) {
+        echo $fail($result['error']);
+        exit;
+    }
+    echo $answer([
+        'sent'       => $result['sent'],
+        'failed'     => $result['failed'],
+        'results'    => $result['results'],
+        'dispatches' => loadMissionDispatchesForUser($missionId, (int) $userId, true, false),
+    ] + $liveSectors($result['results']) + $liveRoutes($result['results']) + $liveRestricted($result['results']));
+    exit;
+}
+
+if ($action === 'cancel_wait') {
+    // «Ακύρωση αναμονής» (v3.461.0): the orders a played phase holds back for one team (or for all) will not go; they stay in the plan.
+    $teamRaw = trim((string) post('team_id'));
+    $result = cancelScenarioWait($mission, (int) post('phase_id'), $teamRaw === '' ? null : (int) $teamRaw, (int) $userId);
+    echo $result['ok'] ? $answer(['cancelled' => $result['cancelled']]) : $fail($result['error']);
     exit;
 }
 
@@ -376,6 +414,7 @@ if ($action === 'withdraw_phase') {
     }
     echo $answer([
         'withdrawn'  => $result['withdrawn'],
+        'cancelled'  => $result['cancelled'],
         'failed'     => $result['failed'],
         'results'    => $result['results'],
         'dispatches' => loadMissionDispatchesForUser($missionId, (int) $userId, true, false),

@@ -1280,6 +1280,15 @@ function recordDispatchProgress(int $dispatchId, ?int $teamId, int $userId, stri
             break;
         }
     }
+    // A team that has finished its order may be the one a waiting phase of the scenario was waiting for (v3.461.0): this is the
+    // only place a point's «Ολοκληρώθηκε» is written, so every way of pressing it (the page, the app's button) comes through here.
+    // The hook never gets in the way of the completion itself.
+    if (in_array('complete', $recorded, true)) {
+        $finishedMission = scenarioMissionOfDispatch($dispatchId);
+        if ($finishedMission > 0) {
+            scenarioAfterOrderFinished($finishedMission);
+        }
+    }
     return $recorded;
 }
 
@@ -5574,6 +5583,9 @@ function maybeCompleteRoute(int $routeId, int $actorId): bool {
         'route.notify_completed_message', ['team' => $teamLbl, 'mission' => $mission['title'] ?? '']
     );
     logAudit('complete_mission_route', 'mission_routes', $routeId, null, ['mission_id' => $route['mission_id'], 'team_id' => $route['team_id']]);
+    // The team that finished its route may be the one a waiting phase of the scenario was waiting for (v3.461.0): this is the only
+    // place a route is stamped complete. The hook never gets in the way of the completion itself.
+    scenarioAfterOrderFinished((int) $route['mission_id']);
     return true;
 }
 

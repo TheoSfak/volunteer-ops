@@ -601,7 +601,9 @@ final class ScenarioTest extends TestCase
         $this->assertSame($this->members, $this->notifiedAbout((int) $row['id']), 'the team the slot became is told, and nobody else');
         $this->assertSame($this->teamId, (int) dbFetchValue("SELECT team_id FROM mission_scenario_slots WHERE id = ?", [$slot]));
 
-        // The next phase needs no question: the slot already stands for a team.
+        // The next phase needs no question: the slot already stands for a team. (The team has finished the first order, so the second
+        // goes at once: an unfinished one would make it wait, see ScenarioReleaseTest.)
+        recordDispatchProgress($r['results'][0]['dispatch_id'], $this->teamId, $this->members[0], 'complete');
         $next = $this->play($two);
         $this->assertTrue($next['ok']);
         $this->assertSame($this->teamId, (int) dbFetchValue("SELECT team_id FROM mission_dispatch_points WHERE id = ?", [$next['results'][0]['dispatch_id']]));
@@ -1744,12 +1746,12 @@ final class ScenarioTest extends TestCase
 
         $p = $this->playedPhaseOf($made['phase']);
         $this->assertSame('open', $p['items'][0]['state']);
-        $this->assertSame(['total' => 1, 'done' => 0, 'open' => 1, 'standing' => 0, 'withdrawn' => 0, 'failed' => 0, 'complete' => false, 'withdrawable' => 1, 'can_withdraw' => true], $p['progress']);
+        $this->assertSame(['total' => 1, 'done' => 0, 'open' => 1, 'waiting' => 0, 'standing' => 0, 'withdrawn' => 0, 'failed' => 0, 'complete' => false, 'withdrawable' => 1, 'can_withdraw' => true], $p['progress']);
 
         recordDispatchProgress($made['dispatch'], $this->teamId, $this->members[0], 'complete');
         $p = $this->playedPhaseOf($made['phase']);
         $this->assertSame('done', $p['items'][0]['state']);
-        $this->assertSame(['total' => 1, 'done' => 1, 'open' => 0, 'standing' => 0, 'withdrawn' => 0, 'failed' => 0, 'complete' => true, 'withdrawable' => 0, 'can_withdraw' => false], $p['progress']);
+        $this->assertSame(['total' => 1, 'done' => 1, 'open' => 0, 'waiting' => 0, 'standing' => 0, 'withdrawn' => 0, 'failed' => 0, 'complete' => true, 'withdrawable' => 0, 'can_withdraw' => false], $p['progress']);
 
         dbExecute("UPDATE mission_dispatch_progress SET completed_at = NULL, completed_by = NULL WHERE dispatch_id = ?", [$made['dispatch']]);
         $this->assertSame('open', $this->playedPhaseOf($made['phase'])['items'][0]['state'], 'a reopened order is under way again');
@@ -1887,7 +1889,7 @@ final class ScenarioTest extends TestCase
         $p = $this->playedPhaseOf($phase);
         $this->assertNotNull($p['played_at'], 'the phase stays played');
         $this->assertSame(['done', 'withdrawn', 'withdrawn', 'withdrawn', 'withdrawn'], array_column($p['items'], 'state'));
-        $this->assertSame(['total' => 1, 'done' => 1, 'open' => 0, 'standing' => 0, 'withdrawn' => 4, 'failed' => 0, 'complete' => true, 'withdrawable' => 0, 'can_withdraw' => false], $p['progress']);
+        $this->assertSame(['total' => 1, 'done' => 1, 'open' => 0, 'waiting' => 0, 'standing' => 0, 'withdrawn' => 4, 'failed' => 0, 'complete' => true, 'withdrawable' => 0, 'can_withdraw' => false], $p['progress']);
 
         $again = withdrawScenarioPhase($this->mission, $phase, $this->adminId);
         $this->assertFalse($again['ok'], 'a second press has nothing left to take back');

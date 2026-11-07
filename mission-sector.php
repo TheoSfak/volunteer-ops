@@ -201,6 +201,12 @@ if ($action === 'status') {
         $sector, $targetStatus, $userId, $canManageWarRoom, $user['name'] ?? ''
     );
 
+    // A team that has finished its sector may be the one a waiting phase of the scenario was waiting for (v3.461.0): this is the only
+    // place a sector is set to «completed». The hook never gets in the way of the completion itself.
+    if ($targetStatus === 'completed') {
+        scenarioAfterOrderFinished((int) $missionId);
+    }
+
     echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
 }

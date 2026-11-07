@@ -3476,14 +3476,22 @@ CREATE TABLE IF NOT EXISTS `mission_scenario_items` (
     `sent_at` DATETIME NULL COMMENT 'When it went out as a live order',
     `sent_ref_id` INT UNSIGNED NULL COMMENT 'The live order it became (mission_dispatch_points.id); no foreign key',
     `last_error` VARCHAR(255) NULL COMMENT 'Why the last attempt to send it failed',
+    `waiting_since` DATETIME NULL COMMENT 'Set by play while the item waits for its team to finish the earlier phases (migration 211); cleared when it is sent or its wait is cancelled',
+    `wait_cancelled_at` DATETIME NULL COMMENT 'When command cancelled the wait: the item stays in the plan, counts as taken back, and can still be sent by hand (migration 211)',
+    `parent_item_id` INT UNSIGNED NULL COMMENT 'The order to every team this item was split from (one item per team), migration 211',
+    `release_mode` VARCHAR(10) NULL COMMENT 'auto = sent when its team finished the earlier phases, manual = command pressed send now, NULL = sent with play (migration 211)',
+    `released_by` INT UNSIGNED NULL COMMENT 'Who pressed send now (release_mode manual); no foreign key (migration 211)',
     `created_by` INT UNSIGNED NOT NULL,
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX `idx_scenario_item_phase` (`phase_id`, `seq`),
     INDEX `idx_scenario_item_mission` (`mission_id`),
     INDEX `idx_scenario_item_slot` (`slot_id`),
+    INDEX `idx_scenario_item_waiting` (`mission_id`, `waiting_since`),
+    INDEX `idx_scenario_item_parent` (`parent_item_id`),
     FOREIGN KEY (`phase_id`) REFERENCES `mission_scenario_phases`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
-    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE CASCADE
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`parent_item_id`) REFERENCES `mission_scenario_items`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Scenario team slots - v3.453.0 (migration 204): the names a scenario gives to teams that may not exist yet,

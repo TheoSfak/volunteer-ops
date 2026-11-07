@@ -8129,6 +8129,24 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 211,
+            'description' => "Scenario per-team release (v3.461.0): pressing play on a phase now ARMS it - an order whose team has not yet finished the earlier phases waits and goes out by itself when the team finishes them. mission_scenario_items gains waiting_since (set while the item waits), wait_cancelled_at (command cancelled the wait; the item stays in the plan), parent_item_id (an order to every team that was split into one order per team when play found some teams not ready; ON DELETE CASCADE), release_mode ('auto' = went when its team finished, 'manual' = command pressed send now, NULL = went with play) and released_by. Re-running it changes nothing.",
+            'up' => function () {
+                if (!dbColumnExists('mission_scenario_items', 'waiting_since')) {
+                    dbExecute("ALTER TABLE mission_scenario_items
+                        ADD COLUMN waiting_since DATETIME NULL COMMENT 'Set by play while the item waits for its team to finish the earlier phases (v3.461.0); cleared when it is sent or its wait is cancelled' AFTER last_error,
+                        ADD COLUMN wait_cancelled_at DATETIME NULL COMMENT 'When command cancelled the wait: the item stays in the plan, counts as taken back, and can still be sent by hand' AFTER waiting_since,
+                        ADD COLUMN parent_item_id INT UNSIGNED NULL COMMENT 'The order to every team this item was split from (one item per team), v3.461.0' AFTER wait_cancelled_at,
+                        ADD COLUMN release_mode VARCHAR(10) NULL COMMENT 'auto = sent when its team finished the earlier phases, manual = command pressed send now, NULL = sent with play' AFTER parent_item_id,
+                        ADD COLUMN released_by INT UNSIGNED NULL COMMENT 'Who pressed send now (release_mode manual); no foreign key' AFTER release_mode,
+                        ADD INDEX idx_scenario_item_waiting (mission_id, waiting_since),
+                        ADD INDEX idx_scenario_item_parent (parent_item_id),
+                        ADD CONSTRAINT fk_scenario_item_parent FOREIGN KEY (parent_item_id) REFERENCES mission_scenario_items(id) ON DELETE CASCADE");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

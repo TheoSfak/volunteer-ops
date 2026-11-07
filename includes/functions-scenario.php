@@ -112,6 +112,20 @@
  * route, assignMissionSector() with no team for a sector (the functions the three endpoints' delete / cancel / assign
  * now use). Finished orders stay. The phase stays played; nothing is ever sent again by a withdrawal.
  *
+ * PER-TEAM RELEASE (v3.461.0). Pressing play ARMS a phase rather than sending all of it at once: each order goes out at once if its team
+ * has finished the earlier phases (scenarioTeamReadiness(): every order of the team in an earlier phase that was SENT and is a stage of
+ * its work - a point or an area, a route, a sector - is finished; a withdrawn, failed or never-sent order never blocks; «Δεν μπορώ» keeps
+ * the order open, so it blocks and the card shows the team red), and otherwise WAITS (waiting_since) until the team does, when it goes by
+ * itself with the ordinary alert. The press of play stays a human decision and nothing is timed: what is automatic is only the delivery
+ * of an order to a team that has done what the coordinator asked it to do first. Messages, zones, areas, buildings and an announcement
+ * to everyone on duty belong to no team's stage and go at once; a building follows its sector. An order to «όλες οι ομάδες» goes as one
+ * real broadcast when every team is ready, and otherwise is split into one order per team (parent_item_id) so each team is released on
+ * its own. The release is scenarioReleaseWaiting(), one conditional claim per order (two completions never send twice), called by every
+ * place a team's order is finished - recordDispatchProgress(), maybeCompleteRoute() and the sector `status` action, the only writers -
+ * and by the card's refresh, which heals a completion nobody hooked. A team that reopens an order after it was released stays released.
+ * Command's two overrides are sendScenarioWaitingNow() and cancelScenarioWait(); taking a phase back cancels its waits. The release
+ * re-resolves exactly as play does and never widens: a team that is gone or a slot that stands for none fails the order with its reason.
+ *
  * FIRST PRESS WINS. Pressing play claims the phase with one conditional UPDATE (played_at IS NULL); two
  * coordinators pressing at once send it once. An item that fails (the team was deleted since, the shape no
  * longer passes) does not stop the others: it keeps its reason in last_error, and the panel offers to try
@@ -175,7 +189,7 @@ function loadMissionScenario(int $missionId): array {
         return ['phases' => [], 'slots' => $slots, 'teams' => $teams];
     }
     $items = dbFetchAll(
-        "SELECT id, phase_id, seq, kind, payload, sent_at, sent_ref_id, last_error
+        "SELECT id, phase_id, seq, kind, payload, sent_at, sent_ref_id, last_error, waiting_since, wait_cancelled_at, parent_item_id, release_mode
          FROM mission_scenario_items WHERE mission_id = ? ORDER BY phase_id, seq, id",
         [$missionId]
     );
@@ -254,6 +268,38 @@ function loadMissionScenario(int $missionId): array {
     // How each order that was sent stands now (v3.456.0): finished, still under way, or taken back.
     $states = scenarioItemLiveStates($missionId, $items);
 
+    // Per-team release (v3.461.0): which orders wait for their team, which teams a phase that has not been played would send to at
+    // once and which would wait. The facts about the earlier phases are read only when something needs them.
+    $slotTeams = [];
+    foreach ($slots as $slotRow) {
+        if ($slotRow['team_id'] !== null) {
+            $slotTeams[$slotRow['id']] = $slotRow['team_id'];
+        }
+    }
+    $rowsById = [];
+    $parentIds = [];
+    foreach ($items as $row) {
+        $rowsById[(int) $row['id']] = $row;
+        if ($row['parent_item_id'] !== null) {
+            $parentIds[(int) $row['parent_item_id']] = true;
+        }
+    }
+    $armedPhases = [];
+    foreach ($phases as $phase) {
+        if ($phase['played_at'] === null && ($phaseNumbers[(int) $phase['id']] ?? 1) > 1) {
+            $armedPhases[(int) $phase['id']] = true;
+        }
+    }
+    $needFacts = false;
+    foreach ($items as $row) {
+        if ($row['sent_at'] === null && ($row['waiting_since'] !== null || isset($armedPhases[(int) $row['phase_id']]))) {
+            $needFacts = true;
+            break;
+        }
+    }
+    $facts = $needFacts ? scenarioGatingFacts($missionId) : [];
+    $broadcastTeamIds = $needFacts ? scenarioBroadcastTeamIds($missionId) : [];
+
     $byPhase = [];
     foreach ($items as $row) {
         $payload = json_decode((string) $row['payload'], true);
@@ -266,6 +312,11 @@ function loadMissionScenario(int $missionId): array {
         $isRestricted = $row['kind'] === 'restricted';
         $isSearchArea = $row['kind'] === 'area';
         $isBuilding = $row['kind'] === 'building';
+        // Waiting for its team to finish the earlier phases, or its wait was cancelled (v3.461.0), and which team that is.
+        $isWaiting = $row['sent_at'] === null && $row['waiting_since'] !== null && $row['wait_cancelled_at'] === null;
+        $isWaitCancelled = $row['sent_at'] === null && $row['wait_cancelled_at'] !== null;
+        $waitTeamId = ($isWaiting || $isWaitCancelled) ? scenarioItemTeamId($row['kind'], $payload, $slotTeams, $rowsById) : null;
+        $waitInfo = ($isWaiting && $waitTeamId !== null) ? scenarioTeamReadiness($facts, $phaseNumbers, $waitTeamId, (int) $row['phase_id']) + ['team_label' => $teamLabels[$waitTeamId] ?? ''] : null;
         // A building names the sector it stands in: one that exists (sector_id) or one the scenario makes (sector_item_id),
         // which is either still to be made (then the card says in which phase), made already (it is a live sector now), or
         // gone from the plan (the building will fail at play).
@@ -380,7 +431,16 @@ function loadMissionScenario(int $missionId): array {
             'order_id'     => $isOrder && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'restricted_id' => $isRestricted && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'error'        => $row['last_error'],
-            'state'        => $states[(int) $row['id']]['state'] ?? null,
+            'state'        => $isWaiting ? 'waiting' : ($isWaitCancelled ? 'cancelled' : (isset($parentIds[(int) $row['id']]) ? 'expanded' : ($states[(int) $row['id']]['state'] ?? null))),
+            // Per-team release: the team the order waits for and what that team still has to finish (phase_n, done / of, cant),
+            // the order to every team this one was split from, and how it was sent when it waited (auto, manual) and when.
+            'waiting'      => $isWaiting,
+            'wait_team_id' => $waitTeamId,
+            'wait'         => $waitInfo,
+            'parent_item_id' => $row['parent_item_id'] !== null ? (int) $row['parent_item_id'] : null,
+            'is_parent'    => isset($parentIds[(int) $row['id']]),
+            'release_mode' => $row['release_mode'],
+            'released_label' => ($row['release_mode'] !== null && $row['sent_at'] !== null) ? date('H:i', strtotime($row['sent_at'])) : null,
             'done_n'       => $states[(int) $row['id']]['done'] ?? null,
             'of_n'         => $states[(int) $row['id']]['of'] ?? null,
         ];
@@ -398,6 +458,9 @@ function loadMissionScenario(int $missionId): array {
             'played_by_name' => $phase['played_by_name'],
             'items'          => $phaseItems,
             'progress'       => $phase['played_at'] ? scenarioPhaseProgress($phaseItems) : null,
+            // What a played phase holds back, per team; and, for a phase not played yet, who would get it at once and who would wait.
+            'waits'          => $phase['played_at'] ? scenarioPhaseWaits($phaseItems, $teamLabels) : [],
+            'release_preview' => isset($armedPhases[(int) $phase['id']]) ? scenarioReleasePreview($phaseItems, $facts, $phaseNumbers, (int) $phase['id'], $teamLabels, $broadcastTeamIds) : null,
         ];
     }
     return ['phases' => $out, 'slots' => $slots, 'teams' => $teams];
@@ -555,10 +618,21 @@ function scenarioItemLiveStates(int $missionId, array $items): array {
  * can_withdraw is true while any order is still open or any zone stands.
  */
 function scenarioPhaseProgress(array $items): array {
-    $done = $open = $withdrawn = $failed = $withdrawable = $standing = 0;
+    $done = $open = $withdrawn = $failed = $withdrawable = $standing = $waiting = 0;
     foreach ($items as $item) {
         $state = $item['state'] ?? null;
-        if ($state === 'done') {
+        if ($state === 'waiting') {
+            // Waiting for its team to finish the earlier phases (v3.461.0): the phase is not finished while an order waits, and
+            // taking the phase back cancels the wait.
+            $waiting++;
+            $withdrawable++;
+        } elseif ($state === 'cancelled') {
+            // Its wait was cancelled: it will not go, like an order that was taken back.
+            $withdrawn++;
+        } elseif ($state === 'expanded') {
+            // An order to every team that was split into one order per team: the orders per team are what count.
+            continue;
+        } elseif ($state === 'done') {
             $done++;
         } elseif ($state === 'open') {
             $open++;
@@ -581,9 +655,9 @@ function scenarioPhaseProgress(array $items): array {
             $failed++;
         }
     }
-    $total = $done + $open + $failed;
+    $total = $done + $open + $failed + $waiting;
     return [
-        'total' => $total, 'done' => $done, 'open' => $open, 'standing' => $standing, 'withdrawn' => $withdrawn, 'failed' => $failed,
+        'total' => $total, 'done' => $done, 'open' => $open, 'waiting' => $waiting, 'standing' => $standing, 'withdrawn' => $withdrawn, 'failed' => $failed,
         'complete' => $total > 0 && $done === $total,
         'withdrawable' => $withdrawable,
         'can_withdraw' => $withdrawable > 0,
@@ -1713,8 +1787,9 @@ function claimScenarioPhase(int $missionId, int $phaseId, int $userId): bool {
  * stop the rest. $mapping (slot id => team id) is what the dialog at play collects for the slots that stand for
  * no team yet; it is applied only to those, and a phase that still uses a slot with no team after it is refused
  * BEFORE the claim, with the list of those slots in 'unmapped' - nothing is sent and the phase stays a plan.
+ * An order whose team has not finished the earlier phases waits instead of going (v3.461.0, see scenarioPlayPhaseItems()).
  * Returns ['ok' => false, 'error' => text (, 'unmapped' => [['id' =>, 'label' =>]])], or ['ok' => true, 'sent' =>
- * n, 'failed' => n, 'results' => [per item, see scenarioSendItem()]].
+ * n, 'waiting' => n, 'failed' => n, 'results' => [per item, see scenarioSendItem(); 'waiting' => true for the orders that wait]].
  */
 function playScenarioPhase(array $mission, int $phaseId, int $userId, string $userName, array $mapping = []): array {
     $missionId = (int) $mission['id'];
@@ -1748,16 +1823,15 @@ function playScenarioPhase(array $mission, int $phaseId, int $userId, string $us
         return ['ok' => false, 'error' => t('scenario.phase_already_played')];
     }
 
-    $results = [];
     $items = dbFetchAll("SELECT id, kind, payload FROM mission_scenario_items WHERE phase_id = ? AND sent_at IS NULL ORDER BY seq, id", [$phaseId]);
-    foreach ($items as $item) {
-        $results[] = scenarioSendItem($mission, $item, $userId, $userName);
-    }
-    $sent = count(array_filter($results, fn($r) => $r['ok']));
+    $results = scenarioPlayPhaseItems($mission, $phaseId, $items, $userId, $userName);
+    $waiting = count(array_filter($results, fn($r) => !empty($r['waiting'])));
+    $failed = count(array_filter($results, fn($r) => !$r['ok']));
+    $sent = count($results) - $waiting - $failed;
     logAudit('play_scenario_phase', 'mission_scenario_phases', $phaseId, null, [
-        'mission_id' => $missionId, 'orders' => count($results), 'sent' => $sent, 'failed' => count($results) - $sent,
+        'mission_id' => $missionId, 'orders' => count($results), 'sent' => $sent, 'waiting' => $waiting, 'failed' => $failed,
     ]);
-    return ['ok' => true, 'sent' => $sent, 'failed' => count($results) - $sent, 'results' => $results];
+    return ['ok' => true, 'sent' => $sent, 'waiting' => $waiting, 'failed' => $failed, 'results' => $results];
 }
 
 /**
@@ -1826,12 +1900,28 @@ function withdrawScenarioPhase(array $mission, int $phaseId, int $userId): array
     // are taken off their teams, the area stays on the map.
     // Nor is a building (v3.460.0): it stays with its sector, which is taken off its team but stays on the map.
     $open = array_values(array_filter($rows, fn($r) => !in_array($r['kind'], ['order', 'area', 'building'], true) && in_array($states[(int) $r['id']]['state'] ?? '', ['open', 'standing'], true)));
-    if (!$open) {
+    // Orders of the phase that are only waiting for their team (v3.461.0) are taken back too: their wait is cancelled, so nothing is sent
+    // for them later. They stay in the plan, read as taken back.
+    $waitingRows = dbFetchAll(
+        "SELECT id, kind FROM mission_scenario_items WHERE phase_id = ? AND mission_id = ? AND sent_at IS NULL AND waiting_since IS NOT NULL AND wait_cancelled_at IS NULL",
+        [$phaseId, $missionId]
+    );
+    if (!$open && !$waitingRows) {
         return ['ok' => false, 'error' => t('scenario.withdraw_nothing')];
     }
     $phaseNumber = scenarioPhaseNumber($missionId, $phase);
 
     $results = [];
+    foreach ($waitingRows as $waitingRow) {
+        $cancelled = dbExecute(
+            "UPDATE mission_scenario_items SET waiting_since = NULL, wait_cancelled_at = NOW()
+             WHERE id = ? AND mission_id = ? AND sent_at IS NULL AND waiting_since IS NOT NULL AND wait_cancelled_at IS NULL",
+            [(int) $waitingRow['id'], $missionId]
+        );
+        if ($cancelled) {
+            $results[] = ['item_id' => (int) $waitingRow['id'], 'kind' => $waitingRow['kind'], 'ok' => true, 'error' => null, 'cancelled' => true];
+        }
+    }
     $dispatchItems = [];
     foreach ($open as $row) {
         if ($row['kind'] === 'dispatch') {
@@ -1883,7 +1973,506 @@ function withdrawScenarioPhase(array $mission, int $phaseId, int $userId): array
     logAudit('withdraw_scenario_phase', 'mission_scenario_phases', $phaseId, null, [
         'mission_id' => $missionId, 'orders' => count($results), 'withdrawn' => $withdrawn, 'failed' => count($results) - $withdrawn,
     ]);
-    return ['ok' => true, 'withdrawn' => $withdrawn, 'failed' => count($results) - $withdrawn, 'results' => $results];
+    return ['ok' => true, 'withdrawn' => $withdrawn, 'cancelled' => count(array_filter($results, fn($r) => !empty($r['cancelled']))), 'failed' => count($results) - $withdrawn, 'results' => $results];
+}
+
+// ── Per-team release (v3.461.0) ─────────────────────────────────────────────────────────────────────────────────
+
+/** The kinds of order that belong to ONE team, and so can wait for it. The others (zones, areas, buildings) go at once. */
+const SCENARIO_TEAM_KINDS = ['dispatch', 'sector', 'route', 'order'];
+
+/** The number of each phase of the mission ("Φάση n" = the position in the list): phase id => n. */
+function scenarioPhasePositions(int $missionId): array {
+    $out = [];
+    $n = 0;
+    foreach (dbFetchAll("SELECT id FROM mission_scenario_phases WHERE mission_id = ? ORDER BY seq, id", [$missionId]) as $row) {
+        $out[(int) $row['id']] = ++$n;
+    }
+    return $out;
+}
+
+/**
+ * The one team a staged order belongs to, or null when it belongs to none (a zone, an area, an order to every person on
+ * duty), when its team is not decided (a slot that stands for no team) or when it is for every team. The same answer play
+ * and the release give, from the payload: audience 'team' -> its team id, 'slot' -> the team the slot stands for NOW
+ * ($slotTeams = scenarioSlotTeamMap()). A BUILDING belongs to the team of the staged sector it stands in
+ * (payload sector_item_id), looked up in $rowsById (item id => row with kind and payload).
+ */
+function scenarioItemTeamId(string $kind, $payload, array $slotTeams, array $rowsById = []): ?int {
+    if (!is_array($payload)) {
+        return null;
+    }
+    if ($kind === 'building') {
+        $sectorRow = $rowsById[(int) ($payload['sector_item_id'] ?? 0)] ?? null;
+        if ($sectorRow === null || ($sectorRow['kind'] ?? '') !== 'sector') {
+            return null;
+        }
+        return scenarioItemTeamId('sector', json_decode((string) $sectorRow['payload'], true), $slotTeams);
+    }
+    if (!in_array($kind, SCENARIO_TEAM_KINDS, true)) {
+        return null;
+    }
+    $audience = $payload['audience'] ?? '';
+    if ($audience === 'team') {
+        $teamId = (int) ($payload['team_id'] ?? 0);
+    } elseif ($audience === 'slot') {
+        $teamId = (int) ($slotTeams[(int) ($payload['slot_id'] ?? 0)] ?? 0);
+    } else {
+        $teamId = 0;
+    }
+    return $teamId > 0 ? $teamId : null;
+}
+
+/**
+ * What the orders a scenario has SENT say about each team, for deciding whether a team has finished the earlier phases:
+ * a list of ['item_id', 'phase_id', 'team_id', 'state' => 'open'|'done', 'cant' => bool], read from the LIVE orders. Only the
+ * kinds that are stages of a team's work count - a point or an area (the team pressed «Ολοκληρώθηκε»), a route (completed)
+ * and a sector (completed). A message, an announcement, a zone, a search area and a building are standing or informational
+ * and never hold a team back. An order that is gone, cancelled or taken off its team is not here at all (it never blocks).
+ * An order sent to every team has one fact for each team that has people. `cant` is true when the team said «Δεν μπορώ» on
+ * it: the order stays open - it still blocks - and command is shown that the team is stuck.
+ */
+function scenarioGatingFacts(int $missionId): array {
+    $rows = dbFetchAll(
+        "SELECT id, phase_id, kind, sent_ref_id FROM mission_scenario_items
+         WHERE mission_id = ? AND sent_at IS NOT NULL AND sent_ref_id IS NOT NULL AND kind IN ('dispatch', 'route', 'sector')",
+        [$missionId]
+    );
+    if (!$rows) {
+        return [];
+    }
+    $byKind = ['dispatch' => [], 'route' => [], 'sector' => []];
+    foreach ($rows as $row) {
+        $byKind[$row['kind']][(int) $row['id']] = ['phase' => (int) $row['phase_id'], 'ref' => (int) $row['sent_ref_id']];
+    }
+    $in = fn(array $ids) => implode(',', array_fill(0, count($ids), '?'));
+    $facts = [];
+
+    if ($byKind['dispatch']) {
+        $refs = array_values(array_unique(array_column($byKind['dispatch'], 'ref')));
+        $live = [];
+        foreach (dbFetchAll("SELECT id, team_id FROM mission_dispatch_points WHERE mission_id = ? AND id IN (" . $in($refs) . ")", array_merge([$missionId], $refs)) as $r) {
+            $live[(int) $r['id']] = $r['team_id'] !== null ? (int) $r['team_id'] : null;
+        }
+        $progress = $live ? loadDispatchProgress(array_keys($live)) : [];
+        $scopes = in_array(null, $live, true) ? missionBroadcastScopes($missionId) : [];
+        foreach ($byKind['dispatch'] as $itemId => $one) {
+            $ref = $one['ref'];
+            if (!array_key_exists($ref, $live)) {
+                continue;
+            }
+            $teams = $live[$ref] !== null ? [$live[$ref]] : array_map(fn($scope) => (int) substr($scope, 1), $scopes);
+            foreach ($teams as $teamId) {
+                $done = ($progress[$ref]['t' . $teamId]['completed_ts'] ?? null) !== null;
+                $facts[] = [
+                    'item_id' => $itemId, 'phase_id' => $one['phase'], 'team_id' => $teamId, 'state' => $done ? 'done' : 'open',
+                    'cant' => !$done && activeOrderDecline($missionId, 'dispatch', $ref, 't' . $teamId) !== null,
+                ];
+            }
+        }
+    }
+
+    if ($byKind['route']) {
+        $refs = array_values(array_unique(array_column($byKind['route'], 'ref')));
+        $live = [];
+        foreach (dbFetchAll("SELECT id, team_id, completed_at, cancelled_at FROM mission_routes WHERE mission_id = ? AND id IN (" . $in($refs) . ")", array_merge([$missionId], $refs)) as $r) {
+            $live[(int) $r['id']] = $r;
+        }
+        foreach ($byKind['route'] as $itemId => $one) {
+            $route = $live[$one['ref']] ?? null;
+            // A route of people picked across teams (no team) is a stage of none of them.
+            if ($route === null || $route['cancelled_at'] !== null || $route['team_id'] === null) {
+                continue;
+            }
+            $done = $route['completed_at'] !== null;
+            $facts[] = [
+                'item_id' => $itemId, 'phase_id' => $one['phase'], 'team_id' => (int) $route['team_id'], 'state' => $done ? 'done' : 'open',
+                'cant' => !$done && activeOrderDecline($missionId, 'route', $one['ref'], 'all') !== null,
+            ];
+        }
+    }
+
+    if ($byKind['sector']) {
+        $refs = array_values(array_unique(array_column($byKind['sector'], 'ref')));
+        $live = [];
+        foreach (dbFetchAll("SELECT id, team_id, status FROM mission_search_sectors WHERE mission_id = ? AND id IN (" . $in($refs) . ")", array_merge([$missionId], $refs)) as $r) {
+            $live[(int) $r['id']] = $r;
+        }
+        foreach ($byKind['sector'] as $itemId => $one) {
+            $sector = $live[$one['ref']] ?? null;
+            // A sector taken off its team is withdrawn: it holds nobody back.
+            if ($sector === null || $sector['team_id'] === null) {
+                continue;
+            }
+            $done = $sector['status'] === 'completed';
+            $facts[] = [
+                'item_id' => $itemId, 'phase_id' => $one['phase'], 'team_id' => (int) $sector['team_id'], 'state' => $done ? 'done' : 'open',
+                'cant' => !$done && activeOrderDecline($missionId, 'sector', $one['ref'], 't' . (int) $sector['team_id']) !== null,
+            ];
+        }
+    }
+    return $facts;
+}
+
+/**
+ * Whether a team has finished the phases BEFORE $phaseId: ['blocked' => bool, 'phase_n' => the first earlier phase it still has
+ * an open order in, 'done' / 'of' => how many of its orders in that phase are finished («2/3»), 'cant' => it said «Δεν μπορώ»
+ * on one of the orders holding it]. $facts is scenarioGatingFacts(), $positions scenarioPhasePositions(). A team with nothing
+ * open before the phase - or with nothing sent at all - is not blocked.
+ */
+function scenarioTeamReadiness(array $facts, array $positions, int $teamId, int $phaseId): array {
+    $position = $positions[$phaseId] ?? 0;
+    $first = null;
+    $cant = false;
+    foreach ($facts as $fact) {
+        if ($fact['team_id'] !== $teamId || $fact['state'] !== 'open') {
+            continue;
+        }
+        $at = $positions[$fact['phase_id']] ?? PHP_INT_MAX;
+        if ($at >= $position) {
+            continue;
+        }
+        $first = $first === null ? $at : min($first, $at);
+        $cant = $cant || $fact['cant'];
+    }
+    if ($first === null) {
+        return ['blocked' => false, 'phase_n' => null, 'done' => 0, 'of' => 0, 'cant' => false];
+    }
+    $done = $of = 0;
+    foreach ($facts as $fact) {
+        if ($fact['team_id'] === $teamId && ($positions[$fact['phase_id']] ?? 0) === $first) {
+            $of++;
+            $done += $fact['state'] === 'done' ? 1 : 0;
+        }
+    }
+    return ['blocked' => true, 'phase_n' => $first, 'done' => $done, 'of' => $of, 'cant' => $cant];
+}
+
+/** The teams an order to «όλες οι ομάδες» reaches: those of the mission that have people (ids). */
+function scenarioBroadcastTeamIds(int $missionId): array {
+    return array_map(fn($scope) => (int) substr($scope, 1), missionBroadcastScopes($missionId));
+}
+
+/** All the items of the mission by id (id, kind, payload), for a building to find the sector it stands in. */
+function scenarioItemRowsById(int $missionId): array {
+    $out = [];
+    foreach (dbFetchAll("SELECT id, kind, payload FROM mission_scenario_items WHERE mission_id = ?", [$missionId]) as $row) {
+        $out[(int) $row['id']] = $row;
+    }
+    return $out;
+}
+
+/** The result entry of an order that was not sent but is waiting for its team (ok: nothing went wrong). */
+function scenarioWaitingResult(int $itemId, string $kind, ?int $teamId): array {
+    return [
+        'item_id' => $itemId, 'kind' => $kind, 'ok' => true, 'waiting' => true, 'team_id' => $teamId,
+        'dispatch_id' => null, 'sector_id' => null, 'route_id' => null, 'order_id' => null, 'restricted_id' => null,
+        'search_area_id' => null, 'building_id' => null, 'error' => null,
+    ];
+}
+
+/**
+ * What play does with the orders of a phase it has just claimed (v3.461.0). Pressing play ARMS the phase: each order goes out at
+ * once if its team has finished the earlier phases, and otherwise WAITS (waiting_since) until the team does - then
+ * scenarioReleaseWaiting() sends it. Orders that belong to no team (zones, areas, an order to every person on duty) and an
+ * order to «όλες οι ομάδες» when every team is ready go out at once, exactly as before. An order to «όλες οι ομάδες» when some
+ * team is NOT ready is split: the order stays in the plan as the parent (marked sent, with no live order) and one order per team is
+ * made from it (parent_item_id), each sent or waiting on its own, so each team is released when it finishes. A building whose
+ * staged sector is waiting waits with it. $items are rows (id, kind, payload) in the order they are sent. Returns the results in
+ * the form of scenarioSendItem(), with ['waiting' => true] for the orders that wait.
+ */
+function scenarioPlayPhaseItems(array $mission, int $phaseId, array $items, int $userId, string $userName): array {
+    $missionId = (int) $mission['id'];
+    $positions = scenarioPhasePositions($missionId);
+    $facts = ($positions[$phaseId] ?? 1) > 1 ? scenarioGatingFacts($missionId) : [];
+    $slotTeams = scenarioSlotTeamMap($missionId);
+    $rowsById = scenarioItemRowsById($missionId);
+    $ready = fn(int $teamId) => !scenarioTeamReadiness($facts, $positions, $teamId, $phaseId)['blocked'];
+    $hold = function (array $item, string $kind, int $teamId) use ($missionId) {
+        dbExecute("UPDATE mission_scenario_items SET waiting_since = NOW() WHERE id = ? AND mission_id = ? AND sent_at IS NULL", [(int) $item['id'], $missionId]);
+        return scenarioWaitingResult((int) $item['id'], $kind, $teamId);
+    };
+
+    $results = [];
+    foreach ($items as $item) {
+        $kind = in_array($item['kind'] ?? 'dispatch', ['sector', 'route', 'order', 'restricted', 'area', 'building'], true) ? $item['kind'] : 'dispatch';
+        $payload = json_decode((string) $item['payload'], true);
+
+        // An order to every team, when some team is not ready: one order per team.
+        if ($kind === 'dispatch' && is_array($payload) && ($payload['audience'] ?? '') === 'all') {
+            $teams = scenarioBroadcastTeamIds($missionId);
+            if (array_filter($teams, fn($teamId) => !$ready($teamId))) {
+                dbExecute("UPDATE mission_scenario_items SET sent_at = NOW() WHERE id = ? AND mission_id = ? AND sent_at IS NULL", [(int) $item['id'], $missionId]);
+                $seq = (int) dbFetchValue("SELECT seq FROM mission_scenario_items WHERE id = ?", [(int) $item['id']]);
+                foreach ($teams as $teamId) {
+                    $childPayload = $payload;
+                    $childPayload['audience'] = 'team';
+                    $childPayload['team_id'] = $teamId;
+                    unset($childPayload['slot_id'], $childPayload['slot_label']);
+                    $childPayload = json_encode($childPayload, JSON_UNESCAPED_UNICODE);
+                    $childId = (int) dbInsert(
+                        "INSERT INTO mission_scenario_items (phase_id, mission_id, seq, kind, payload, parent_item_id, created_by, created_at)
+                         VALUES (?, ?, ?, 'dispatch', ?, ?, ?, NOW())",
+                        [$phaseId, $missionId, $seq, $childPayload, (int) $item['id'], $userId]
+                    );
+                    $child = ['id' => $childId, 'kind' => 'dispatch', 'payload' => $childPayload];
+                    $results[] = $ready($teamId) ? scenarioSendItem($mission, $child, $userId, $userName) : $hold($child, 'dispatch', $teamId);
+                }
+                continue;
+            }
+        }
+
+        $teamId = scenarioItemTeamId($kind, $payload, $slotTeams, $rowsById);
+        // A building follows its sector: when that sector is waiting, so does the building.
+        $followsWaitingSector = $kind === 'building' && is_array($payload) && (int) ($payload['sector_item_id'] ?? 0) > 0
+            && dbFetchValue(
+                "SELECT 1 FROM mission_scenario_items WHERE id = ? AND mission_id = ? AND sent_at IS NULL AND waiting_since IS NOT NULL AND wait_cancelled_at IS NULL",
+                [(int) $payload['sector_item_id'], $missionId]
+            );
+        if ($teamId !== null && ($followsWaitingSector || (in_array($kind, SCENARIO_TEAM_KINDS, true) && !$ready($teamId)))) {
+            $results[] = $hold($item, $kind, $teamId);
+            continue;
+        }
+        $results[] = scenarioSendItem($mission, $item, $userId, $userName);
+    }
+    return $results;
+}
+
+/**
+ * Takes one WAITING item (or, when $mode is 'manual', one whose wait was cancelled) and sends it. The claim is one conditional UPDATE, so of
+ * two releases at the same moment - two completions, a completion and a card refresh, or send now - exactly one sends. Returns the
+ * result of scenarioSendItem() (the item may have failed: it then keeps its reason and the card offers a retry), or null when
+ * somebody else got it first. $row needs id, kind, payload. Never widens: the send re-resolves the team like play does.
+ */
+function scenarioReleaseItem(array $mission, array $row, string $mode, ?int $releasedBy, int $userId, string $userName): ?array {
+    $missionId = (int) $mission['id'];
+    $open = $mode === 'manual' ? "(waiting_since IS NOT NULL OR wait_cancelled_at IS NOT NULL)" : "(waiting_since IS NOT NULL AND wait_cancelled_at IS NULL)";
+    $claimed = dbExecute(
+        "UPDATE mission_scenario_items SET waiting_since = NULL, wait_cancelled_at = NULL, release_mode = ?, released_by = ?
+         WHERE id = ? AND mission_id = ? AND sent_at IS NULL AND " . $open,
+        [$mode, $releasedBy, (int) $row['id'], $missionId]
+    );
+    if (!$claimed) {
+        return null;
+    }
+    $result = scenarioSendItem($mission, $row, $userId, $userName);
+    logAudit('release_scenario_item', 'mission_scenario_items', (int) $row['id'], null, [
+        'mission_id' => $missionId, 'mode' => $mode, 'ok' => $result['ok'],
+    ]);
+    return $result;
+}
+
+/**
+ * The reconcile: sends every waiting order whose team has now finished the earlier phases (v3.461.0). Called by each place a
+ * team's order is finished (a point, a route, a sector) and by the card's refresh, which heals a completion that was missed.
+ * Cheap when nothing waits: one indexed query. Orders go in phase order, and the facts are read again after each order that is a
+ * stage of a team's work is sent, so a team released into phase 2 is not also released into phase 3 in the same breath. The live
+ * order is made by the coordinator who pressed play on the phase (a closed mission releases nothing). Returns the results of
+ * what was sent now, each with the team: [] when nothing went.
+ */
+function scenarioReleaseWaiting(int $missionId): array {
+    if (!dbFetchValue("SELECT 1 FROM mission_scenario_items WHERE mission_id = ? AND waiting_since IS NOT NULL AND sent_at IS NULL AND wait_cancelled_at IS NULL LIMIT 1", [$missionId])) {
+        return [];
+    }
+    $mission = dbFetchOne("SELECT id, title, status, show_in_ops, responsible_user_id FROM missions WHERE id = ? AND deleted_at IS NULL", [$missionId]);
+    if (!$mission || $mission['status'] !== STATUS_OPEN) {
+        return [];
+    }
+    $waiting = dbFetchAll(
+        "SELECT i.id, i.phase_id, i.kind, i.payload, p.played_by, u.name AS played_by_name
+         FROM mission_scenario_items i
+         JOIN mission_scenario_phases p ON p.id = i.phase_id
+         LEFT JOIN users u ON u.id = p.played_by
+         WHERE i.mission_id = ? AND i.waiting_since IS NOT NULL AND i.sent_at IS NULL AND i.wait_cancelled_at IS NULL AND p.played_at IS NOT NULL
+         ORDER BY p.seq, p.id, i.seq, i.id",
+        [$missionId]
+    );
+    if (!$waiting) {
+        return [];
+    }
+    $slotTeams = scenarioSlotTeamMap($missionId);
+    $rowsById = scenarioItemRowsById($missionId);
+    $positions = scenarioPhasePositions($missionId);
+    $facts = scenarioGatingFacts($missionId);
+    $results = [];
+    foreach ($waiting as $row) {
+        $actor = $row['played_by'] !== null ? (int) $row['played_by'] : (int) ($mission['responsible_user_id'] ?? 0);
+        if ($actor <= 0) {
+            continue;
+        }
+        $payload = json_decode((string) $row['payload'], true);
+        $teamId = scenarioItemTeamId($row['kind'], $payload, $slotTeams, $rowsById);
+        if ($teamId !== null && scenarioTeamReadiness($facts, $positions, $teamId, (int) $row['phase_id'])['blocked']) {
+            continue;
+        }
+        $result = scenarioReleaseItem($mission, $row, 'auto', null, $actor, (string) ($row['played_by_name'] ?? ''));
+        if ($result === null) {
+            continue;
+        }
+        $results[] = $result + ['team_id' => $teamId];
+        if ($result['ok'] && in_array($row['kind'], ['dispatch', 'route', 'sector'], true)) {
+            $facts = scenarioGatingFacts($missionId);
+        }
+    }
+    return $results;
+}
+
+/**
+ * The hook the places that finish a team's order call (a point's «Ολοκληρώθηκε», a route's last stop, a sector set to
+ * completed): releases what was only waiting for that. It must NEVER get in the way of the completion itself, so it catches
+ * everything. Returns the results (see scenarioReleaseWaiting()).
+ */
+function scenarioAfterOrderFinished(int $missionId): array {
+    try {
+        return scenarioReleaseWaiting($missionId);
+    } catch (Throwable $e) {
+        error_log('[scenario] releasing waiting orders of mission ' . $missionId . ' failed: ' . $e->getMessage());
+        return [];
+    }
+}
+
+/** The mission of a dispatch, for the hook that only knows the dispatch (0 if it is gone). */
+function scenarioMissionOfDispatch(int $dispatchId): int {
+    return (int) dbFetchValue("SELECT mission_id FROM mission_dispatch_points WHERE id = ?", [$dispatchId]);
+}
+
+/**
+ * The waiting orders of a played phase (rows id, kind, payload), for one team or - with $teamId null - for all of them, in the order
+ * they go. With $withCancelled the ones whose wait was cancelled are in too (send now can bring them back).
+ */
+function scenarioPhaseWaitingItems(int $missionId, int $phaseId, ?int $teamId, bool $withCancelled): array {
+    $rows = dbFetchAll(
+        "SELECT id, kind, payload FROM mission_scenario_items
+         WHERE phase_id = ? AND mission_id = ? AND sent_at IS NULL AND (waiting_since IS NOT NULL" . ($withCancelled ? " OR wait_cancelled_at IS NOT NULL" : "") . ")
+         ORDER BY seq, id",
+        [$phaseId, $missionId]
+    );
+    if ($teamId === null) {
+        return $rows;
+    }
+    $slotTeams = scenarioSlotTeamMap($missionId);
+    $rowsById = scenarioItemRowsById($missionId);
+    return array_values(array_filter($rows, fn($row) => scenarioItemTeamId($row['kind'], json_decode((string) $row['payload'], true), $slotTeams, $rowsById) === $teamId));
+}
+
+/**
+ * «Στείλε τώρα»: sends what a played phase holds back for one team (or, with no team, for all) without waiting for the team to
+ * finish, by command's own decision - including orders whose wait was cancelled. Returns ['ok' => false, 'error' => text], or
+ * ['ok' => true, 'sent' => n, 'failed' => n, 'results' => [...]].
+ */
+function sendScenarioWaitingNow(array $mission, int $phaseId, ?int $teamId, int $userId, string $userName): array {
+    $missionId = (int) $mission['id'];
+    $phase = scenarioPhaseRow($missionId, $phaseId);
+    if (!$phase) {
+        return ['ok' => false, 'error' => t('scenario.phase_not_found')];
+    }
+    if ($phase['played_at'] === null) {
+        return ['ok' => false, 'error' => t('scenario.phase_not_played_yet')];
+    }
+    $rows = scenarioPhaseWaitingItems($missionId, $phaseId, $teamId, true);
+    if (!$rows) {
+        return ['ok' => false, 'error' => t('scenario.nothing_waiting')];
+    }
+    $results = [];
+    foreach ($rows as $row) {
+        $result = scenarioReleaseItem($mission, $row, 'manual', $userId, $userId, $userName);
+        if ($result !== null) {
+            $results[] = $result;
+        }
+    }
+    $sent = count(array_filter($results, fn($r) => $r['ok']));
+    logAudit('send_scenario_waiting_now', 'mission_scenario_phases', $phaseId, null, [
+        'mission_id' => $missionId, 'team_id' => $teamId, 'orders' => count($results), 'sent' => $sent,
+    ]);
+    return ['ok' => true, 'sent' => $sent, 'failed' => count($results) - $sent, 'results' => $results];
+}
+
+/**
+ * «Ακύρωση αναμονής»: command does not want what a played phase holds back for one team (or for all) to go out. The orders stay in the
+ * plan, read as taken back, and nothing is sent; «Στείλε τώρα» can still send them. Returns ['ok' => false, 'error' => text], or
+ * ['ok' => true, 'cancelled' => n].
+ */
+function cancelScenarioWait(array $mission, int $phaseId, ?int $teamId, int $userId): array {
+    $missionId = (int) $mission['id'];
+    $phase = scenarioPhaseRow($missionId, $phaseId);
+    if (!$phase) {
+        return ['ok' => false, 'error' => t('scenario.phase_not_found')];
+    }
+    if ($phase['played_at'] === null) {
+        return ['ok' => false, 'error' => t('scenario.phase_not_played_yet')];
+    }
+    $cancelled = 0;
+    foreach (scenarioPhaseWaitingItems($missionId, $phaseId, $teamId, false) as $row) {
+        $cancelled += dbExecute(
+            "UPDATE mission_scenario_items SET waiting_since = NULL, wait_cancelled_at = NOW()
+             WHERE id = ? AND mission_id = ? AND sent_at IS NULL AND waiting_since IS NOT NULL AND wait_cancelled_at IS NULL",
+            [(int) $row['id'], $missionId]
+        );
+    }
+    if ($cancelled === 0) {
+        return ['ok' => false, 'error' => t('scenario.nothing_waiting')];
+    }
+    logAudit('cancel_scenario_wait', 'mission_scenario_phases', $phaseId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'orders' => $cancelled]);
+    return ['ok' => true, 'cancelled' => $cancelled];
+}
+
+/**
+ * For the card and for the confirmation of play: which teams a phase that has not been played would send to at once and which would wait, from
+ * the loader's items of that phase. [] when the phase has nothing for a team. $items are the loader's item arrays (unsent ones are
+ * looked at); a team whose slot is not decided yet is left out - play asks about those first.
+ * Returns ['now' => [['team_id', 'team_label']], 'wait' => [['team_id', 'team_label', 'phase_n', 'done', 'of', 'cant']]].
+ */
+function scenarioReleasePreview(array $items, array $facts, array $positions, int $phaseId, array $teamLabels, array $broadcastTeamIds): array {
+    $teams = [];
+    foreach ($items as $item) {
+        if ($item['sent'] || empty($item['type']) || !in_array($item['kind'], SCENARIO_TEAM_KINDS, true)) {
+            continue;
+        }
+        if ($item['kind'] === 'dispatch' && $item['audience'] === 'all') {
+            foreach ($broadcastTeamIds as $teamId) {
+                $teams[$teamId] = true;
+            }
+        } elseif (($item['audience'] === 'team' || $item['audience'] === 'slot') && $item['team_id'] && !$item['team_missing']) {
+            $teams[(int) $item['team_id']] = true;
+        }
+    }
+    $now = $wait = [];
+    foreach (array_keys($teams) as $teamId) {
+        $ready = scenarioTeamReadiness($facts, $positions, $teamId, $phaseId);
+        $label = $teamLabels[$teamId] ?? '#' . $teamId;
+        if ($ready['blocked']) {
+            $wait[] = ['team_id' => $teamId, 'team_label' => $label, 'phase_n' => $ready['phase_n'], 'done' => $ready['done'], 'of' => $ready['of'], 'cant' => $ready['cant']];
+        } else {
+            $now[] = ['team_id' => $teamId, 'team_label' => $label];
+        }
+    }
+    return ['now' => $now, 'wait' => $wait];
+}
+
+/**
+ * Per team, what a PLAYED phase holds back: one entry for the orders waiting for the team and one for the orders whose wait command
+ * cancelled, from the loader's items (which carry wait_team_id and wait). [['team_id', 'team_label', 'n', 'cancelled' => bool,
+ * 'phase_n', 'done', 'of', 'cant']].
+ */
+function scenarioPhaseWaits(array $items, array $teamLabels): array {
+    $groups = [];
+    foreach ($items as $item) {
+        if (!in_array($item['state'] ?? '', ['waiting', 'cancelled'], true) || empty($item['wait_team_id'])) {
+            continue;
+        }
+        $cancelled = $item['state'] === 'cancelled';
+        $key = $item['wait_team_id'] . ($cancelled ? 'c' : 'w');
+        if (!isset($groups[$key])) {
+            $wait = $item['wait'] ?? [];
+            $groups[$key] = [
+                'team_id' => (int) $item['wait_team_id'], 'team_label' => $teamLabels[(int) $item['wait_team_id']] ?? '#' . $item['wait_team_id'],
+                'n' => 0, 'cancelled' => $cancelled,
+                'phase_n' => $wait['phase_n'] ?? null, 'done' => $wait['done'] ?? 0, 'of' => $wait['of'] ?? 0, 'cant' => !empty($wait['cant']),
+            ];
+        }
+        $groups[$key]['n']++;
+    }
+    return array_values($groups);
 }
 
 // ── Slots ───────────────────────────────────────────────────────────────────────────────────────────────────────

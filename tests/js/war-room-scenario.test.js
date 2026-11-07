@@ -968,3 +968,185 @@ test('withdrawing a phase that holds a sector and its building does not claim th
     assert.doesNotMatch(text, /withdraw_confirm_zones/);
     assert.match(text, /"n":1\}/);
 });
+
+// ── Per-team release (v3.461.0) ─────────────────────────────────────────────────────────────────────────────────
+
+const waitingItem = (id, over = {}) => Object.assign({}, TEAM, {
+    id, kind: 'dispatch', type: 'point', label: 'Σημείο ' + id, geo: {lat: 35, lng: 24}, sent: false, state: 'waiting', waiting: true,
+    team_id: 40, team_label: 'Beta 2', wait_team_id: 40,
+    wait: {team_id: 40, team_label: 'Beta 2', phase_n: 1, done: 1, of: 3, cant: false, blocked: true},
+}, over);
+const WAIT_ROW = {team_id: 40, team_label: 'Beta 2', n: 2, cancelled: false, phase_n: 1, done: 1, of: 3, cant: false};
+const armedPhases = (items, waits, preview = null) => {
+    const played = waits.length > 0 || items.some((i) => i.state === 'waiting');
+    return {
+        phases: [
+            {id: 7, n: 1, title: null, played_at: '2026-11-07 10:00:00', played_label: '10:00', played_by_name: 'Admin', items: [sentItem(1, 'open')], progress: {total: 1, done: 0, open: 1, waiting: 0, standing: 0, withdrawn: 0, failed: 0, complete: false, withdrawable: 1, can_withdraw: true}, waits: [], release_preview: null},
+            {id: 8, n: 2, title: null, played_at: played ? '2026-11-07 10:05:00' : null, played_label: '10:05', played_by_name: 'Admin', items,
+                progress: played ? {total: items.length, done: 0, open: 0, waiting: items.length, standing: 0, withdrawn: 0, failed: 0, complete: false, withdrawable: items.length, can_withdraw: true} : null,
+                waits, release_preview: preview},
+        ],
+        slots: [], teams: [],
+    };
+};
+
+test('a played phase shows each waiting order with what its team still has to finish, and one row per team with the two overrides', async () => {
+    const stuck = waitingItem(3, {wait: {team_id: 40, team_label: 'Beta 2', phase_n: 1, done: 0, of: 1, cant: true, blocked: true}});
+    const {body} = await load(armedPhases([waitingItem(2), stuck], [WAIT_ROW]));
+
+    const html = body.innerHTML;
+    assert.match(html, /scenario\.state_waiting\{"team":"Beta 2","phase":"scenario\.phase_n\{\\"n\\":1\}","done":1,"of":3\}/, 'the order says who it waits for and how far they are');
+    assert.match(html, /scenario\.state_waiting_cant/, 'a team that said «Δεν μπορώ» is shown as stuck');
+    assert.match(html, /text-danger"><i class="bi bi-exclamation-octagon-fill/, 'in red');
+    assert.match(html, /data-sc-waits="1"/);
+    assert.match(html, /scenario\.wait_row\{"team":"Beta 2","phase":"scenario\.phase_n\{\\"n\\":1\}","done":1,"of":3,"n":2\}/);
+    assert.match(html, /data-sc="release-now" data-phase="8" data-team="40" data-cancelled="0"/);
+    assert.match(html, /data-sc="cancel-wait" data-phase="8" data-team="40"/);
+    assert.doesNotMatch(html, /small text-danger fw-semibold/, 'a team that is simply waiting is not shown red');
+    const stuckRow = await load(armedPhases([stuck], [Object.assign({}, WAIT_ROW, {cant: true, n: 1})]));
+    assert.match(stuckRow.body.innerHTML, /small text-danger fw-semibold">scenario\.wait_row_cant/, 'a team stuck on «Δεν μπορώ» is red in its row');
+    assert.match(html, /scenario\.progress_badge\{"done":0,"total":2\}/, 'a waiting order is not finished, so the phase is not');
+    assert.match(html, /data-sc="withdraw" data-phase="8"/, 'and the phase can be taken back, which cancels the waits');
+});
+
+test('a row of cancelled waits has only «Στείλε τώρα», and a cancelled order and a split one say so', async () => {
+    const cancelled = waitingItem(2, {state: 'cancelled', waiting: false, wait: null});
+    const parent = Object.assign({}, TEAM, {id: 5, kind: 'dispatch', type: 'polygon', label: 'Χωράφι', audience: 'all', team_id: null, team_label: null, geo: [[35, 24], [35, 24.1], [35.1, 24.1]], sent: true, state: 'expanded', is_parent: true});
+    const child = waitingItem(6, {parent_item_id: 5});
+    const {body} = await load(armedPhases([cancelled, parent, child], [Object.assign({}, WAIT_ROW, {cancelled: true, n: 1})]));
+
+    const html = body.innerHTML;
+    assert.match(html, /data-sc="release-now" data-phase="8" data-team="40" data-cancelled="1"/);
+    assert.equal((html.match(/data-sc="cancel-wait"/g) || []).length, 0, 'nothing left to cancel on that row');
+    assert.match(html, /scenario\.wait_row_cancelled/);
+    assert.match(html, /scenario\.state_cancelled/);
+    assert.match(html, /scenario\.state_split/, 'the order to every team says it was split per team');
+    assert.match(html, /wr-sc-child/, 'and its parts hang under it');
+});
+
+test('«Στείλε τώρα» asks about a team that has not finished, sends, and shows what it made at once; a cancelled row needs no question', async () => {
+    const answer = {ok: true, sent: 2, failed: 1, results: [{ok: false, error: 'η ομάδα δεν υπάρχει'}], dispatches: [{id: 9}]};
+    const {handlers, calls, ctx} = await load(armedPhases([waitingItem(2), waitingItem(3)], [WAIT_ROW]), {release_now: answer});
+    ctx.confirm = (text) => { calls.push(['confirm', text]); return true; };
+    calls.length = 0;
+
+    await clickOn(handlers, {sc: 'release-now', phase: '8', team: '40', cancelled: '0'});
+    await settle();
+
+    assert.match(calls.find((c) => c[0] === 'confirm')[1], /scenario\.release_now_confirm\{"team":"Beta 2","phase":"scenario\.phase_n\{\\"n\\":1\}","done":1,"of":3\}/);
+    const post = calls.find((c) => c[0] === 'fetch' && c[2]);
+    const sent = new URLSearchParams(post[2]);
+    assert.equal(sent.get('action'), 'release_now');
+    assert.equal(sent.get('phase_id'), '8');
+    assert.equal(sent.get('team_id'), '40');
+    assert.ok(calls.some((c) => c[0] === 'renderDispatches'), 'the orders it made are on the map at once');
+    assert.match(calls.find((c) => c[0] === 'alert')[1], /scenario\.play_partial\{"sent":2,"failed":1\}[^]*η ομάδα δεν υπάρχει/);
+
+    // Declining the question sends nothing.
+    const again = await load(armedPhases([waitingItem(2)], [WAIT_ROW]));
+    again.ctx.confirm = () => false;
+    again.calls.length = 0;
+    await clickOn(again.handlers, {sc: 'release-now', phase: '8', team: '40', cancelled: '0'});
+    await settle();
+    assert.equal(again.calls.filter((c) => c[0] === 'fetch').length, 0);
+
+    // A row whose wait was cancelled is sent without the question: command already decided about it.
+    const cancelledRow = Object.assign({}, WAIT_ROW, {cancelled: true});
+    const third = await load(armedPhases([waitingItem(2, {state: 'cancelled', waiting: false})], [cancelledRow]), {release_now: {ok: true, sent: 1, failed: 0, results: []}});
+    third.ctx.confirm = (text) => { third.calls.push(['confirm', text]); return true; };
+    third.calls.length = 0;
+    await clickOn(third.handlers, {sc: 'release-now', phase: '8', team: '40', cancelled: '1'});
+    await settle();
+    assert.equal(third.calls.filter((c) => c[0] === 'confirm').length, 0);
+    assert.equal(new URLSearchParams(third.calls.find((c) => c[0] === 'fetch' && c[2])[2]).get('action'), 'release_now');
+});
+
+test('«Ακύρωση αναμονής» asks first and then cancels the team\'s waits', async () => {
+    const {handlers, calls, ctx} = await load(armedPhases([waitingItem(2)], [WAIT_ROW]), {cancel_wait: {ok: true, cancelled: 1}});
+    ctx.confirm = (text) => { calls.push(['confirm', text]); return false; };
+    calls.length = 0;
+    await clickOn(handlers, {sc: 'cancel-wait', phase: '8', team: '40'});
+    await settle();
+    assert.match(calls.find((c) => c[0] === 'confirm')[1], /scenario\.cancel_wait_confirm\{"team":"Beta 2"\}/);
+    assert.equal(calls.filter((c) => c[0] === 'fetch').length, 0, 'declined: nothing is sent');
+
+    ctx.confirm = () => true;
+    await clickOn(handlers, {sc: 'cancel-wait', phase: '8', team: '40'});
+    await settle();
+    const sent = new URLSearchParams(calls.find((c) => c[0] === 'fetch' && c[2])[2]);
+    assert.deepEqual([sent.get('action'), sent.get('phase_id'), sent.get('team_id')], ['cancel_wait', '8', '40']);
+});
+
+test('the confirmation of play names who gets their orders at once and who waits, with how far they are', async () => {
+    const preview = {
+        now: [{team_id: 39, team_label: 'Alpha 1'}],
+        wait: [{team_id: 40, team_label: 'Beta 2', phase_n: 1, done: 1, of: 3, cant: false}, {team_id: 41, team_label: 'Gamma 3', phase_n: 1, done: 0, of: 1, cant: true}],
+    };
+    const items = [Object.assign({}, TEAM, {id: 2, kind: 'dispatch', type: 'point', label: 'Β', geo: {lat: 35, lng: 24}, sent: false, state: null})];
+    const {handlers, calls, ctx} = await load(armedPhases(items, [], preview));
+    ctx.confirm = (text) => { calls.push(['confirm', text]); return false; };
+    await clickOn(handlers, {sc: 'play', phase: '8'});
+    await settle();
+    const text = calls.find((c) => c[0] === 'confirm')[1];
+    assert.match(text, /scenario\.play_confirm_now\{"teams":"Alpha 1"\}/);
+    assert.match(text, /scenario\.play_confirm_wait\{/);
+    assert.match(text, /play_confirm_wait_team[^]*Beta 2[^]*\\"done\\":1,\\"of\\":3/, 'Beta 2 is one of three');
+    assert.match(text, /play_confirm_wait_cant[^]*Gamma 3/, 'and Gamma 3 is shown as stuck');
+    assert.ok(text.indexOf('play_confirm_now') < text.indexOf('play_confirm_wait{') && text.indexOf('\n\n') < text.indexOf('play_confirm_now'), 'right after the first paragraph');
+
+    // Nobody waiting: the confirmation is the plain one.
+    const plain = await load(armedPhases(items, [], {now: [{team_id: 39, team_label: 'Alpha 1'}], wait: []}));
+    plain.ctx.confirm = (t2) => { plain.calls.push(['confirm', t2]); return false; };
+    await clickOn(plain.handlers, {sc: 'play', phase: '8'});
+    await settle();
+    assert.doesNotMatch(plain.calls.find((c) => c[0] === 'confirm')[1], /play_confirm_wait/);
+});
+
+test('taking a phase back says that waiting orders are cancelled and that later orders waiting for it will go', async () => {
+    const later = {id: 9, n: 3, title: null, played_at: '2026-11-07 10:09:00', played_label: '10:09', played_by_name: 'Admin', items: [waitingItem(9, {wait: {team_id: 40, team_label: 'Beta 2', phase_n: 2, done: 0, of: 1, cant: false, blocked: true}})], progress: {total: 1, done: 0, open: 0, waiting: 1, standing: 0, withdrawn: 0, failed: 0, complete: false, withdrawable: 1, can_withdraw: true}, waits: [], release_preview: null};
+    const plan = armedPhases([waitingItem(2)], [WAIT_ROW]);
+    plan.phases[1].progress.waiting = 1;
+    plan.phases.push(later);
+    const {handlers, calls, ctx} = await load(plan, {withdraw_phase: {ok: true, withdrawn: 1, failed: 0, results: []}});
+    ctx.confirm = (text) => { calls.push(['confirm', text]); return true; };
+    const plainT = ctx.t;
+    ctx.t = (key, vars) => (key === 'scenario.withdraw_confirm' ? 'intro\n\nthe closing question' : plainT(key, vars));
+    await clickOn(handlers, {sc: 'withdraw', phase: '8'});
+    await settle();
+    const text = calls.find((c) => c[0] === 'confirm')[1];
+    assert.match(text, /scenario\.withdraw_confirm_waits\{"n":1\}/, 'its own waits');
+    assert.match(text, /scenario\.withdraw_confirm_later\{"n":1\}/, 'the later order that waits for this phase');
+    assert.ok(text.lastIndexOf('withdraw_confirm_later') < text.lastIndexOf('\n\n'), 'both come before the closing question');
+});
+
+test('the card keeps refreshing while an order waits, and what a refresh released is put on the map at once', async () => {
+    const plan = armedPhases([waitingItem(2)], [WAIT_ROW]);
+    plan.phases[0].progress.open = 0;
+    const {timers, calls, ctx} = await load(plan, {get: {ok: true, released: [{ok: true, kind: 'dispatch'}], dispatches: [{id: 4}], sectors: [{id: 1}], areas: [], routes: [{id: 2}]}});
+    ctx.sectorRefreshAfter = (s, a) => calls.push(['sectorRefreshAfter', s, a]);
+    calls.length = 0;
+
+    timers[0]();
+    await settle();
+    await settle();
+
+    assert.ok(calls.some((c) => c[0] === 'fetch'), 'a waiting order keeps the safety net running even with nothing open');
+    assert.ok(calls.some((c) => c[0] === 'renderDispatches'));
+    assert.ok(calls.some((c) => c[0] === 'sectorRefreshAfter'));
+    assert.ok(calls.some((c) => c[0] === 'renderRouteLayer'));
+
+    // With nothing open and nothing waiting there is nothing to watch.
+    const idle = await load({phases: [], slots: [], teams: []});
+    idle.calls.length = 0;
+    idle.timers[0]();
+    await settle();
+    assert.equal(idle.calls.filter((c) => c[0] === 'fetch').length, 0);
+});
+
+test('an order that went out by itself says when and why, and one sent by hand says so', async () => {
+    const auto = sentItem(2, 'open', {release_mode: 'auto', released_label: '14:32'});
+    const manual = sentItem(3, 'open', {release_mode: 'manual', released_label: '14:40'});
+    const {body} = await load(armedPhases([auto, manual], []));
+    assert.match(body.innerHTML, /scenario\.state_released_auto\{"time":"14:32"\}/);
+    assert.match(body.innerHTML, /scenario\.state_released_manual\{"time":"14:40"\}/);
+});

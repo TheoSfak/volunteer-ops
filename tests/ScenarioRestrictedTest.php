@@ -328,14 +328,14 @@ final class ScenarioRestrictedTest extends TestCase
                 $p = $ph['progress'];
             }
         }
-        $this->assertSame(['total' => 0, 'done' => 0, 'open' => 0, 'standing' => 1, 'withdrawn' => 0, 'failed' => 0, 'complete' => false, 'withdrawable' => 1, 'can_withdraw' => true], $p);
+        $this->assertSame(['total' => 0, 'done' => 0, 'open' => 0, 'waiting' => 0, 'standing' => 1, 'withdrawn' => 0, 'failed' => 0, 'complete' => false, 'withdrawable' => 1, 'can_withdraw' => true], $p);
 
         // Beside orders that are finished the zone does not stop the phase being complete; it can still be taken back.
         $mixed = scenarioPhaseProgress([
             ['kind' => 'dispatch', 'sent' => true, 'state' => 'done'],
             ['kind' => 'restricted', 'sent' => true, 'state' => 'standing'],
         ]);
-        $this->assertSame(['total' => 1, 'done' => 1, 'open' => 0, 'standing' => 1, 'withdrawn' => 0, 'failed' => 0, 'complete' => true, 'withdrawable' => 1, 'can_withdraw' => true], $mixed);
+        $this->assertSame(['total' => 1, 'done' => 1, 'open' => 0, 'waiting' => 0, 'standing' => 1, 'withdrawn' => 0, 'failed' => 0, 'complete' => true, 'withdrawable' => 1, 'can_withdraw' => true], $mixed);
         // ...but an order that is still under way does, as before.
         $this->assertFalse(scenarioPhaseProgress([
             ['kind' => 'dispatch', 'sent' => true, 'state' => 'open'],

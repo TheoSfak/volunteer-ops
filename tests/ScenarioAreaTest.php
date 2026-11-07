@@ -639,7 +639,7 @@ final class ScenarioAreaTest extends TestCase
         $phase = $this->phase();
         $this->stageArea($phase);
         $this->play($phase);
-        $this->assertSame(['total' => 0, 'done' => 0, 'open' => 0, 'standing' => 0, 'withdrawn' => 0, 'failed' => 0, 'complete' => false, 'withdrawable' => 0, 'can_withdraw' => false], $this->progress($phase), 'an area is in none of the counts: `standing` is the zones that withdrawing deletes');
+        $this->assertSame(['total' => 0, 'done' => 0, 'open' => 0, 'waiting' => 0, 'standing' => 0, 'withdrawn' => 0, 'failed' => 0, 'complete' => false, 'withdrawable' => 0, 'can_withdraw' => false], $this->progress($phase), 'an area is in none of the counts: `standing` is the zones that withdrawing deletes');
         $this->assertSame(t('scenario.withdraw_nothing'), withdrawScenarioPhase($this->mission, $phase, $this->adminId)['error']);
         $this->assertCount(1, $this->areas(), 'the area is still there');
 
