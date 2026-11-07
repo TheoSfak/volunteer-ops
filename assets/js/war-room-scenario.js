@@ -28,6 +28,10 @@
  *     ghost polygon, and once made the card reads it as «Σε ισχύ» and says that taking the phase back leaves it on the
  *     map. Its row on the card has «Τομείς», which opens the division window on it: the sectors cut there are written down
  *     against that area ('item:<id>') and play makes the area first;
+ *   - the «Κτίριο» button on the row of a sector the scenario has still to make (v3.460.0): it arms the next click on the map,
+ *     inside that sector, and the popup that opens there (name, floors, phase) puts the building into a phase (stageBuilding)
+ *     instead of making it. A building has no team (the sector's team searches it); it is a small dashed square marker with the
+ *     phase number, and once made the card reads it as «Σε ισχύ» and says that taking the phase back leaves it in the sector;
  *   - the team slots (v3.453.0): names for teams that may not exist yet, in the card, in the window's recipient
  *     list, and in the dialog that play opens to ask which team is which.
  *
@@ -83,6 +87,7 @@
         style.id = 'wrScenarioCss';
         style.textContent = [
             '.wr-sc-ghost-pin{width:26px;height:26px;border-radius:50%;border:2px dashed #6b7280;background:rgba(243,244,246,.88);color:#374151;font-weight:700;font-size:.8rem;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.35)}',
+            '.wr-sc-ghost-pin.wr-sc-ghost-building{border-radius:6px}',
             '.wr-sc-phase{border:1px solid var(--bs-border-color,#dee2e6);border-radius:8px;padding:.4rem .55rem;margin-bottom:.55rem}',
             '.wr-sc-phase.wr-sc-played{background:rgba(25,135,84,.07);border-color:rgba(25,135,84,.35)}',
             '.wr-sc-phase.wr-sc-ready{border-color:rgba(25,135,84,.7);box-shadow:0 0 0 2px rgba(25,135,84,.18)}',
@@ -181,6 +186,7 @@
         if (item.type === 'route') return t('scenario.kind_route');
         if (item.type === 'restricted') return t('scenario.kind_restricted');
         if (item.type === 'search_area') return t('scenario.kind_search_area');
+        if (item.type === 'building') return t('scenario.kind_building');
         if (item.type === 'order') return t(ORDER_LABEL_KEYS[item.order_type] || 'scenario.order_add_btn');
         return item.type === 'point' ? t('scenario.kind_point') : t('scenario.kind_area');
     }
@@ -217,6 +223,10 @@
         if (item.state === 'standing' && item.type === 'search_area') {
             return `<div class="small text-primary"><i class="bi bi-bounding-box me-1"></i>${esc(t('scenario.state_standing'))} <span class="text-muted">· ${esc(t('scenario.area_stays_hint'))}</span></div>`;
         }
+        // A building stands with its sector: taking the phase back leaves it there, so the line is calm too (v3.460.0).
+        if (item.state === 'standing' && item.type === 'building') {
+            return `<div class="small text-primary"><i class="bi bi-building me-1"></i>${esc(t('scenario.state_standing'))} <span class="text-muted">· ${esc(t('scenario.building_stays_hint'))}</span></div>`;
+        }
         // A zone is never finished: it stands until somebody takes it away.
         if (item.state === 'standing') {
             return `<div class="small text-danger"><i class="bi bi-shield-fill-exclamation me-1"></i>${esc(t('scenario.state_standing'))}</div>`;
@@ -250,7 +260,7 @@
             : (item.type === 'sector' ? 'bi-grid-3x3-gap-fill'
                 : (item.type === 'route' ? 'bi-signpost-split-fill'
                     : (item.type === 'restricted' ? 'bi-exclamation-triangle-fill'
-                        : (item.type === 'order' ? (ORDER_ICONS[item.order_type] || 'bi-chat-left-text-fill') : 'bi-bounding-box'))));
+                        : (item.type === 'order' ? (ORDER_ICONS[item.order_type] || 'bi-chat-left-text-fill') : (item.type === 'building' ? 'bi-building-fill' : 'bi-bounding-box')))));
         const badgeClass = item.team_missing ? 'bg-danger'
             : (item.audience === 'all' ? 'bg-warning text-dark' : (item.audience === 'slot' ? (item.unmapped ? 'bg-warning text-dark' : 'bg-info text-dark') : 'bg-secondary'));
         const target = `<span class="badge ${badgeClass}">${esc(itemTarget(item))}</span>`;
@@ -263,6 +273,8 @@
             status = `<div class="small text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(t('scenario.team_gone_hint'))}</div>`;
         } else if (item.area_missing) {
             status = `<div class="small text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(t('scenario.area_gone_hint'))}</div>`;
+        } else if (item.sector_missing) {
+            status = `<div class="small text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(t('scenario.sector_gone_hint'))}</div>`;
         } else if (item.team_empty) {
             status = `<div class="small text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(t('scenario.team_empty_hint'))}</div>`;
         } else if (item.unmapped) {
@@ -295,16 +307,32 @@
             const shapeText = RESTRICTED_SHAPE_KEYS[item.shape] ? t(RESTRICTED_SHAPE_KEYS[item.shape]) : '';
             where = ` <span class="text-muted small">${esc([kindText, shapeText].filter(Boolean).join(' · '))}</span>`;
         }
+        // A building says how many floors it has and which sector it stands in (that sector may still have to be made: then
+        // in which phase) (v3.460.0).
+        if (item.type === 'building') {
+            const floors = item.floor_count > 0 ? t('scenario.building_floors', {n: item.floor_count}) : t('scenario.building_ground_only');
+            const inSector = item.sector_label
+                ? (item.sector_staged
+                    ? t('scenario.building_in_staged_sector', {sector: item.sector_label, phase: t('scenario.phase_n', {n: item.sector_phase_n || ''})})
+                    : t('scenario.building_in_sector', {sector: item.sector_label}))
+                : '';
+            where = ` <span class="text-muted small">${esc([floors, inSector].filter(Boolean).join(' · '))}</span>`;
+        }
         // A search area is a boundary and not an order to anybody: no «→ προς:» for it. Until it is made it has «Τομείς»,
-        // which opens the division window on it (the sectors cut there go into the scenario, against this area).
+        // which opens the division window on it (the sectors cut there go into the scenario, against this area). A building
+        // goes to nobody either: the team of its sector searches it.
         const isArea = item.type === 'search_area';
-        const recipient = isArea ? '' : ` <i class="bi bi-arrow-right-short"></i> ${target}`;
+        const recipient = (isArea || item.type === 'building') ? '' : ` <i class="bi bi-arrow-right-short"></i> ${target}`;
         // The button goes under the words, not beside them: the card is narrow, and a button in the row squeezes the name.
         const divide = (isArea && !item.sent)
             ? `<div class="mt-1"><button type="button" class="btn btn-outline-primary btn-sm py-0" data-sc="divide-area" data-item="${item.id}" title="${esc(t('scenario.area_divide_title'))}"><i class="bi bi-grid-3x3-gap me-1"></i>${esc(t('scenario.area_divide_btn'))}</button></div>` : '';
+        // A sector the scenario has still to make can have buildings written down in it: «Κτίριο» arms the next click on the map
+        // (v3.460.0). Also under the words, for the same reason.
+        const addBuilding = (item.type === 'sector' && !item.sent && Array.isArray(item.geo) && item.geo.length >= 3)
+            ? `<div class="mt-1"><button type="button" class="btn btn-outline-primary btn-sm py-0" data-sc="add-building" data-item="${item.id}" title="${esc(t('scenario.building_add_title'))}"><i class="bi bi-building-add me-1"></i>${esc(t('scenario.building_add_btn'))}</button></div>` : '';
         return `<li class="wr-sc-item d-flex align-items-start gap-1${item.state === 'withdrawn' ? ' wr-sc-withdrawn' : ''}" data-item="${item.id}">
             <i class="bi ${icon} text-secondary mt-1"></i>
-            <span class="flex-grow-1">${goto}${where}${recipient}${status}${divide}</span>
+            <span class="flex-grow-1">${goto}${where}${recipient}${status}${divide}${addBuilding}</span>
             ${retry}${del}
         </li>`;
     }
@@ -455,7 +483,8 @@
         pending.forEach(i => {
             // A search area goes to nobody: it names no recipient (v3.459.0). Unless it is all the phase has, in which case the
             // line has to say something, and the area is on the map for everybody it concerns: «για όλους».
-            if (i.type === 'search_area' && pending.some(o => o.type !== 'search_area')) return;
+            // A building goes to nobody either: the team of its sector searches it (v3.460.0).
+            if ((i.type === 'search_area' || i.type === 'building') && pending.some(o => o.type !== 'search_area' && o.type !== 'building')) return;
             // A restricted area is for everybody in the field, and the confirmation says so («προς: για όλους»).
             const label = i.audience === 'all' ? (i.type === 'order' ? t('scenario.target_all_people') : t('scenario.target_all')) : itemTarget(i);
             if (!names.includes(label)) names.push(label);
@@ -465,6 +494,8 @@
         if (missing) text += '\n\n' + t('scenario.play_confirm_missing', {n: missing});
         const noArea = pending.filter(i => i.area_missing).length;
         if (noArea) text += '\n\n' + t('scenario.play_confirm_area_missing', {n: noArea});
+        const noSector = pending.filter(i => i.sector_missing).length;
+        if (noSector) text += '\n\n' + t('scenario.play_confirm_sector_missing', {n: noSector});
         const noPeople = pending.filter(i => i.team_empty).length;
         if (noPeople) text += '\n\n' + t('scenario.play_confirm_team_empty', {n: noPeople});
         return text;
@@ -624,6 +655,13 @@
             if (!hit || hit.item.type !== 'search_area' || hit.item.sent || !Array.isArray(hit.item.geo) || hit.item.geo.length < 3) return;
             if (typeof openDivideSectorsForStagedArea !== 'function') return;
             openDivideSectorsForStagedArea({item_id: hit.item.id, label: hit.item.label || '', geo: hit.item.geo});
+        } else if (act === 'add-building') {
+            // «Κτίριο» on a sector the scenario has still to make (v3.460.0): the next click on the map, inside that sector, opens
+            // the popup that writes the building down against this sector ('item:<id>'). The page's own function arms it.
+            const hit = findItem(el.dataset.item);
+            if (!hit || hit.item.type !== 'sector' || hit.item.sent || !Array.isArray(hit.item.geo) || hit.item.geo.length < 3) return;
+            if (typeof armStagedBuilding !== 'function') return;
+            armStagedBuilding({item_id: hit.item.id, label: hit.item.label || '', geo: hit.item.geo, phase_id: hit.phase.id});
         } else if (act === 'add-phase') {
             run('add_phase', {});
         } else if (act === 'order-open') {
@@ -730,6 +768,10 @@
         return L.divIcon({className: '', html: `<div class="wr-sc-ghost-pin"><span>${esc(n)}</span></div>`, iconSize: [26, 26], iconAnchor: [13, 13]});
     }
 
+    function buildingPinIcon(n) {
+        return L.divIcon({className: '', html: `<div class="wr-sc-ghost-pin wr-sc-ghost-building"><span>${esc(n)}</span></div>`, iconSize: [26, 26], iconAnchor: [13, 13]});
+    }
+
     // Every order not yet sent, as a dashed grey shape with its phase number, into any layer group - the live
     // map's own, and the point/area window's read-only copy of the live map.
     function drawGhostsInto(layer) {
@@ -737,7 +779,7 @@
             phase.items.forEach(item => {
                 if (item.sent || !item.geo) return;
                 // A search area goes to nobody, so its tooltip has no «→ …» part (v3.459.0).
-                const tip = (item.type === 'search_area' ? [phaseName(phase), itemTitle(item)] : [phaseName(phase), itemTitle(item), '→ ' + itemTarget(item)]).join(' · ') + ' — ' + t('scenario.ghost_not_sent');
+                const tip = ((item.type === 'search_area' || item.type === 'building') ? [phaseName(phase), itemTitle(item)] : [phaseName(phase), itemTitle(item), '→ ' + itemTarget(item)]).join(' · ') + ' — ' + t('scenario.ghost_not_sent');
                 if (item.type === 'route') {
                     // A dashed line through the waypoints (back to the first one when the route is a loop), a dot at each
                     // waypoint, and the phase number where it starts.
@@ -761,6 +803,10 @@
                             .bindTooltip(tip, {sticky: true}).addTo(layer);
                         L.marker(zone.getBounds().getCenter(), {icon: pinIcon(phase.n), keyboard: false, interactive: false}).addTo(layer);
                     }
+                } else if (item.type === 'building') {
+                    // One point: a small dashed square with the phase number where the building will be (a point is a circle).
+                    if (!Array.isArray(item.geo) || !item.geo.length) return;
+                    L.marker(item.geo[0], {icon: buildingPinIcon(phase.n), keyboard: false, zIndexOffset: -500}).bindTooltip(tip).addTo(layer);
                 } else if (item.type === 'point') {
                     L.marker([item.geo.lat, item.geo.lng], {icon: pinIcon(phase.n), keyboard: false, zIndexOffset: -500})
                         .bindTooltip(tip).addTo(layer);
@@ -838,6 +884,16 @@
             .catch(() => { alert(t('common.send_failed')); return {ok: false}; });
     }
 
+    // The building popup's «Στο σενάριο» (v3.460.0): a building put on the map inside a sector goes into the phase instead of being made
+    // now. fields = {sector_id: 'item:<id>' (a sector the scenario makes) | the id of a sector that exists, label, lat, lng,
+    // floor_count}. A building has no team or slot. Resolves with the endpoint's answer (phase_id on success); a refusal (a point
+    // outside the sector, a phase before the sector) has already been shown to the person.
+    function stageBuilding(phaseId, fields) {
+        return request('add_building', Object.assign({phase_id: String(phaseId)}, fields))
+            .then(res => { if (!res || !res.ok) failed(res); return res; })
+            .catch(() => { alert(t('common.send_failed')); return {ok: false}; });
+    }
+
     function phaseNumber(phaseId) {
         const p = findPhase(phaseId);
         return p ? p.n : null;
@@ -859,5 +915,5 @@
         setInterval(refreshProgress, REFRESH_MS);
     }
 
-    window.wrScenario = {init: init, reload: load, menuHtml: menuHtml, stage: stage, stageSectors: stageSectors, stageRoute: stageRoute, stageRestricted: stageRestricted, stageArea: stageArea, phaseNumber: phaseNumber, drawGhostsInto: drawGhostsInto, phases: () => scenario.phases, newSlot: newSlot, fillSlotOptions: fillSlotOptions};
+    window.wrScenario = {init: init, reload: load, menuHtml: menuHtml, stage: stage, stageSectors: stageSectors, stageRoute: stageRoute, stageRestricted: stageRestricted, stageArea: stageArea, stageBuilding: stageBuilding, phaseNumber: phaseNumber, drawGhostsInto: drawGhostsInto, phases: () => scenario.phases, newSlot: newSlot, fillSlotOptions: fillSlotOptions};
 })();

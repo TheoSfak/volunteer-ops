@@ -1177,7 +1177,7 @@ final class ScenarioTest extends TestCase
         // of lists the sector endpoint answers with, and only when a sector was made.
         $src = $this->source('mission-scenario.php');
         // ...and also when a search area was (v3.459.0): the pair carries the areas too.
-        $this->assertStringContainsString("fn(\$r) => in_array(\$r['kind'] ?? '', ['sector', 'area'], true) && !empty(\$r['ok'])", $src);
+        $this->assertStringContainsString("fn(\$r) => in_array(\$r['kind'] ?? '', ['sector', 'area', 'building'], true) && !empty(\$r['ok'])", $src);
         $this->assertStringContainsString("'sectors' => loadMissionSectorsForUser(\$missionId, (int) \$userId, true, false), 'areas' => loadMissionSearchAreasForUser(\$missionId, true)", $src);
         $this->assertStringContainsString("] + \$liveSectors(\$result['results'])", $src, 'play');
         $this->assertStringContainsString("] + \$liveSectors([\$result['item']])", $src, 'retry');

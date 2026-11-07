@@ -705,15 +705,15 @@ final class ScenarioAreaTest extends TestCase
         $sectors = substr($src, (int) strpos($src, "if (\$action === 'add_sectors') {"), 2600);
         $this->assertStringContainsString("preg_match('/^item:([1-9][0-9]{0,9})\$/'", $sectors);
         $this->assertStringContainsString('$areaItemId > 0 ? 0 : (int) $areaRef, $sectors, $areaItemId)', $sectors);
-        $this->assertStringContainsString("in_array(\$r['kind'] ?? '', ['sector', 'area'], true)", $src, 'play and retry hand the areas back with the sectors');
+        $this->assertStringContainsString("in_array(\$r['kind'] ?? '', ['sector', 'area', 'building'], true)", $src, 'play and retry hand the areas (and, since v3.460.0, the buildings) back with the sectors');
     }
 
     public function testTheKindColumnKnowsAreaInTheSchemaTheMigrationAndTheTestDatabase(): void
     {
         $this->assertGreaterThanOrEqual(209, DB_SCHEMA_VERSION);
-        $this->assertStringContainsString("`kind` ENUM('dispatch','sector','route','order','restricted','area')", $this->source('sql/schema.sql'));
+        $this->assertStringContainsString("`kind` ENUM('dispatch','sector','route','order','restricted','area'", $this->source('sql/schema.sql'));
         $this->assertStringContainsString("'version'     => 209,", $this->source('includes/migrations.php'));
-        $this->assertStringContainsString("MODIFY COLUMN kind ENUM('dispatch','sector','route','order','restricted','area')", $this->source('includes/migrations.php'));
+        $this->assertStringContainsString("MODIFY COLUMN kind ENUM('dispatch','sector','route','order','restricted','area'", $this->source('includes/migrations.php'));
         $type = (string) dbFetchValue("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_scenario_items' AND COLUMN_NAME = 'kind'");
         $this->assertStringContainsString("'area'", $type, 'run php tests/migrate-fixture.php after adding a migration');
     }

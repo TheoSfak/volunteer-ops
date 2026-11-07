@@ -50,8 +50,9 @@ $answer = fn(array $extra = []) => json_encode(['ok' => true, 'scenario' => load
 $fail = fn(string $error, array $extra = []) => json_encode(['ok' => false, 'error' => $error, 'scenario' => loadMissionScenario($missionId)] + $extra);
 // The sectors a play or a retry has just made are live now: hand back the live list (the same pair the sector
 // endpoint answers with) so the map shows them at once, not at the next poll. Only when one was made.
-// A search area made by play (v3.459.0) is handed back the same way: the pair carries it.
-$liveSectors = fn(array $results) => array_filter($results, fn($r) => in_array($r['kind'] ?? '', ['sector', 'area'], true) && !empty($r['ok']))
+// A search area made by play (v3.459.0) is handed back the same way: the pair carries it. So is a building (v3.460.0): the sectors
+// of the pair carry their buildings and floors.
+$liveSectors = fn(array $results) => array_filter($results, fn($r) => in_array($r['kind'] ?? '', ['sector', 'area', 'building'], true) && !empty($r['ok']))
     ? ['sectors' => loadMissionSectorsForUser($missionId, (int) $userId, true, false), 'areas' => loadMissionSearchAreasForUser($missionId, true)]
     : [];
 // Likewise a play or a retry that has sent routes: the live list of routes, the one the route endpoint answers with.
@@ -235,6 +236,40 @@ if ($action === 'add_area') {
     $result = addScenarioAreaItem($mission, $phaseId, (int) $userId, [
         'label' => post('label'),
         'geo'   => post('geo'),
+    ]);
+    if (!$result['ok']) {
+        if ($madePhase) {
+            deleteScenarioPhase($mission, $phaseId, (int) $userId);
+        }
+        echo $fail($result['error']);
+        exit;
+    }
+    echo $answer(['item_id' => $result['id'], 'phase_id' => $phaseId]);
+    exit;
+}
+
+if ($action === 'add_building') {
+    // The building popup's «Στο σενάριο» (v3.460.0): the building put on the map in a sector goes into the phase instead of being
+    // made now. sector_id is the id of a sector that exists, or 'item:<id>' naming the staged sector the building stands in. A
+    // building has no team: the sector's team searches it. As for add_item, a "new phase" made for a refused order is taken out
+    // again.
+    $phaseId = (int) post('phase_id');
+    $madePhase = false;
+    if ($phaseId === 0 && post('phase_id') === 'new') {
+        $made = addScenarioPhase($mission, (int) $userId, '');
+        if (!$made['ok']) {
+            echo $fail($made['error']);
+            exit;
+        }
+        $phaseId = (int) $made['id'];
+        $madePhase = true;
+    }
+    $result = addScenarioBuildingItem($mission, $phaseId, (int) $userId, [
+        'sector_id'   => post('sector_id'),
+        'label'       => post('label'),
+        'lat'         => post('lat'),
+        'lng'         => post('lng'),
+        'floor_count' => post('floor_count'),
     ]);
     if (!$result['ok']) {
         if ($madePhase) {

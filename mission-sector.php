@@ -111,9 +111,6 @@ if (!isset($_POST['csrf_token']) || !hash_equals($_SESSION['csrf_token'] ?? '', 
 }
 
 $action = post('action');
-$isValidLatLng = fn($lat, $lng) => is_numeric($lat) && is_numeric($lng)
-    && (float) $lat >= -90 && (float) $lat <= 90 && (float) $lng >= -180 && (float) $lng <= 180
-    && !((float) $lat === 0.0 && (float) $lng === 0.0);
 
 // ── Self-report actions: assigned-team members OR admin ─────────────────────
 
@@ -575,76 +572,21 @@ if ($action === 'clear_ring_generated') {
 }
 
 if ($action === 'create_building') {
-    $sectorId = (int) post('sector_id');
-    // geo and label come along because the containment check below needs the
-    // polygon, and the refusal has to be able to name the sector it refused.
-    $sector = dbFetchOne("SELECT id, label, geo FROM mission_search_sectors WHERE id = ? AND mission_id = ?", [$sectorId, $missionId]);
-    if (!$sector) {
-        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
-        exit;
-    }
-
-    $label = trim((string) post('label'));
-    if ($label === '') {
-        echo json_encode(['ok' => false, 'error' => t('sector.invalid_label')]);
-        exit;
-    }
-    $label = mb_substr($label, 0, 255);
-
-    $lat = post('lat');
-    $lng = post('lng');
-    if (!$isValidLatLng($lat, $lng)) {
-        echo json_encode(['ok' => false, 'error' => t('dispatch.invalid_point')]);
-        exit;
-    }
-
-    // Floors ABOVE ground. 0 is valid and means a single-storey building —
-    // the ground floor itself is created unconditionally below, because every
-    // building has one and it is the one storey a search team must clear.
-    $floorCount = (int) post('floor_count');
-    if ($floorCount < 0 || $floorCount > 50) {
-        echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
-        exit;
-    }
-
-    // DOES IT ACTUALLY STAND IN THIS SECTOR? The sector_id arrived in the POST
-    // and was taken on trust, so a building could be filed under one sector
-    // while standing in another — or nowhere near any of them. Nothing noticed,
-    // and the cost is a team clearing their sector without ever walking past a
-    // building on their list, or walking to one that belongs to the crew on the
-    // far side of the ridge.
-    //
-    // A tolerance rather than a hard edge: a building on the boundary, or
-    // dropped from a GPS fix taken beside it, is legitimately a few metres out
-    // and refusing that would block somebody recording a real building during
-    // an operation. Past the tolerance it is not a rounding matter.
-    $sectorGeo = json_decode((string) ($sector['geo'] ?? ''), true);
-    if (is_array($sectorGeo) && count($sectorGeo) >= 3) {
-        $outBy = pointToPolygonDistanceMeters((float) $lat, (float) $lng, $sectorGeo);
-        if ($outBy > SECTOR_BUILDING_TOLERANCE_METRES) {
-            echo json_encode(['ok' => false, 'error' => t('sector.building_outside', [
-                'sector' => $sector['label'],
-                'metres' => (int) round($outBy),
-            ])]);
-            exit;
-        }
-    }
-
-    $buildingId = dbInsert(
-        "INSERT INTO mission_sector_buildings (sector_id, label, lat, lng, floor_count, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
-        [$sectorId, $label, (float) $lat, (float) $lng, $floorCount, $userId]
-    );
-    // Floor 0 is the ground floor and is always created. All floors default
-    // required=1 — admin narrows via update_building_floors, which refuses to
-    // drop the ground floor.
-    for ($i = 0; $i <= $floorCount; $i++) {
-        dbInsert("INSERT INTO mission_sector_building_floors (building_id, floor_number, is_required) VALUES (?, ?, 1)", [$buildingId, $i]);
-    }
-    logAudit('create_sector_building', 'mission_sector_buildings', $buildingId, null, [
-        'mission_id' => $missionId, 'sector_id' => $sectorId, 'floor_count' => $floorCount,
+    // The checks, the rows and the audit entry are createMissionSectorBuilding() (v3.460.0), the function a scenario makes a
+    // building with too.
+    $made = createMissionSectorBuilding($mission, (int) $userId, [
+        'sector_id'   => post('sector_id'),
+        'label'       => post('label'),
+        'lat'         => post('lat'),
+        'lng'         => post('lng'),
+        'floor_count' => post('floor_count'),
     ]);
+    if (!$made['ok']) {
+        echo json_encode(['ok' => false, 'error' => $made['error']]);
+        exit;
+    }
 
-    echo json_encode(['ok' => true, 'id' => (int) $buildingId] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
+    echo json_encode(['ok' => true, 'id' => (int) $made['id']] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;
 }
 

@@ -6208,6 +6208,144 @@ function createMissionSearchArea(array $mission, int $userId, array $input): arr
 }
 
 /**
+ * Everything createMissionSectorBuilding() checks about a building of a search sector, and nothing it does (v3.460.0): the
+ * checks of mission-sector.php's `create_building`, moved here unchanged so that the window's save and a scenario's staged
+ * building are held to the same rules. Pure: it reads, writes nothing and tells no one. The checks run in the order the
+ * endpoint always ran them (the sector, the name, the point, the floors, and last whether the point stands in the sector), so
+ * a form with two mistakes gets the same message it always got.
+ *
+ * $input is what the form posts, as post() returns it: sector_id, label, lat, lng, floor_count (floors ABOVE ground: 0 is a
+ * single-storey building, at most 50). Returns ['ok' => false, 'error' => <text to show>], or ['ok' => true, 'sector_id' =>
+ * int, 'sector_label' => string, 'label' => string (trimmed, at most 255), 'lat' => float, 'lng' => float, 'floor_count' =>
+ * int].
+ *
+ * $stagedSector is only for a scenario that is writing a building down for a sector it has not made yet: ['label' => the staged
+ * sector's name, 'geo' => its polygon as [[lat, lng], ...]] stands in for the sector row (and sector_id comes back 0). The
+ * building still has to stand in that polygon. Nothing that makes a building passes it.
+ */
+function prepareMissionSectorBuilding(array $mission, array $input, ?array $stagedSector = null): array {
+    $missionId = (int) $mission['id'];
+    $sectorId = (int) ($input['sector_id'] ?? 0);
+    // geo and label come along because the containment check below needs the polygon, and the refusal has to be able to
+    // name the sector it refused.
+    if ($stagedSector !== null) {
+        $sector = ['id' => 0, 'label' => (string) ($stagedSector['label'] ?? '')];
+        $sectorGeo = $stagedSector['geo'] ?? null;
+    } else {
+        $sector = dbFetchOne("SELECT id, label, geo FROM mission_search_sectors WHERE id = ? AND mission_id = ?", [$sectorId, $missionId]);
+        if (!$sector) {
+            return ['ok' => false, 'error' => t('common.not_found')];
+        }
+        $sectorGeo = json_decode((string) ($sector['geo'] ?? ''), true);
+    }
+
+    $label = trim((string) ($input['label'] ?? ''));
+    if ($label === '') {
+        return ['ok' => false, 'error' => t('sector.invalid_label')];
+    }
+    $label = mb_substr($label, 0, 255);
+
+    $lat = $input['lat'] ?? null;
+    $lng = $input['lng'] ?? null;
+    $isValidLatLng = fn($lat, $lng) => is_numeric($lat) && is_numeric($lng)
+        && (float) $lat >= -90 && (float) $lat <= 90 && (float) $lng >= -180 && (float) $lng <= 180
+        && !((float) $lat === 0.0 && (float) $lng === 0.0);
+    if (!$isValidLatLng($lat, $lng)) {
+        return ['ok' => false, 'error' => t('dispatch.invalid_point')];
+    }
+
+    // Floors ABOVE ground. 0 is valid and means a single-storey building — the ground floor itself is created
+    // unconditionally by createMissionSectorBuilding(), because every building has one and it is the one storey a search
+    // team must clear.
+    $floorCount = (int) ($input['floor_count'] ?? 0);
+    if ($floorCount < 0 || $floorCount > 50) {
+        return ['ok' => false, 'error' => t('common.invalid_request')];
+    }
+
+    // DOES IT ACTUALLY STAND IN THIS SECTOR? The sector_id arrived in the POST and was taken on trust, so a building could
+    // be filed under one sector while standing in another — or nowhere near any of them. Nothing noticed, and the cost is a
+    // team clearing their sector without ever walking past a building on their list, or walking to one that belongs to the
+    // crew on the far side of the ridge.
+    //
+    // A tolerance rather than a hard edge: a building on the boundary, or dropped from a GPS fix taken beside it, is
+    // legitimately a few metres out and refusing that would block somebody recording a real building during an operation.
+    // Past the tolerance it is not a rounding matter.
+    if (is_array($sectorGeo) && count($sectorGeo) >= 3) {
+        $outBy = pointToPolygonDistanceMeters((float) $lat, (float) $lng, $sectorGeo);
+        if ($outBy > SECTOR_BUILDING_TOLERANCE_METRES) {
+            return ['ok' => false, 'error' => t('sector.building_outside', [
+                'sector' => $sector['label'],
+                'metres' => (int) round($outBy),
+            ])];
+        }
+    }
+
+    return [
+        'ok'           => true,
+        'sector_id'    => (int) $sector['id'],
+        'sector_label' => (string) $sector['label'],
+        'label'        => $label,
+        'lat'          => (float) $lat,
+        'lng'          => (float) $lng,
+        'floor_count'  => $floorCount,
+    ];
+}
+
+/**
+ * Command records a building in a search sector, with a row for each of its floors. This is the body of mission-sector.php's
+ * `create_building` (v3.460.0), moved here unchanged so that anything else that has to make the very same building - a step of
+ * a scenario - goes through the same checks and writes the same rows and audit entry as a hand-recorded one. Command only: the
+ * caller has checked that. The endpoint adds the lists it answers with; this does not.
+ *
+ * The ground floor (floor_number 0) is always made, then one row per floor above it, all required (the administrator narrows
+ * that later with `update_building_floors`, which refuses to drop the ground floor). The building and its floors go in one
+ * transaction of their own unless the caller already has one (the tests run inside one; the endpoint never does), so a failure
+ * half-way leaves no building without floors behind and a retry cannot make a second one.
+ *
+ * $input is the form's: see prepareMissionSectorBuilding(). Returns ['ok' => true, 'id' => <building id>] or ['ok' => false,
+ * 'error' => <text to show>].
+ */
+function createMissionSectorBuilding(array $mission, int $userId, array $input): array {
+    $prepared = prepareMissionSectorBuilding($mission, $input);
+    if (!$prepared['ok']) {
+        return $prepared;
+    }
+    $missionId = (int) $mission['id'];
+    $sectorId = $prepared['sector_id'];
+    $floorCount = $prepared['floor_count'];
+
+    $pdo = db();
+    $ownTransaction = !$pdo->inTransaction();
+    if ($ownTransaction) {
+        $pdo->beginTransaction();
+    }
+    try {
+        $buildingId = dbInsert(
+            "INSERT INTO mission_sector_buildings (sector_id, label, lat, lng, floor_count, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, NOW())",
+            [$sectorId, $prepared['label'], $prepared['lat'], $prepared['lng'], $floorCount, $userId]
+        );
+        // Floor 0 is the ground floor and is always created. All floors default required=1 — admin narrows via
+        // update_building_floors, which refuses to drop the ground floor.
+        for ($i = 0; $i <= $floorCount; $i++) {
+            dbInsert("INSERT INTO mission_sector_building_floors (building_id, floor_number, is_required) VALUES (?, ?, 1)", [$buildingId, $i]);
+        }
+        if ($ownTransaction) {
+            $pdo->commit();
+        }
+    } catch (Exception $e) {
+        if ($ownTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        return ['ok' => false, 'error' => t('common.failed')];
+    }
+    logAudit('create_sector_building', 'mission_sector_buildings', $buildingId, null, [
+        'mission_id' => $missionId, 'sector_id' => $sectorId, 'floor_count' => $floorCount,
+    ]);
+
+    return ['ok' => true, 'id' => (int) $buildingId];
+}
+
+/**
  * «Ελήφθη» on a search sector. Command staff may confirm any sector (standing
  * in for a team); anyone else only their own team's, and only as an approved
  * participant. Returns null on success, else the error to show.

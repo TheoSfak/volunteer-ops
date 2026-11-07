@@ -8120,6 +8120,15 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 210,
+            'description' => "Scenario sector buildings (v3.460.0): a staged order can now be a building of a search sector (with the floors it is searched floor by floor) as well - mission_scenario_items.kind grows from ENUM('dispatch','sector','route','order','restricted','area') to ENUM('dispatch','sector','route','order','restricted','area','building'). A building's payload holds its label, point and number of floors above ground, and names the sector it stands in: a sector that exists (sector_id) or a staged sector of the same scenario (sector_item_id). It has no team or slot - the sector's team searches it. Re-running it changes nothing.",
+            'up' => function () {
+                dbExecute("ALTER TABLE mission_scenario_items
+                    MODIFY COLUMN kind ENUM('dispatch','sector','route','order','restricted','area','building') NOT NULL DEFAULT 'dispatch' COMMENT 'What kind of order: dispatch = a point or an area (sent as a mission_dispatch_points row), sector = a search sector (sent as a mission_search_sectors row), route = a patrol of waypoints (sent as a mission_routes row), order = a general order to people (sent as a mission_orders row), restricted = a restricted area (sent as a mission_restricted_areas row), area = a search area (sent as a mission_search_areas row), building = a building of a search sector (sent as a mission_sector_buildings row with its floors)'");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

@@ -9251,6 +9251,25 @@ let arrowStart = null, arrowStartMarker = null;
 // next click, not a persistent toggleable tool). Consumed and cleared by
 // the map click handler below.
 let addingBuildingToSectorId = null;
+// Scenario (v3.460.0): the same one-shot click-to-place mode, but for a sector the scenario has still to make. The «Κτίριο» button
+// on that sector's row on the Scenario card arms it with {item_id, label, geo, phase_id}; the next click on the map opens a popup
+// (name, floors, phase) whose «Στο σενάριο» writes the building down against that sector instead of making it.
+let addingBuildingToStagedSector = null;
+function armStagedBuilding(sector) {
+    if (!map || !sector || !Array.isArray(sector.geo) || sector.geo.length < 3) return;
+    measureDisarm();
+    addingBuildingToSectorId = null;
+    addingBuildingToStagedSector = sector;
+    map.closePopup();
+    document.getElementById('mapCard')?.classList.add('wr-draw-active');
+    if (typeof scrollToCard === 'function') scrollToCard('mapCard');
+    map.fitBounds(L.latLngBounds(sector.geo), {padding: [40, 40]});
+    // A hint in the sector itself says what the next click does; the click replaces it with the building's own popup.
+    L.popup({closeOnClick: false, autoClose: false})
+        .setLatLng(L.latLngBounds(sector.geo).getCenter())
+        .setContent(`<div class="small">${escapeHtml(t('scenario.building_pick_hint'))}</div>`)
+        .openOn(map);
+}
 function cancelActiveDrawing() {
     if (map) { map.dragging.enable(); map.doubleClickZoom.enable(); }
     if (annotationDrawLayer) annotationDrawLayer.clearLayers();
@@ -11559,6 +11578,49 @@ map.on('click', e => {
             };
             document.getElementById('sectorBuildingSave')?.addEventListener('click', save);
         }, 0);
+    } else if (addingBuildingToStagedSector !== null) {
+        // The same popup technique for a building in a sector that the scenario has still to make (v3.460.0). The phases offered
+        // are the unplayed ones from the sector's own phase on (play makes the sector first); «Στο σενάριο» writes the building down
+        // against the sector's item ('item:<id>') and the server says whether the point stands in the sector.
+        const staged = addingBuildingToStagedSector;
+        const latlng = e.latlng;
+        addingBuildingToStagedSector = null;
+        document.getElementById('mapCard')?.classList.remove('wr-draw-active');
+        const scenarioApi = window.wrScenario;
+        if (!scenarioApi) return;
+        const phases = scenarioApi.phases();
+        const fromIndex = Math.max(0, phases.findIndex(p => String(p.id) === String(staged.phase_id)));
+        const open = phases.filter((p, i) => i >= fromIndex && !p.played_at);
+        const ownPhase = open.find(p => String(p.id) === String(staged.phase_id)) || open[0] || null;
+        const phaseOptions = open.map(p => `<option value="${p.id}"${ownPhase && p.id === ownPhase.id ? ' selected' : ''}>${escapeHtml(t('scenario.phase_n', {n: p.n}))}${p.title ? ' · ' + escapeHtml(p.title) : ''}</option>`).join('')
+            + `<option value="new"${ownPhase ? '' : ' selected'}>${escapeHtml(t('scenario.new_phase_n', {n: phases.length + 1}))}</option>`;
+        L.popup({closeOnClick: false})
+            .setLatLng(latlng)
+            .setContent(`<input type="text" maxlength="255" class="form-control form-control-sm mb-1" id="stagedBuildingLabelInput" placeholder="${t('sector.building_label_placeholder')}">
+                          <input type="number" min="0" max="50" value="0" class="form-control form-control-sm mb-1" id="stagedBuildingFloorsInput" placeholder="${t('sector.floor_count_label')}">
+                          <div class="small text-muted mb-1">${t('sector.floor_count_hint')}</div>
+                          <label class="form-label small fw-semibold mb-0" for="stagedBuildingPhase">${escapeHtml(t('scenario.building_popup_phase'))}</label>
+                          <select class="form-select form-select-sm mb-1" id="stagedBuildingPhase">${phaseOptions}</select>
+                          <button type="button" class="btn btn-sm btn-primary w-100" id="stagedBuildingSave" title="${escapeHtml(t('scenario.building_add_to_scenario_title'))}"><i class="bi bi-collection-play me-1"></i>${escapeHtml(t('scenario.add_to_scenario'))}</button>`)
+            .openOn(map);
+        setTimeout(() => {
+            const input = document.getElementById('stagedBuildingLabelInput');
+            const saveBtn = document.getElementById('stagedBuildingSave');
+            if (!input || !saveBtn) return;
+            input.focus();
+            saveBtn.addEventListener('click', () => {
+                const label = input.value.trim();
+                const raw = document.getElementById('stagedBuildingFloorsInput').value.trim();
+                const floorCount = raw === '' ? 0 : parseInt(raw, 10);
+                if (!label || !Number.isInteger(floorCount) || floorCount < 0 || floorCount > 50) return;
+                saveBtn.disabled = true;
+                scenarioApi.stageBuilding(document.getElementById('stagedBuildingPhase').value, {
+                    sector_id: 'item:' + staged.item_id, label, lat: latlng.lat, lng: latlng.lng, floor_count: floorCount
+                }).then(res => {
+                    if (res && res.ok) map.closePopup(); else saveBtn.disabled = false;
+                });
+            });
+        }, 0);
     }
 });
 // ── Right-click / long-press menu, and «Απόσταση από εδώ / Έως εδώ» ─────────
@@ -11840,6 +11902,7 @@ function measureArm() {
     if (typeof cpStopPick === 'function') cpStopPick();
     if (typeof triageStopPick === 'function') triageStopPick();
     addingBuildingToSectorId = null;
+    addingBuildingToStagedSector = null;
     measureClear();
     map.closePopup();
     measureHold(true);
@@ -12558,7 +12621,7 @@ function mapCommandIncident(point) {
 })();
 
 map.on('contextmenu', e => {
-    if (activeTool || triagePickKind || cpPickMode || addingBuildingToSectorId !== null) return;
+    if (activeTool || triagePickKind || cpPickMode || addingBuildingToSectorId !== null || addingBuildingToStagedSector !== null) return;
     const ev = e.originalEvent;
     if (ev && ev.target && ev.target.closest && ev.target.closest('.leaflet-popup, .leaflet-control')) return;
     const touch = mapGestureIsTouch(ev);

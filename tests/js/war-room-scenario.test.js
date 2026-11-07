@@ -796,3 +796,175 @@ test('withdrawing a phase that holds only an area and its sectors does not claim
     assert.doesNotMatch(text, /withdraw_confirm_zones/);
     assert.match(text, /"n":2\}/);
 });
+
+// ── Buildings of a sector (v3.460.0) ──────────────────────────────────────────────────────────────────────────────
+// A building is a point in a sector: audience 'none' (the sector's team searches it), never finished (it stands), written
+// down against a sector the plan makes ('item:<id>') or one that exists. Its row says its floors and its sector; an unsent
+// sector has «Κτίριο», which arms the next click on the map; taking the phase back leaves it in the sector.
+const building = (id, over = {}) => Object.assign({
+    id, kind: 'building', type: 'building', audience: 'none', team_id: null, team_label: null, team_missing: false,
+    slot_id: null, slot_label: null, unmapped: false, team_empty: false, area_missing: false, sent: false, error: null,
+    label: 'Σχολείο', geo: [[35.05, 24.02]], floor_count: 2, state: null,
+    sector_item_id: 2, sector_label: 'Τομέας Α', sector_staged: true, sector_phase_n: 1, sector_missing: false,
+}, over);
+
+test('the card\'s building popup stages a building through add_building, with a sector and no team in it', async () => {
+    const {api, calls} = await load(plan([]), {add_building: {ok: true, phase_id: 7}});
+    assert.equal(typeof api.stageBuilding, 'function');
+    const res = await api.stageBuilding('new', {sector_id: 'item:2', label: 'Σχολείο', lat: 35.05, lng: 24.02, floor_count: 2});
+
+    assert.equal(res.ok, true);
+    const fields = new URLSearchParams(calls.filter((c) => c[0] === 'fetch' && c[2]).pop()[2]);
+    assert.equal(fields.get('action'), 'add_building');
+    assert.equal(fields.get('phase_id'), 'new');
+    assert.equal(fields.get('sector_id'), 'item:2');
+    assert.equal(fields.get('label'), 'Σχολείο');
+    assert.equal(fields.get('lat'), '35.05');
+    assert.equal(fields.get('lng'), '24.02');
+    assert.equal(fields.get('floor_count'), '2');
+    assert.equal(fields.get('mission_id'), '83');
+    assert.equal(fields.has('team_id'), false, 'a building has no team');
+});
+
+test('a refused building (outside its sector) is shown to the person and the answer is handed back', async () => {
+    const {api, calls} = await load(plan([]), {add_building: {ok: false, error: 'Το κτίριο πέφτει 31 μ. έξω από τον τομέα.'}});
+    const res = await api.stageBuilding('7', {sector_id: 'item:2', label: 'Σχολείο', lat: 35.9, lng: 24.9, floor_count: 0});
+    assert.equal(res.ok, false);
+    assert.ok(calls.some((c) => c[0] === 'alert' && c[1] === 'Το κτίριο πέφτει 31 μ. έξω από τον τομέα.'));
+});
+
+test('the card says what a building is, how many floors, in which sector and phase, and names no recipient', async () => {
+    const {body} = await load(zonePhase([building(1)], false));
+    assert.match(body.innerHTML, /scenario\.kind_building/);
+    assert.match(body.innerHTML, /bi-building-fill/);
+    assert.match(body.innerHTML, /scenario\.building_floors\{"n":2\}/);
+    assert.match(body.innerHTML, /scenario\.building_in_staged_sector\{"sector":"Τομέας Α","phase":"scenario\.phase_n\{\\"n\\":1\}"\}/);
+    assert.doesNotMatch(body.innerHTML, /scenario\.building_in_sector\{/);
+    assert.doesNotMatch(body.innerHTML, /scenario\.target_everyone|common\.all_teams|scenario\.team_gone/, 'a building goes to nobody');
+    assert.doesNotMatch(body.innerHTML, /bi-arrow-right-short/, 'no «→ προς» for it');
+    assert.match(body.innerHTML, /data-sc="goto"/);
+    assert.match(body.innerHTML, /data-sc="delete-item"/);
+
+    const ground = await load(zonePhase([building(1, {floor_count: 0})], false));
+    assert.match(ground.body.innerHTML, /scenario\.building_ground_only/);
+    assert.doesNotMatch(ground.body.innerHTML, /scenario\.building_floors/);
+    const live = await load(zonePhase([building(1, {sector_staged: false, sector_item_id: null, sector_phase_n: null})], false));
+    assert.match(live.body.innerHTML, /scenario\.building_in_sector\{"sector":"Τομέας Α"\}/);
+    assert.doesNotMatch(live.body.innerHTML, /building_in_staged_sector/);
+});
+
+test('a building whose sector was taken off the plan says the sector is gone', async () => {
+    const {body} = await load(zonePhase([building(1, {sector_missing: true, sector_staged: false})], false));
+    assert.match(body.innerHTML, /scenario\.sector_gone_hint/);
+});
+
+test('a made building stands calmly: no delete, no red shield, and it says that withdrawing leaves it in its sector', async () => {
+    const prog = {total: 0, done: 0, open: 0, standing: 0, withdrawn: 0, failed: 0, complete: false, withdrawable: 0, can_withdraw: false};
+    const {body} = await load(zonePhase([building(1, {sent: true, state: 'standing', building_id: 5, sector_staged: false})], true, prog));
+    assert.match(body.innerHTML, /scenario\.state_standing/);
+    assert.match(body.innerHTML, /scenario\.building_stays_hint/);
+    assert.doesNotMatch(body.innerHTML, /bi-shield-fill-exclamation/, 'it is not a danger zone');
+    assert.doesNotMatch(body.innerHTML, /data-sc="delete-item"/);
+    assert.doesNotMatch(body.innerHTML, /progress_badge/, 'a building is not an order to finish');
+    assert.doesNotMatch(body.innerHTML, /data-sc="withdraw"/, 'nothing in the phase can be taken back');
+});
+
+test('«Κτίριο» is on an unsent sector with an outline only, under its words', async () => {
+    const withOutline = await load(zonePhase([stagedSector(2, {area_staged: false, area_id: 12})], false));
+    assert.match(withOutline.body.innerHTML, /data-sc="add-building" data-item="2"/);
+    assert.match(withOutline.body.innerHTML, /scenario\.building_add_btn/);
+    const sent = await load(zonePhase([stagedSector(2, {sent: true, state: 'open', area_staged: false, area_id: 12})], true));
+    assert.doesNotMatch(sent.body.innerHTML, /add-building/, 'a sector that is made is not for the plan');
+    const noOutline = await load(zonePhase([stagedSector(2, {geo: [[35, 24]]})], false));
+    assert.doesNotMatch(noOutline.body.innerHTML, /add-building/);
+    const notASector = await load(zonePhase([searchArea(1), building(3)], false));
+    assert.doesNotMatch(notASector.body.innerHTML, /add-building/, 'an area and a building have no «Κτίριο»');
+});
+
+test('«Κτίριο» arms the page with the sector\'s item, name, points and phase', async () => {
+    const {handlers, ctx} = await load(zonePhase([stagedSector(2)], false));
+    const armed = [];
+    ctx.armStagedBuilding = (sector) => armed.push(sector);
+    await clickOn(handlers, {sc: 'add-building', item: '2'});
+    // Objects made inside the vm context have another Array.prototype: compare them as JSON.
+    assert.equal(JSON.stringify(armed), JSON.stringify([{item_id: 2, label: 'Τομέας Α', geo: [[35.0, 24.0], [35.1, 24.0], [35.1, 24.1]], phase_id: 7}]));
+});
+
+test('«Κτίριο» does nothing for a sector that is made, an item that is gone, a building, or a sector with no outline', async () => {
+    const {handlers, ctx} = await load(zonePhase([stagedSector(2, {sent: true, state: 'open'}), stagedSector(3, {geo: [[35, 24]]}), building(4)], false));
+    const armed = [];
+    ctx.armStagedBuilding = (sector) => armed.push(sector);
+    for (const item of ['2', '3', '4', '99']) {
+        await clickOn(handlers, {sc: 'add-building', item});
+    }
+    assert.deepEqual(armed, []);
+});
+
+test('a staged building is a dashed rounded square with the phase number and no «→» in its tooltip; a made one leaves no ghost', async () => {
+    const tips = [];
+    const {api, drawn, ctx} = await load(zonePhase([building(1), building(2, {sent: true, state: 'standing'})], false));
+    const markerOf = ctx.L.marker;
+    ctx.L.marker = (...args) => {
+        const chain = markerOf(...args);
+        const bind = chain.bindTooltip;
+        chain.bindTooltip = (text, ...rest) => { tips.push(text); return bind(text, ...rest); };
+        return chain;
+    };
+    drawn.length = 0;
+    api.drawGhostsInto({name: 'layer'});
+
+    const pins = drawn.filter((d) => d.kind === 'marker');
+    assert.equal(pins.length, 1);
+    assert.deepEqual(pins[0].args[0], [35.05, 24.02], 'where the building will be');
+    assert.match(pins[0].args[1].icon.html, /wr-sc-ghost-building/);
+    assert.match(pins[0].args[1].icon.html, /<span>1<\/span>/, 'the phase number');
+    assert.equal(tips.length, 1);
+    assert.match(tips[0], /scenario\.kind_building/);
+    assert.doesNotMatch(tips[0], /→/);
+});
+
+test('the play confirmation names no recipient for a building beside other orders, and «για όλους» when buildings are all there is', async () => {
+    const ask = async (items) => {
+        const {handlers, calls, ctx} = await load(zonePhase(items, false), {play_phase: {ok: true, sent: 1, failed: 0, results: []}});
+        ctx.confirm = (text) => { calls.push(['confirm', text]); return true; };
+        await clickOn(handlers, {sc: 'play', phase: '7'});
+        await settle();
+        return calls.find((c) => c[0] === 'confirm')[1];
+    };
+    const alone = await ask([building(1)]);
+    assert.match(alone, /"orders":1,"targets":"scenario\.target_everyone"\}/);
+    const withSector = await ask([stagedSector(2, {area_staged: false, area_id: 12}), building(1)]);
+    assert.match(withSector, /"orders":2,"targets":"Alpha 1"\}/, 'only the sector\'s team');
+    const missing = await ask([building(1, {sector_missing: true, sector_staged: false})]);
+    assert.match(missing, /scenario\.play_confirm_sector_missing\{"n":1\}/);
+});
+
+test('play and retry put a building they made on the map at once, through the sector pair of lists', async () => {
+    const sectors = [{id: 3, buildings: [{id: 5}]}];
+    const areas = [{id: 12, label: 'Κοίτη'}];
+    for (const [action, click, answer, scenario] of [
+        ['play_phase', {sc: 'play', phase: '7'}, {ok: true, sent: 1, failed: 0, results: [], sectors, areas}, zonePhase([building(1)], false)],
+        ['retry_item', {sc: 'retry', item: '1'}, {ok: true, item: {ok: true, kind: 'building'}, sectors, areas}, zonePhase([building(1, {error: 'x'})], true, standing({standing: 0}))],
+    ]) {
+        const {handlers, calls, ctx} = await load(scenario, {[action]: answer});
+        ctx.sectorRefreshAfter = (s, a) => calls.push(['sectorRefreshAfter', s, a]);
+        calls.length = 0;
+        await clickOn(handlers, click);
+        await settle();
+        const hit = calls.find((c) => c[0] === 'sectorRefreshAfter');
+        assert.ok(hit, action + ' redraws sectors and areas');
+        assert.deepEqual([hit[1], hit[2]], [sectors, areas], action);
+    }
+});
+
+test('withdrawing a phase that holds a sector and its building does not claim that zones are removed', async () => {
+    const prog = {total: 1, done: 0, open: 1, standing: 0, withdrawn: 0, failed: 0, complete: false, withdrawable: 1, can_withdraw: true};
+    const items = [stagedSector(2, {sent: true, state: 'open', area_staged: false, area_id: 12}), building(1, {sent: true, state: 'standing', sector_staged: false})];
+    const {handlers, calls, ctx} = await load(zonePhase(items, true, prog), {withdraw_phase: {ok: true, withdrawn: 1, failed: 0, results: []}});
+    ctx.confirm = (text) => { calls.push(['confirm', text]); return true; };
+    await clickOn(handlers, {sc: 'withdraw', phase: '7'});
+    await settle();
+    const text = calls.find((c) => c[0] === 'confirm')[1];
+    assert.doesNotMatch(text, /withdraw_confirm_zones/);
+    assert.match(text, /"n":1\}/);
+});

@@ -87,6 +87,20 @@
  * off the plan, nor can the phase that holds it (deleteScenarioItem(), deleteScenarioPhase()). Taking a phase back never
  * deletes an area, because deleting it deletes its sectors: the sectors are taken off their teams and the area stays on the map.
  *
+ * SECTOR BUILDINGS (v3.460.0). A staged order can also be a building of a search sector (kind 'building', type 'building'): a
+ * point with a name and the number of floors above the ground, which the team that searches the sector clears floor by floor.
+ * Play hands it to createMissionSectorBuilding() - the function the building popup's save uses - so the building, its floors
+ * (the ground floor and one row for each above it, all required) and its audit entry are those of a building recorded by hand, and
+ * prepareMissionSectorBuilding() checks it when it is staged, including that the point stands in the sector (within the
+ * tolerance). A building has no team, slot or «όλες οι ομάδες» (audience 'none'): the sector's team searches it. Like a search
+ * area it is never finished, so it does not count in a phase's progress and the card reads it as «Σε ισχύ». Like a sector in a
+ * staged area it depends on another item of the plan, the sector: it names the sector's item (payload sector_item_id) instead of a
+ * sector that exists (sector_id); the sector has to be in the same phase or an earlier one, play makes the sector first, and
+ * if the sector was taken off the plan, was not sent yet or failed to be made the building FAILS with that reason
+ * (scenarioResolveStagedBuildingSector()) - it is never put in another sector. A staged sector that unsent buildings still name
+ * cannot be taken off the plan, nor can the phase that holds it (deleteScenarioItem(), deleteScenarioPhase()). Taking a phase back
+ * never deletes a building: the sector is taken off its team and stays on the map with its buildings.
+ *
  * HOW FAR A PHASE HAS GOT (v3.456.0). Nothing about progress is stored: scenarioItemLiveStates() reads each sent order
  * from the live order itself (a point is finished when its team pressed «Ολοκληρώθηκε», a route when it is completed,
  * a sector when it is completed; an order that is gone, cancelled or taken off its team is withdrawn), and
@@ -196,6 +210,30 @@ function loadMissionScenario(int $missionId): array {
         $phaseNumbers[(int) $phase['id']] = $i + 1;
     }
 
+    // The sectors the scenario itself writes down, for the buildings that name one instead of a sector that exists (v3.460.0),
+    // and the sectors that exist now, for the buildings that name one of those (or one the scenario has made).
+    $sectorItems = [];
+    $sectorLabels = [];
+    foreach ($items as $row) {
+        if ($row['kind'] === 'building') {
+            foreach ($items as $sectorRow) {
+                if ($sectorRow['kind'] === 'sector') {
+                    $sectorPayload = json_decode((string) $sectorRow['payload'], true);
+                    $sectorItems[(int) $sectorRow['id']] = [
+                        'label'    => is_array($sectorPayload) ? (string) ($sectorPayload['label'] ?? '') : '',
+                        'sent'     => $sectorRow['sent_at'] !== null && $sectorRow['sent_ref_id'] !== null,
+                        'ref'      => $sectorRow['sent_ref_id'] !== null ? (int) $sectorRow['sent_ref_id'] : null,
+                        'phase_id' => (int) $sectorRow['phase_id'],
+                    ];
+                }
+            }
+            foreach (dbFetchAll("SELECT id, label FROM mission_search_sectors WHERE mission_id = ?", [$missionId]) as $sector) {
+                $sectorLabels[(int) $sector['id']] = (string) $sector['label'];
+            }
+            break;
+        }
+    }
+
     // The people of each team who take part in the Action Room, for the routes that go to a team: a route with
     // nobody to receive it fails at play, and the card says so beforehand.
     $participantsByTeam = [];
@@ -227,6 +265,33 @@ function loadMissionScenario(int $missionId): array {
         $isOrder = $row['kind'] === 'order';
         $isRestricted = $row['kind'] === 'restricted';
         $isSearchArea = $row['kind'] === 'area';
+        $isBuilding = $row['kind'] === 'building';
+        // A building names the sector it stands in: one that exists (sector_id) or one the scenario makes (sector_item_id),
+        // which is either still to be made (then the card says in which phase), made already (it is a live sector now), or
+        // gone from the plan (the building will fail at play).
+        $buildingSectorId = $isBuilding ? (int) ($payload['sector_id'] ?? 0) : 0;
+        $buildingSectorItemId = $isBuilding ? (int) ($payload['sector_item_id'] ?? 0) : 0;
+        $buildingSectorLabel = $isBuilding ? ($payload['sector_label'] ?? null) : null;
+        $buildingSectorStaged = false;
+        $buildingSectorPhaseN = null;
+        $buildingSectorMissing = false;
+        if ($isBuilding && $buildingSectorItemId > 0) {
+            $sectorItem = $sectorItems[$buildingSectorItemId] ?? null;
+            if ($sectorItem === null) {
+                $buildingSectorMissing = true;
+            } elseif ($sectorItem['sent']) {
+                $buildingSectorId = (int) $sectorItem['ref'];
+                $buildingSectorLabel = $sectorLabels[$buildingSectorId] ?? $sectorItem['label'];
+                $buildingSectorMissing = !isset($sectorLabels[$buildingSectorId]);
+            } else {
+                $buildingSectorLabel = $sectorItem['label'];
+                $buildingSectorStaged = true;
+                $buildingSectorPhaseN = $phaseNumbers[$sectorItem['phase_id']] ?? null;
+            }
+        } elseif ($isBuilding) {
+            $buildingSectorMissing = !isset($sectorLabels[$buildingSectorId]);
+            $buildingSectorLabel = $sectorLabels[$buildingSectorId] ?? $buildingSectorLabel;
+        }
         $areaId = $isSector ? (int) ($payload['area_id'] ?? 0) : 0;
         // A sector may name a search area the scenario makes (area_item_id) instead of one that exists (area_id): then the
         // card says which, whether it is still to be made (area_staged, and in which phase) or gone, and a sector whose
@@ -254,8 +319,9 @@ function loadMissionScenario(int $missionId): array {
                 $areaPhaseN = $phaseNumbers[$areaItem['phase_id']] ?? null;
             }
         }
-        // A restricted area and a search area go to nobody in particular: their audience is 'none', which is not "everybody" to widen to.
-        $audience = ($isRestricted || $isSearchArea) ? 'none' : (in_array($payload['audience'] ?? '', ['all', 'slot'], true) ? $payload['audience'] : 'team');
+        // A restricted area, a search area and a building go to nobody in particular: their audience is 'none', which is not
+        // "everybody" to widen to (the team of the building's sector is the one that searches it).
+        $audience = ($isRestricted || $isSearchArea || $isBuilding) ? 'none' : (in_array($payload['audience'] ?? '', ['all', 'slot'], true) ? $payload['audience'] : 'team');
         $slotId = $audience === 'slot' ? (int) ($payload['slot_id'] ?? 0) : 0;
         $slot = $slotById[$slotId] ?? null;
         if ($audience === 'slot') {
@@ -275,8 +341,9 @@ function loadMissionScenario(int $missionId): array {
             'slot_id'      => $slotId ?: null,
             'slot_label'   => $audience === 'slot' ? ($slot['label'] ?? ($payload['slot_label'] ?? null)) : null,
             'unmapped'     => $audience === 'slot' && $teamLabelNow === null,
-            'type'         => $isSector ? 'sector' : ($isRoute ? 'route' : ($isOrder ? 'order' : ($isRestricted ? 'restricted' : ($isSearchArea ? 'search_area' : ($payload['type'] ?? null))))),
-            'geo'          => $isRoute ? scenarioRouteGhostPoints($payload) : ($isOrder ? null : ($payload['geo'] ?? null)),
+            'type'         => $isSector ? 'sector' : ($isRoute ? 'route' : ($isOrder ? 'order' : ($isRestricted ? 'restricted' : ($isSearchArea ? 'search_area' : ($isBuilding ? 'building' : ($payload['type'] ?? null)))))),
+            // A building is one point, handed over as a list of one so the card's «δείξε στον χάρτη» and the ghost read it like any shape.
+            'geo'          => $isRoute ? scenarioRouteGhostPoints($payload) : ($isOrder ? null : ($isBuilding ? (isset($payload['lat'], $payload['lng']) ? [[(float) $payload['lat'], (float) $payload['lng']]] : null) : ($payload['geo'] ?? null))),
             // An order to people has no place on the map; the words typed for it are what the card shows.
             'label'        => $isOrder ? ($payload['text'] ?? null) : ($payload['label'] ?? null),
             'order_type'   => $isOrder ? ($payload['order_type'] ?? null) : null,
@@ -297,8 +364,17 @@ function loadMissionScenario(int $missionId): array {
             'closed_loop'  => $isRoute ? !empty($payload['is_closed_loop']) : null,
             'return_to_start' => $isRoute ? !empty($payload['add_return_waypoint']) : null,
             'team_empty'   => $isRoute && $teamId > 0 && isset($teamLabels[(int) $teamId]) && empty($participantsByTeam[(int) $teamId]),
-            'dispatch_id'  => !$isSector && !$isRoute && !$isOrder && !$isRestricted && !$isSearchArea && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
+            // A building: the sector it stands in (a live one, or one the scenario makes and where that is in the plan) and
+            // how many floors it has above the ground (v3.460.0).
+            'floor_count'  => $isBuilding ? (int) ($payload['floor_count'] ?? 0) : null,
+            'sector_item_id' => $buildingSectorItemId ?: null,
+            'sector_label' => $buildingSectorLabel,
+            'sector_staged' => $buildingSectorStaged,
+            'sector_phase_n' => $buildingSectorPhaseN,
+            'sector_missing' => $buildingSectorMissing,
+            'dispatch_id'  => !$isSector && !$isRoute && !$isOrder && !$isRestricted && !$isSearchArea && !$isBuilding && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'search_area_id' => $isSearchArea && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
+            'building_id'  => $isBuilding && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'sector_id'    => $isSector && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'route_id'     => $isRoute && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'order_id'     => $isOrder && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
@@ -341,12 +417,12 @@ function loadMissionScenario(int $missionId): array {
  * A «Δεν μπορώ» does not finish anything: the order stays open. Reopening a finished order makes it open again.
  */
 function scenarioItemLiveStates(int $missionId, array $items): array {
-    $byKind = ['dispatch' => [], 'route' => [], 'sector' => [], 'order' => [], 'restricted' => [], 'area' => []];
+    $byKind = ['dispatch' => [], 'route' => [], 'sector' => [], 'order' => [], 'restricted' => [], 'area' => [], 'building' => []];
     foreach ($items as $row) {
         if ($row['sent_at'] === null || $row['sent_ref_id'] === null) {
             continue;
         }
-        $kind = in_array($row['kind'], ['route', 'sector', 'order', 'restricted', 'area'], true) ? $row['kind'] : 'dispatch';
+        $kind = in_array($row['kind'], ['route', 'sector', 'order', 'restricted', 'area', 'building'], true) ? $row['kind'] : 'dispatch';
         $byKind[$kind][(int) $row['id']] = (int) $row['sent_ref_id'];
     }
     $out = [];
@@ -419,6 +495,24 @@ function scenarioItemLiveStates(int $missionId, array $items): array {
         }
     }
 
+    if ($byKind['building']) {
+        // A building is no order that can be finished (the team that searches its sector clears it floor by floor, in the
+        // sector's own checklist), so it is STANDING while it exists. It exists as long as its sector does: a sector that is
+        // deleted takes its buildings with it, and one of ANOTHER mission is not this scenario's building (v3.460.0).
+        $refs = array_values(array_unique($byKind['building']));
+        $live = [];
+        foreach (dbFetchAll(
+            "SELECT b.id FROM mission_sector_buildings b JOIN mission_search_sectors s ON s.id = b.sector_id
+             WHERE s.mission_id = ? AND b.id IN (" . $in($refs) . ")",
+            array_merge([$missionId], $refs)
+        ) as $r) {
+            $live[(int) $r['id']] = true;
+        }
+        foreach ($byKind['building'] as $itemId => $ref) {
+            $out[$itemId] = ['state' => isset($live[$ref]) ? 'standing' : 'withdrawn', 'done' => null, 'of' => null];
+        }
+    }
+
     if ($byKind['order']) {
         // An order to people is DONE when everybody it went to has done what it asked - the same rule as the
         // acknowledgement panel's «finished»: for a task, a location, a photo or a video that is the thing itself
@@ -476,7 +570,8 @@ function scenarioPhaseProgress(array $items): array {
             // A search area stands too, but it is no order that can be finished and taking a phase back never deletes it
             // (it is the ground its sectors are on): it is in none of the counts. `standing` is the zones that taking the
             // phase back DELETES, and the card's confirmation says so.
-            if (($item['kind'] ?? '') !== 'area') {
+            // Nor does a building (v3.460.0): it stays with its sector, which is what the phase takes back.
+            if (!in_array($item['kind'] ?? '', ['area', 'building'], true)) {
                 $standing++;
                 $withdrawable++;
             }
@@ -549,6 +644,16 @@ function deleteScenarioPhase(array $mission, int $phaseId, int $userId): ?string
             if ($waiting['phase_id'] !== $phaseId) {
                 $areaPayload = json_decode((string) $areaRow['payload'], true);
                 return t('scenario.phase_area_in_use', ['area' => is_array($areaPayload) ? (string) ($areaPayload['label'] ?? '') : '']);
+            }
+        }
+    }
+    // Likewise a sector of this phase that buildings of ANOTHER phase are waiting for (v3.460.0): those buildings would be left
+    // with a sector that is nowhere. Buildings of this very phase go with it.
+    foreach (dbFetchAll("SELECT id, payload FROM mission_scenario_items WHERE phase_id = ? AND mission_id = ? AND kind = 'sector'", [$phaseId, $missionId]) as $sectorRow) {
+        foreach (scenarioUnsentBuildingsOfStagedSector($missionId, (int) $sectorRow['id']) as $waiting) {
+            if ($waiting['phase_id'] !== $phaseId) {
+                $sectorPayload = json_decode((string) $sectorRow['payload'], true);
+                return t('scenario.phase_sector_in_use', ['sector' => is_array($sectorPayload) ? (string) ($sectorPayload['label'] ?? '') : '']);
             }
         }
     }
@@ -808,6 +913,49 @@ function scenarioUnsentSectorsOfStagedArea(int $missionId, int $areaItemId): arr
     return $out;
 }
 
+/**
+ * Where a building written down in $buildingPhase may stand when it names the scenario's own sector $sectorItemId (v3.460.0):
+ * ['error' => text] when there is no such sector in this scenario, or when it is in a LATER phase than the building (play makes
+ * things phase by phase and in order, so the sector has to come first); ['live_sector_id' => n] when the sector has been made
+ * already (it is a real sector now, and the building is written against that one); else ['label' => the staged sector's name,
+ * 'geo' => its polygon], meaning the building is written against the staged sector and play makes the sector first.
+ */
+function scenarioStagedSectorForBuilding(int $missionId, array $buildingPhase, int $sectorItemId): array {
+    $row = dbFetchOne(
+        "SELECT i.id, i.phase_id, i.payload, i.sent_at, i.sent_ref_id FROM mission_scenario_items i
+         WHERE i.id = ? AND i.mission_id = ? AND i.kind = 'sector'",
+        [$sectorItemId, $missionId]
+    );
+    if (!$row) {
+        return ['error' => t('scenario.sector_item_not_found')];
+    }
+    $payload = json_decode((string) $row['payload'], true);
+    $label = is_array($payload) ? (string) ($payload['label'] ?? '') : '';
+    if ($row['sent_at'] !== null && $row['sent_ref_id'] !== null) {
+        return ['live_sector_id' => (int) $row['sent_ref_id']];
+    }
+    $sectorPhase = scenarioPhaseRow($missionId, (int) $row['phase_id']);
+    if ($sectorPhase && ((int) $sectorPhase['seq'] > (int) $buildingPhase['seq'] || ((int) $sectorPhase['seq'] === (int) $buildingPhase['seq'] && (int) $sectorPhase['id'] > (int) $buildingPhase['id']))) {
+        return ['error' => t('scenario.building_before_sector', ['sector' => $label, 'phase' => t('scenario.phase_n', ['n' => scenarioPhaseNumber($missionId, $sectorPhase)])])];
+    }
+    return ['label' => $label, 'geo' => is_array($payload) && is_array($payload['geo'] ?? null) ? $payload['geo'] : []];
+}
+
+/**
+ * The buildings of this scenario that have not been sent and stand in the scenario's own sector $sectorItemId: [['id' => the
+ * building item, 'phase_id' => its phase], ...]. A staged sector with any of them cannot be taken off the plan (v3.460.0).
+ */
+function scenarioUnsentBuildingsOfStagedSector(int $missionId, int $sectorItemId): array {
+    $out = [];
+    foreach (dbFetchAll("SELECT id, phase_id, payload FROM mission_scenario_items WHERE mission_id = ? AND kind = 'building' AND sent_at IS NULL", [$missionId]) as $row) {
+        $payload = json_decode((string) $row['payload'], true);
+        if (is_array($payload) && (int) ($payload['sector_item_id'] ?? 0) === $sectorItemId) {
+            $out[] = ['id' => (int) $row['id'], 'phase_id' => (int) $row['phase_id']];
+        }
+    }
+    return $out;
+}
+
 /** A staged route's waypoints as [[lat, lng], ...] for the map, or null when it has none. */
 function scenarioRouteGhostPoints($payload): ?array {
     if (!is_array($payload) || !is_array($payload['waypoints'] ?? null) || !$payload['waypoints']) {
@@ -1055,6 +1203,90 @@ function addScenarioAreaItem(array $mission, int $phaseId, int $userId, array $i
     return ['ok' => true, 'id' => $id];
 }
 
+/**
+ * Writes a building of a search sector into a phase (v3.460.0). $input is the building popup's form: sector_id (the id of a
+ * sector that exists, or 'item:<id>' naming a sector the scenario itself makes), label, lat, lng and floor_count (floors above
+ * the ground, 0-50). There is no team or slot here: the team that searches the sector searches its buildings. Checked by
+ * prepareMissionSectorBuilding(), exactly as making it would be - including that the point stands in the sector (within the
+ * tolerance), against the staged sector's own polygon when the sector is not made yet - so a building that could never be
+ * made is refused when it is written down. A staged sector has to be in the same phase as the building or an earlier one
+ * (play makes the sector first); a sector that has been made since is used as the live sector it is. A phase that has been
+ * played takes no more orders. ['ok' => true, 'id' => n] or ['ok' => false, 'error' => text].
+ */
+function addScenarioBuildingItem(array $mission, int $phaseId, int $userId, array $input): array {
+    $missionId = (int) $mission['id'];
+    $phase = scenarioPhaseRow($missionId, $phaseId);
+    if (!$phase) {
+        return ['ok' => false, 'error' => t('scenario.phase_not_found')];
+    }
+    if ($phase['played_at'] !== null) {
+        return ['ok' => false, 'error' => t('scenario.phase_closed_for_orders')];
+    }
+    if ((int) dbFetchValue("SELECT COUNT(*) FROM mission_scenario_items WHERE phase_id = ?", [$phaseId]) >= SCENARIO_MAX_ITEMS_PER_PHASE) {
+        return ['ok' => false, 'error' => t('scenario.too_many_orders', ['max' => SCENARIO_MAX_ITEMS_PER_PHASE])];
+    }
+
+    $ref = trim((string) ($input['sector_id'] ?? ''));
+    $sectorItemId = 0;
+    $sectorId = 0;
+    if (preg_match('/^item:([1-9][0-9]{0,9})$/', $ref, $m)) {
+        $sectorItemId = (int) $m[1];
+    } elseif (ctype_digit($ref) && (int) $ref > 0) {
+        $sectorId = (int) $ref;
+    } else {
+        return ['ok' => false, 'error' => t('scenario.building_sector_not_found')];
+    }
+
+    $stagedSector = null;
+    if ($sectorItemId > 0) {
+        $found = scenarioStagedSectorForBuilding($missionId, $phase, $sectorItemId);
+        if (isset($found['error'])) {
+            return ['ok' => false, 'error' => $found['error']];
+        }
+        if (isset($found['live_sector_id'])) {
+            $sectorId = $found['live_sector_id'];
+            $sectorItemId = 0;
+        } else {
+            $stagedSector = ['label' => $found['label'], 'geo' => $found['geo']];
+        }
+    }
+    if ($stagedSector === null && !dbFetchValue("SELECT 1 FROM mission_search_sectors WHERE id = ? AND mission_id = ?", [$sectorId, $missionId])) {
+        return ['ok' => false, 'error' => t('scenario.building_sector_not_found')];
+    }
+
+    $prepared = prepareMissionSectorBuilding($mission, [
+        'sector_id'   => $sectorId,
+        'label'       => $input['label'] ?? '',
+        'lat'         => $input['lat'] ?? null,
+        'lng'         => $input['lng'] ?? null,
+        'floor_count' => $input['floor_count'] ?? 0,
+    ], $stagedSector);
+    if (!$prepared['ok']) {
+        return $prepared;
+    }
+
+    $payload = [
+        'label'        => $prepared['label'],
+        'lat'          => $prepared['lat'],
+        'lng'          => $prepared['lng'],
+        'floor_count'  => $prepared['floor_count'],
+        'sector_label' => $prepared['sector_label'],
+    ];
+    if ($stagedSector !== null) {
+        // The sector is named by the plan's own item, not by an id: there is none yet. Play looks the item up.
+        $payload['sector_item_id'] = $sectorItemId;
+    } else {
+        $payload['sector_id'] = $prepared['sector_id'];
+    }
+    $seq = 1 + (int) dbFetchValue("SELECT COALESCE(MAX(seq), 0) FROM mission_scenario_items WHERE phase_id = ?", [$phaseId]);
+    $id = (int) dbInsert(
+        "INSERT INTO mission_scenario_items (phase_id, mission_id, seq, kind, payload, slot_id, created_by, created_at) VALUES (?, ?, ?, 'building', ?, NULL, ?, NOW())",
+        [$phaseId, $missionId, $seq, json_encode($payload, JSON_UNESCAPED_UNICODE), $userId]
+    );
+    logAudit('stage_scenario_item', 'mission_scenario_items', $id, null, ['mission_id' => $missionId, 'phase_id' => $phaseId, 'type' => 'building', 'sector_id' => $payload['sector_id'] ?? null, 'sector_item_id' => $payload['sector_item_id'] ?? null, 'floor_count' => $payload['floor_count']]);
+    return ['ok' => true, 'id' => $id];
+}
+
 /** Takes one staged order off the plan. Null on success. */
 function deleteScenarioItem(array $mission, int $itemId, int $userId): ?string {
     $missionId = (int) $mission['id'];
@@ -1069,6 +1301,14 @@ function deleteScenarioItem(array $mission, int $itemId, int $userId): ?string {
         if ($waiting) {
             $areaPayload = json_decode((string) $item['payload'], true);
             return t('scenario.area_in_use', ['area' => is_array($areaPayload) ? (string) ($areaPayload['label'] ?? '') : '', 'n' => count($waiting)]);
+        }
+    }
+    // And a staged sector that buildings still waiting to be sent are in (v3.460.0): they would have no sector to be made in.
+    if ($item['kind'] === 'sector') {
+        $waiting = scenarioUnsentBuildingsOfStagedSector($missionId, $itemId);
+        if ($waiting) {
+            $sectorPayload = json_decode((string) $item['payload'], true);
+            return t('scenario.sector_in_use', ['sector' => is_array($sectorPayload) ? (string) ($sectorPayload['label'] ?? '') : '', 'n' => count($waiting)]);
         }
     }
     dbExecute("DELETE FROM mission_scenario_items WHERE id = ? AND mission_id = ?", [$itemId, $missionId]);
@@ -1231,6 +1471,57 @@ function scenarioResolveStagedSectorArea(int $missionId, array $payload): array 
 }
 
 /**
+ * What createMissionSectorBuilding() takes, built from a staged building's payload, or null when the payload cannot be read as
+ * one (v3.460.0). The building's twin of scenarioAreaInputFromPayload(): no audience to widen. The label must be words, the point
+ * and the number of floors must be there as numbers, and the sector must already be an id (a building that names the plan's own
+ * sector gets it from scenarioResolveStagedBuildingSector() first). Whether the numbers are in range, and whether the point stands
+ * in the sector, is for prepareMissionSectorBuilding() to say when it is sent. Anything else is null, and the item fails with
+ * «δεν διαβάζεται» rather than making a building nobody asked for.
+ */
+function scenarioBuildingInputFromPayload($payload): ?array {
+    if (!is_array($payload) || trim((string) ($payload['label'] ?? '')) === '' || (int) ($payload['sector_id'] ?? 0) <= 0) {
+        return null;
+    }
+    if (!is_numeric($payload['lat'] ?? null) || !is_numeric($payload['lng'] ?? null) || !is_numeric($payload['floor_count'] ?? null)) {
+        return null;
+    }
+    return [
+        'sector_id'   => (string) (int) $payload['sector_id'],
+        'label'       => (string) $payload['label'],
+        'lat'         => (string) $payload['lat'],
+        'lng'         => (string) $payload['lng'],
+        'floor_count' => (string) (int) $payload['floor_count'],
+    ];
+}
+
+/**
+ * The live sector a staged building is to be made in, when its payload names one of the scenario's own sectors (sector_item_id,
+ * v3.460.0): ['sector_id' => the id of the sector that item became] once that sector has been made, else ['error' => text] - the
+ * sector was taken off the plan, or has not been made (its phase has not been played, or its sending failed and is waiting for a
+ * retry). Never another sector, and never a guess: the building fails and says why.
+ */
+function scenarioResolveStagedBuildingSector(int $missionId, array $payload): array {
+    $name = (string) ($payload['sector_label'] ?? '');
+    $row = dbFetchOne(
+        "SELECT i.id, i.phase_id, i.payload, i.sent_at, i.sent_ref_id, p.seq, p.id AS pid FROM mission_scenario_items i
+         JOIN mission_scenario_phases p ON p.id = i.phase_id
+         WHERE i.id = ? AND i.mission_id = ? AND i.kind = 'sector'",
+        [(int) ($payload['sector_item_id'] ?? 0), $missionId]
+    );
+    if (!$row) {
+        return ['error' => t('scenario.item_sector_item_gone', ['sector' => $name])];
+    }
+    $sectorPayload = json_decode((string) $row['payload'], true);
+    if (is_array($sectorPayload) && trim((string) ($sectorPayload['label'] ?? '')) !== '') {
+        $name = (string) $sectorPayload['label'];
+    }
+    if ($row['sent_at'] === null || $row['sent_ref_id'] === null) {
+        return ['error' => t('scenario.item_sector_not_made', ['sector' => $name, 'phase' => t('scenario.phase_n', ['n' => scenarioPhaseNumber($missionId, ['id' => $row['pid'], 'seq' => $row['seq']])])])];
+    }
+    return ['sector_id' => (int) $row['sent_ref_id']];
+}
+
+/**
  * What createScenarioOrder() takes, built from a staged general order's payload, or null when the payload cannot be
  * read as one. The general order's twin of scenarioDispatchInputFromPayload(), with the same rule: the audience 'all'
  * (every person on duty at the moment of sending) is read ONLY when the payload says so in words; an audience 'team'
@@ -1309,8 +1600,9 @@ function createScenarioOrder(array $mission, int $userId, array $input): array {
 /**
  * Sends one staged order - a point or an area through createMissionDispatch(), a sector through
  * createMissionSector(), a route through createMissionRoute(), an order to people through createScenarioOrder(), a
- * restricted area through createMissionRestrictedArea() - and writes down what came of it. Returns ['item_id' => n,
- * 'kind' => 'dispatch'|'sector'|'route'|'order'|'restricted', 'ok' => bool, 'dispatch_id' => n|null (the live order, for a
+ * restricted area through createMissionRestrictedArea(), a search area through createMissionSearchArea(), a building through
+ * createMissionSectorBuilding() - and writes down what came of it. Returns ['item_id' => n,
+ * 'kind' => 'dispatch'|'sector'|'route'|'order'|'restricted'|'area'|'building', 'ok' => bool, 'building_id' => n|null (for a building), 'dispatch_id' => n|null (the live order, for a
  * point or an area), 'sector_id' => n|null (for a sector), 'route_id' => n|null (for a route), 'order_id' => n|null (for an
  * order to people), 'restricted_id' => n|null (for a restricted area), 'error' => text|null]. Never throws: an item
  * that blows up is a failed item, not an aborted phase. A sector whose search area has been deleted since fails with
@@ -1318,8 +1610,9 @@ function createScenarioOrder(array $mission, int $userId, array $input): array {
  */
 function scenarioSendItem(array $mission, array $item, int $userId, string $userName): array {
     $itemId = (int) $item['id'];
-    $kind = in_array($item['kind'] ?? 'dispatch', ['sector', 'route', 'order', 'restricted', 'area'], true) ? $item['kind'] : 'dispatch';
+    $kind = in_array($item['kind'] ?? 'dispatch', ['sector', 'route', 'order', 'restricted', 'area', 'building'], true) ? $item['kind'] : 'dispatch';
     $isSector = $kind === 'sector';
+    $isBuilding = $kind === 'building';
     $payload = json_decode((string) $item['payload'], true);
     $slotTeams = scenarioSlotTeamMap((int) $mission['id']);
     // A sector written down against a search area the scenario makes (v3.459.0) is cut from the live area that item became:
@@ -1334,7 +1627,19 @@ function scenarioSendItem(array $mission, array $item, int $userId, string $user
             $payload['area_id'] = $resolved['area_id'];
         }
     }
+    // A building written down for a sector the scenario makes (v3.460.0) is made in the live sector that item became: looked up here,
+    // now, so a phase that makes the sector and its buildings together has the sector before the first building (they play in
+    // order). If the sector is not there the building fails and says why; it is never put in any other sector.
+    if ($isBuilding && is_array($payload) && (int) ($payload['sector_item_id'] ?? 0) > 0) {
+        $resolvedSector = scenarioResolveStagedBuildingSector((int) $mission['id'], $payload);
+        if (isset($resolvedSector['error'])) {
+            $areaError = $resolvedSector['error'];
+        } else {
+            $payload['sector_id'] = $resolvedSector['sector_id'];
+        }
+    }
     $input = match ($kind) {
+        'building' => scenarioBuildingInputFromPayload($payload),
         'sector' => scenarioSectorInputFromPayload($payload, $slotTeams),
         'route' => scenarioRouteInputFromPayload($payload, $slotTeams),
         'order' => scenarioOrderInputFromPayload($payload, $slotTeams),
@@ -1350,6 +1655,8 @@ function scenarioSendItem(array $mission, array $item, int $userId, string $user
             : t('scenario.item_unreadable')];
     } elseif ($isSector && !dbFetchValue("SELECT 1 FROM mission_search_areas WHERE id = ? AND mission_id = ?", [(int) $input['area_id'], (int) $mission['id']])) {
         $result = ['ok' => false, 'error' => t('scenario.item_area_gone', ['area' => (string) ($payload['area_label'] ?? '')])];
+    } elseif ($isBuilding && !dbFetchValue("SELECT 1 FROM mission_search_sectors WHERE id = ? AND mission_id = ?", [(int) $input['sector_id'], (int) $mission['id']])) {
+        $result = ['ok' => false, 'error' => t('scenario.item_sector_gone', ['sector' => (string) ($payload['sector_label'] ?? '')])];
     } else {
         try {
             $result = match ($kind) {
@@ -1358,6 +1665,7 @@ function scenarioSendItem(array $mission, array $item, int $userId, string $user
                 'order' => createScenarioOrder($mission, $userId, $input),
                 'restricted' => createMissionRestrictedArea($mission, $userId, $input),
                 'area' => createMissionSearchArea($mission, $userId, $input),
+                'building' => createMissionSectorBuilding($mission, $userId, $input),
                 default => createMissionDispatch($mission, $userId, $userName, $input),
             };
         } catch (Throwable $e) {
@@ -1378,12 +1686,13 @@ function scenarioSendItem(array $mission, array $item, int $userId, string $user
             'order_id' => $kind === 'order' ? (int) $result['id'] : null,
             'restricted_id' => $kind === 'restricted' ? (int) $result['id'] : null,
             'search_area_id' => $kind === 'area' ? (int) $result['id'] : null,
+            'building_id' => $isBuilding ? (int) $result['id'] : null,
             'error' => null,
         ];
     }
     $error = mb_substr((string) $result['error'], 0, 250);
     dbExecute("UPDATE mission_scenario_items SET last_error = ? WHERE id = ?", [$error, $itemId]);
-    return ['item_id' => $itemId, 'kind' => $kind, 'ok' => false, 'dispatch_id' => null, 'sector_id' => null, 'route_id' => null, 'order_id' => null, 'restricted_id' => null, 'search_area_id' => null, 'error' => $error];
+    return ['item_id' => $itemId, 'kind' => $kind, 'ok' => false, 'dispatch_id' => null, 'sector_id' => null, 'route_id' => null, 'order_id' => null, 'restricted_id' => null, 'search_area_id' => null, 'building_id' => null, 'error' => $error];
 }
 
 /**
@@ -1515,7 +1824,8 @@ function withdrawScenarioPhase(array $mission, int $phaseId, int $userId): array
     // is nothing to take back, and the Action Room has no way to do it by hand either.
     // Nor is a search area (v3.459.0): it is the ground its sectors lie on, and deleting it would delete them - the sectors
     // are taken off their teams, the area stays on the map.
-    $open = array_values(array_filter($rows, fn($r) => !in_array($r['kind'], ['order', 'area'], true) && in_array($states[(int) $r['id']]['state'] ?? '', ['open', 'standing'], true)));
+    // Nor is a building (v3.460.0): it stays with its sector, which is taken off its team but stays on the map.
+    $open = array_values(array_filter($rows, fn($r) => !in_array($r['kind'], ['order', 'area', 'building'], true) && in_array($states[(int) $r['id']]['state'] ?? '', ['open', 'standing'], true)));
     if (!$open) {
         return ['ok' => false, 'error' => t('scenario.withdraw_nothing')];
     }
