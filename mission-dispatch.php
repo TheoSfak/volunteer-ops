@@ -132,23 +132,12 @@ if ($action === 'reopen') {
 }
 
 if ($action === 'delete') {
-    $dispatchId = (int) post('id');
-    $row = dbFetchOne("SELECT id FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$dispatchId, $missionId]);
-    if (!$row) {
+    // The steps of taking an order back live in withdrawMissionDispatches() (v3.456.0), so a scenario can take
+    // a phase back through exactly the same ones.
+    if (!withdrawMissionDispatches($mission, [(int) post('id')], (int) $userId)) {
         echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
         exit;
     }
-    // Before the DELETE: afterwards nothing says who it went to.
-    $withdrawn = withdrawnDispatchLines($missionId, [$dispatchId], (int) $userId);
-    // And so the activity timeline still says it was sent, and that it was taken back.
-    logDispatchWithdrawal($dispatchId, $missionId, (int) $userId);
-    dbExecute("DELETE FROM mission_dispatch_points WHERE id = ?", [$dispatchId]);
-    logAudit('delete_mission_dispatch', 'mission_dispatch_points', $dispatchId, null, ['mission_id' => $missionId]);
-    // Deleting it is command's answer to a «Δεν μπορώ» on it; the rows stay
-    // for the record, closed.
-    resolveOrderDeclinesReassigned('dispatch', $dispatchId, (int) $userId);
-    // Whoever was still on their way is told it no longer stands.
-    notifyOrdersWithdrawn($missionId, $mission['title'], $withdrawn, 'mission_dispatch_point');
     echo json_encode(['ok' => true]);
     exit;
 }

@@ -4329,6 +4329,160 @@ function notifyOrdersWithdrawn(int $missionId, string $missionTitle, array $line
     }
 }
 
+// ── Taking orders back, as functions (v3.456.0) ─────────────────────────────────────────────────────────────────
+// The bodies of mission-dispatch.php `delete`, mission-route.php `cancel` and mission-sector.php `assign`, moved
+// unchanged so a scenario can take a phase back through exactly the same steps a coordinator takes by hand (the
+// people told, the record kept, the declines answered). The endpoints keep the login / CSRF / command gate and
+// the answer.
+
+/**
+ * Takes live dispatch points/areas of this mission back: for each, who loses what is read first, the withdrawal is
+ * recorded, the row is deleted, the audit entry is written and any «Δεν μπορώ» on it is answered; then ONE notice
+ * per person says what they lost. Ids that are not this mission's dispatches are ignored. Returns the ids taken back.
+ *
+ * @return int[]
+ */
+function withdrawMissionDispatches(array $mission, array $dispatchIds, int $userId): array {
+    $missionId = (int) $mission['id'];
+    $ids = [];
+    foreach (array_values(array_unique(array_map('intval', $dispatchIds))) as $id) {
+        if (dbFetchOne("SELECT id FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$id, $missionId])) {
+            $ids[] = $id;
+        }
+    }
+    if (!$ids) {
+        return [];
+    }
+    // Before the DELETE: afterwards nothing says who it went to.
+    $withdrawn = withdrawnDispatchLines($missionId, $ids, $userId);
+    foreach ($ids as $dispatchId) {
+        // And so the activity timeline still says it was sent, and that it was taken back.
+        logDispatchWithdrawal($dispatchId, $missionId, $userId);
+        dbExecute("DELETE FROM mission_dispatch_points WHERE id = ?", [$dispatchId]);
+        logAudit('delete_mission_dispatch', 'mission_dispatch_points', $dispatchId, null, ['mission_id' => $missionId]);
+        // Deleting it is command's answer to a «Δεν μπορώ» on it; the rows stay
+        // for the record, closed.
+        resolveOrderDeclinesReassigned('dispatch', $dispatchId, $userId);
+    }
+    // Whoever was still on their way is told it no longer stands.
+    notifyOrdersWithdrawn($missionId, $mission['title'], $withdrawn, 'mission_dispatch_point');
+    return $ids;
+}
+
+/**
+ * Cancels a route of this mission that is still open and tells its team. $reason is optional text (trimmed, 255
+ * characters at most). Null on success, else the error to show.
+ */
+function cancelMissionRoute(array $mission, int $userId, int $routeId, string $reason): ?string {
+    $missionId = (int) $mission['id'];
+    $route = dbFetchOne("SELECT id, team_id, order_id, completed_at, cancelled_at FROM mission_routes WHERE id = ? AND mission_id = ?", [$routeId, $missionId]);
+    if (!$route) {
+        return t('common.not_found');
+    }
+    if ($route['completed_at'] || $route['cancelled_at']) {
+        return t('route.already_closed');
+    }
+
+    $reason = trim($reason);
+    $reason = $reason !== '' ? mb_substr($reason, 0, 255) : null;
+
+    dbExecute("UPDATE mission_routes SET cancelled_at = NOW(), cancelled_by = ?, cancel_reason = ? WHERE id = ?", [$userId, $reason, $routeId]);
+    // A cancelled route is the admin's own call to abort, not the team failing to
+    // deliver — stamp fulfilled_at too so it stops counting as "outstanding" in the
+    // generic mission_orders fulfillment-rate stats (mission-stats.php) it rides on.
+    if ($route['order_id']) {
+        dbExecute("UPDATE mission_order_recipients SET fulfilled_at = NOW() WHERE order_id = ? AND fulfilled_at IS NULL", [$route['order_id']]);
+    }
+
+    notifyRouteTeam($missionId, $routeId, $userId, 'mission_route_cancelled', 'route.notify_cancelled_title', [], 'route.notify_cancelled_message', ['mission' => $mission['title']]);
+    logAudit('cancel_mission_route', 'mission_routes', $routeId, null, ['mission_id' => $missionId, 'reason' => $reason]);
+    // Cancelling is command's answer to a «Δεν μπορώ» on it.
+    resolveOrderDeclinesReassigned('route', $routeId, $userId);
+    return null;
+}
+
+/**
+ * Gives a sector of this mission to a team, or to none ($newTeamId null). $travelModeRaw is the vehicle choice as
+ * posted, or null when none was posted (the same team asked again with nothing sent keeps its mode). The team that
+ * is losing the sector is read while it is still theirs. Returns ['ok' => false, 'error' => text], or ['ok' =>
+ * true, 'withdrawn' => lines] - what each person lost, for notifyOrdersWithdrawn() once the caller has finished
+ * (one notice per person even when several sectors are taken off).
+ */
+function assignMissionSector(array $mission, int $userId, int $sectorId, ?int $newTeamId, ?string $travelModeRaw): array {
+    $missionId = (int) $mission['id'];
+    $sector = dbFetchOne("SELECT id, team_id, status, label FROM mission_search_sectors WHERE id = ? AND mission_id = ?", [$sectorId, $missionId]);
+    if (!$sector) {
+        return ['ok' => false, 'error' => t('common.not_found')];
+    }
+
+    if ($newTeamId) {
+        $team = dbFetchOne("SELECT id FROM mission_teams WHERE id = ? AND mission_id = ?", [$newTeamId, $missionId]);
+        if (!$team) {
+            return ['ok' => false, 'error' => t('common.team_not_found')];
+        }
+    }
+
+    $oldTeamId = $sector['team_id'] ? (int) $sector['team_id'] : null;
+    // The team losing it, read while it is still theirs.
+    $withdrawn = ($oldTeamId && $newTeamId !== $oldTeamId)
+        ? withdrawnSectorLines($missionId, [$sectorId], $userId, true)
+        : [];
+    // On foot or with a vehicle, as chosen next to the team (v3.438.0). A
+    // sector handed to ANOTHER team (or to none) is a new order and starts from
+    // that team's own transport, so a mode chosen for the last team never
+    // carries over; the same team asked again with nothing sent keeps its mode.
+    $modeSent = $travelModeRaw !== null;
+    $travelMode = ($newTeamId && $modeSent) ? normalizeTravelMode($travelModeRaw) : null;
+    if ($newTeamId && $newTeamId === $oldTeamId && !$modeSent) {
+        dbExecute("UPDATE mission_search_sectors SET team_id = ? WHERE id = ?", [$newTeamId, $sectorId]);
+    } else {
+        dbExecute("UPDATE mission_search_sectors SET team_id = ?, travel_mode = ? WHERE id = ?", [$newTeamId, $travelMode, $sectorId]);
+    }
+    logAudit('assign_mission_sector', 'mission_search_sectors', $sectorId, null, [
+        'mission_id' => $missionId, 'old_team_id' => $oldTeamId, 'new_team_id' => $newTeamId, 'travel_mode' => $travelMode,
+    ]);
+
+    // Attaching a team to a not_started sector auto-promotes it to assigned;
+    // clearing the team on a sector still at assigned (nothing done yet)
+    // reverts to not_started. Any further-along status (in_progress/
+    // completed/needs_recheck) keeps its status untouched on reassignment —
+    // a team hand-off shouldn't erase recorded progress.
+    if ($newTeamId && $sector['status'] === 'not_started') {
+        dbExecute("UPDATE mission_search_sectors SET status = 'assigned', status_updated_at = NOW(), status_updated_by = ? WHERE id = ?", [$userId, $sectorId]);
+        dbInsert(
+            "INSERT INTO mission_sector_status_log (sector_id, from_status, to_status, team_id, user_id, created_at) VALUES (?, 'not_started', 'assigned', ?, ?, NOW())",
+            [$sectorId, $newTeamId, $userId]
+        );
+    } elseif (!$newTeamId && $sector['status'] === 'assigned') {
+        dbExecute("UPDATE mission_search_sectors SET status = 'not_started', status_updated_at = NOW(), status_updated_by = ? WHERE id = ?", [$userId, $sectorId]);
+        dbInsert(
+            "INSERT INTO mission_sector_status_log (sector_id, from_status, to_status, team_id, user_id, created_at) VALUES (?, 'assigned', 'not_started', ?, ?, NOW())",
+            [$sectorId, $oldTeamId, $userId]
+        );
+    }
+
+    // A team hand-off while the sector is still sitting at 'assigned'
+    // (whether it already was, or the branch above just promoted it from
+    // not_started) means whoever's attached now hasn't confirmed anything
+    // yet — an earlier team's acknowledgment must not carry over onto them.
+    // Sectors already past 'assigned' (en_route+) keep acknowledged_at
+    // untouched, same "don't erase recorded progress" spirit as status above.
+    $resultingStatus = ($newTeamId && $sector['status'] === 'not_started') ? 'assigned' : $sector['status'];
+    if ($newTeamId !== $oldTeamId && $resultingStatus === 'assigned') {
+        dbExecute("UPDATE mission_search_sectors SET acknowledged_at = NULL, acknowledged_by = NULL WHERE id = ?", [$sectorId]);
+    }
+
+    if ($newTeamId && $newTeamId !== $oldTeamId) {
+        notifySectorAssigned($missionId, $mission['title'], $newTeamId, (int) $sectorId, $sector['label'], $userId);
+    }
+    // The team that said «Δεν μπορώ» has been answered: the sector went to
+    // someone else (or to nobody).
+    if ($newTeamId !== $oldTeamId) {
+        resolveOrderDeclinesReassigned('sector', (int) $sectorId, $userId);
+    }
+    return ['ok' => true, 'withdrawn' => $withdrawn];
+}
+
 // ── «Ελήφθη» — one implementation for the page and the phone ────────────────
 // A volunteer can confirm an order from the Action Room page (mission-order.php,
 // mission-dispatch.php, mission-sector.php) or, since v3.332.0, straight from

@@ -476,82 +476,19 @@ if ($action === 'generate_grid') {
 }
 
 if ($action === 'assign') {
-    $sectorId = (int) post('id');
-    $sector = dbFetchOne("SELECT id, team_id, status, label FROM mission_search_sectors WHERE id = ? AND mission_id = ?", [$sectorId, $missionId]);
-    if (!$sector) {
-        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
+    // The steps of giving a sector to a team (or to none) live in assignMissionSector() (v3.456.0), so a scenario
+    // can take a phase back through exactly the same ones.
+    $teamIdRaw = post('team_id');
+    $result = assignMissionSector(
+        $mission, (int) $userId, (int) post('id'),
+        ($teamIdRaw !== '' && $teamIdRaw !== null) ? (int) $teamIdRaw : null,
+        isset($_POST['travel_mode']) ? post('travel_mode') : null
+    );
+    if (!$result['ok']) {
+        echo json_encode($result);
         exit;
     }
-
-    $teamIdRaw = post('team_id');
-    $newTeamId = ($teamIdRaw !== '' && $teamIdRaw !== null) ? (int) $teamIdRaw : null;
-    if ($newTeamId) {
-        $team = dbFetchOne("SELECT id FROM mission_teams WHERE id = ? AND mission_id = ?", [$newTeamId, $missionId]);
-        if (!$team) {
-            echo json_encode(['ok' => false, 'error' => t('common.team_not_found')]);
-            exit;
-        }
-    }
-
-    $oldTeamId = $sector['team_id'] ? (int) $sector['team_id'] : null;
-    // The team losing it, read while it is still theirs.
-    $withdrawn = ($oldTeamId && $newTeamId !== $oldTeamId)
-        ? withdrawnSectorLines($missionId, [$sectorId], (int) $userId, true)
-        : [];
-    // On foot or with a vehicle, as chosen next to the team (v3.438.0). A
-    // sector handed to ANOTHER team (or to none) is a new order and starts from
-    // that team's own transport, so a mode chosen for the last team never
-    // carries over; the same team asked again with nothing sent keeps its mode.
-    $modeSent = isset($_POST['travel_mode']);
-    $travelMode = ($newTeamId && $modeSent) ? normalizeTravelMode(post('travel_mode')) : null;
-    if ($newTeamId && $newTeamId === $oldTeamId && !$modeSent) {
-        dbExecute("UPDATE mission_search_sectors SET team_id = ? WHERE id = ?", [$newTeamId, $sectorId]);
-    } else {
-        dbExecute("UPDATE mission_search_sectors SET team_id = ?, travel_mode = ? WHERE id = ?", [$newTeamId, $travelMode, $sectorId]);
-    }
-    logAudit('assign_mission_sector', 'mission_search_sectors', $sectorId, null, [
-        'mission_id' => $missionId, 'old_team_id' => $oldTeamId, 'new_team_id' => $newTeamId, 'travel_mode' => $travelMode,
-    ]);
-
-    // Attaching a team to a not_started sector auto-promotes it to assigned;
-    // clearing the team on a sector still at assigned (nothing done yet)
-    // reverts to not_started. Any further-along status (in_progress/
-    // completed/needs_recheck) keeps its status untouched on reassignment —
-    // a team hand-off shouldn't erase recorded progress.
-    if ($newTeamId && $sector['status'] === 'not_started') {
-        dbExecute("UPDATE mission_search_sectors SET status = 'assigned', status_updated_at = NOW(), status_updated_by = ? WHERE id = ?", [$userId, $sectorId]);
-        dbInsert(
-            "INSERT INTO mission_sector_status_log (sector_id, from_status, to_status, team_id, user_id, created_at) VALUES (?, 'not_started', 'assigned', ?, ?, NOW())",
-            [$sectorId, $newTeamId, $userId]
-        );
-    } elseif (!$newTeamId && $sector['status'] === 'assigned') {
-        dbExecute("UPDATE mission_search_sectors SET status = 'not_started', status_updated_at = NOW(), status_updated_by = ? WHERE id = ?", [$userId, $sectorId]);
-        dbInsert(
-            "INSERT INTO mission_sector_status_log (sector_id, from_status, to_status, team_id, user_id, created_at) VALUES (?, 'assigned', 'not_started', ?, ?, NOW())",
-            [$sectorId, $oldTeamId, $userId]
-        );
-    }
-
-    // A team hand-off while the sector is still sitting at 'assigned'
-    // (whether it already was, or the branch above just promoted it from
-    // not_started) means whoever's attached now hasn't confirmed anything
-    // yet — an earlier team's acknowledgment must not carry over onto them.
-    // Sectors already past 'assigned' (en_route+) keep acknowledged_at
-    // untouched, same "don't erase recorded progress" spirit as status above.
-    $resultingStatus = ($newTeamId && $sector['status'] === 'not_started') ? 'assigned' : $sector['status'];
-    if ($newTeamId !== $oldTeamId && $resultingStatus === 'assigned') {
-        dbExecute("UPDATE mission_search_sectors SET acknowledged_at = NULL, acknowledged_by = NULL WHERE id = ?", [$sectorId]);
-    }
-
-    if ($newTeamId && $newTeamId !== $oldTeamId) {
-        notifySectorAssigned($missionId, $mission['title'], $newTeamId, (int) $sectorId, $sector['label'], $userId);
-    }
-    // The team that said «Δεν μπορώ» has been answered: the sector went to
-    // someone else (or to nobody).
-    if ($newTeamId !== $oldTeamId) {
-        resolveOrderDeclinesReassigned('sector', (int) $sectorId, (int) $userId);
-    }
-    notifyOrdersWithdrawn($missionId, $mission['title'], $withdrawn, 'mission_sector_assigned');
+    notifyOrdersWithdrawn($missionId, $mission['title'], $result['withdrawn'], 'mission_sector_assigned');
 
     echo json_encode(['ok' => true] + loadSectorPollPayload($missionId, $userId, $canManageWarRoom, $isApprovedParticipant));
     exit;

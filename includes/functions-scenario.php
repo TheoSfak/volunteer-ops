@@ -53,6 +53,17 @@
  * where the team is (the optional «επιστροφή στην αφετηρία» waypoint is its last ping). Both are asked when the route
  * is SENT; the card says beforehand when a team has nobody in the Action Room (team_empty) and play warns.
  *
+ * HOW FAR A PHASE HAS GOT (v3.456.0). Nothing about progress is stored: scenarioItemLiveStates() reads each sent order
+ * from the live order itself (a point is finished when its team pressed «Ολοκληρώθηκε», a route when it is completed,
+ * a sector when it is completed; an order that is gone, cancelled or taken off its team is withdrawn), and
+ * scenarioPhaseProgress() turns that into «4/6 ✓». The card shows it, and a passive note when a phase is finished
+ * and the next one has not gone; the note sends nothing - a phase goes only by its own press of play.
+ *
+ * TAKING A PHASE BACK (v3.456.0). withdrawScenarioPhase() takes back what a played phase sent and is still under way, by
+ * the same steps a coordinator takes by hand: withdrawMissionDispatches() for points and areas, cancelMissionRoute() for a
+ * route, assignMissionSector() with no team for a sector (the functions the three endpoints' delete / cancel / assign
+ * now use). Finished orders stay. The phase stays played; nothing is ever sent again by a withdrawal.
+ *
  * FIRST PRESS WINS. Pressing play claims the phase with one conditional UPDATE (played_at IS NULL); two
  * coordinators pressing at once send it once. An item that fails (the team was deleted since, the shape no
  * longer passes) does not stop the others: it keeps its reason in last_error, and the panel offers to try
@@ -149,6 +160,9 @@ function loadMissionScenario(int $missionId): array {
         }
     }
 
+    // How each order that was sent stands now (v3.456.0): finished, still under way, or taken back.
+    $states = scenarioItemLiveStates($missionId, $items);
+
     $byPhase = [];
     foreach ($items as $row) {
         $payload = json_decode((string) $row['payload'], true);
@@ -195,11 +209,15 @@ function loadMissionScenario(int $missionId): array {
             'sector_id'    => $isSector && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'route_id'     => $isRoute && $row['sent_ref_id'] !== null ? (int) $row['sent_ref_id'] : null,
             'error'        => $row['last_error'],
+            'state'        => $states[(int) $row['id']]['state'] ?? null,
+            'done_n'       => $states[(int) $row['id']]['done'] ?? null,
+            'of_n'         => $states[(int) $row['id']]['of'] ?? null,
         ];
     }
 
     $out = [];
     foreach ($phases as $i => $phase) {
+        $phaseItems = $byPhase[(int) $phase['id']] ?? [];
         $out[] = [
             'id'             => (int) $phase['id'],
             'n'              => $i + 1,
@@ -207,10 +225,108 @@ function loadMissionScenario(int $missionId): array {
             'played_at'      => $phase['played_at'],
             'played_label'   => $phase['played_at'] ? date('d/m H:i', strtotime($phase['played_at'])) : null,
             'played_by_name' => $phase['played_by_name'],
-            'items'          => $byPhase[(int) $phase['id']] ?? [],
+            'items'          => $phaseItems,
+            'progress'       => $phase['played_at'] ? scenarioPhaseProgress($phaseItems) : null,
         ];
     }
     return ['phases' => $out, 'slots' => $slots, 'teams' => $teams];
+}
+
+/**
+ * How the orders a scenario has SENT stand now, read from the live orders themselves (v3.456.0): nothing is stored
+ * about it, so it can never disagree with the map. $items are rows of mission_scenario_items (id, kind, sent_at,
+ * sent_ref_id); only sent ones are looked at. Returns itemId => ['state' => 'done'|'open'|'withdrawn', 'done' => n|null,
+ * 'of' => n|null]:
+ *   - a point or area is DONE when the team it went to has pressed «Ολοκληρώθηκε» (the same fact the live map fades
+ *     it on); an order to every team when ALL the teams that have people have (done/of say how many); OPEN until
+ *     then; WITHDRAWN when the live order is gone;
+ *   - a route is DONE when it is completed, WITHDRAWN when it is cancelled or gone, else OPEN;
+ *   - a sector is DONE when its status is completed, WITHDRAWN when it is gone or has been taken off its team, else OPEN.
+ * A «Δεν μπορώ» does not finish anything: the order stays open. Reopening a finished order makes it open again.
+ */
+function scenarioItemLiveStates(int $missionId, array $items): array {
+    $byKind = ['dispatch' => [], 'route' => [], 'sector' => []];
+    foreach ($items as $row) {
+        if ($row['sent_at'] === null || $row['sent_ref_id'] === null) {
+            continue;
+        }
+        $kind = in_array($row['kind'], ['route', 'sector'], true) ? $row['kind'] : 'dispatch';
+        $byKind[$kind][(int) $row['id']] = (int) $row['sent_ref_id'];
+    }
+    $out = [];
+    $in = fn(array $ids) => implode(',', array_fill(0, count($ids), '?'));
+
+    if ($byKind['dispatch']) {
+        $refs = array_values(array_unique($byKind['dispatch']));
+        $live = [];
+        foreach (dbFetchAll("SELECT id, team_id FROM mission_dispatch_points WHERE mission_id = ? AND id IN (" . $in($refs) . ")", array_merge([$missionId], $refs)) as $r) {
+            $live[(int) $r['id']] = $r['team_id'] !== null ? (int) $r['team_id'] : null;
+        }
+        $progress = $live ? loadDispatchProgress(array_keys($live)) : [];
+        $scopes = in_array(null, $live, true) ? missionBroadcastScopes($missionId) : [];
+        foreach ($byKind['dispatch'] as $itemId => $ref) {
+            if (!array_key_exists($ref, $live)) {
+                $out[$itemId] = ['state' => 'withdrawn', 'done' => null, 'of' => null];
+            } elseif ($live[$ref] === null) {
+                $finish = broadcastFinish($scopes, $progress[$ref] ?? []);
+                $out[$itemId] = ['state' => $finish['ts'] !== null ? 'done' : 'open', 'done' => $finish['done'], 'of' => count($scopes)];
+            } else {
+                $finished = ($progress[$ref]['t' . $live[$ref]]['completed_ts'] ?? null) !== null;
+                $out[$itemId] = ['state' => $finished ? 'done' : 'open', 'done' => null, 'of' => null];
+            }
+        }
+    }
+
+    if ($byKind['route']) {
+        $refs = array_values(array_unique($byKind['route']));
+        $live = [];
+        foreach (dbFetchAll("SELECT id, completed_at, cancelled_at FROM mission_routes WHERE mission_id = ? AND id IN (" . $in($refs) . ")", array_merge([$missionId], $refs)) as $r) {
+            $live[(int) $r['id']] = $r['cancelled_at'] !== null ? 'withdrawn' : ($r['completed_at'] !== null ? 'done' : 'open');
+        }
+        foreach ($byKind['route'] as $itemId => $ref) {
+            $out[$itemId] = ['state' => $live[$ref] ?? 'withdrawn', 'done' => null, 'of' => null];
+        }
+    }
+
+    if ($byKind['sector']) {
+        $refs = array_values(array_unique($byKind['sector']));
+        $live = [];
+        foreach (dbFetchAll("SELECT id, team_id, status FROM mission_search_sectors WHERE mission_id = ? AND id IN (" . $in($refs) . ")", array_merge([$missionId], $refs)) as $r) {
+            $live[(int) $r['id']] = $r['status'] === 'completed' ? 'done' : ($r['team_id'] === null ? 'withdrawn' : 'open');
+        }
+        foreach ($byKind['sector'] as $itemId => $ref) {
+            $out[$itemId] = ['state' => $live[$ref] ?? 'withdrawn', 'done' => null, 'of' => null];
+        }
+    }
+    return $out;
+}
+
+/**
+ * The progress of a PLAYED phase, from its items as loadMissionScenario() builds them: total = the orders that still
+ * count (everything but the ones taken back; an order that failed to go counts, so the phase is not "finished"
+ * while one is waiting for a retry), done = finished ones, open = sent and still under way, withdrawn, failed, and
+ * complete (every order that still counts is finished). can_withdraw is true while any order is still open.
+ */
+function scenarioPhaseProgress(array $items): array {
+    $done = $open = $withdrawn = $failed = 0;
+    foreach ($items as $item) {
+        $state = $item['state'] ?? null;
+        if ($state === 'done') {
+            $done++;
+        } elseif ($state === 'open') {
+            $open++;
+        } elseif ($state === 'withdrawn') {
+            $withdrawn++;
+        } elseif (!$item['sent']) {
+            $failed++;
+        }
+    }
+    $total = $done + $open + $failed;
+    return [
+        'total' => $total, 'done' => $done, 'open' => $open, 'withdrawn' => $withdrawn, 'failed' => $failed,
+        'complete' => $total > 0 && $done === $total,
+        'can_withdraw' => $open > 0,
+    ];
 }
 
 /** One phase of this mission, or null. */
@@ -784,6 +900,91 @@ function retryScenarioItem(array $mission, int $itemId, int $userId, string $use
     $result = scenarioSendItem($mission, $item, $userId, $userName);
     logAudit('retry_scenario_item', 'mission_scenario_items', $itemId, null, ['mission_id' => $missionId, 'ok' => $result['ok']]);
     return ['ok' => true, 'item' => $result];
+}
+
+/**
+ * «Ανάκληση φάσης» (v3.456.0): takes back what a PLAYED phase sent and is still under way, through the same steps a
+ * coordinator takes by hand - a point or an area is withdrawn (withdrawMissionDispatches: the withdrawal is recorded
+ * and the people still on their way are told), a route is cancelled (cancelMissionRoute: its team is told), a sector
+ * is taken off its team (assignMissionSector with no team: the sector stays on the map as an unassigned one and the
+ * team is told). Orders that are already finished stay as they are - they are a fact, there is nothing to stop - and
+ * so do orders already taken back. The phase stays played and its orders read «ανακλήθηκε»; nothing is sent again.
+ * Several orders to one team are told in one notice (sectors and points) or one per route, as by hand.
+ * Returns ['ok' => false, 'error' => text], or ['ok' => true, 'withdrawn' => n, 'failed' => n, 'results' => [['item_id'
+ * =>, 'kind' =>, 'ok' =>, 'error' =>], ...]].
+ */
+function withdrawScenarioPhase(array $mission, int $phaseId, int $userId): array {
+    $missionId = (int) $mission['id'];
+    $phase = scenarioPhaseRow($missionId, $phaseId);
+    if (!$phase) {
+        return ['ok' => false, 'error' => t('scenario.phase_not_found')];
+    }
+    if ($phase['played_at'] === null) {
+        return ['ok' => false, 'error' => t('scenario.phase_not_played_yet')];
+    }
+    $rows = dbFetchAll(
+        "SELECT id, kind, sent_at, sent_ref_id FROM mission_scenario_items
+         WHERE phase_id = ? AND mission_id = ? AND sent_at IS NOT NULL AND sent_ref_id IS NOT NULL ORDER BY seq, id",
+        [$phaseId, $missionId]
+    );
+    $states = scenarioItemLiveStates($missionId, $rows);
+    $open = array_values(array_filter($rows, fn($r) => ($states[(int) $r['id']]['state'] ?? '') === 'open'));
+    if (!$open) {
+        return ['ok' => false, 'error' => t('scenario.withdraw_nothing')];
+    }
+    $phaseNumber = 1 + (int) dbFetchValue("SELECT COUNT(*) FROM mission_scenario_phases WHERE mission_id = ? AND (seq < ? OR (seq = ? AND id < ?))", [$missionId, (int) $phase['seq'], (int) $phase['seq'], $phaseId]);
+
+    $results = [];
+    $dispatchItems = [];
+    foreach ($open as $row) {
+        if (!in_array($row['kind'], ['route', 'sector'], true)) {
+            $dispatchItems[(int) $row['sent_ref_id']] = (int) $row['id'];
+        }
+    }
+    if ($dispatchItems) {
+        try {
+            $taken = withdrawMissionDispatches($mission, array_keys($dispatchItems), $userId);
+        } catch (Throwable $e) {
+            error_log('[scenario] withdrawing the points of phase ' . $phaseId . ' failed: ' . $e->getMessage());
+            $taken = [];
+        }
+        foreach ($dispatchItems as $dispatchId => $itemId) {
+            $ok = in_array($dispatchId, $taken, true);
+            $results[] = ['item_id' => $itemId, 'kind' => 'dispatch', 'ok' => $ok, 'error' => $ok ? null : t('scenario.withdraw_item_failed')];
+        }
+    }
+
+    $sectorLines = [];
+    foreach ($open as $row) {
+        $itemId = (int) $row['id'];
+        $ref = (int) $row['sent_ref_id'];
+        try {
+            if ($row['kind'] === 'route') {
+                $error = cancelMissionRoute($mission, $userId, $ref, t('scenario.withdraw_reason', ['phase' => $phaseNumber]));
+            } elseif ($row['kind'] === 'sector') {
+                $answer = assignMissionSector($mission, $userId, $ref, null, null);
+                $error = $answer['ok'] ? null : $answer['error'];
+                foreach ($answer['withdrawn'] ?? [] as $personId => $lines) {
+                    foreach ($lines as $line) {
+                        $sectorLines[$personId][] = $line;
+                    }
+                }
+            } else {
+                continue;
+            }
+        } catch (Throwable $e) {
+            error_log('[scenario] withdrawing item ' . $itemId . ' failed: ' . $e->getMessage());
+            $error = t('scenario.withdraw_item_failed');
+        }
+        $results[] = ['item_id' => $itemId, 'kind' => $row['kind'], 'ok' => $error === null, 'error' => $error];
+    }
+    notifyOrdersWithdrawn($missionId, (string) $mission['title'], $sectorLines, 'mission_sector_assigned');
+
+    $withdrawn = count(array_filter($results, fn($r) => $r['ok']));
+    logAudit('withdraw_scenario_phase', 'mission_scenario_phases', $phaseId, null, [
+        'mission_id' => $missionId, 'orders' => count($results), 'withdrawn' => $withdrawn, 'failed' => count($results) - $withdrawn,
+    ]);
+    return ['ok' => true, 'withdrawn' => $withdrawn, 'failed' => count($results) - $withdrawn, 'results' => $results];
 }
 
 // ── Slots ───────────────────────────────────────────────────────────────────────────────────────────────────────

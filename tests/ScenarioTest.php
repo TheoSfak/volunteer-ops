@@ -1702,6 +1702,272 @@ final class ScenarioTest extends TestCase
         $this->assertStringContainsString('pinIcon(phase.n)', $js);
     }
 
+    // ── How far a played phase has got, and taking it back (v3.456.0) ─────────────────────────────────────
+
+    /** A phase with one point to the team, played. @return array{phase: int, dispatch: int} */
+    private function playedPoint(): array
+    {
+        $phase = $this->phase();
+        $this->stage($phase, $this->point());
+        $result = $this->play($phase);
+        $this->assertTrue($result['ok'], (string) ($result['error'] ?? ''));
+        return ['phase' => $phase, 'dispatch' => $result['results'][0]['dispatch_id']];
+    }
+
+    private function playedPhaseOf(int $phaseId): array
+    {
+        foreach (loadMissionScenario($this->missionId)['phases'] as $p) {
+            if ($p['id'] === $phaseId) {
+                return $p;
+            }
+        }
+        $this->fail('phase not in the plan');
+    }
+
+    public function testAnUnplayedPhaseHasNoProgressAndItsOrdersNoState(): void
+    {
+        $phase = $this->phase();
+        $this->stage($phase, $this->point());
+
+        $p = $this->playedPhaseOf($phase);
+
+        $this->assertNull($p['progress']);
+        $this->assertNull($p['items'][0]['state']);
+    }
+
+    public function testAPointIsDoneWhenItsTeamPressesFinishedAndOpenAgainWhenCommandReopensIt(): void
+    {
+        $made = $this->playedPoint();
+
+        $p = $this->playedPhaseOf($made['phase']);
+        $this->assertSame('open', $p['items'][0]['state']);
+        $this->assertSame(['total' => 1, 'done' => 0, 'open' => 1, 'withdrawn' => 0, 'failed' => 0, 'complete' => false, 'can_withdraw' => true], $p['progress']);
+
+        recordDispatchProgress($made['dispatch'], $this->teamId, $this->members[0], 'complete');
+        $p = $this->playedPhaseOf($made['phase']);
+        $this->assertSame('done', $p['items'][0]['state']);
+        $this->assertSame(['total' => 1, 'done' => 1, 'open' => 0, 'withdrawn' => 0, 'failed' => 0, 'complete' => true, 'can_withdraw' => false], $p['progress']);
+
+        dbExecute("UPDATE mission_dispatch_progress SET completed_at = NULL, completed_by = NULL WHERE dispatch_id = ?", [$made['dispatch']]);
+        $this->assertSame('open', $this->playedPhaseOf($made['phase'])['items'][0]['state'], 'a reopened order is under way again');
+    }
+
+    public function testAnArrivalOrADeclineDoesNotFinishAnOrder(): void
+    {
+        $made = $this->playedPoint();
+
+        recordDispatchProgress($made['dispatch'], $this->teamId, $this->members[0], 'arrive');
+        dbInsert(
+            "INSERT INTO mission_order_declines (mission_id, target_kind, target_id, scope_key, team_id, reason, declined_by, declined_at, active) VALUES (?, 'dispatch', ?, ?, ?, 'busy', ?, NOW(), 1)",
+            [$this->missionId, $made['dispatch'], 't' . $this->teamId, $this->teamId, $this->members[0]]
+        );
+
+        $this->assertSame('open', $this->playedPhaseOf($made['phase'])['items'][0]['state']);
+    }
+
+    public function testAnOrderToEveryTeamIsDoneOnlyWhenAllTeamsWithPeopleHaveFinishedIt(): void
+    {
+        $second = $this->teamWithMember('ΓΑΜΜΑ', 3);
+        $phase = $this->phase();
+        $this->stage($phase, $this->area());
+        $dispatch = $this->play($phase)['results'][0]['dispatch_id'];
+
+        recordDispatchProgress($dispatch, $this->teamId, $this->members[0], 'complete');
+        $item = $this->playedPhaseOf($phase)['items'][0];
+        $this->assertSame('open', $item['state']);
+        $this->assertSame(1, $item['done_n']);
+        $this->assertSame(2, $item['of_n'], 'the empty second team of the fixture is not waited for, the one with a member is');
+
+        recordDispatchProgress($dispatch, $second['team'], $second['member'], 'complete');
+        $item = $this->playedPhaseOf($phase)['items'][0];
+        $this->assertSame('done', $item['state']);
+        $this->assertTrue($this->playedPhaseOf($phase)['progress']['complete']);
+    }
+
+    public function testARouteIsDoneWhenCompletedAndWithdrawnWhenCancelledOrGone(): void
+    {
+        $phase = $this->phase();
+        $this->stageRoute($phase, $this->routeRow());
+        $this->stageRoute($phase, $this->routeRow(['title' => 'Δεύτερη']));
+        $this->stageRoute($phase, $this->routeRow(['title' => 'Τρίτη']));
+        $this->stageRoute($phase, $this->routeRow(['title' => 'Τέταρτη']));
+        $this->play($phase);
+        $ids = array_map('intval', array_column(dbFetchAll("SELECT sent_ref_id FROM mission_scenario_items WHERE phase_id = ? ORDER BY seq, id", [$phase]), 'sent_ref_id'));
+        $this->assertCount(4, $ids);
+
+        dbExecute("UPDATE mission_routes SET completed_at = NOW() WHERE id = ?", [$ids[1]]);
+        dbExecute("UPDATE mission_routes SET cancelled_at = NOW() WHERE id = ?", [$ids[2]]);
+        dbExecute("DELETE FROM mission_routes WHERE id = ?", [$ids[3]]);
+
+        $states = array_column($this->playedPhaseOf($phase)['items'], 'state');
+        $this->assertSame(['open', 'done', 'withdrawn', 'withdrawn'], $states);
+    }
+
+    public function testASectorIsDoneWhenCompletedAndWithdrawnWhenTakenOffItsTeamOrGone(): void
+    {
+        $area = $this->searchArea();
+        $phase = $this->phase();
+        $this->stageSectors($phase, $area, [
+            $this->sectorRow(['label' => 'Α']), $this->sectorRow(['label' => 'Β']), $this->sectorRow(['label' => 'Γ']), $this->sectorRow(['label' => 'Δ']),
+        ]);
+        $this->play($phase);
+        $ids = array_map('intval', array_column(dbFetchAll("SELECT sent_ref_id FROM mission_scenario_items WHERE phase_id = ? ORDER BY seq, id", [$phase]), 'sent_ref_id'));
+
+        dbExecute("UPDATE mission_search_sectors SET status = 'completed' WHERE id = ?", [$ids[1]]);
+        dbExecute("UPDATE mission_search_sectors SET team_id = NULL WHERE id = ?", [$ids[2]]);
+        dbExecute("DELETE FROM mission_search_sectors WHERE id = ?", [$ids[3]]);
+
+        $this->assertSame(['open', 'done', 'withdrawn', 'withdrawn'], array_column($this->playedPhaseOf($phase)['items'], 'state'));
+    }
+
+    public function testAnOrderThatFailedToGoKeepsThePhaseFromBeingFinished(): void
+    {
+        $doomed = $this->makeTeam('ΓΑΜΜΑ', 3);
+        $other = $this->teamWithMember('ΔΕΛΤΑ', 4);
+        $phase = $this->phase();
+        $this->stage($phase, $this->point(['team_id' => (string) $doomed]));
+        $this->stage($phase, $this->point(['team_id' => (string) $other['team'], 'label' => 'Δεύτερο']));
+        dbExecute("DELETE FROM mission_teams WHERE id = ?", [$doomed]);
+        $result = $this->play($phase);
+        $this->assertSame(1, $result['sent']);
+        $this->assertSame(1, $result['failed']);
+
+        recordDispatchProgress($result['results'][1]['dispatch_id'], $other['team'], $other['member'], 'complete');
+        $p = $this->playedPhaseOf($phase);
+
+        $this->assertSame(1, $p['progress']['done']);
+        $this->assertSame(1, $p['progress']['failed']);
+        $this->assertSame(2, $p['progress']['total'], 'an order waiting for a retry still counts');
+        $this->assertFalse($p['progress']['complete']);
+    }
+
+    public function testWithdrawingAPhaseTakesBackOnlyWhatIsStillUnderWayAndTellsTheTeams(): void
+    {
+        $area = $this->searchArea();
+        $phase = $this->phase();
+        $this->stage($phase, $this->point(['label' => 'Τελειωμένο']));
+        $this->stage($phase, $this->point(['label' => 'Σε εξέλιξη']));
+        $this->stage($phase, $this->area());
+        $this->stageRoute($phase, $this->routeRow());
+        $this->stageSectors($phase, $area, [$this->sectorRow(['label' => 'Τομέας Ρέματος'])]);
+        $result = $this->play($phase);
+        $this->assertSame(5, $result['sent']);
+        [$finished, $underway, $broadcast] = [$result['results'][0]['dispatch_id'], $result['results'][1]['dispatch_id'], $result['results'][2]['dispatch_id']];
+        $routeId = $result['results'][3]['route_id'];
+        $sectorId = $result['results'][4]['sector_id'];
+        recordDispatchProgress($finished, $this->teamId, $this->members[0], 'complete');
+        $handMade = createMissionDispatch($this->mission, $this->adminId, 'Scenario Admin', $this->point(['label' => 'Στο χέρι']))['id'];
+        $notes = $this->notificationCount();
+
+        $r = withdrawScenarioPhase($this->mission, $phase, $this->adminId);
+
+        $this->assertTrue($r['ok'], (string) ($r['error'] ?? ''));
+        $this->assertSame(4, $r['withdrawn']);
+        $this->assertSame(0, $r['failed']);
+        $this->assertNotNull(dbFetchOne("SELECT id FROM mission_dispatch_points WHERE id = ?", [$finished]), 'a finished order is a fact and stays');
+        $this->assertNotNull(dbFetchOne("SELECT id FROM mission_dispatch_points WHERE id = ?", [$handMade]), 'an order the scenario did not send is never touched');
+        $this->assertNull(dbFetchOne("SELECT id FROM mission_dispatch_points WHERE id = ?", [$underway]));
+        $this->assertNull(dbFetchOne("SELECT id FROM mission_dispatch_points WHERE id = ?", [$broadcast]));
+        $this->assertSame(2, (int) dbFetchValue("SELECT COUNT(*) FROM mission_dispatch_withdrawals WHERE mission_id = ?", [$this->missionId]), 'both withdrawals are on the record');
+        $route = dbFetchOne("SELECT cancelled_at, cancel_reason FROM mission_routes WHERE id = ?", [$routeId]);
+        $this->assertNotNull($route['cancelled_at']);
+        $this->assertStringContainsString('1', (string) $route['cancel_reason'], 'the reason names the phase');
+        $sector = dbFetchOne("SELECT team_id, status FROM mission_search_sectors WHERE id = ?", [$sectorId]);
+        $this->assertNull($sector['team_id'], 'the sector is taken off its team');
+        $this->assertSame('not_started', $sector['status']);
+        // Each member of the team is told three things: the two points (one notice), the route, the sector.
+        $this->assertSame(3 * count($this->members), $this->notificationCount() - $notes, 'the teams are told');
+        $this->assertSame(1, $this->auditCount('withdraw_scenario_phase'));
+        $this->assertSame(1, $this->auditCount('cancel_mission_route'));
+        $this->assertSame(1, $this->auditCount('assign_mission_sector'), 'the sector went through the assign path, once');
+
+        $p = $this->playedPhaseOf($phase);
+        $this->assertNotNull($p['played_at'], 'the phase stays played');
+        $this->assertSame(['done', 'withdrawn', 'withdrawn', 'withdrawn', 'withdrawn'], array_column($p['items'], 'state'));
+        $this->assertSame(['total' => 1, 'done' => 1, 'open' => 0, 'withdrawn' => 4, 'failed' => 0, 'complete' => true, 'can_withdraw' => false], $p['progress']);
+
+        $again = withdrawScenarioPhase($this->mission, $phase, $this->adminId);
+        $this->assertFalse($again['ok'], 'a second press has nothing left to take back');
+    }
+
+    public function testWithdrawingTellsAPersonOnceNoMatterHowManyOrdersWereTakenBack(): void
+    {
+        $phase = $this->phase();
+        foreach (['Ένα', 'Δύο', 'Τρία'] as $label) {
+            $this->stage($phase, $this->point(['label' => $label]));
+        }
+        $this->play($phase);
+        $before = $this->notificationCount();
+
+        $r = withdrawScenarioPhase($this->mission, $phase, $this->adminId);
+
+        $this->assertSame(3, $r['withdrawn']);
+        $this->assertSame(count($this->members), $this->notificationCount() - $before, 'one notice per person for the three orders');
+        // A phase with every order taken back is not a phase that finished: no «ολοκληρώθηκε», no «έτοιμη η επόμενη».
+        $progress = $this->playedPhaseOf($phase)['progress'];
+        $this->assertSame(0, $progress['total']);
+        $this->assertSame(3, $progress['withdrawn']);
+        $this->assertFalse($progress['complete']);
+        $this->assertFalse($progress['can_withdraw']);
+    }
+
+    public function testAPhaseThatWasNeverPlayedOrBelongsToAnotherMissionCannotBeWithdrawn(): void
+    {
+        $unplayed = $this->phase();
+        $this->stage($unplayed, $this->point());
+        $made = $this->playedPoint();
+        $otherMission = ['id' => $this->otherMissionId, 'title' => 'Other'];
+
+        $r = withdrawScenarioPhase($this->mission, $unplayed, $this->adminId);
+        $this->assertFalse($r['ok']);
+        $this->assertSame(t('scenario.phase_not_played_yet'), $r['error']);
+        $r = withdrawScenarioPhase($otherMission, $made['phase'], $this->adminId);
+        $this->assertFalse($r['ok']);
+        $this->assertSame(t('scenario.phase_not_found'), $r['error']);
+        $this->assertFalse(withdrawScenarioPhase($this->mission, 999999999, $this->adminId)['ok']);
+        $this->assertNotNull(dbFetchOne("SELECT id FROM mission_dispatch_points WHERE id = ?", [$made['dispatch']]), 'nothing was taken back');
+    }
+
+    public function testWithdrawingGoesOnlyThroughTheFunctionsTheEndpointsUseAndNeverSendsAnything(): void
+    {
+        $scenario = $this->source('includes/functions-scenario.php');
+        foreach (['withdrawMissionDispatches(', 'cancelMissionRoute(', 'assignMissionSector('] as $fn) {
+            $this->assertStringContainsString($fn, $scenario);
+        }
+        foreach (['DELETE FROM mission_dispatch_points', 'UPDATE mission_routes', 'UPDATE mission_search_sectors', 'sendNotification(', 'notifyRouteTeam('] as $never) {
+            $this->assertStringNotContainsString($never, $scenario, "the scenario never does `$never` itself");
+        }
+        $this->assertStringContainsString('withdrawMissionDispatches($mission, [(int) post(\'id\')], (int) $userId)', $this->source('mission-dispatch.php'));
+        $this->assertStringContainsString('cancelMissionRoute($mission, (int) $userId, (int) post(\'id\'), (string) post(\'reason\'))', $this->source('mission-route.php'));
+        $this->assertStringContainsString('assignMissionSector(', $this->source('mission-sector.php'));
+        $warroom = $this->source('includes/functions-warroom.php');
+        foreach (['withdrawMissionDispatches', 'cancelMissionRoute', 'assignMissionSector'] as $fn) {
+            $this->assertSame(1, substr_count($warroom, "function $fn("), $fn);
+        }
+        // The endpoint hands back the live lists so the map drops the orders at once.
+        $src = $this->source('mission-scenario.php');
+        $block = substr($src, (int) strpos($src, "if (\$action === 'withdraw_phase') {"), 1200);
+        foreach (['loadMissionDispatchesForUser(', 'loadRoutesForUser(', 'loadMissionSectorsForUser(', 'loadMissionSearchAreasForUser('] as $loader) {
+            $this->assertStringContainsString($loader, $block);
+        }
+    }
+
+    public function testTheNextPhaseHintOnlySaysSoAndNeverPlaysAnything(): void
+    {
+        $js = $this->source('assets/js/war-room-scenario.js');
+        $start = strpos($js, 'function readyHint(');
+        $this->assertNotFalse($start);
+        $hint = substr($js, $start, 900);
+        $this->assertStringNotContainsString('request(', $hint);
+        $this->assertStringNotContainsString('play_phase', $hint);
+        // It appears on the phase after a finished one, only while that phase has not been played, and is per-browser switchable.
+        $this->assertStringContainsString('prev.progress.complete', $hint);
+        $this->assertStringContainsString('phase.played_at', $hint);
+        $this->assertStringContainsString("localStorage.getItem('wrScenarioHint')", $js);
+        // And the refresh that keeps the progress moving never tears the card down under a select being used.
+        $this->assertStringContainsString("active.tagName === 'SELECT'", $js);
+    }
+
     // ── Where it may be read, and who may ask ───────────────────────────────────────────────────────────────
 
     public function testOnlyTheScenarioCodeReadsTheScenarioTables(): void
@@ -1747,7 +2013,7 @@ final class ScenarioTest extends TestCase
         // POSTs need the CSRF token before any action.
         $csrf = strpos($src, "hash_equals(\$_SESSION['csrf_token']");
         $this->assertNotFalse($csrf);
-        foreach (['add_phase', 'rename_phase', 'delete_phase', 'add_item', 'add_sectors', 'add_route', 'delete_item', 'play_phase', 'retry_item'] as $action) {
+        foreach (['add_phase', 'rename_phase', 'delete_phase', 'add_item', 'add_sectors', 'add_route', 'delete_item', 'play_phase', 'withdraw_phase', 'retry_item'] as $action) {
             $this->assertGreaterThan($csrf, strpos($src, "'$action'"), "$action is after the CSRF check");
         }
         // The same open-mission gate as the dispatch endpoint.

@@ -295,8 +295,11 @@ final class CreateMissionSectorTest extends TestCase
         // The login, the CSRF token and the command gate come before any action, as they did.
         $this->assertLessThan($start, strpos($src, 'hash_equals($_SESSION[\'csrf_token\']'));
         $this->assertLessThan($start, strpos($src, "if (!\$canManageWarRoom) {\n    echo json_encode(['ok' => false, 'error' => t('sector.no_manage_permission')]);"));
-        // assign() still tells the team, through the function that now lives with createMissionSector().
-        $this->assertStringContainsString('notifySectorAssigned($missionId, $mission[\'title\'], $newTeamId', $src);
+        // assign() still tells the team: since v3.456.0 it is assignMissionSector() that does, through the function
+        // that lives with createMissionSector().
+        $this->assertStringContainsString('assignMissionSector(', $src);
+        $warroom = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../includes/functions-warroom.php'));
+        $this->assertStringContainsString('notifySectorAssigned($missionId, $mission[\'title\'], $newTeamId', $warroom);
         $this->assertTrue(function_exists('notifySectorAssigned'));
     }
 }

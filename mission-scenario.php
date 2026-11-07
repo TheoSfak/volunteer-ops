@@ -227,6 +227,26 @@ if ($action === 'play_phase') {
     exit;
 }
 
+if ($action === 'withdraw_phase') {
+    // «Ανάκληση φάσης» (v3.456.0): takes back what a played phase sent and is still under way, by the same steps a
+    // coordinator takes by hand. The live lists come back so the map drops the withdrawn orders at once.
+    $result = withdrawScenarioPhase($mission, (int) post('phase_id'), (int) $userId);
+    if (!$result['ok']) {
+        echo $fail($result['error']);
+        exit;
+    }
+    echo $answer([
+        'withdrawn'  => $result['withdrawn'],
+        'failed'     => $result['failed'],
+        'results'    => $result['results'],
+        'dispatches' => loadMissionDispatchesForUser($missionId, (int) $userId, true, false),
+        'routes'     => loadRoutesForUser($missionId, (int) $userId, true),
+        'sectors'    => loadMissionSectorsForUser($missionId, (int) $userId, true, false),
+        'areas'      => loadMissionSearchAreasForUser($missionId, true),
+    ]);
+    exit;
+}
+
 if ($action === 'retry_item') {
     $result = retryScenarioItem($mission, (int) post('item_id'), (int) $userId, (string) $user['name']);
     if (!$result['ok']) {

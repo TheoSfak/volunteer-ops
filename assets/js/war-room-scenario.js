@@ -32,6 +32,11 @@
     let ghostLayer = null;
     let initialised = false;
     let busy = false;
+    let lastJson = '';
+    // While an order of a played phase is still under way its progress moves on its own (a team presses «Ολοκληρώθηκε»),
+    // so the card asks again now and then - only while the tab is in front, nobody is choosing in the card and there is
+    // something to wait for. It redraws only when the answer differs, so a select being used is never torn down.
+    const REFRESH_MS = 20000;
 
     function esc(value) {
         return escapeHtml(String(value == null ? '' : value));
@@ -45,6 +50,8 @@
             '.wr-sc-ghost-pin{width:26px;height:26px;border-radius:50%;border:2px dashed #6b7280;background:rgba(243,244,246,.88);color:#374151;font-weight:700;font-size:.8rem;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.35)}',
             '.wr-sc-phase{border:1px solid var(--bs-border-color,#dee2e6);border-radius:8px;padding:.4rem .55rem;margin-bottom:.55rem}',
             '.wr-sc-phase.wr-sc-played{background:rgba(25,135,84,.07);border-color:rgba(25,135,84,.35)}',
+            '.wr-sc-phase.wr-sc-ready{border-color:rgba(25,135,84,.7);box-shadow:0 0 0 2px rgba(25,135,84,.18)}',
+            '.wr-sc-item.wr-sc-withdrawn{opacity:.6}',
             '.wr-sc-items{list-style:none;margin:.35rem 0 0;padding:0}',
             '.wr-sc-item{font-size:.85rem;padding:.2rem 0;border-top:1px dashed var(--bs-border-color,#dee2e6)}',
             '.wr-sc-item:first-child{border-top:0}',
@@ -59,6 +66,7 @@
 
     // ── Talking to the server ──────────────────────────────────────────────────────────────────────────────────
     function apply(fresh) {
+        lastJson = JSON.stringify(fresh || null);
         scenario = (fresh && Array.isArray(fresh.phases)) ? fresh : {phases: []};
         if (!Array.isArray(scenario.slots)) scenario.slots = [];
         if (!Array.isArray(scenario.teams)) scenario.teams = [];
@@ -72,6 +80,20 @@
         return fetch(ENDPOINT + '?mission_id=' + encodeURIComponent(WR_MISSION_ID))
             .then(r => r.json())
             .then(res => { if (res && res.ok) apply(res.scenario); return res; })
+            .catch(() => null);
+    }
+
+    function underWay() {
+        return scenario.phases.some(p => p.played_at && p.progress && p.progress.open > 0);
+    }
+    function refreshProgress() {
+        if (document.hidden || busy || !underWay()) return;
+        const body = document.getElementById('scenarioBody');
+        const active = document.activeElement;
+        if (body && active && body.contains(active) && (active.tagName === 'SELECT' || active.tagName === 'INPUT')) return;
+        fetch(ENDPOINT + '?mission_id=' + encodeURIComponent(WR_MISSION_ID))
+            .then(r => r.json())
+            .then(res => { if (res && res.ok && !busy && JSON.stringify(res.scenario) !== lastJson) apply(res.scenario); })
             .catch(() => null);
     }
 
@@ -125,6 +147,38 @@
     }
 
     // ── The card ───────────────────────────────────────────────────────────────────────────────────────────────
+    // How an order that was sent stands now (v3.456.0), read from the live order by the server: finished, under way
+    // (with how many teams have finished it when it went to every team), or taken back.
+    function stateLine(item) {
+        if (item.state === 'done') {
+            return `<div class="small text-success"><i class="bi bi-check-circle-fill me-1"></i>${esc(t('scenario.state_done'))}</div>`;
+        }
+        if (item.state === 'withdrawn') {
+            return `<div class="small text-muted"><i class="bi bi-slash-circle me-1"></i>${esc(t('scenario.state_withdrawn'))}</div>`;
+        }
+        if (item.state === 'open') {
+            const text = item.of_n ? t('scenario.state_open_broadcast', {done: item.done_n || 0, of: item.of_n}) : t('scenario.state_open');
+            return `<div class="small text-primary"><i class="bi bi-hourglass-split me-1"></i>${esc(text)}</div>`;
+        }
+        return `<div class="small text-success"><i class="bi bi-check-circle-fill me-1"></i>${esc(t('scenario.item_sent'))}</div>`;
+    }
+
+    // The passive note «Η Φάση 1 ολοκληρώθηκε · έτοιμη η Φάση 2» (v3.456.0). It only says so: the phase is still sent by
+    // pressing its own play, and nothing is ever sent for it. Per browser; on unless switched off.
+    function hintEnabled() {
+        try { return localStorage.getItem('wrScenarioHint') !== '0'; } catch (e) { return true; }
+    }
+    function setHintEnabled(on) {
+        try { localStorage.setItem('wrScenarioHint', on ? '1' : '0'); } catch (e) { /* private window: stays on for this page only */ }
+    }
+    function readyHint(phase) {
+        if (phase.played_at || !hintEnabled()) return '';
+        const idx = scenario.phases.indexOf(phase);
+        const prev = idx > 0 ? scenario.phases[idx - 1] : null;
+        if (!prev || !prev.played_at || !prev.progress || !prev.progress.complete) return '';
+        return `<div class="small fw-semibold text-success mt-1" data-sc-ready="1"><i class="bi bi-flag-fill me-1"></i>${esc(t('scenario.hint_ready', {prev: phaseName(prev), next: phaseName(phase)}))}</div>`;
+    }
+
     function itemHtml(phase, item) {
         const icon = item.type === 'point' ? 'bi-geo-alt-fill'
             : (item.type === 'sector' ? 'bi-grid-3x3-gap-fill' : (item.type === 'route' ? 'bi-signpost-split-fill' : 'bi-bounding-box'));
@@ -133,7 +187,7 @@
         const target = `<span class="badge ${badgeClass}">${esc(itemTarget(item))}</span>`;
         let status = '';
         if (item.sent) {
-            status = `<div class="small text-success"><i class="bi bi-check-circle-fill me-1"></i>${esc(t('scenario.item_sent'))}</div>`;
+            status = stateLine(item);
         } else if (item.error) {
             status = `<div class="small text-danger"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(item.error)}</div>`;
         } else if (item.team_missing) {
@@ -159,7 +213,7 @@
         if (item.type === 'route') {
             where = ` <span class="text-muted small">${esc(t('scenario.route_points', {n: item.point_count || 0}))}${item.return_to_start ? ' · ' + esc(t('scenario.route_return_hint')) : ''}</span>`;
         }
-        return `<li class="wr-sc-item d-flex align-items-start gap-1" data-item="${item.id}">
+        return `<li class="wr-sc-item d-flex align-items-start gap-1${item.state === 'withdrawn' ? ' wr-sc-withdrawn' : ''}" data-item="${item.id}">
             <i class="bi ${icon} text-secondary mt-1"></i>
             <span class="flex-grow-1">${goto}${where} <i class="bi bi-arrow-right-short"></i> ${target}${status}</span>
             ${retry}${del}
@@ -175,14 +229,25 @@
         const items = phase.items.length
             ? `<ul class="wr-sc-items">${phase.items.map(i => itemHtml(phase, i)).join('')}</ul>`
             : `<div class="small text-muted mt-1">${esc(t('scenario.phase_no_orders'))}</div>`;
-        return `<div class="wr-sc-phase ${played ? 'wr-sc-played' : ''}" data-phase="${phase.id}">
+        // «Φάση 1 · 4/6 ✓»: how many of the orders that still count are finished; «Ανακλήθηκε» when all were taken back.
+        const pr = played ? phase.progress : null;
+        let badge = '';
+        if (pr && pr.total > 0) {
+            badge = ` <span class="badge ${pr.complete ? 'bg-success' : 'bg-secondary'}" title="${esc(t('scenario.progress_title'))}">${esc(t('scenario.progress_badge', {done: pr.done, total: pr.total}))}</span>`;
+        } else if (pr && pr.withdrawn > 0) {
+            badge = ` <span class="badge bg-secondary">${esc(t('scenario.state_withdrawn'))}</span>`;
+        }
+        const withdraw = (pr && pr.can_withdraw)
+            ? `<div class="mt-1"><button type="button" class="btn btn-outline-danger btn-sm w-100" data-sc="withdraw" data-phase="${phase.id}" title="${esc(t('scenario.withdraw_title'))}"><i class="bi bi-arrow-counterclockwise me-1"></i>${esc(t('scenario.withdraw_btn'))}</button></div>` : '';
+        const ready = readyHint(phase);
+        return `<div class="wr-sc-phase ${played ? 'wr-sc-played' : ''}${ready ? ' wr-sc-ready' : ''}" data-phase="${phase.id}">
             <div class="d-flex align-items-center gap-1">
-                <span class="flex-grow-1 text-break"><strong>${esc(phaseName(phase))}</strong>${phase.title ? ` <span class="text-muted small">· ${esc(phase.title)}</span>` : ''}</span>
+                <span class="flex-grow-1 text-break"><strong>${esc(phaseName(phase))}</strong>${badge}${phase.title ? ` <span class="text-muted small">· ${esc(phase.title)}</span>` : ''}</span>
                 <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" data-sc="rename" data-phase="${phase.id}" title="${esc(t('scenario.phase_rename'))}"><i class="bi bi-pencil"></i></button>
                 <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2" data-sc="delete-phase" data-phase="${phase.id}" title="${esc(t('scenario.phase_delete'))}"><i class="bi bi-trash"></i></button>
             </div>
-            ${play ? `<div class="mt-1">${play}</div>` : ''}
-            ${playedLine}${items}
+            ${ready}${play ? `<div class="mt-1">${play}</div>` : ''}
+            ${playedLine}${withdraw}${items}
         </div>`;
     }
 
@@ -212,7 +277,9 @@
         if (!body) return;
         const add = `<button type="button" class="btn btn-outline-primary btn-sm w-100" data-sc="add-phase"><i class="bi bi-plus-lg me-1"></i>${esc(t('scenario.add_phase_btn'))}</button>`;
         const lead = scenario.phases.length ? scenario.phases.map(phaseHtml).join('') : `<p class="small text-muted mb-2">${esc(t('scenario.empty'))}</p>`;
-        body.innerHTML = lead + add + slotsHtml();
+        const hintToggle = scenario.phases.length > 1
+            ? `<label class="d-flex align-items-start gap-1 small text-muted mt-2"><input type="checkbox" class="form-check-input mt-1" data-sc-hint="1"${hintEnabled() ? ' checked' : ''}><span>${esc(t('scenario.hint_toggle'))}</span></label>` : '';
+        body.innerHTML = lead + add + hintToggle + slotsHtml();
     }
 
     function findPhase(id) {
@@ -337,6 +404,12 @@
     }
 
     function onCardChange(e) {
+        const hint = e.target.closest('input[data-sc-hint]');
+        if (hint) {
+            setHintEnabled(hint.checked);
+            renderCard();
+            return;
+        }
         const sel = e.target.closest('select[data-sc-map]');
         if (!sel || busy) return;
         busy = true;
@@ -423,6 +496,19 @@
                 const fields = {phase_id: el.dataset.phase};
                 Object.keys(mapping).forEach(slotId => { fields['mapping[' + slotId + ']'] = mapping[slotId]; });
                 run('play_phase', fields, afterPlay);
+            });
+        } else if (act === 'withdraw') {
+            const phase = findPhase(el.dataset.phase);
+            if (!phase || !phase.progress) return;
+            if (!confirm(t('scenario.withdraw_confirm', {phase: phaseName(phase), n: phase.progress.open}))) return;
+            run('withdraw_phase', {phase_id: el.dataset.phase}, res => {
+                if (res.dispatches && typeof renderDispatches === 'function') renderDispatches(dispatches = res.dispatches);
+                showNewSectors(res);
+                showNewRoutes(res);
+                if (res.failed > 0) {
+                    const lines = (res.results || []).filter(r => !r.ok).map(r => '• ' + r.error);
+                    alert(t('scenario.withdraw_partial', {withdrawn: res.withdrawn, failed: res.failed}) + '\n\n' + lines.join('\n'));
+                }
             });
         } else if (act === 'retry') {
             run('retry_item', {item_id: el.dataset.item}, res => {
@@ -530,6 +616,7 @@
         renderCard();
         load();
         document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
+        setInterval(refreshProgress, REFRESH_MS);
     }
 
     window.wrScenario = {init: init, reload: load, menuHtml: menuHtml, stage: stage, stageSectors: stageSectors, stageRoute: stageRoute, phaseNumber: phaseNumber, drawGhostsInto: drawGhostsInto, phases: () => scenario.phases, newSlot: newSlot, fillSlotOptions: fillSlotOptions};

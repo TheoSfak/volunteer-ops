@@ -133,32 +133,13 @@ if ($action === 'cancel') {
         echo json_encode(['ok' => false, 'error' => t('dispatch.no_manage_permission')]);
         exit;
     }
-    $routeId = (int) post('id');
-    $route = dbFetchOne("SELECT id, team_id, order_id, completed_at, cancelled_at FROM mission_routes WHERE id = ? AND mission_id = ?", [$routeId, $missionId]);
-    if (!$route) {
-        echo json_encode(['ok' => false, 'error' => t('common.not_found')]);
+    // The steps of cancelling live in cancelMissionRoute() (v3.456.0), so a scenario can take a phase back
+    // through exactly the same ones.
+    $error = cancelMissionRoute($mission, (int) $userId, (int) post('id'), (string) post('reason'));
+    if ($error !== null) {
+        echo json_encode(['ok' => false, 'error' => $error]);
         exit;
     }
-    if ($route['completed_at'] || $route['cancelled_at']) {
-        echo json_encode(['ok' => false, 'error' => t('route.already_closed')]);
-        exit;
-    }
-
-    $reason = trim((string) post('reason'));
-    $reason = $reason !== '' ? mb_substr($reason, 0, 255) : null;
-
-    dbExecute("UPDATE mission_routes SET cancelled_at = NOW(), cancelled_by = ?, cancel_reason = ? WHERE id = ?", [$userId, $reason, $routeId]);
-    // A cancelled route is the admin's own call to abort, not the team failing to
-    // deliver — stamp fulfilled_at too so it stops counting as "outstanding" in the
-    // generic mission_orders fulfillment-rate stats (mission-stats.php) it rides on.
-    if ($route['order_id']) {
-        dbExecute("UPDATE mission_order_recipients SET fulfilled_at = NOW() WHERE order_id = ? AND fulfilled_at IS NULL", [$route['order_id']]);
-    }
-
-    notifyRouteTeam($missionId, $routeId, $userId, 'mission_route_cancelled', 'route.notify_cancelled_title', [], 'route.notify_cancelled_message', ['mission' => $mission['title']]);
-    logAudit('cancel_mission_route', 'mission_routes', $routeId, null, ['mission_id' => $missionId, 'reason' => $reason]);
-    // Cancelling is command's answer to a «Δεν μπορώ» on it.
-    resolveOrderDeclinesReassigned('route', $routeId, (int) $userId);
 
     echo json_encode(['ok' => true, 'routes' => loadRoutesForUser($missionId, $userId, $canManageWarRoom)]);
     exit;
