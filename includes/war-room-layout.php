@@ -17,7 +17,7 @@ if (!defined('VOLUNTEEROPS')) {
  * should pick up too. Stored in the saved row as 'v' (a row without it is
  * version 1); see warRoomUpgradeSavedLayout() for what each step does.
  */
-const WAR_ROOM_LAYOUT_VERSION = 2;
+const WAR_ROOM_LAYOUT_VERSION = 3;
 
 /**
  * The 44 admin-desktop-view cards, in default reading order, split into the
@@ -42,10 +42,10 @@ function warRoomDefaultLayout(): array {
             'participantsCard', 'liveStreamsCard', 'activityCard', 'chatCard',
         ],
         'sidebar' => [
-            'sosAlertsCard', 'voiceMessagesCard',
+            'sosAlertsCard', 'voiceMessagesCard', 'scenarioCard',
             'myLocationCard', 'myLiveCard', 'mediaCard', 'broadcastPhotoCard', 'nearbyTeamsCard', 'restrictedAreaProximityCard', 'myRouteCard',
             'myTasksCard', 'mySectorsCard', 'shiftsCard', 'broadcastCard',
-            'dispatchCard', 'scenarioCard', 'sectorsCard', 'restrictedAreasCard', 'routeOrderCard',
+            'dispatchCard', 'sectorsCard', 'restrictedAreasCard', 'routeOrderCard',
             'teamRoutesAdminCard',
             'requestLocationCard', 'requestPhotoCard', 'requestVideoCard', 'requestLiveCard', 'requestTaskCard', 'requestSpeakCard',
             'briefingCard', 'missionVisitorsCard', 'missionMgmtCard', 'endMissionCard',
@@ -217,6 +217,10 @@ function getWarRoomLayoutForUser(int $userId, bool $isApprovedParticipant, bool 
  *      in the left column move to the sidebar, after the last order form that
  *      is there (the end of the sidebar if none is); one that was already
  *      dragged into the sidebar stays where it is.
+ *  v3: the «Σενάριο» card (a slim summary line now, v3.462.0) sits right under the
+ *      two alert cards instead of two and a half screens down among the order
+ *      forms, where nobody found it. Only when it is in the sidebar: one dragged
+ *      to the left column was put there on purpose.
  */
 function warRoomUpgradeSavedLayout(array $saved): array {
     if ((int)($saved['v'] ?? 1) >= WAR_ROOM_LAYOUT_VERSION) {
@@ -226,6 +230,19 @@ function warRoomUpgradeSavedLayout(array $saved): array {
     if (in_array('sosAlertsCard', $sidebar, true)) {
         $alerts = ['sosAlertsCard', 'voiceMessagesCard'];
         $sidebar = array_merge($alerts, array_values(array_diff($sidebar, $alerts)));
+        $saved['sidebar'] = $sidebar;
+    }
+    if (in_array('scenarioCard', $sidebar, true)) {
+        // Right after the alert cards that lead the sidebar (the top if there are none).
+        $rest = array_values(array_diff($sidebar, ['scenarioCard']));
+        $at = 0;
+        foreach ($rest as $i => $id) {
+            if ($id === 'sosAlertsCard' || $id === 'voiceMessagesCard') {
+                $at = $i + 1;
+            }
+        }
+        array_splice($rest, $at, 0, ['scenarioCard']);
+        $sidebar = $rest;
         $saved['sidebar'] = $sidebar;
     }
 

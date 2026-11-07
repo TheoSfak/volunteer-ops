@@ -2045,7 +2045,7 @@ final class ScenarioTest extends TestCase
         // The card is inside a command-only block, and the plan is not in the page's data.
         $card = strpos($page, 'data-card-id="scenarioCard"');
         $this->assertNotFalse($card);
-        $this->assertStringContainsString('<div id="scenarioBody"></div>', $page);
+        $this->assertStringContainsString('<div id="scenarioBody" data-sc-mode="room"></div>', $page);
         $this->assertStringNotContainsString('mission_scenario', $page);
         $this->assertStringNotContainsString('loadMissionScenario', $page);
         $js = $this->source('assets/js/war-room-scenario.js');

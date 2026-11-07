@@ -2598,3 +2598,34 @@ function deleteScenarioSlot(array $mission, int $slotId, int $userId): ?string {
     logAudit('delete_scenario_slot', 'mission_scenario_slots', $slotId, null, ['mission_id' => $missionId]);
     return null;
 }
+
+// ── The Scenario page (v3.462.0) ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The keys, besides everything called scenario.*, that assets/js/war-room-scenario.js asks t() for. The Scenario page
+ * (mission-scenario-view.php) is not the Action Room, so it has no translation tables of its own; it prints just these.
+ * A test reads every key literal of the script and fails when one is missing from here or from a language.
+ */
+function scenarioPageExtraStringKeys(): array {
+    return [
+        'common.send_failed', 'common.cancel', 'common.all_teams',
+        'restricted_area.kind_danger', 'restricted_area.kind_cliff', 'restricted_area.kind_forbidden',
+        'restricted_area.shape_polygon', 'restricted_area.shape_line',
+    ];
+}
+
+/**
+ * The words the Scenario page's script needs, in the viewer's language and in the default one it falls back to:
+ * ['strings' => [...], 'fallback' => [...]]. The whole war-room table is 190 KB; the page needs a tenth of it.
+ */
+function scenarioPageStrings(string $lang): array {
+    $all = loadLangStrings('war-room');
+    $extra = array_flip(scenarioPageExtraStringKeys());
+    $pick = function (array $table) use ($extra): array {
+        return array_filter($table, fn($key) => str_starts_with((string) $key, 'scenario.') || isset($extra[$key]), ARRAY_FILTER_USE_KEY);
+    };
+    return [
+        'strings'  => $pick($all[$lang] ?? []),
+        'fallback' => $pick($all[DEFAULT_LANGUAGE] ?? []),
+    ];
+}

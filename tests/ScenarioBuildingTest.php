@@ -848,7 +848,7 @@ final class ScenarioBuildingTest extends TestCase
         $this->assertStringContainsString("request('add_building',", $js);
         $this->assertStringContainsString('stageBuilding: stageBuilding', $js);
         $this->assertStringContainsString('data-sc="add-building"', $js);
-        $this->assertStringContainsString('armStagedBuilding({item_id: hit.item.id', $js);
+        $this->assertStringContainsString('armStagedBuilding({item_id: item.id', $js);
         $this->assertStringContainsString("item.type === 'sector' && !item.sent && Array.isArray(item.geo) && item.geo.length >= 3", $js, 'the button is only for a sector still to be made');
         $this->assertStringContainsString('buildingPinIcon(phase.n)', $js);
         $lang = (string) file_get_contents(__DIR__ . '/../includes/lang/war-room.php');

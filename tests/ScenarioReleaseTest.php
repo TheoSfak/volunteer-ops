@@ -796,7 +796,11 @@ final class ScenarioReleaseTest extends TestCase
     public function testTheCardShowsWhoWaitsAndKeepsRefreshingWhileAnythingWaits(): void
     {
         $js = $this->source('assets/js/war-room-scenario.js');
-        $this->assertStringContainsString('p.progress.open > 0 || p.progress.waiting > 0', $js);
+        // Since v3.462.0 the card asks again every 20 s on the page and in the Action Room alike (the old gate, "only while something is
+        // under way", would never have noticed a phase played or staged in the other tab); the waits still need it to heal a missed completion.
+        $this->assertStringContainsString('function refreshProgress()', $js);
+        $this->assertStringContainsString('if (document.hidden || busy) return;', $js);
+        $this->assertStringContainsString('setInterval(refreshProgress, REFRESH_MS)', $js);
         $this->assertStringContainsString('data-sc="release-now"', $js);
         $this->assertStringContainsString('data-sc="cancel-wait"', $js);
         $this->assertStringContainsString("run('release_now'", $js);

@@ -4107,6 +4107,10 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>
         <?php if ($canManageWarRoom && !$volunteerTabs): ?>
         <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i><?= t('hero.btn_response_report') ?></button>
+        <!-- «Σενάριο» (v3.462.0): the scenario's own page, in a tab of its own like the heart-rate report below - phases, the
+             state of every team, ▶ - to sit on a second screen while the map keeps running here. Command only (this block). The
+             tab is named for the mission, so pressing this again brings back the one that is open instead of piling up tabs. -->
+        <a href="mission-scenario-view.php?id=<?= $missionId ?>" target="wrScenarioPage<?= $missionId ?>" class="btn btn-outline-light" id="scenarioHeroBtn"><i class="bi bi-collection-play-fill me-1"></i><?= t('hero.btn_scenario') ?></a>
         <?php if (vitalsEnabled()): ?>
         <!-- A new tab, not a modal like its neighbour: this one carries a
              chart, three tables and a list of episodes, and it is meant to sit
@@ -5945,14 +5949,16 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 
         <?php
         // «Σενάριο» (v3.452.0): orders written down before an exercise, sent phase by phase with a manual ▶.
-        // Filled entirely by assets/js/war-room-scenario.js from mission-scenario.php (command only): the plan
-        // is not in the page, not in WR_BOOT and not in the 5-second poll.
+        // Since v3.462.0 the card here is a slim summary line («Φάση 1 · 4/6 ✓ · Φάση 2 · περιμένουν 2 ομάδες») and a link to the
+        // Scenario page (mission-scenario-view.php), where the whole card lives. The line is drawn entirely by
+        // assets/js/war-room-scenario.js from mission-scenario.php (command only): the plan is not in the page, not in
+        // WR_BOOT and not in the 5-second poll. The link is printed here, so it works before any script has run.
         ?>
         <div class="card shadow-sm mb-4 border-primary" data-card-id="scenarioCard">
             <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-collection-play-fill me-1"></i><?= t('scenario.card_title') ?></h5></div>
-            <div class="card-body">
-                <p class="small text-muted"><?= t('scenario.note') ?></p>
-                <div id="scenarioBody"></div>
+            <div class="card-body py-2">
+                <div id="scenarioBody" data-sc-mode="room"></div>
+                <a href="mission-scenario-view.php?id=<?= $missionId ?>" target="wrScenarioPage<?= $missionId ?>" class="btn btn-primary btn-sm w-100 mt-2" id="scenarioOpenBtn" title="<?= t('scenario.summary_open_title') ?>"><i class="bi bi-box-arrow-up-right me-1"></i><?= t('scenario.summary_open_btn') ?></a>
             </div>
         </div>
 

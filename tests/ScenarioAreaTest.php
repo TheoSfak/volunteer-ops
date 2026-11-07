@@ -807,7 +807,7 @@ final class ScenarioAreaTest extends TestCase
         $this->assertStringContainsString("request('add_area',", $js);
         $this->assertStringContainsString('stageArea: stageArea', $js);
         $this->assertStringContainsString('data-sc="divide-area"', $js);
-        $this->assertStringContainsString('openDivideSectorsForStagedArea({item_id: hit.item.id', $js);
+        $this->assertStringContainsString('openDivideSectorsForStagedArea({item_id: item.id', $js);
         $lang = (string) file_get_contents(__DIR__ . '/../includes/lang/war-room.php');
         foreach ([
             'scenario.kind_search_area', 'scenario.area_add_to_scenario_title', 'scenario.area_item_not_found', 'scenario.sector_before_area',

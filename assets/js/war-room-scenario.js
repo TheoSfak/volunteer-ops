@@ -35,25 +35,47 @@
  *   - the team slots (v3.453.0): names for teams that may not exist yet, in the card, in the window's recipient
  *     list, and in the dialog that play opens to ask which team is which.
  *
+ * Two places show the card (v3.462.0), and this one file serves both, through ONE renderer:
+ *   - the Scenario PAGE (mission-scenario-view.php, its own tab, command only): the whole card - phases, orders, ▶,
+ *     «Ποια ομάδα είναι ποια;», the waits, withdrawing, renaming, the «Εντολή σε άτομα» form. It has no map, so what
+ *     needs one («Δείξε το στον χάρτη», «Τομείς», «Κτίριο») is a link to the Action Room, which opens focused on that
+ *     order (?sc_do=...&sc_item=...; runMapAction below). The page marks itself with data-sc-mode="page" on #scenarioBody.
+ *   - the Action Room: the card there is a slim summary line («Φάση 1 · 4/6 ✓ · Φάση 2 · περιμένουν 2 ομάδες») and a link
+ *     to the page. Everything of the map stays here: the ghosts and the «Στο σενάριο ▾» menus of the order windows.
+ * The two tabs share no messages: each asks mission-scenario.php again every REFRESH_MS, so a phase played on the page
+ * is on the map within that time, and an order staged from a map window is on the page within it.
+ *
  * The plan is never part of the 5-second poll or of WR_BOOT: it is fetched here, once when the page opens and
  * again whenever the tab comes back to the front or an action changes it (every answer of mission-scenario.php
  * carries the whole plan). A second coordinator's change shows up at the next of those.
  *
  * Loaded before the page's own script, so it only DECLARES things here and reaches for the page's globals (map,
- * dispatches, csrfToken, WR_MISSION_ID, t(), escapeHtml(), renderDispatches()) when it is called.
+ * dispatches, csrfToken, WR_MISSION_ID, t(), escapeHtml(), renderDispatches()) when it is called. The Scenario page
+ * defines the same few globals itself (a small boot script printed by PHP), so nothing here knows which page it is on
+ * except through data-sc-mode.
  */
 (function () {
     const ENDPOINT = 'mission-scenario.php';
+    // Where the links of the page lead to, and the tab they reuse: the Action Room of this mission names its own window (init, in
+    // the Action Room), so a link of the page navigates THAT tab instead of opening a second Action Room.
+    const ROOM_PAGE = 'war-room.php';
+    function roomTarget() {
+        return 'wrActionRoom' + WR_MISSION_ID;
+    }
 
     let scenario = {phases: [], slots: [], teams: []};
     let ghostLayer = null;
     let initialised = false;
     let busy = false;
     let lastJson = '';
-    // While an order of a played phase is still under way its progress moves on its own (a team presses «Ολοκληρώθηκε»),
-    // so the card asks again now and then - only while the tab is in front, nobody is choosing in the card and there is
-    // something to wait for. It redraws only when the answer differs, so a select being used is never torn down.
+    // True on the Scenario page (the whole card), false in the Action Room (the summary line). Set once, by init().
+    let pageMode = false;
+    let deepLinkDone = false;
+    // The card asks again now and then, so that what another tab changed shows up: always on the page, in the Action Room
+    // whenever there is a plan to show ghosts of - only while the tab is in front and nobody is choosing in the card. It
+    // redraws only when the answer differs, so a select being used is never torn down.
     const REFRESH_MS = 20000;
+    const DEEP_LINK_DELAY_MS = 800;
 
     // The general orders a phase may carry (v3.457.0): orders to people rather than to a place. The three that carry
     // words are the first three; the others are a request for a location, a photo or a video.
@@ -81,6 +103,11 @@
         return escapeHtml(String(value == null ? '' : value));
     }
 
+    // The Action Room opened on one order of the plan: what to do there (goto | divide-area | add-building) and which order.
+    function roomHref(act, itemId) {
+        return ROOM_PAGE + '?id=' + encodeURIComponent(WR_MISSION_ID) + '&sc_do=' + encodeURIComponent(act) + '&sc_item=' + encodeURIComponent(itemId);
+    }
+
     function injectCss() {
         if (document.getElementById('wrScenarioCss')) return;
         const style = document.createElement('style');
@@ -102,7 +129,18 @@
             '.wr-sc-goto:hover{text-decoration:underline}',
             '.wr-sc-child{margin-left:14px;border-left:2px solid rgba(128,128,128,.35);padding-left:6px}',
             '.wr-sc-waits{margin-top:6px;padding:6px 8px;border:1px dashed rgba(178,106,0,.6);border-radius:6px}',
-            '.wr-sc-wait + .wr-sc-wait{margin-top:6px;padding-top:6px;border-top:1px solid rgba(128,128,128,.25)}'
+            '.wr-sc-wait + .wr-sc-wait{margin-top:6px;padding-top:6px;border-top:1px solid rgba(128,128,128,.25)}',
+            // The summary line of the Action Room: one small chip per phase.
+            '.wr-sc-chips{display:flex;flex-wrap:wrap;gap:4px}',
+            '.wr-sc-chip{display:inline-block;padding:2px 8px;border-radius:999px;font-size:.78rem;font-weight:600;border:1px solid rgba(128,128,128,.4);background:rgba(128,128,128,.08)}',
+            '.wr-sc-chip-ok{color:#146c43;border-color:rgba(25,135,84,.5);background:rgba(25,135,84,.1)}',
+            '.wr-sc-chip-run{color:#0a58ca;border-color:rgba(13,110,253,.45);background:rgba(13,110,253,.08)}',
+            '.wr-sc-chip-wait{color:#8a5300;border-color:rgba(178,106,0,.55);background:rgba(255,193,7,.14)}',
+            '.wr-sc-chip-bad{color:#b02a37;border-color:rgba(220,53,69,.55);background:rgba(220,53,69,.1)}',
+            '.wr-sc-chip-ready{color:#146c43;border-color:#198754;box-shadow:0 0 0 2px rgba(25,135,84,.18)}',
+            // The page: a wide screen holds the phases side by side instead of one long column.
+            '.wr-sc-page .wr-sc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:.75rem;align-items:start;margin-bottom:.75rem}',
+            '.wr-sc-page .wr-sc-grid .wr-sc-phase{margin-bottom:0}'
         ].join('\n');
         document.head.appendChild(style);
     }
@@ -122,17 +160,24 @@
     function load() {
         return fetch(ENDPOINT + '?mission_id=' + encodeURIComponent(WR_MISSION_ID))
             .then(r => r.json())
-            .then(res => { if (res && res.ok) { apply(res.scenario); showReleased(res); } return res; })
-            .catch(() => null);
+            .then(res => { if (res && res.ok) { apply(res.scenario); showReleased(res); consumeDeepLink(); } else { loadFailed(res); } return res; })
+            .catch(() => { loadFailed(null); return null; });
     }
 
-    // Something is under way while a played phase has an open order - or an order waiting for its team (v3.461.0): then the card keeps
-    // refreshing, and each refresh is also the safety net that sends what a missed completion left waiting.
-    function underWay() {
-        return scenario.phases.some(p => p.played_at && p.progress && (p.progress.open > 0 || p.progress.waiting > 0));
+    // The page has nothing to draw until the plan has come: if it never does (the mission was closed, the session ended, the
+    // connection is down) it says so instead of staying empty. After a first success the last good card stays.
+    function loadFailed(res) {
+        const body = document.getElementById('scenarioBody');
+        if (!pageMode || !body || lastJson) return;
+        body.innerHTML = `<div class="alert alert-warning mb-0" data-sc-load-error="1">${esc((res && res.error) || t('common.send_failed'))}</div>`;
     }
+
+    // Every REFRESH_MS the card asks again, on the page and in the Action Room alike: another tab may have played a phase
+    // or staged an order, a team may have finished an order, and each refresh is also the safety net that sends what a
+    // missed completion left waiting for a team (v3.461.0). It stops while the tab is hidden, while an action is in
+    // flight, and while somebody is choosing or typing in the card.
     function refreshProgress() {
-        if (document.hidden || busy || !underWay()) return;
+        if (document.hidden || busy) return;
         const body = document.getElementById('scenarioBody');
         const active = document.activeElement;
         if (body && active && body.contains(active) && (active.tagName === 'SELECT' || active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
@@ -321,10 +366,11 @@
             ? `<button type="button" class="btn btn-outline-primary btn-sm py-0" data-sc="retry" data-item="${item.id}" title="${esc(t('scenario.retry_btn'))}"><i class="bi bi-arrow-repeat"></i></button>` : '';
         const del = !item.sent
             ? `<button type="button" class="btn btn-outline-danger btn-sm py-0" data-sc="delete-item" data-item="${item.id}" title="${esc(t('scenario.item_delete'))}"><i class="bi bi-x-lg"></i></button>` : '';
-        // An order to people has no place on the map to show.
+        // An order to people has no place on the map to show. The page has no map either: its link opens the Action Room on the
+        // order (v3.462.0), the one place that can show it. data-sc-link tells the click handler to leave the link alone.
         const goto = (item.sent || item.type === 'order')
             ? `<span>${esc(itemTitle(item))}</span>`
-            : `<a href="#" class="wr-sc-goto" data-sc="goto" data-item="${item.id}" title="${esc(t('scenario.show_on_map'))}">${esc(itemTitle(item))}</a>`;
+            : `<a href="${esc(roomHref('goto', item.id))}" target="${roomTarget()}" class="wr-sc-goto" data-sc="goto" data-item="${item.id}" data-sc-link="1" title="${esc(t('scenario.show_on_map'))}">${esc(itemTitle(item))}</a>`;
         // A sector says which search area it is cut from (the area may be gone: then the line below says so). An area the
         // scenario itself still has to make says in which phase (v3.459.0).
         let where = '';
@@ -362,11 +408,11 @@
         const recipient = (isArea || item.type === 'building') ? '' : ` <i class="bi bi-arrow-right-short"></i> ${target}`;
         // The button goes under the words, not beside them: the card is narrow, and a button in the row squeezes the name.
         const divide = (isArea && !item.sent)
-            ? `<div class="mt-1"><button type="button" class="btn btn-outline-primary btn-sm py-0" data-sc="divide-area" data-item="${item.id}" title="${esc(t('scenario.area_divide_title'))}"><i class="bi bi-grid-3x3-gap me-1"></i>${esc(t('scenario.area_divide_btn'))}</button></div>` : '';
+            ? `<div class="mt-1"><a href="${esc(roomHref('divide-area', item.id))}" target="${roomTarget()}" class="btn btn-outline-primary btn-sm py-0" data-sc="divide-area" data-item="${item.id}" data-sc-link="1" title="${esc(t('scenario.area_divide_title'))}"><i class="bi bi-grid-3x3-gap me-1"></i>${esc(t('scenario.area_divide_btn'))}</a></div>` : '';
         // A sector the scenario has still to make can have buildings written down in it: «Κτίριο» arms the next click on the map
         // (v3.460.0). Also under the words, for the same reason.
         const addBuilding = (item.type === 'sector' && !item.sent && Array.isArray(item.geo) && item.geo.length >= 3)
-            ? `<div class="mt-1"><button type="button" class="btn btn-outline-primary btn-sm py-0" data-sc="add-building" data-item="${item.id}" title="${esc(t('scenario.building_add_title'))}"><i class="bi bi-building-add me-1"></i>${esc(t('scenario.building_add_btn'))}</button></div>` : '';
+            ? `<div class="mt-1"><a href="${esc(roomHref('add-building', item.id))}" target="${roomTarget()}" class="btn btn-outline-primary btn-sm py-0" data-sc="add-building" data-item="${item.id}" data-sc-link="1" title="${esc(t('scenario.building_add_title'))}"><i class="bi bi-building-add me-1"></i>${esc(t('scenario.building_add_btn'))}</a></div>` : '';
         return `<li class="wr-sc-item d-flex align-items-start gap-1${item.state === 'withdrawn' || item.state === 'cancelled' ? ' wr-sc-withdrawn' : ''}${item.parent_item_id ? ' wr-sc-child' : ''}" data-item="${item.id}">
             <i class="bi ${icon} text-secondary mt-1"></i>
             <span class="flex-grow-1">${goto}${where}${recipient}${status}${divide}${addBuilding}</span>
@@ -515,11 +561,54 @@
         }
     }
 
+    // The Action Room's card (v3.462.0): one chip per phase and nothing to press - «Φάση 1 · 4/6 ✓», «Φάση 2 · περιμένουν 2 ομάδες»,
+    // «Φάση 3 · δεν στάλθηκε · εντολές: 5». The page behind the link beside it has everything else.
+    const SUMMARY_MAX_CHIPS = 6;
+    function phaseChip(phase, previous) {
+        const parts = [phaseName(phase)];
+        let tone = 'idle';
+        if (phase.played_at) {
+            const pr = phase.progress || {};
+            if (pr.total > 0) parts.push(t('scenario.progress_badge', {done: pr.done, total: pr.total}));
+            else if (pr.withdrawn > 0) parts.push(t('scenario.state_withdrawn'));
+            const waits = (Array.isArray(phase.waits) ? phase.waits : []).filter(w => !w.cancelled);
+            const blocked = waits.filter(w => w.cant).length;
+            const waiting = waits.length - blocked;
+            const failed = phase.items.filter(i => !i.sent && i.error).length;
+            if (waiting > 0) parts.push(waiting === 1 ? t('scenario.summary_waiting_one') : t('scenario.summary_waiting_many', {n: waiting}));
+            if (blocked > 0) parts.push(t('scenario.summary_blocked', {n: blocked}));
+            if (failed > 0) parts.push(t('scenario.summary_failed', {n: failed}));
+            tone = (blocked > 0 || failed > 0) ? 'bad' : (waiting > 0 ? 'wait' : (pr.complete ? 'ok' : 'run'));
+        } else {
+            parts.push(phase.items.length ? t('scenario.summary_unsent', {n: phase.items.length}) : t('scenario.phase_no_orders'));
+            // The same passive note as the page's «έτοιμη η Φάση n+1»: the earlier phase is finished, so this one is next.
+            if (phase.items.length && hintEnabled() && previous && previous.played_at && previous.progress && previous.progress.complete) {
+                parts.push(t('scenario.summary_ready'));
+                tone = 'ready';
+            }
+        }
+        return `<span class="wr-sc-chip wr-sc-chip-${tone}" data-sc-chip="${phase.id}">${esc(parts.join(' · '))}</span>`;
+    }
+
+    function summaryHtml() {
+        if (!scenario.phases.length) return `<div class="small text-muted" data-sc-summary="empty">${esc(t('scenario.summary_empty'))}</div>`;
+        const shown = scenario.phases.slice(0, SUMMARY_MAX_CHIPS);
+        const more = scenario.phases.length - shown.length;
+        const chips = shown.map((phase, i) => phaseChip(phase, i > 0 ? scenario.phases[i - 1] : null)).join('');
+        return `<div class="wr-sc-chips" data-sc-summary="chips">${chips}${more > 0 ? `<span class="wr-sc-chip">${esc(t('scenario.summary_more', {n: more}))}</span>` : ''}</div>`;
+    }
+
     function renderCard() {
         const body = document.getElementById('scenarioBody');
         if (!body) return;
+        if (!pageMode) {
+            body.innerHTML = summaryHtml();
+            return;
+        }
         const add = `<button type="button" class="btn btn-outline-primary btn-sm w-100" data-sc="add-phase"><i class="bi bi-plus-lg me-1"></i>${esc(t('scenario.add_phase_btn'))}</button>`;
-        const lead = scenario.phases.length ? scenario.phases.map(phaseHtml).join('') : `<p class="small text-muted mb-2">${esc(t('scenario.empty'))}</p>`;
+        const lead = scenario.phases.length
+            ? `<div class="wr-sc-grid">${scenario.phases.map(phaseHtml).join('')}</div>`
+            : `<p class="small text-muted mb-2">${esc(t('scenario.empty'))}</p>`;
         const hintToggle = scenario.phases.length > 1
             ? `<label class="d-flex align-items-start gap-1 small text-muted mt-2"><input type="checkbox" class="form-check-input mt-1" data-sc-hint="1"${hintEnabled() ? ' checked' : ''}><span>${esc(t('scenario.hint_toggle'))}</span></label>` : '';
         body.innerHTML = lead + add + orderFormHtml() + hintToggle + slotsHtml();
@@ -692,23 +781,71 @@
             .finally(() => { busy = false; sel.disabled = false; });
     }
 
+    // What the Action Room does when the page sends it here (?sc_do=...&sc_item=...): the three things that need its map. Returns
+    // false when the order is not there to act on any more (sent, taken off the plan, or never had an outline).
+    function runMapAction(act, itemId) {
+        const hit = findItem(itemId);
+        if (!hit) return false;
+        const item = hit.item;
+        if (act === 'goto') {
+            // «Δείξε το στον χάρτη»: the card of the map is brought into view and the map goes to the order.
+            if (typeof map !== 'undefined' && map && item.geo) {
+                if (typeof scrollToCard === 'function') scrollToCard('mapCard');
+                if (item.type === 'point') map.setView([item.geo.lat, item.geo.lng], Math.max(map.getZoom(), 16));
+                else if (Array.isArray(item.geo) && item.geo.length === 1) map.setView(item.geo[0], Math.max(map.getZoom(), 16));
+                else map.fitBounds(L.latLngBounds(item.geo), {padding: [40, 40]});
+            }
+            return true;
+        }
+        if (act === 'divide-area') {
+            // «Τομείς» on an area the scenario has still to make (v3.459.0): the division window opens on it. The sectors cut
+            // there are written down against this area (item:<id>), not made. The page's own function, as for a live area.
+            if (item.type !== 'search_area' || item.sent || !Array.isArray(item.geo) || item.geo.length < 3) return false;
+            if (typeof openDivideSectorsForStagedArea !== 'function') return false;
+            openDivideSectorsForStagedArea({item_id: item.id, label: item.label || '', geo: item.geo});
+            return true;
+        }
+        if (act === 'add-building') {
+            // «Κτίριο» on a sector the scenario has still to make (v3.460.0): the next click on the map, inside that sector, opens
+            // the popup that writes the building down against this sector ('item:<id>'). The page's own function arms it.
+            if (item.type !== 'sector' || item.sent || !Array.isArray(item.geo) || item.geo.length < 3) return false;
+            if (typeof armStagedBuilding !== 'function') return false;
+            armStagedBuilding({item_id: item.id, label: item.label || '', geo: item.geo, phase_id: hit.phase.id});
+            return true;
+        }
+        return false;
+    }
+
+    // The Action Room, opened from a link of the Scenario page, does what the link asked once the plan is here, and takes the
+    // asking out of its address so a reload does not do it again. Once per page load; the page itself never does this.
+    function consumeDeepLink() {
+        if (deepLinkDone || pageMode) return;
+        deepLinkDone = true;
+        let url;
+        try { url = new URL(location.href); } catch (e) { return; }
+        const act = url.searchParams.get('sc_do');
+        const itemId = url.searchParams.get('sc_item');
+        if (!act || !itemId) return;
+        try {
+            url.searchParams.delete('sc_do');
+            url.searchParams.delete('sc_item');
+            history.replaceState(null, '', url.pathname + url.search + url.hash);
+        } catch (e) { /* the address stays: a reload would only ask again */ }
+        // The Action Room frames the mission on the map as it opens, and that would take the map away from the order again: so the
+        // action waits until the page has loaded and has had a moment to settle (the action happens in front of the person).
+        const run = () => setTimeout(() => { if (!runMapAction(act, itemId)) alert(t('scenario.deeplink_gone')); }, DEEP_LINK_DELAY_MS);
+        if (document.readyState === 'complete') run();
+        else window.addEventListener('load', run, {once: true});
+    }
+
     function onCardClick(e) {
         const el = e.target.closest('[data-sc]');
         if (!el) return;
+        // A link to the Action Room (v3.462.0) is a link: the browser opens it, in the tab named for it.
+        if (el.dataset.scLink === '1') return;
         e.preventDefault();
         if (busy) return;
         const act = el.dataset.sc;
-
-        if (act === 'goto') {
-            const hit = findItem(el.dataset.item);
-            if (hit && typeof map !== 'undefined' && map && hit.item.geo) {
-                if (typeof scrollToCard === 'function') scrollToCard('mapCard');
-                if (hit.item.type === 'point') map.setView([hit.item.geo.lat, hit.item.geo.lng], Math.max(map.getZoom(), 16));
-                else if (Array.isArray(hit.item.geo) && hit.item.geo.length === 1) map.setView(hit.item.geo[0], Math.max(map.getZoom(), 16));
-                else map.fitBounds(L.latLngBounds(hit.item.geo), {padding: [40, 40]});
-            }
-            return;
-        }
 
         const run = (action, fields, after) => {
             busy = true;
@@ -718,21 +855,7 @@
             }).catch(() => alert(t('common.send_failed'))).finally(() => { busy = false; el.disabled = false; });
         };
 
-        if (act === 'divide-area') {
-            // «Τομείς» on an area the scenario has still to make (v3.459.0): the division window opens on it. The sectors cut
-            // there are written down against this area (item:<id>), not made. The page's own function, as for a live area.
-            const hit = findItem(el.dataset.item);
-            if (!hit || hit.item.type !== 'search_area' || hit.item.sent || !Array.isArray(hit.item.geo) || hit.item.geo.length < 3) return;
-            if (typeof openDivideSectorsForStagedArea !== 'function') return;
-            openDivideSectorsForStagedArea({item_id: hit.item.id, label: hit.item.label || '', geo: hit.item.geo});
-        } else if (act === 'add-building') {
-            // «Κτίριο» on a sector the scenario has still to make (v3.460.0): the next click on the map, inside that sector, opens
-            // the popup that writes the building down against this sector ('item:<id>'). The page's own function arms it.
-            const hit = findItem(el.dataset.item);
-            if (!hit || hit.item.type !== 'sector' || hit.item.sent || !Array.isArray(hit.item.geo) || hit.item.geo.length < 3) return;
-            if (typeof armStagedBuilding !== 'function') return;
-            armStagedBuilding({item_id: hit.item.id, label: hit.item.label || '', geo: hit.item.geo, phase_id: hit.phase.id});
-        } else if (act === 'add-phase') {
+        if (act === 'add-phase') {
             run('add_phase', {});
         } else if (act === 'order-open') {
             orderDraft.open = true;
@@ -1007,12 +1130,19 @@
         initialised = true;
         injectCss();
         const body = document.getElementById('scenarioBody');
-        if (body) {
+        pageMode = !!(body && body.dataset && body.dataset.scMode === 'page');
+        // The Action Room names its window, once, so the page's links reach this very tab (a window that already has a name keeps it).
+        if (!pageMode) {
+            try { if (!window.name) window.name = roomTarget(); } catch (e) { /* a sandboxed frame: the links open a tab of their own */ }
+        }
+        if (body && pageMode) {
             body.addEventListener('click', onCardClick);
             body.addEventListener('change', onCardChange);
             body.addEventListener('input', onCardInput);
         }
-        renderCard();
+        // The page waits for the plan before drawing (its placeholder says so): an empty card for a second would read as "no
+        // scenario". The Action Room's summary is small enough to start from empty.
+        if (!pageMode) renderCard();
         load();
         document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
         setInterval(refreshProgress, REFRESH_MS);

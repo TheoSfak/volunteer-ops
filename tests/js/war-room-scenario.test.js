@@ -36,13 +36,21 @@ function fakeLeaflet(drawn) {
  * Loads the script with a plan the endpoint "answers" with. Returns {api, drawn, body, calls, ctx}: the script's
  * window.wrScenario, what it drew, the card's fake element, the requests it made and the context (for the page
  * globals it assigns).
+ *
+ * opts.mode is where the script thinks it is (v3.462.0): 'page' (the default, so every test of the card draws the whole
+ * card) is the Scenario page, data-sc-mode="page"; 'room' is the Action Room, which draws a summary line and has the map.
+ * opts.href is the address the page was opened at (the Action Room is opened on an order by ?sc_do=...&sc_item=...),
+ * opts.readyState what the document says about loading. Returns also {win, timeouts (what setTimeout was asked for, in
+ * order), winHandlers}.
  */
-async function load(scenario, answers = {}) {
+async function load(scenario, answers = {}, opts = {}) {
     const drawn = [];
     const calls = [];
     const handlers = {};
-    const body = {innerHTML: '', addEventListener: (type, fn) => { handlers[type] = fn; }};
-    const win = {};
+    const body = {innerHTML: '', dataset: {scMode: opts.mode || 'page'}, addEventListener: (type, fn) => { handlers[type] = fn; }};
+    const winHandlers = {};
+    const timeouts = [];
+    const win = {name: opts.windowName || '', addEventListener: (type, fn) => { winHandlers[type] = fn; }};
     const timers = [];
     const storage = {};
     const doc = {
@@ -52,6 +60,7 @@ async function load(scenario, answers = {}) {
         addEventListener() {},
         dispatchEvent() {},
         hidden: false,
+        readyState: opts.readyState || 'complete',
         activeElement: null,
     };
     body.contains = (el) => !!el && el.inCard === true;
@@ -59,6 +68,10 @@ async function load(scenario, answers = {}) {
         window: win,
         document: doc,
         setInterval: (fn) => { timers.push(fn); return timers.length; },
+        setTimeout: (fn, ms) => { timeouts.push({fn, ms}); return timeouts.length; },
+        URL,
+        location: {href: opts.href || 'http://localhost/volunteerops/war-room.php?id=83'},
+        history: {replaceState: (state, title, url) => calls.push(['replaceState', url])},
         localStorage: {getItem: (k) => (k in storage ? storage[k] : null), setItem: (k, v) => { storage[k] = String(v); }},
         CustomEvent: class { constructor(type) { this.type = type; } },
         URLSearchParams,
@@ -86,7 +99,7 @@ async function load(scenario, answers = {}) {
     vm.runInContext(SOURCE, ctx);
     win.wrScenario.init();
     await new Promise((resolve) => setImmediate(resolve));
-    return {api: win.wrScenario, drawn, body, calls, ctx, handlers, timers, storage, doc};
+    return {api: win.wrScenario, drawn, body, calls, ctx, handlers, timers, storage, doc, win, timeouts, winHandlers};
 }
 
 const TEAM = {audience: 'team', team_id: 39, team_label: 'Alpha 1', team_missing: false, slot_id: null, slot_label: null, unmapped: false, team_empty: false, area_missing: false, sent: false, error: null};
@@ -306,7 +319,7 @@ test('switching the note off is remembered and sends nothing', async () => {
     assert.equal(calls.filter((c) => c[0] === 'fetch').length, 0, 'a note is not an order');
 });
 
-test('the card asks again for progress only while something is under way, the tab is in front and nobody is choosing in it', async () => {
+test('the card asks again every 20 s, on the page and in the Action Room, but not while the tab is hidden, an action is in flight or somebody is choosing in it', async () => {
     const {timers, calls, doc} = await load(twoPhases({items: [sentItem(1, 'open')]}, {}));
     assert.equal(timers.length, 1);
     const gets = (c) => c.filter((x) => x[0] === 'fetch' && !x[2]).length;
@@ -314,7 +327,7 @@ test('the card asks again for progress only while something is under way, the ta
 
     timers[0]();
     await settle();
-    assert.equal(gets(calls), base + 1, 'something is under way: it asks');
+    assert.equal(gets(calls), base + 1, 'it asks');
 
     doc.hidden = true;
     timers[0]();
@@ -326,12 +339,19 @@ test('the card asks again for progress only while something is under way, the ta
     assert.equal(gets(calls), base + 1, 'not while a select of the card is in use');
     doc.activeElement = null;
 
-    // Nothing under way: finished and withdrawn phases are not worth asking about.
+    // Nothing under way - a finished phase, or no plan at all - is still asked about: another tab may have played or staged one (v3.462.0).
     const idle = await load(twoPhases({progress: progress({done: 6, open: 0, complete: true, can_withdraw: false})}, {}));
     const idleBase = gets(idle.calls);
     idle.timers[0]();
     await settle();
-    assert.equal(gets(idle.calls), idleBase);
+    assert.equal(gets(idle.calls), idleBase + 1);
+    for (const mode of ['page', 'room']) {
+        const empty = await load({phases: [], slots: [], teams: []}, {}, {mode});
+        const emptyBase = gets(empty.calls);
+        empty.timers[0]();
+        await settle();
+        assert.equal(gets(empty.calls), emptyBase + 1, mode + ': an empty plan is asked about too');
+    }
 });
 
 test('an answer that is the same as the card already shows does not redraw it', async () => {
@@ -696,23 +716,24 @@ test('a made area stands calmly: no «Τομείς», no delete, no red shield, 
     assert.doesNotMatch(body.innerHTML, /data-sc="withdraw"/, 'nothing in the phase can be taken back');
 });
 
-test('«Τομείς» opens the division window on the staged area with its item, name and points', async () => {
-    const {handlers, ctx} = await load(zonePhase([searchArea(1)], false));
+test('«Τομείς» opens the division window on the staged area with its item, name and points - when the page sends the Action Room here', async () => {
+    const {ctx, timeouts} = await load(zonePhase([searchArea(1)], false), {}, {mode: 'room', href: 'http://localhost/volunteerops/war-room.php?id=83&sc_do=divide-area&sc_item=1'});
     const opened = [];
     ctx.openDivideSectorsForStagedArea = (area) => opened.push(area);
-    await clickOn(handlers, {sc: 'divide-area', item: '1'});
+    timeouts[0].fn();
     // Objects made inside the vm context have another Array.prototype: compare them as JSON.
     assert.equal(JSON.stringify(opened), JSON.stringify([{item_id: 1, label: 'Κοίτη', geo: [[35.0, 24.0], [35.1, 24.0], [35.1, 24.1]]}]));
 });
 
-test('«Τομείς» does nothing for an area that is already made, an item that is gone, or an area with no outline', async () => {
-    const {handlers, ctx} = await load(zonePhase([searchArea(1, {sent: true, state: 'standing'}), searchArea(2, {geo: [[35, 24]]})], false));
-    const opened = [];
-    ctx.openDivideSectorsForStagedArea = (area) => opened.push(area);
-    await clickOn(handlers, {sc: 'divide-area', item: '1'});
-    await clickOn(handlers, {sc: 'divide-area', item: '2'});
-    await clickOn(handlers, {sc: 'divide-area', item: '99'});
-    assert.deepEqual(opened, []);
+test('«Τομείς» does nothing for an area that is already made, an item that is gone, or an area with no outline - and says so', async () => {
+    for (const item of ['1', '2', '99']) {
+        const {ctx, timeouts, calls} = await load(zonePhase([searchArea(1, {sent: true, state: 'standing'}), searchArea(2, {geo: [[35, 24]]})], false), {}, {mode: 'room', href: 'http://localhost/volunteerops/war-room.php?id=83&sc_do=divide-area&sc_item=' + item});
+        const opened = [];
+        ctx.openDivideSectorsForStagedArea = (area) => opened.push(area);
+        timeouts[0].fn();
+        assert.deepEqual(opened, [], 'item ' + item);
+        assert.ok(calls.some((c) => c[0] === 'alert' && /scenario\.deeplink_gone/.test(c[1])), 'item ' + item + ': the person is told it is not there to act on');
+    }
 });
 
 test('a sector says which staged area it is cut from and in which phase; one cut from a made area says only the area', async () => {
@@ -881,12 +902,11 @@ test('«Κτίριο» is on an unsent sector with an outline only, under its wo
     assert.doesNotMatch(notASector.body.innerHTML, /add-building/, 'an area and a building have no «Κτίριο»');
 });
 
-test('«Κτίριο» arms the page with the sector\'s item, name, points and phase', async () => {
-    const {handlers, ctx} = await load(zonePhase([stagedSector(2)], false));
+test('«Κτίριο» arms the Action Room with the sector\'s item, name, points and phase - when the page sends it here', async () => {
+    const {ctx, timeouts} = await load(zonePhase([stagedSector(2)], false), {}, {mode: 'room', href: 'http://localhost/volunteerops/war-room.php?id=83&sc_do=add-building&sc_item=2'});
     const armed = [];
     ctx.armStagedBuilding = (sector) => armed.push(sector);
-    await clickOn(handlers, {sc: 'add-building', item: '2'});
-    // Objects made inside the vm context have another Array.prototype: compare them as JSON.
+    timeouts[0].fn();
     assert.equal(JSON.stringify(armed), JSON.stringify([{item_id: 2, label: 'Τομέας Α', geo: [[35.0, 24.0], [35.1, 24.0], [35.1, 24.1]], phase_id: 7}]));
 });
 
@@ -1134,13 +1154,6 @@ test('the card keeps refreshing while an order waits, and what a refresh release
     assert.ok(calls.some((c) => c[0] === 'renderDispatches'));
     assert.ok(calls.some((c) => c[0] === 'sectorRefreshAfter'));
     assert.ok(calls.some((c) => c[0] === 'renderRouteLayer'));
-
-    // With nothing open and nothing waiting there is nothing to watch.
-    const idle = await load({phases: [], slots: [], teams: []});
-    idle.calls.length = 0;
-    idle.timers[0]();
-    await settle();
-    assert.equal(idle.calls.filter((c) => c[0] === 'fetch').length, 0);
 });
 
 test('an order that went out by itself says when and why, and one sent by hand says so', async () => {
@@ -1149,4 +1162,186 @@ test('an order that went out by itself says when and why, and one sent by hand s
     const {body} = await load(armedPhases([auto, manual], []));
     assert.match(body.innerHTML, /scenario\.state_released_auto\{"time":"14:32"\}/);
     assert.match(body.innerHTML, /scenario\.state_released_manual\{"time":"14:40"\}/);
+});
+
+// ── v3.462.0: the card on its own page, and a summary line in the Action Room ────────────────────────────────────
+
+const PAGE_URL = 'war-room.php?id=83';
+
+test('on the page the controls that need the map are links to the Action Room, named for the mission, and the click handler leaves them alone', async () => {
+    const {body, handlers, calls} = await load(zonePhase([searchArea(1), stagedSector(2), building(3)], false));
+    const html = body.innerHTML;
+    assert.match(html, /<a href="war-room\.php\?id=83&amp;sc_do=goto&amp;sc_item=1" target="wrActionRoom83" class="wr-sc-goto" data-sc="goto" data-item="1" data-sc-link="1"/);
+    assert.match(html, /<a href="war-room\.php\?id=83&amp;sc_do=divide-area&amp;sc_item=1" target="wrActionRoom83" class="btn btn-outline-primary btn-sm py-0" data-sc="divide-area" data-item="1" data-sc-link="1"/);
+    assert.match(html, /<a href="war-room\.php\?id=83&amp;sc_do=add-building&amp;sc_item=2" target="wrActionRoom83" class="btn btn-outline-primary btn-sm py-0" data-sc="add-building" data-item="2" data-sc-link="1"/);
+    assert.doesNotMatch(html, /<button[^>]*data-sc="(goto|divide-area|add-building)"/, 'no button on the page asks the map for anything');
+
+    // A click on such a link is the browser's: nothing is prevented, nothing is sent.
+    let prevented = false;
+    calls.length = 0;
+    await handlers.click({target: {closest: () => ({dataset: {sc: 'divide-area', item: '1', scLink: '1'}, disabled: false})}, preventDefault() { prevented = true; }});
+    assert.equal(prevented, false);
+    assert.equal(calls.length, 0);
+});
+
+test('the page draws the whole card, in a grid of phases, and never touches a map', async () => {
+    const {body, drawn, api, handlers, win} = await load(zonePhase([searchArea(1), stagedSector(2)], false));
+    assert.match(body.innerHTML, /class="wr-sc-grid"/);
+    assert.match(body.innerHTML, /data-sc="play"/);
+    assert.match(body.innerHTML, /data-sc="add-phase"/);
+    assert.match(body.innerHTML, /data-sc="order-open"/);
+    assert.match(body.innerHTML, /data-sc="add-slot"/);
+    assert.equal(drawn.length, 0, 'no ghosts: the page has no map');
+    assert.ok(handlers.click && handlers.change && handlers.input, 'the card listens to its own clicks, changes and typing');
+    assert.equal(win.name, '', 'the page does not rename its window: only the Action Room does');
+    assert.equal(typeof api.menuHtml, 'function', 'the API is the same one');
+});
+
+test('the Action Room draws only a summary line and keeps the map: ghosts, the order windows\' menus, its window\'s name', async () => {
+    const {body, drawn, handlers, win, api} = await load(zonePhase([searchArea(1)], false), {}, {mode: 'room'});
+    assert.match(body.innerHTML, /data-sc-summary="chips"/);
+    assert.doesNotMatch(body.innerHTML, /data-sc="/, 'nothing to press in the summary');
+    assert.doesNotMatch(body.innerHTML, /wr-sc-grid/);
+    assert.deepEqual(Object.keys(handlers), [], 'the summary listens to nothing');
+    assert.equal(win.name, 'wrActionRoom83', 'so that the page\'s links reach this very tab');
+    api.drawGhostsInto({});
+    assert.ok(drawn.length >= 2, "the ghosts are the same ones as before: the area's polygon and its number");
+    assert.match(api.menuHtml(), /data-sc-phase="7"/, 'the «Στο σενάριο ▾» menus still know the phases');
+});
+
+test('a window that already has a name keeps it', async () => {
+    const {win} = await load(zonePhase([], false), {}, {mode: 'room', windowName: 'mine'});
+    assert.equal(win.name, 'mine');
+});
+
+test('the summary has one chip per phase: how far a played one is, who waits, who is blocked, what failed; and how many orders an unplayed one holds', async () => {
+    const waits = [
+        {team_id: 40, team_label: 'Beta 2', n: 1, cancelled: false, phase_n: 1, done: 1, of: 3, cant: false},
+        {team_id: 41, team_label: 'Gamma 3', n: 1, cancelled: false, phase_n: 1, done: 0, of: 2, cant: true},
+        {team_id: 42, team_label: 'Delta 4', n: 1, cancelled: true, phase_n: 1, done: 0, of: 2, cant: false},
+    ];
+    const plan3 = {
+        phases: [
+            {id: 7, n: 1, played_at: '2026-11-07 10:00:00', items: [sentItem(1, 'done')], progress: progress({total: 6, done: 4}), waits: []},
+            {id: 8, n: 2, played_at: '2026-11-07 10:05:00', items: [sentItem(2, 'open'), Object.assign({}, TEAM, {id: 3, kind: 'dispatch', type: 'point', sent: false, error: 'x'})], progress: progress({total: 2, done: 0}), waits},
+            {id: 9, n: 3, played_at: null, items: [Object.assign({}, TEAM, {id: 4, type: 'point', geo: {lat: 1, lng: 2}})], progress: null, waits: []},
+        ],
+        slots: [], teams: [],
+    };
+    const {body} = await load(plan3, {}, {mode: 'room'});
+    const chips = body.innerHTML.match(/<span class="wr-sc-chip [^"]*" data-sc-chip="\d+">[^<]*<\/span>/g);
+    assert.equal(chips.length, 3);
+    assert.match(chips[0], /wr-sc-chip-run/);
+    assert.match(chips[0], /scenario\.phase_n\{"n":1\} · scenario\.progress_badge\{"done":4,"total":6\}/);
+    // Beta 2 waits (one team, singular), Gamma 3 is blocked, the cancelled wait of Delta 4 is not a wait, one order failed.
+    assert.match(chips[1], /wr-sc-chip-bad/);
+    assert.match(chips[1], /scenario\.summary_waiting_one · scenario\.summary_blocked\{"n":1\} · scenario\.summary_failed\{"n":1\}/);
+    assert.doesNotMatch(chips[1], /summary_waiting_many/);
+    assert.match(chips[2], /wr-sc-chip-idle/);
+    assert.match(chips[2], /scenario\.phase_n\{"n":3\} · scenario\.summary_unsent\{"n":1\}/);
+});
+
+test('the summary says «περιμένουν N» for more than one waiting team, ✓ in green when a phase is finished, and ready for the phase after it', async () => {
+    const waits = [{team_id: 40, n: 1, cancelled: false, phase_n: 1, done: 0, of: 1, cant: false}, {team_id: 41, n: 1, cancelled: false, phase_n: 1, done: 0, of: 1, cant: false}];
+    const waiting = await load({phases: [{id: 8, n: 2, played_at: 'x', items: [], progress: progress({total: 2, done: 0}), waits}], slots: [], teams: []}, {}, {mode: 'room'});
+    assert.match(waiting.body.innerHTML, /wr-sc-chip-wait/);
+    assert.match(waiting.body.innerHTML, /scenario\.summary_waiting_many\{"n":2\}/);
+
+    const plan2 = twoPhases({progress: progress({done: 6, open: 0, complete: true, can_withdraw: false}), waits: []}, {items: [Object.assign({}, TEAM, {id: 9, type: 'point', geo: {lat: 1, lng: 2}})]});
+    const ready = await load(plan2, {}, {mode: 'room'});
+    assert.match(ready.body.innerHTML, /wr-sc-chip-ok[^>]*>scenario\.phase_n\{"n":1\} · scenario\.progress_badge/);
+    assert.match(ready.body.innerHTML, /wr-sc-chip-ready[^>]*>scenario\.phase_n\{"n":2\} · scenario\.summary_unsent\{"n":1\} · scenario\.summary_ready/);
+
+    // The passive note of the page can be switched off, and then the summary does not say it either.
+    const off = await load(plan2, {}, {mode: 'room'});
+    off.storage.wrScenarioHint = '0';
+    off.api.reload();
+    await settle();
+    assert.doesNotMatch(off.body.innerHTML, /summary_ready/);
+});
+
+test('the summary of an empty plan says so, and a long plan shows six chips and how many more', async () => {
+    const empty = await load({phases: [], slots: [], teams: []}, {}, {mode: 'room'});
+    assert.match(empty.body.innerHTML, /data-sc-summary="empty">scenario\.summary_empty</);
+    const many = {phases: Array.from({length: 8}, (_, i) => ({id: i + 1, n: i + 1, played_at: null, items: [], progress: null, waits: []})), slots: [], teams: []};
+    const long = await load(many, {}, {mode: 'room'});
+    assert.equal((long.body.innerHTML.match(/data-sc-chip="/g) || []).length, 6);
+    assert.match(long.body.innerHTML, /scenario\.summary_more\{"n":2\}/);
+});
+
+test('the Action Room does what the page asked once the page has loaded, takes the asking out of its address, and keeps the rest of it', async () => {
+    const {ctx, timeouts, calls} = await load(twoPhases({items: [sentItem(1, 'open')]}, {items: [Object.assign({}, TEAM, {id: 5, type: 'point', geo: {lat: 35.1, lng: 24.2}, sent: false})]}), {}, {mode: 'room', href: 'http://localhost/volunteerops/war-room.php?id=83&sc_do=goto&sc_item=5&view=x#top'});
+    const moves = [];
+    ctx.map = {getZoom: () => 12, setView: (c, z) => moves.push(JSON.stringify([c, z])), fitBounds: () => moves.push('fit')};
+    const replaced = calls.filter((c) => c[0] === 'replaceState');
+    assert.equal(replaced.length, 1);
+    assert.equal(replaced[0][1], '/volunteerops/war-room.php?id=83&view=x#top', 'only sc_do and sc_item come out');
+    assert.equal(timeouts.length, 1);
+    assert.equal(timeouts[0].ms, 800, 'after the page has had a moment to frame the mission');
+    assert.deepEqual(moves, [], 'not before that moment');
+    timeouts[0].fn();
+    assert.deepEqual(moves, ['[[35.1,24.2],16]']);
+});
+
+test('the Action Room waits for the load event when the page is still loading, and asks only once', async () => {
+    const {timeouts, winHandlers, api, calls} = await load(twoPhases({}, {}), {}, {mode: 'room', readyState: 'loading', href: 'http://localhost/volunteerops/war-room.php?id=83&sc_do=goto&sc_item=1'});
+    assert.equal(timeouts.length, 0);
+    assert.equal(typeof winHandlers.load, 'function');
+    winHandlers.load();
+    assert.equal(timeouts.length, 1);
+    // A later refresh answers with the same plan: the link has been used up.
+    await api.reload();
+    assert.equal(timeouts.length, 1);
+    assert.equal(calls.filter((c) => c[0] === 'replaceState').length, 1);
+});
+
+test('without sc_do and sc_item, or on the page itself, nothing happens', async () => {
+    const plain = await load(twoPhases({}, {}), {}, {mode: 'room'});
+    assert.equal(plain.timeouts.length, 0);
+    assert.equal(plain.calls.filter((c) => c[0] === 'replaceState').length, 0);
+    const half = await load(twoPhases({}, {}), {}, {mode: 'room', href: 'http://localhost/volunteerops/war-room.php?id=83&sc_do=goto'});
+    assert.equal(half.timeouts.length, 0);
+    const onPage = await load(twoPhases({}, {}), {}, {mode: 'page', href: 'http://localhost/volunteerops/mission-scenario-view.php?id=83&sc_do=goto&sc_item=1'});
+    assert.equal(onPage.timeouts.length, 0, 'the page has no map to act on');
+    assert.equal(onPage.calls.filter((c) => c[0] === 'replaceState').length, 0);
+});
+
+test('an unknown action in the address says the order is not there, and does nothing else', async () => {
+    const {ctx, timeouts, calls} = await load(twoPhases({}, {items: [Object.assign({}, TEAM, {id: 5, type: 'point', geo: {lat: 35.1, lng: 24.2}, sent: false})]}), {}, {mode: 'room', href: 'http://localhost/volunteerops/war-room.php?id=83&sc_do=delete-everything&sc_item=5'});
+    ctx.map = {getZoom: () => 12, setView: () => calls.push(['moved']), fitBounds: () => calls.push(['moved'])};
+    timeouts[0].fn();
+    assert.ok(calls.some((c) => c[0] === 'alert' && /deeplink_gone/.test(c[1])));
+    assert.ok(!calls.some((c) => c[0] === 'moved'));
+});
+
+test('a staged order made from the map shows on the page at the next refresh, and one played on the page shows in the Action Room at its next', async () => {
+    const answerWith = (plan) => async () => ({json: async () => ({ok: true, scenario: plan})});
+    // The page asks again and draws what the other tab staged.
+    const page = await load(twoPhases({}, {}), {}, {mode: 'page'});
+    assert.doesNotMatch(page.body.innerHTML, /Σημείο 77/);
+    page.ctx.fetch = answerWith(twoPhases({}, {items: [Object.assign({}, TEAM, {id: 77, type: 'point', label: 'Σημείο 77', geo: {lat: 35, lng: 24}, sent: false})]}));
+    page.timers[0]();
+    await settle();
+    assert.match(page.body.innerHTML, /Σημείο 77/);
+    // The Action Room: phase 2 held one unsent order, and is played in the other tab.
+    const room = await load(twoPhases({}, {items: [Object.assign({}, TEAM, {id: 77, type: 'point', label: 'Σημείο 77', geo: {lat: 35, lng: 24}, sent: false})]}), {}, {mode: 'room'});
+    assert.match(room.body.innerHTML, /scenario\.phase_n\{"n":2\} · scenario\.summary_unsent\{"n":1\}/);
+    room.ctx.fetch = answerWith(twoPhases({}, {played_at: '2026-11-07 10:07:00', items: [sentItem(77, 'open')], progress: progress({total: 1, done: 0})}));
+    room.timers[0]();
+    await settle();
+    assert.doesNotMatch(room.body.innerHTML, /summary_unsent/);
+    assert.match(room.body.innerHTML, /scenario\.phase_n\{"n":2\} · scenario\.progress_badge\{"done":0,"total":1\}/);
+});
+
+test('the page says why when the plan never arrives, and keeps the last good card when a later refresh fails', async () => {
+    const dead = await load({phases: [], slots: [], teams: []}, {get: {ok: false, error: 'Η αποστολή δεν βρέθηκε ή δεν είναι ενεργή'}});
+    assert.match(dead.body.innerHTML, /data-sc-load-error="1">Η αποστολή δεν βρέθηκε/);
+    const room = await load({phases: [], slots: [], teams: []}, {get: {ok: false, error: 'x'}}, {mode: 'room'});
+    assert.doesNotMatch(room.body.innerHTML, /data-sc-load-error/, 'the Action Room has the map to show its trouble; the summary stays empty');
+
+    const good = await load(twoPhases({items: [sentItem(1, 'open')]}, {}), {});
+    good.ctx.fetch = async () => { throw new Error('offline'); };
+    await good.api.reload();
+    assert.match(good.body.innerHTML, /data-phase="7"/, 'the card the person was reading stays');
+    assert.doesNotMatch(good.body.innerHTML, /data-sc-load-error/);
 });
