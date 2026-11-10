@@ -647,7 +647,11 @@ final class MissionTeamsPageTest extends TestCase
         $this->assertSame(1, substr_count($war, 'id="teamsHeroBtn"'));
         $blockStart = strrpos(substr($war, 0, $button), '<?php if ($canManageWarRoom && !$volunteerTabs): ?>');
         $this->assertNotFalse($blockStart);
-        $this->assertStringNotContainsString('<?php endif; ?>', substr($war, $blockStart, $button - $blockStart), 'inside the command block, not after it');
+        $between = substr($war, $blockStart, $button - $blockStart);
+        // The «Σενάριο» button carries its own system-admin-only if/endif (v3.466.0), nested here; that is the
+        // one closed block allowed before the teams button, which stays unconditional once inside this one.
+        $this->assertSame(1, substr_count($between, '<?php endif; ?>'), 'inside the command block, not after it - only the nested «Σενάριο» if closes first');
+        $this->assertStringContainsString('<?php if (isSystemAdmin()): ?>', $between);
         $tag = substr($war, strrpos(substr($war, 0, $button), '<a '), 400);
         $this->assertStringContainsString('href="mission-teams-view.php?id=<?= $missionId ?>"', $tag);
         $this->assertStringContainsString('target="wrTeamsPage<?= $missionId ?>"', $tag);

@@ -194,9 +194,11 @@ final class ScenarioPageTest extends TestCase
         $this->assertStringNotContainsString('<button', $card);
         $this->assertSame(1, substr_count($war, 'data-card-id="scenarioCard"'), 'the card is in the page once');
         $this->assertSame(1, substr_count($war, 'id="scenarioBody"'));
-        // Still command only: the card and the script sit in the blocks that only command staff are given.
+        // System admin only (v3.466.0): the card and the script sit in blocks gated tighter than $canManageWarRoom.
         $script = strpos($war, '/assets/js/war-room-scenario.js?v=');
-        $this->assertStringContainsString('if ($canManageWarRoom)', substr($war, $script - 200, 200));
+        $this->assertStringContainsString('if ($canManageWarRoom && isSystemAdmin())', substr($war, $script - 200, 200));
+        $cardBlock = strpos($war, 'data-card-id="scenarioCard"');
+        $this->assertStringContainsString('if (isSystemAdmin())', substr($war, max(0, $cardBlock - 200), 200));
     }
 
     public function testTheMapActionsAreStillThePagesOwnFunctions(): void

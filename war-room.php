@@ -3727,10 +3727,13 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>
         <?php if ($canManageWarRoom && !$volunteerTabs): ?>
         <button type="button" class="btn btn-outline-light" data-bs-toggle="modal" data-bs-target="#reportModal"><i class="bi bi-stopwatch me-1"></i><?= t('hero.btn_response_report') ?></button>
+        <?php if (isSystemAdmin()): ?>
         <!-- «Σενάριο» (v3.462.0): the scenario's own page, in a tab of its own like the heart-rate report below - phases, the
-             state of every team, ▶ - to sit on a second screen while the map keeps running here. Command only (this block). The
+             state of every team, ▶ - to sit on a second screen while the map keeps running here. System admin only (v3.466.0):
+             tighter than this block's own $canManageWarRoom, because a staged plan is never shown to a department admin. The
              tab is named for the mission, so pressing this again brings back the one that is open instead of piling up tabs. -->
         <a href="mission-scenario-view.php?id=<?= $missionId ?>" target="wrScenarioPage<?= $missionId ?>" class="btn btn-outline-light" id="scenarioHeroBtn"><i class="bi bi-collection-play-fill me-1"></i><?= t('hero.btn_scenario') ?></a>
+        <?php endif; ?>
         <!-- «Ομάδες» (v3.463.0): the teams' own page, in a tab of its own like the Scenario - the automatic split by a number of
              people per team, moving a person between teams, renaming and deleting, and GPS per person or per team. Command only
              (this block). The tab is named for the mission, so pressing this again brings back the one that is open. -->
@@ -5566,7 +5569,10 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         // Scenario page (mission-scenario-view.php), where the whole card lives. The line is drawn entirely by
         // assets/js/war-room-scenario.js from mission-scenario.php (command only): the plan is not in the page, not in
         // WR_BOOT and not in the 5-second poll. The link is printed here, so it works before any script has run.
+        // System admin only (v3.466.0), tighter than this block's own $canManageWarRoom: a department admin never sees even
+        // the slim summary - the card itself is left out for them, not just emptied.
         ?>
+        <?php if (isSystemAdmin()): ?>
         <div class="card shadow-sm mb-4 border-primary" data-card-id="scenarioCard">
             <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-collection-play-fill me-1"></i><?= t('scenario.card_title') ?></h5></div>
             <div class="card-body py-2">
@@ -5574,6 +5580,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                 <a href="mission-scenario-view.php?id=<?= $missionId ?>" target="wrScenarioPage<?= $missionId ?>" class="btn btn-primary btn-sm w-100 mt-2" id="scenarioOpenBtn" title="<?= t('scenario.summary_open_title') ?>"><i class="bi bi-box-arrow-up-right me-1"></i><?= t('scenario.summary_open_btn') ?></a>
             </div>
         </div>
+        <?php endif; ?>
 
         <div class="card shadow-sm mb-4 border-primary" data-card-id="sectorsCard">
             <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-grid-3x3-gap-fill me-1"></i><?= t('sector.card_title') ?></h5></div>
@@ -5904,11 +5911,15 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                         <?php
                         // «Στο σενάριο ▾» (v3.452.0): the order drawn here goes into a phase of the scenario
                         // instead of out to a team. The menu is built by assets/js/war-room-scenario.js.
+                        // System admin only (v3.466.0): the script itself is not given to anyone else, so the
+                        // button is left out rather than kept, disabled, for an account that can never use it.
                         ?>
+                        <?php if (isSystemAdmin()): ?>
                         <div class="btn-group" id="dispatchScenarioGroup">
                             <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" id="dispatchScenarioBtn" data-bs-toggle="dropdown" aria-expanded="false" title="<?= t('scenario.add_to_scenario_title') ?>" disabled><i class="bi bi-collection-play me-1"></i><?= t('scenario.add_to_scenario') ?></button>
                             <ul class="dropdown-menu dropdown-menu-end" id="dispatchScenarioMenu"></ul>
                         </div>
+                        <?php endif; ?>
                         <button type="button" class="btn btn-success btn-sm" id="dispatchSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('dispatch.send_short_btn') ?></button>
                     </div>
                 </div>
@@ -5947,12 +5958,14 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                         <?php
                         // «Στο σενάριο ▾» (v3.454.0): every piece of this division goes into a phase of the scenario
                         // instead of being made now. Each piece needs a team or a team slot. The menu is built by
-                        // assets/js/war-room-scenario.js.
+                        // assets/js/war-room-scenario.js. System admin only (v3.466.0), as above.
                         ?>
+                        <?php if (isSystemAdmin()): ?>
                         <div class="btn-group w-100" id="divideScenarioGroup">
                             <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" id="divideScenarioBtn" data-bs-toggle="dropdown" aria-expanded="false" title="<?= t('scenario.sector_add_to_scenario_title') ?>" disabled><i class="bi bi-collection-play me-1"></i><?= t('scenario.add_to_scenario') ?></button>
                             <ul class="dropdown-menu dropdown-menu-end" id="divideScenarioMenu"></ul>
                         </div>
+                        <?php endif; ?>
                         <div class="small text-success" id="divideScenarioStatus" role="status"></div>
                     </div>
                     <div id="divideSectorsGridPane" class="d-none flex-column gap-2 flex-grow-1" style="min-height:0;">
@@ -6051,11 +6064,14 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                         // made now, so that sectors can be written down against it. The menu is built by
                         // assets/js/war-room-scenario.js. An area has no team to choose. Not offered while the window is
                         // drawing a SECTOR inside an existing area (then «Αποθήκευση» saves a sector, not an area).
+                        // System admin only (v3.466.0), as above.
                         ?>
+                        <?php if (isSystemAdmin()): ?>
                         <div class="btn-group" id="areaScenarioGroup">
                             <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" id="areaScenarioBtn" data-bs-toggle="dropdown" aria-expanded="false" title="<?= t('scenario.area_add_to_scenario_title') ?>" disabled><i class="bi bi-collection-play me-1"></i><?= t('scenario.add_to_scenario') ?></button>
                             <ul class="dropdown-menu dropdown-menu-end" id="areaScenarioMenu"></ul>
                         </div>
+                        <?php endif; ?>
                         <button type="button" class="btn btn-success btn-sm" id="areaSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('sector.area_save_btn') ?></button>
                     </div>
                 </div>
@@ -6102,11 +6118,14 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                         <?php
                         // «Στο σενάριο ▾» (v3.458.0): the zone drawn here goes into a phase of the scenario instead of being
                         // made now. The menu is built by assets/js/war-room-scenario.js. A zone has no team to choose.
+                        // System admin only (v3.466.0), as above.
                         ?>
+                        <?php if (isSystemAdmin()): ?>
                         <div class="btn-group" id="restrictedAreaScenarioGroup">
                             <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" id="restrictedAreaScenarioBtn" data-bs-toggle="dropdown" aria-expanded="false" title="<?= t('scenario.restricted_add_to_scenario_title') ?>" disabled><i class="bi bi-collection-play me-1"></i><?= t('scenario.add_to_scenario') ?></button>
                             <ul class="dropdown-menu dropdown-menu-end" id="restrictedAreaScenarioMenu"></ul>
                         </div>
+                        <?php endif; ?>
                         <button type="button" class="btn btn-danger btn-sm" id="restrictedAreaSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('restricted_area.save_btn') ?></button>
                     </div>
                 </div>
@@ -6143,12 +6162,15 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                         <button type="button" class="btn btn-outline-secondary btn-sm" id="routeClearBtn"><i class="bi bi-arrow-counterclockwise me-1"></i><?= t('dispatch.clear_btn') ?></button>
                         <?php
                         // «Στο σενάριο ▾» (v3.455.0): the route drawn here goes into a phase of the scenario instead of
-                        // out to a team. The menu is built by assets/js/war-room-scenario.js.
+                        // out to a team. The menu is built by assets/js/war-room-scenario.js. System admin only
+                        // (v3.466.0), as above.
                         ?>
+                        <?php if (isSystemAdmin()): ?>
                         <div class="btn-group" id="routeScenarioGroup">
                             <button type="button" class="btn btn-outline-primary btn-sm dropdown-toggle" id="routeScenarioBtn" data-bs-toggle="dropdown" aria-expanded="false" title="<?= t('scenario.route_add_to_scenario_title') ?>" disabled><i class="bi bi-collection-play me-1"></i><?= t('scenario.add_to_scenario') ?></button>
                             <ul class="dropdown-menu dropdown-menu-end" id="routeScenarioMenu"></ul>
                         </div>
+                        <?php endif; ?>
                         <button type="button" class="btn btn-success btn-sm" id="routeSendBtn" disabled><i class="bi bi-send-fill me-1"></i><?= t('route.send_btn') ?></button>
                     </div>
                 </div>
@@ -6492,7 +6514,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-time-machine.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-time-machine.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-team-coverage.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-team-coverage.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-done-orders.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-done-orders.js') ?>"></script>
-<?php if ($canManageWarRoom): ?>
+<?php if ($canManageWarRoom && isSystemAdmin()): ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-scenario.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-scenario.js') ?>"></script>
 <?php endif; ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/triage.js?v=<?= APP_VERSION ?>"></script>

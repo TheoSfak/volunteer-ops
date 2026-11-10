@@ -1,11 +1,12 @@
 <?php
 /**
- * VolunteerOps - Mission Scenario Endpoint (v3.452.0)
+ * VolunteerOps - Mission Scenario Endpoint (v3.452.0, system-admin only since v3.466.0)
  * Action Room: command writes orders down in phases before an exercise (GET lists the plan; POST adds and
  * removes phases and orders) and presses play on a phase to send it. The plan itself is in
- * includes/functions-scenario.php. COMMAND ONLY: anyone else - a volunteer, a participant, a shift leader -
- * gets an error and no data, for GET as for POST, because a staged order must never reach the field before it
- * is sent. AJAX only.
+ * includes/functions-scenario.php. SYSTEM ADMIN ONLY: not a volunteer, a participant or a shift leader, but not
+ * a department admin either - every other gate of the Action Room draws that line at canManageActionRoom(), this
+ * one draws it tighter, because a staged order must never be seen, or reach the field, before the one account
+ * trusted with it presses play. GET as for POST, no error message hints at what exists either way. AJAX only.
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -28,7 +29,9 @@ if (!$mission || $mission['status'] !== STATUS_OPEN || empty($mission['show_in_o
 }
 
 $canManageWarRoom = canManageActionRoom($mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, (int) $userId);
-if (!$canManageWarRoom) {
+// System admins only (v3.466.0): a department admin can run everything else of the Action Room, but a staged
+// plan is not sent until a system admin presses play, so only a system admin is ever given it, played or not.
+if (!$canManageWarRoom || !isSystemAdmin()) {
     echo json_encode(['ok' => false, 'error' => t('scenario.no_permission')]);
     exit;
 }

@@ -2009,7 +2009,8 @@ final class ScenarioTest extends TestCase
         $src = $this->source('mission-scenario.php');
         $gate = strpos($src, 'canManageActionRoom(');
         $this->assertNotFalse($gate);
-        $refuse = strpos($src, "if (!\$canManageWarRoom) {", $gate);
+        // System admin only (v3.466.0): tighter than $canManageWarRoom, which a department admin also satisfies.
+        $refuse = strpos($src, "if (!\$canManageWarRoom || !isSystemAdmin()) {", $gate);
         $this->assertNotFalse($refuse);
         $this->assertStringContainsString("scenario.no_permission", substr($src, $refuse, 200));
         // GET and POST both come after the gate; so does every read of the plan.
@@ -2041,7 +2042,8 @@ final class ScenarioTest extends TestCase
         $tag = strpos($page, '/assets/js/war-room-scenario.js?v=');
         $this->assertNotFalse($tag);
         $before = substr($page, max(0, $tag - 200), 200);
-        $this->assertStringContainsString('if ($canManageWarRoom)', $before);
+        // System admin only (v3.466.0): a department admin can manage the Action Room and never gets the script.
+        $this->assertStringContainsString('if ($canManageWarRoom && isSystemAdmin())', $before);
         // The card is inside a command-only block, and the plan is not in the page's data.
         $card = strpos($page, 'data-card-id="scenarioCard"');
         $this->assertNotFalse($card);

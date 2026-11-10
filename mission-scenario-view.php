@@ -13,9 +13,10 @@
  * (staging from the order windows, the ghosts, «Δείξε το στον χάρτη», «Τομείς», «Κτίριο») stays in the Action Room and
  * is a link to it from here.
  *
- * Command staff only, with the same gate as everything else of the scenario (canManageActionRoom) and the endpoint's
- * own rule that the mission is open and on the board: anyone else is sent away with a message and is never given the
- * script, which is what keeps a staged order from reaching the field.
+ * System admins only (v3.466.0), not every account that can manage the Action Room, and the endpoint's own rule
+ * that the mission is open and on the board: anyone else is sent away with a message and is never given the
+ * script, which is what keeps a staged plan - unplayed or not - from being seen, or reaching the field, before
+ * the one account trusted with it presses play.
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -36,7 +37,9 @@ if (!$mission) {
     redirect('dashboard.php');
 }
 
-if (!canManageActionRoom($mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId)) {
+// System admins only (v3.466.0), the same tightening as the endpoint: a department admin manages everything
+// else of the Action Room but is never given a staged plan, played or not.
+if (!canManageActionRoom($mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId) || !isSystemAdmin()) {
     setFlash('error', t('scenario.no_permission'));
     redirect('mission-view.php?id=' . $missionId);
 }
