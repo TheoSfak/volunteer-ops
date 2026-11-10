@@ -5,14 +5,18 @@ declare(strict_types=1);
 use PHPUnit\Framework\TestCase;
 
 /**
- * The team edit window can rename a team and send one person straight to
- * another team (v3.436.0).
+ * Renaming a team and sending one person straight to another team (v3.436.0).
  *
  * Before it, a name was fixed at creation and a person could only be moved by
  * unticking them in one team and ticking them in the other team's own edit -
  * two saves, or a lock for a leader / a team's only member.
  *
- * The first blocks need no database. The database block runs inside a
+ * Since v3.464.0 both are done on the «Ομάδες» page (tests/MissionTeamsPageTest.php)
+ * and the Action Room's edit window is gone; what is kept here are the two rules
+ * the page stands on: what a new name does (teamRenameDecision()) and how a
+ * person changes team (applyTeamMemberMoves()).
+ *
+ * The first block needs no database. The database block runs inside a
  * transaction that is always rolled back.
  */
 final class TeamEditRenameMoveTest extends TestCase
@@ -79,39 +83,6 @@ final class TeamEditRenameMoveTest extends TestCase
             [$this->missionId, $userId]
         );
         return $id === null || $id === false ? null : (int) $id;
-    }
-
-    // ── Which «Μετακίνηση σε…» choices are honoured ─────────────────────────
-
-    public function testAMoveOfAMemberToAnotherTeamOfTheMissionIsKept(): void
-    {
-        $moves = resolveTeamMemberMoves(['7' => '12', '8' => '13'], [7, 8, 9], [12, 13]);
-        $this->assertSame([7 => 12, 8 => 13], $moves);
-    }
-
-    public function testAnEmptyChoiceMeansStay(): void
-    {
-        // The select's first option is «Μετακίνηση σε…» with an empty value.
-        $this->assertSame([], resolveTeamMemberMoves(['7' => ''], [7], [12]));
-    }
-
-    public function testSomeoneWhoIsNotOnThisTeamCannotBeMovedFromIt(): void
-    {
-        $this->assertSame([], resolveTeamMemberMoves(['99' => '12'], [7, 8], [12]), 'a stale tab or a hand-made request');
-    }
-
-    public function testATeamOfAnotherMissionOrThisTeamItselfIsNotATarget(): void
-    {
-        // The valid targets are the OTHER teams of this mission only.
-        $this->assertSame([], resolveTeamMemberMoves(['7' => '500'], [7], [12, 13]));
-        $this->assertSame([], resolveTeamMemberMoves(['7' => '0'], [7], [12]));
-    }
-
-    public function testAnythingThatIsNotAChoiceListIsNothing(): void
-    {
-        $this->assertSame([], resolveTeamMemberMoves(null, [7], [12]));
-        $this->assertSame([], resolveTeamMemberMoves('7=12', [7], [12]));
-        $this->assertSame([], resolveTeamMemberMoves(['7' => ['12']], [7], [12]));
     }
 
     // ── What happens to the name ────────────────────────────────────────────
@@ -213,37 +184,33 @@ final class TeamEditRenameMoveTest extends TestCase
         $this->assertSame('Ομάδα Νότου', teamLabel($team['codename'], $team['team_number']));
     }
 
-    // ── The window and the save keep their promises ─────────────────────────
+    // ── The rename and the move are the page's now ──────────────────────────
 
-    public function testTheEditWindowAndTheSaveAreWiredTogether(): void
+    public function testTheRenameAndTheMoveAreDoneByThePagesFunctions(): void
     {
+        $functions = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../includes/functions-mission-teams.php'));
+        // A rename asks the same rule and, when the name is new, drops the number.
+        $this->assertStringContainsString('teamRenameDecision($name, (string) $team[\'codename\'], $others)', $functions);
+        $this->assertMatchesRegularExpression('/SET codename = \?, team_number = NULL, updated_at = NOW\(\)/', $functions);
+        // A move goes through the one function that never leaves a person on two teams.
+        $this->assertStringContainsString('applyTeamMemberMoves($missionId, [$userId => $toTeamId]);', $functions);
+        // The Action Room page no longer saves a team at all.
         $page = (string) WarRoomSource::full();
-        // The field and the select are in the page...
-        $this->assertStringContainsString('name="codename" id="editTeamName-', $page);
-        $this->assertStringContainsString('name="move_to[<?= $userId ?>]"', $page);
-        // ...and the save reads both, inside the same transaction as the member rewrite.
-        $this->assertStringContainsString("resolveTeamMemberMoves(\$_POST['move_to']", $page);
-        $this->assertStringContainsString("teamRenameDecision(\$_POST['codename']", $page);
-        $this->assertMatchesRegularExpression('/SET codename = \?, team_number = NULL, leader_id = \?/', $page);
-        $this->assertMatchesRegularExpression('/applyTeamMemberMoves\(\$missionId, \$moveOut\);\s+}\s+applyTeamActionRoomTicks\(/', $page);
-        // Only the people who stay get their GPS switch rewritten; the moved keep theirs.
-        $this->assertStringContainsString('applyTeamActionRoomTicks($missionId, $memberIds, $gpsIds', $page);
+        $this->assertStringNotContainsString('editTeamModal', $page);
+        $this->assertStringNotContainsString("post('action') === 'update_team'", $page);
     }
 
     public function testEveryNewTextIsTranslatedInBothLanguages(): void
     {
         $lang = require __DIR__ . '/../includes/lang/war-room.php';
         foreach ([
-            'teams.name_label', 'teams.rename_hint', 'teams.move_out_note', 'teams.move_to.placeholder',
-            'teams.move_to.title', 'teams.move_to.leader_note', 'team.update.renamed_note',
-            'team.update.moved_out_note', 'team.move_out.would_empty', 'team.rename.duplicate',
+            'team.rename.duplicate', 'teamsp.rename_btn', 'teamsp.rename_placeholder', 'teamsp.move_placeholder',
+            'teamsp.move_title', 'teamsp.move_locked_leader', 'teamsp.move_locked_only',
         ] as $key) {
             $this->assertNotEmpty($lang['el'][$key] ?? '', "el: $key");
             $this->assertNotEmpty($lang['en'][$key] ?? '', "en: $key");
             $this->assertNotSame($lang['el'][$key], $lang['en'][$key], "$key is the same in both languages");
         }
-        $this->assertStringContainsString('{old}', $lang['el']['team.update.renamed_note']);
-        $this->assertStringContainsString('{moved}', $lang['en']['team.update.moved_out_note']);
         $this->assertStringContainsString('{name}', $lang['el']['team.rename.duplicate']);
     }
 }

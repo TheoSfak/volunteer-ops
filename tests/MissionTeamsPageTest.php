@@ -16,7 +16,7 @@ use PHPUnit\Framework\TestCase;
  *   - a leader and an only member cannot be moved away, two teams never read the same, a leader is a member;
  *   - the page and its endpoint are for command staff only, and a volunteer is sent away before anything is printed;
  *   - every word the script asks for is in the page's own small table, in both languages;
- *   - the Action Room's own team windows go through the same functions.
+ *   - the Action Room makes and changes no team of its own any more (v3.464.0): its card shows the teams and links here.
  *
  * The database cases run inside a transaction that is always rolled back.
  */
@@ -252,6 +252,8 @@ final class MissionTeamsPageTest extends TestCase
             $this->assertSame('foot', $row['transport']);
         }
         $this->assertSame(['Alpha', 'Bravo'], array_column(dbFetchAll("SELECT codename FROM mission_teams WHERE mission_id = ? ORDER BY id", [$this->missionId]), 'codename'));
+        // The Action Room's card lists them in the order they were made, though they were all made in the same second.
+        $this->assertSame(array_keys($this->teams()), array_keys(loadMissionTeamsForMission($this->missionId)));
         // Everybody was told which team they are on.
         $told = (int) dbFetchValue("SELECT COUNT(DISTINCT user_id) FROM notifications WHERE user_id IN (" . implode(',', $all) . ")");
         $this->assertSame(7, $told);
@@ -315,7 +317,7 @@ final class MissionTeamsPageTest extends TestCase
 
     // ── a team by hand ─────────────────────────────────────────────────────────────────────────────────────────
 
-    public function testATeamMadeOnThePageLeavesGpsAloneAndTheWindowsColumnSetsIt(): void
+    public function testATeamMadeOnThePageLeavesGpsAloneUnlessAListIsHandedOver(): void
     {
         [$a, $b, $c, $d] = $this->approveMany(4, 'Ours');
         setActionRoomParticipation($this->missionId, $b, true, $this->adminId);
@@ -325,7 +327,7 @@ final class MissionTeamsPageTest extends TestCase
         $this->assertSame([$b], $this->gpsIds(), 'no gps_ids: nobody is switched on and nobody off');
         $this->assertSame('car', dbFetchValue("SELECT transport FROM mission_teams WHERE id = ?", [$page['team_id']]));
 
-        // The Action Room's window hands over its GPS column: the members ticked are on, the other members off.
+        // A caller that hands over a GPS list sets it: the members named are on, the other members off.
         $window = createMissionTeam($this->mission, $this->adminId, ['member_ids' => [$c, $d], 'leader_id' => $c, 'name' => 'Κόκκινη', 'transport' => 'foot', 'gps_ids' => [$c]]);
         $this->assertTrue($window['ok']);
         $this->assertSame('Κόκκινη', $window['label'], 'a typed name carries no number');
@@ -334,7 +336,7 @@ final class MissionTeamsPageTest extends TestCase
         $this->assertSame($expected, $this->gpsIds());
     }
 
-    public function testATeamIsRefusedWithTheWindowsOwnWords(): void
+    public function testATeamIsRefusedWithWordsThatSayWhy(): void
     {
         [$a, $b] = $this->approveMany(2, 'Ours');
         $stranger = $this->makeUser('Not approved');
@@ -595,20 +597,40 @@ final class MissionTeamsPageTest extends TestCase
         $this->assertNotFalse($card);
         $guard = strrpos(substr($war, 0, $card), '<?php if ($canManageWarRoom): ?>');
         $this->assertLessThan(700, $card - $guard, 'the card link is for command only');
+        $this->assertStringContainsString('href="mission-teams-view.php?id=<?= $missionId ?>"', substr($war, $card - 200, 400));
     }
 
-    public function testTheActionRoomsOwnWindowsGoThroughTheSameFunctions(): void
+    public function testTheActionRoomMakesAndChangesNoTeamOfItsOwn(): void
     {
         $war = $this->source('war-room.php');
-        $create = strpos($war, "post('action') === 'create_team'");
-        $update = strpos($war, "post('action') === 'update_team'");
-        $delete = strpos($war, "post('action') === 'delete_team'");
-        $this->assertTrue($create !== false && $update !== false && $delete !== false);
-        $this->assertStringContainsString('createMissionTeam($mission,', substr($war, $create, $update - $create));
-        $this->assertStringNotContainsString('INSERT INTO mission_teams', substr($war, $create, $update - $create));
-        $this->assertStringContainsString('deleteMissionTeam($mission,', substr($war, $delete, 900));
-        // The two things that moved out of the page live in one place, and the real bootstrap loads it (the tests'
-        // own bootstrap would hide a missing require).
+        // No window, no button that opened one, none of the script that ran them...
+        foreach (['createTeamModal', 'editTeamModal', 'team-form', 'team-member-check', 'team-gps-check', 'team-move-select',
+                  'team-leader-select', 'wr-team-edit-reload-btn', 'wr-team-delete-form', "t('teams.new_btn')"] as $gone) {
+            $this->assertStringNotContainsString($gone, $war, $gone);
+        }
+        // ...and no POST action that made, changed or deleted a team: the page's endpoint is the only writer.
+        foreach (['create_team', 'update_team', 'delete_team'] as $action) {
+            $this->assertStringNotContainsString("'" . $action . "'", $war, $action);
+        }
+        foreach (['INSERT INTO mission_teams', 'DELETE FROM mission_teams', 'INSERT INTO mission_team_members', 'DELETE FROM mission_team_members',
+                  'createMissionTeam(', 'deleteMissionTeam(', 'applyTeamMemberMoves(', 'applyTeamActionRoomTicks('] as $write) {
+            $this->assertStringNotContainsString($write, $war, $write);
+        }
+        // The card is still there and still follows the poll: a team made on the page shows up here by itself.
+        $this->assertStringContainsString('data-card-id="teamsCard"', $war);
+        $this->assertStringContainsString('renderTeamRosters(data.teams);', $war);
+        $draw = substr($war, strpos($war, 'function renderTeamRosters(items) {'), 3200);
+        $this->assertStringContainsString('<div class="wr-team-roster">${teamRosterHtml(team)}</div>', $draw);
+        $this->assertStringNotContainsString('<button', $draw, 'a row drawn by the poll has no button, like a row drawn by the server');
+        $this->assertStringNotContainsString('<form', $draw);
+        // The words of the windows went with them, in both languages.
+        $all = loadLangStrings('war-room');
+        foreach (['teams.new_btn', 'teams.edit_modal_title', 'teams.move_to.placeholder', 'team.update.success_flash', 'wr.perm.update_team'] as $key) {
+            $this->assertArrayNotHasKey($key, $all['el'], $key);
+            $this->assertArrayNotHasKey($key, $all['en'], $key);
+        }
+        // What moved out of the page lives in one place, and the real bootstrap loads it (the tests' own bootstrap
+        // would hide a missing require).
         $this->assertStringNotContainsString('function notifyMissionTeamMembers', $war);
         $this->assertStringNotContainsString("define('MISSION_TEAM_CODENAMES'", $war);
         $this->assertStringContainsString("require_once __DIR__ . '/includes/functions-mission-teams.php';", $this->source('bootstrap.php'));

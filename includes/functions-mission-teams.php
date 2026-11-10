@@ -3,9 +3,9 @@
  * VolunteerOps - Mission teams (v3.463.0)
  *
  * The teams of a mission as a set of functions, for the «Ομάδες» page (mission-teams-view.php, drawn by
- * assets/js/mission-teams.js from mission-teams.php) and for the two team windows of the Action Room, which make and
- * delete a team through the same functions. Before this file the making of a team lived only inside war-room.php's
- * POST handler, where nothing else could reach it.
+ * assets/js/mission-teams.js from mission-teams.php). Since v3.464.0 that page is the only place a team is made or
+ * changed: the Action Room's own «Νέα Ομάδα» and edit windows are gone, and its teams card shows the teams and links
+ * to the page.
  *
  * What is here:
  *   - the roster a team is made from: everybody approved on the mission, with their HOME team (Επίδρασις, a partner
@@ -428,13 +428,13 @@ function missionTeamApprovedNames(int $missionId): array {
 }
 
 /**
- * Makes one team: the Action Room's «Νέα Ομάδα» window and the page's «Νέα ομάδα» both end here.
+ * Makes one team: the page's «Νέα ομάδα» ends here.
  *
  * $input: member_ids (int[]), leader_id (int), name (string, '' = the next NATO name), transport (string) and
  * gps_ids - null to leave everybody's GPS exactly as it is (the page: GPS is its own switch), or the members whose
- * GPS is to be ON, every other member of the new team being switched off (the window's GPS column).
+ * GPS is to be ON, every other member of the new team being switched off.
  *
- * Refused, with the words to show and 'level' the flash colour the window uses: nobody chosen, a member who leads or
+ * Refused, with the words to show and 'level' how grave it is ('warning' or 'error'): nobody chosen, a member who leads or
  * is alone on another team, a leader who is not a member, a name another team already reads as, no number left.
  *
  * @return array{ok:bool,error?:string,level?:string,team_id?:int,label?:string}
@@ -819,7 +819,7 @@ function missionTeamsPageExtraStringKeys(): array {
     return [
         'common.cancel', 'common.save', 'common.loading', 'common.send_failed',
         'teams.transport.foot', 'teams.transport.motorbike', 'teams.transport.car',
-        'teams.delete_confirm', 'teams.delete_btn_title', 'teams.empty', 'teams.leader_label',
+        'teams.delete_confirm', 'teams.delete_btn_title', 'teams.empty',
         'gps_participant.label', 'gps_participant.tick_title', 'captain.label', 'guest.org_unknown',
     ];
 }

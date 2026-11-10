@@ -45,8 +45,10 @@ if (!$mission) {
     leaveActionRoom('ended', 'dashboard.php');
 }
 
-// MISSION_TEAM_CODENAMES and notifyMissionTeamMembers() moved to includes/functions-mission-teams.php (v3.463.0),
-// which the «Ομάδες» page (mission-teams-view.php) shares with the two team windows of this page.
+// MISSION_TEAM_CODENAMES and notifyMissionTeamMembers() moved to includes/functions-mission-teams.php (v3.463.0).
+// Since v3.464.0 this page makes, edits and deletes no team at all: its «Νέα Ομάδα» and edit windows, the delete
+// button and their three POST actions are gone, and all of it is on the «Ομάδες» page (mission-teams-view.php,
+// mission-teams.php). The teams card here shows the teams and links to that page.
 
 // MISSION_TEAM_COLORS/MISSION_TEAM_COLOR_TEXT and teamBadgeColors() moved to
 // includes/functions-warroom.php (still same index basis as MISSION_TEAM_CODENAMES
@@ -492,234 +494,6 @@ if (isPost()) {
         );
         logAudit('end_mission_broadcast', 'missions', $missionId);
         setFlash('success', t('end_mission_broadcast.sent_flash', ['count' => count($recipientIds)]));
-        redirect('war-room.php?id=' . $missionId);
-    } elseif (post('action') === 'create_team') {
-        if (!$canManageWarRoom) {
-            setFlash('error', t('wr.perm.create_team'));
-            redirect('war-room.php?id=' . $missionId);
-        }
-
-        // The checks, the team and its members, the GPS column, the audit line and the notifications are all in
-        // createMissionTeam() (includes/functions-mission-teams.php), which the «Ομάδες» page calls too. Whatever the
-        // form's GPS column said is handed over as it is: the form ticks the leader as the leader is chosen (they are
-        // the one who in practice carries the phone), and a coordinator who then unticks them means it.
-        $created = createMissionTeam($mission, (int) $user['id'], [
-            'member_ids' => (array) ($_POST['member_ids'] ?? []),
-            'leader_id'  => (int) post('leader_id'),
-            'name'       => (string) post('custom_codename'),
-            'transport'  => post('transport'),
-            'gps_ids'    => (array) ($_POST['gps_ids'] ?? []),
-        ]);
-        if ($created['ok']) {
-            setFlash('success', t('team.create.success_flash', ['team' => $created['label']]));
-        } else {
-            setFlash($created['level'], $created['error']);
-        }
-        redirect('war-room.php?id=' . $missionId);
-    } elseif (post('action') === 'update_team') {
-        if (!$canManageWarRoom) {
-            setFlash('error', t('wr.perm.update_team'));
-            redirect('war-room.php?id=' . $missionId);
-        }
-
-        $teamId = (int) post('team_id');
-        $team = dbFetchOne("SELECT * FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
-        if (!$team) {
-            setFlash('error', t('common.team_not_found'));
-            redirect('war-room.php?id=' . $missionId);
-        }
-
-        $approvedVolunteers = dbFetchAll(
-            "SELECT DISTINCT pr.volunteer_id, u.name
-             FROM participation_requests pr
-             JOIN shifts s ON s.id = pr.shift_id
-             JOIN users u ON u.id = pr.volunteer_id
-             WHERE s.mission_id = ? AND pr.status = ?",
-            [$missionId, PARTICIPATION_APPROVED]
-        );
-        $namesByUserId = array_column($approvedVolunteers, 'name', 'volunteer_id');
-        $approvedIds = array_map('intval', array_column($approvedVolunteers, 'volunteer_id'));
-        // Anyone approved on the mission is selectable here, including people
-        // already on another team — ticking one MOVES them, in this same save.
-        // It used to be array_diff($approvedIds, $assignedElsewhereIds), which
-        // made a move two saves (remove from A, save; add to B, save) with the
-        // volunteer holding no team chat room in between.
-        $otherAssignments = loadOtherTeamAssignments($missionId, $teamId);
-
-        $memberIds = array_values(array_unique(array_intersect(
-            array_map('intval', (array)($_POST['member_ids'] ?? [])),
-            $approvedIds
-        )));
-        $leaderId = (int) post('leader_id');
-        $oldMemberIds = array_map('intval', array_column(
-            dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [$teamId]),
-            'user_id'
-        ));
-        // The «Μετακίνηση σε…» beside a member of this team: they go straight
-        // onto that team with this same save, instead of being unticked here
-        // and ticked again in the other team's own edit. Both halves happen in
-        // the one transaction below, so nobody is ever on no team in between.
-        $otherTeamRows = dbFetchAll(
-            "SELECT id, codename, team_number, leader_id FROM mission_teams WHERE mission_id = ? AND id != ?",
-            [$missionId, $teamId]
-        );
-        $otherTeamsById = [];
-        foreach ($otherTeamRows as $otherTeamRow) {
-            $otherTeamsById[(int) $otherTeamRow['id']] = $otherTeamRow;
-        }
-        $moveOut = array_filter(
-            resolveTeamMemberMoves($_POST['move_to'] ?? null, $oldMemberIds, array_keys($otherTeamsById)),
-            fn($toTeamId, $movedUserId) => in_array($movedUserId, $approvedIds, true),
-            ARRAY_FILTER_USE_BOTH
-        );
-        // Whoever is being sent away is off this team's list whatever their
-        // tick box said, and keeps their GPS switch exactly as it was: only the
-        // members who stay are handed to applyTeamActionRoomTicks().
-        $memberIds = array_values(array_diff($memberIds, array_keys($moveOut)));
-        $gpsIds = array_values(array_intersect(
-            array_map('intval', (array)($_POST['gps_ids'] ?? [])),
-            $memberIds
-        ));
-        $movedIds = array_values(array_filter($memberIds, fn($id) => isset($otherAssignments[$id])));
-        $blockedTeams = teamsBlockedFromMemberMove($movedIds, $otherAssignments);
-        $rename = teamRenameDecision($_POST['codename'] ?? null, (string) $team['codename'], $otherTeamRows);
-
-        if (empty($memberIds)) {
-            setFlash('warning', empty($moveOut) ? t('team.update.select_member_warning') : t('team.move_out.would_empty'));
-        } elseif (!empty($blockedTeams)) {
-            setFlash('warning', t('team.move.leader_blocked', ['teams' => implode(', ', $blockedTeams)]));
-        } elseif ($rename['clash'] !== null) {
-            setFlash('warning', t('team.rename.duplicate', ['name' => $rename['clash']]));
-        } elseif (!in_array($leaderId, $memberIds, true)) {
-            setFlash('warning', t('team.leader_must_be_member'));
-        } else {
-            $oldGpsIds = array_values(array_intersect(actionRoomParticipantIds($missionId), $oldMemberIds));
-            // One transaction: a move is a delete from the old team plus an
-            // insert into this one, and a volunteer left in neither — or in
-            // both — is worse than the edit simply failing.
-            db()->beginTransaction();
-            try {
-                if (!empty($movedIds)) {
-                    $movePlaceholders = implode(',', array_fill(0, count($movedIds), '?'));
-                    dbExecute(
-                        "DELETE FROM mission_team_members WHERE mission_id = ? AND team_id != ? AND user_id IN ($movePlaceholders)",
-                        array_merge([$missionId, $teamId], $movedIds)
-                    );
-                }
-                dbExecute("DELETE FROM mission_team_members WHERE team_id = ?", [$teamId]);
-                foreach ($memberIds as $memberId) {
-                    dbInsert(
-                        "INSERT INTO mission_team_members (team_id, mission_id, user_id, added_at) VALUES (?, ?, ?, NOW())",
-                        [$teamId, $missionId, $memberId]
-                    );
-                }
-                // A form that did not carry the field (an old tab left open
-                // across the upgrade) keeps what the team has, instead of
-                // quietly turning a car back into somebody on foot.
-                $newTransport = isset($_POST['transport'])
-                    ? normalizeTeamTransport(post('transport'))
-                    : normalizeTeamTransport($team['transport'] ?? 'foot');
-                if ($rename['renamed']) {
-                    // A name an admin typed carries no random number, exactly
-                    // as on create - the number only disambiguates NATO names.
-                    dbExecute(
-                        "UPDATE mission_teams SET codename = ?, team_number = NULL, leader_id = ?, transport = ?, updated_at = NOW() WHERE id = ?",
-                        [$rename['codename'], $leaderId, $newTransport, $teamId]
-                    );
-                } else {
-                    dbExecute("UPDATE mission_teams SET leader_id = ?, transport = ?, updated_at = NOW() WHERE id = ?", [$leaderId, $newTransport, $teamId]);
-                }
-                // The people sent away were deleted with the rest of this team's
-                // rows above; this puts them on their new teams.
-                if (!empty($moveOut)) {
-                    applyTeamMemberMoves($missionId, $moveOut);
-                }
-                applyTeamActionRoomTicks($missionId, $memberIds, $gpsIds, (int) $user['id']);
-                db()->commit();
-            } catch (Throwable $e) {
-                db()->rollBack();
-                throw $e;
-            }
-            forgetActionRoomParticipantIds($missionId);
-            $oldTeamLabel = teamLabel($team['codename'], $team['team_number']);
-            $newCodename = $rename['renamed'] ? $rename['codename'] : (string) $team['codename'];
-            $newTeamNumber = $rename['renamed'] ? null : ($team['team_number'] !== null ? (int) $team['team_number'] : null);
-            logAudit('update_mission_team', 'mission_teams', $teamId, [
-                'member_ids' => $oldMemberIds, 'gps_ids' => $oldGpsIds,
-                'transport' => normalizeTeamTransport($team['transport'] ?? 'foot'),
-                'codename' => $team['codename'], 'team_number' => $team['team_number'],
-            ], [
-                'member_ids' => $memberIds,
-                'leader_id'  => $leaderId,
-                'transport'  => $newTransport,
-                'gps_ids'    => $gpsIds,
-                'codename'   => $newCodename,
-                'team_number' => $newTeamNumber,
-                // Who was taken and from where — without this the audit trail
-                // shows a team gaining a member and says nothing about the
-                // other team quietly losing one in the same action.
-                'moved_from' => array_map(fn($id) => ['user_id' => $id, 'team' => $otherAssignments[$id]['label']], $movedIds),
-                // And the other direction: who this save sent to another team.
-                'moved_to'   => array_map(
-                    fn($id, $toTeamId) => ['user_id' => $id, 'team' => teamLabel($otherTeamsById[$toTeamId]['codename'], $otherTeamsById[$toTeamId]['team_number'])],
-                    array_keys($moveOut),
-                    array_values($moveOut)
-                ),
-            ]);
-            notifyMissionTeamMembers($missionId, $mission['title'], $newCodename, $newTeamNumber, $memberIds, $leaderId, $namesByUserId);
-            // Tell each person who was sent to another team about their new one,
-            // naming the teammates and leader they now have.
-            $arrivalsByTeam = [];
-            foreach ($moveOut as $arrivedUserId => $toTeamId) {
-                $arrivalsByTeam[$toTeamId][] = (int) $arrivedUserId;
-            }
-            foreach ($arrivalsByTeam as $toTeamId => $arrivedIds) {
-                $toTeam = $otherTeamsById[$toTeamId];
-                $toRoster = array_map('intval', array_column(
-                    dbFetchAll("SELECT user_id FROM mission_team_members WHERE team_id = ?", [$toTeamId]),
-                    'user_id'
-                ));
-                notifyMissionTeamMembers(
-                    $missionId, $mission['title'], $toTeam['codename'],
-                    ($toTeam['team_number'] !== null ? (int) $toTeam['team_number'] : null),
-                    $toRoster, (int) ($toTeam['leader_id'] ?? 0), $namesByUserId, $arrivedIds
-                );
-            }
-            $teamLabelForFlash = teamLabel($newCodename, $newTeamNumber);
-            $updateFlash = empty($movedIds)
-                ? t('team.update.success_flash', ['team' => $teamLabelForFlash])
-                : t('team.update.success_with_moves_flash', [
-                    'team'  => $teamLabelForFlash,
-                    'moved' => implode(', ', array_map(fn($id) => ($namesByUserId[$id] ?? ('#' . $id)) . ' (' . $otherAssignments[$id]['label'] . ')', $movedIds)),
-                ]);
-            if ($rename['renamed']) {
-                $updateFlash .= ' ' . t('team.update.renamed_note', ['old' => $oldTeamLabel]);
-            }
-            if (!empty($moveOut)) {
-                $updateFlash .= ' ' . t('team.update.moved_out_note', [
-                    'moved' => implode(', ', array_map(
-                        fn($id, $toTeamId) => ($namesByUserId[$id] ?? ('#' . $id)) . ' → ' . teamLabel($otherTeamsById[$toTeamId]['codename'], $otherTeamsById[$toTeamId]['team_number']),
-                        array_keys($moveOut),
-                        array_values($moveOut)
-                    )),
-                ]);
-            }
-            setFlash('success', $updateFlash);
-        }
-        redirect('war-room.php?id=' . $missionId);
-    } elseif (post('action') === 'delete_team') {
-        if (!$canManageWarRoom) {
-            setFlash('error', t('wr.perm.delete_team'));
-            redirect('war-room.php?id=' . $missionId);
-        }
-
-        // deleteMissionTeam() (includes/functions-mission-teams.php) deletes the team and tells its former members.
-        $deletedLabel = deleteMissionTeam($mission, (int) post('team_id'));
-        if ($deletedLabel !== null) {
-            setFlash('success', t('team.delete.success_flash', ['team' => $deletedLabel]));
-        } else {
-            setFlash('error', t('common.team_not_found'));
-        }
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'save_briefing_info') {
         if (!$canManageWarRoom) {
@@ -1929,13 +1703,11 @@ if ($canManageWarRoom && !empty($mission['is_special_mission'])) {
 }
 
 $teamLabelByUserId = [];
-$teamColorByUserId = [];
 $teamIdByUserId = [];
 foreach ($teams as $team) {
     $label = teamLabel($team['codename'], $team['team_number']);
     foreach ($team['members'] as $member) {
         $teamLabelByUserId[$member['user_id']] = $label;
-        $teamColorByUserId[$member['user_id']] = $team['color'];
         $teamIdByUserId[$member['user_id']] = $team['id'];
     }
 }
@@ -1947,10 +1719,6 @@ foreach ($participants as $participant) {
         $distinctApprovedById[$vid] = ['user_id' => $vid, 'name' => $participant['name']];
     }
 }
-$unassignedApproved = array_values(array_filter(
-    $distinctApprovedById,
-    fn($p) => !isset($teamLabelByUserId[$p['user_id']])
-));
 
 $myTeamId = null;
 foreach ($teams as $team) {
@@ -4895,24 +4663,18 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         <div class="card shadow-sm mb-4" data-card-id="teamsCard">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <!-- Toggle lives on the h5 itself, not the whole header (see
-                     activityCard further down for the same split) — the New
-                     Team button sits right next to it in the same header and
-                     must open its modal on click, not also fight the
-                     collapse toggle. Starts expanded (aria-expanded="true" +
-                     "show" below), unlike this file's other collapsible
-                     cards which default closed — the roster is something
-                     staff check constantly, not an occasional form/log. -->
+                     activityCard further down for the same split) — the link to
+                     the «Ομάδες» page sits right next to it in the same header and
+                     must open the page on click, not also fight the collapse
+                     toggle. Starts expanded (aria-expanded="true" + "show"
+                     below), unlike this file's other collapsible cards which
+                     default closed — the roster is something staff check
+                     constantly, not an occasional form/log. -->
                 <h5 class="mb-0 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#teamsCollapse" role="button" aria-expanded="true" aria-controls="teamsCollapse"><i class="bi bi-diagram-3 me-1"></i><?= t('teams.panel_title') ?> <i class="bi bi-chevron-down wr-collapsible-chevron ms-1"></i></h5>
                 <?php if ($canManageWarRoom): ?>
-                <div class="d-flex gap-1 flex-wrap justify-content-end">
-                    <!-- The teams' own page (v3.463.0): automatic split, moves and GPS in one place. -->
-                    <a href="mission-teams-view.php?id=<?= $missionId ?>" target="wrTeamsPage<?= $missionId ?>" class="btn btn-sm btn-outline-primary" id="teamsPageBtn" title="<?= h(t('teams.manage_page_title')) ?>"><i class="bi bi-box-arrow-up-right me-1"></i><?= t('teams.manage_page_btn') ?></a>
-                    <?php if (!empty($unassignedApproved)): ?>
-                    <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#createTeamModal">
-                        <i class="bi bi-plus-lg me-1"></i><?= t('teams.new_btn') ?>
-                    </button>
-                    <?php endif; ?>
-                </div>
+                <!-- The teams' own page: the automatic split, a team by hand, renaming, deleting, moving a person and GPS.
+                     Since v3.464.0 it is the only place a team is made or changed; this card shows the teams. -->
+                <a href="mission-teams-view.php?id=<?= $missionId ?>" target="wrTeamsPage<?= $missionId ?>" class="btn btn-sm btn-primary" id="teamsPageBtn" title="<?= h(t('teams.manage_page_title')) ?>"><i class="bi bi-box-arrow-up-right me-1"></i><?= t('teams.manage_page_btn') ?></a>
                 <?php endif; ?>
             </div>
             <div class="collapse show" id="teamsCollapse">
@@ -4923,8 +4685,8 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                     // from the rest — on a six-team callout that means hunting
                     // for your own name before you know where you belong.
                     // Deliberately a COPY: $teams is keyed by team id and the
-                    // briefing-token backfill and $teamMemberCheckbox both
-                    // index into it, so the real array must keep its order.
+                    // briefing-token backfill indexes into it, so the real
+                    // array must keep its order.
                     // renderTeamRosters() re-applies this same reorder after a
                     // live change, so being moved between teams keeps it true.
                     $teamsForCard = $teams;
@@ -4954,17 +4716,6 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                                 <?php endforeach; ?>
                             </div>
                         </div>
-                        <?php if ($canManageWarRoom): ?>
-                        <div class="d-flex gap-1">
-                            <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#editTeamModal-<?= $team['id'] ?>" title="<?= t('common.edit') ?>"><i class="bi bi-pencil"></i></button>
-                            <form method="post" onsubmit="return confirm('<?= h(addslashes(t('teams.delete_confirm', ['team' => teamLabel($team['codename'], $team['team_number'])]))) ?>')">
-                                <?= csrfField() ?>
-                                <input type="hidden" name="action" value="delete_team">
-                                <input type="hidden" name="team_id" value="<?= $team['id'] ?>">
-                                <button type="submit" class="btn btn-sm btn-outline-danger" title="<?= t('teams.delete_btn_title') ?>"><i class="bi bi-x-lg"></i></button>
-                            </form>
-                        </div>
-                        <?php endif; ?>
                     </div>
                 </div>
                 <?php endforeach; ?>
@@ -5945,194 +5696,6 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         <?php endif; ?>
     </div>
 </div>
-
-<?php if ($canManageWarRoom): ?>
-<?php
-/**
- * One checkbox row in either team form. Both forms now offer people who are
- * already on another team, because ticking one moves them in the same save —
- * so the row has to say which team it would be taking them from, and grey out
- * the ones that cannot be taken at all (a team's leader, or its only member,
- * either of which would leave that team broken behind you). The server
- * re-checks both in teamsBlockedFromMemberMove(); this is so the admin never
- * gets that far.
- */
-$teamMemberCheckbox = function (array $person, bool $checked, ?int $currentTeamId) use ($teamIdByUserId, $teamLabelByUserId, $teamColorByUserId, $teams, $actionRoomParticipantIds) {
-    $userId = (int) $person['user_id'];
-    $fromTeamId = $teamIdByUserId[$userId] ?? null;
-    $isElsewhere = $fromTeamId !== null && $fromTeamId !== $currentTeamId;
-    $blocked = false;
-    if ($isElsewhere && isset($teams[$fromTeamId])) {
-        $fromTeam = $teams[$fromTeamId];
-        $blocked = ((int) ($fromTeam['leader_id'] ?? 0) === $userId) || count($fromTeam['members']) <= 1;
-    }
-    $gpsOn = in_array($userId, $actionRoomParticipantIds, true);
-    // «Μετακίνηση σε…»: only beside somebody who is on the team being edited,
-    // and only when there is another team to go to and somebody left behind -
-    // a team may not be emptied by a move (delete it instead). The leader gets
-    // one too: the form then asks for a new leader of THIS team in the same
-    // save, which is what the "cannot take" lock on the other side could not.
-    $canMoveOut = $currentTeamId !== null && $checked && count($teams) > 1
-        && isset($teams[$currentTeamId]) && count($teams[$currentTeamId]['members']) > 1;
-    ob_start();
-    // Two separate <label>s rather than one wrapping both inputs: a label's
-    // labeled control is its FIRST labelable descendant, so a GPS box nested
-    // inside the member's label would have every click on it also forwarded
-    // to the member checkbox — ticking GPS would untick the person.
-    ?>
-    <div class="d-flex align-items-center flex-wrap gap-2 py-1<?= $blocked ? ' opacity-50' : '' ?>">
-        <label class="form-check d-flex align-items-center gap-2 mb-0 flex-grow-1">
-            <input class="form-check-input team-member-check" type="checkbox" name="member_ids[]"
-                   value="<?= $userId ?>" data-name="<?= h($person['name']) ?>"
-                   <?= $checked ? 'checked' : '' ?> <?= $blocked ? 'disabled' : '' ?>>
-            <span><?= h($person['name']) ?></span>
-            <?php if ($isElsewhere): ?>
-                <?php [$fromBg, $fromFg] = teamBadgeColors($teamColorByUserId[$userId] ?? null); ?>
-                <span class="badge" style="background:<?= h($fromBg) ?>;color:<?= h($fromFg) ?>;font-size:.68rem;"><?= h($teamLabelByUserId[$userId] ?? '') ?></span>
-                <?php if ($blocked): ?>
-                <span class="small text-muted"><?= t('teams.move.cannot_take') ?></span>
-                <?php endif; ?>
-            <?php endif; ?>
-        </label>
-        <?php if ($canMoveOut): ?>
-        <select class="form-select form-select-sm team-move-select" name="move_to[<?= $userId ?>]" style="width:auto;max-width:10.5rem;"
-                title="<?= h(t('teams.move_to.title')) ?>" aria-label="<?= h(t('teams.move_to.title')) ?>">
-            <option value=""><?= h(t('teams.move_to.placeholder')) ?></option>
-            <?php foreach ($teams as $moveTargetTeam): ?>
-            <?php if ((int) $moveTargetTeam['id'] === (int) $currentTeamId) continue; ?>
-            <option value="<?= (int) $moveTargetTeam['id'] ?>"><?= h(teamLabel($moveTargetTeam['codename'], $moveTargetTeam['team_number'])) ?></option>
-            <?php endforeach; ?>
-        </select>
-        <?php endif; ?>
-        <label class="form-check d-flex align-items-center gap-1 mb-0 team-gps-label" title="<?= t('gps_participant.tick_title') ?>">
-            <input class="form-check-input team-gps-check" type="checkbox" name="gps_ids[]"
-                   value="<?= $userId ?>" <?= $gpsOn ? 'checked' : '' ?> <?= $blocked ? 'disabled' : '' ?>>
-            <span class="small text-muted"><i class="bi bi-geo-alt-fill"></i> <?= t('gps_participant.label') ?></span>
-        </label>
-    </div>
-    <?php
-    return ob_get_clean();
-};
-?>
-<?php
-    // The "how does this team move" choice, shared by the create and edit
-    // windows so the two cannot offer different things.
-    $transportPicker = function (string $idPrefix, string $selected): string {
-        $html = '<label class="form-label small fw-semibold">' . h(t('teams.transport_label')) . '</label>'
-              . '<div class="btn-group w-100 mb-3" role="group" aria-label="' . h(t('teams.transport_label')) . '">';
-        foreach (TEAM_TRANSPORTS as $tr) {
-            $id = $idPrefix . '-' . $tr;
-            $html .= '<input type="radio" class="btn-check" name="transport" id="' . h($id) . '" value="' . $tr . '"' . ($tr === $selected ? ' checked' : '') . '>'
-                   . '<label class="btn btn-outline-primary" for="' . h($id) . '">' . teamTransportIconSvg($tr, 20) . ' ' . h(t('teams.transport.' . $tr)) . '</label>';
-        }
-        return $html . '</div>';
-    };
-?>
-<div class="modal fade" id="createTeamModal" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-plus-lg me-1"></i><?= t('teams.new_btn') ?></h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <form method="post" class="team-form" data-leader-select="#createTeamLeader">
-                <?= csrfField() ?>
-                <input type="hidden" name="action" value="create_team">
-                <div class="modal-body">
-                    <p class="small text-muted"><?= t('teams.create_modal.select_note') ?></p>
-                    <?php
-                        // Unassigned volunteers first - they are the natural picks -
-                        // then everyone already on a team, who can be pulled across
-                        // into the new one without emptying their old team first.
-                        $createPool = array_merge(
-                            $unassignedApproved,
-                            array_values(array_filter($distinctApprovedById, fn($p) => isset($teamIdByUserId[$p['user_id']])))
-                        );
-                    ?>
-                    <div class="border rounded p-2 mb-3" style="max-height:220px;overflow:auto;">
-                        <?php foreach ($createPool as $person): ?>
-                        <?= $teamMemberCheckbox($person, false, null) ?>
-                        <?php endforeach; ?>
-                        <?php if (empty($createPool)): ?>
-                        <div class="text-muted small"><?= t('teams.create_modal.no_available') ?></div>
-                        <?php endif; ?>
-                    </div>
-                    <?php if (!empty($teams)): ?>
-                    <p class="small text-muted mb-3"><i class="bi bi-info-circle me-1"></i><?= t('teams.move_note') ?></p>
-                    <?php endif; ?>
-                    <label class="form-label small fw-semibold"><?= t('teams.custom_name_label') ?></label>
-                    <input type="text" class="form-control mb-3" name="custom_codename" maxlength="20" placeholder="<?= t('teams.custom_name_placeholder') ?>">
-                    <?= $transportPicker('createTeamTransport', 'foot') ?>
-                    <label class="form-label small fw-semibold"><?= t('teams.leader_label') ?></label>
-                    <select class="form-select team-leader-select" name="leader_id" id="createTeamLeader" required>
-                        <option value=""><?= t('teams.select_members_first') ?></option>
-                    </select>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><?= t('common.cancel') ?></button>
-                    <button type="submit" class="btn btn-primary"><?= t('common.create') ?></button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<?php foreach ($teams as $team): ?>
-<?php
-    $memberIdsInTeam = array_column($team['members'], 'user_id');
-    // People on OTHER teams are now offered too: ticking one moves them here
-    // in this same save. teamMemberCheckbox() badges them with the team they
-    // would be leaving, and disables the ones that cannot be taken.
-    $editablePool = array_merge(
-        $team['members'],
-        array_values(array_filter($unassignedApproved, fn($p) => !in_array($p['user_id'], $memberIdsInTeam, true))),
-        array_values(array_filter(
-            $distinctApprovedById,
-            fn($p) => isset($teamIdByUserId[$p['user_id']]) && $teamIdByUserId[$p['user_id']] !== $team['id']
-        ))
-    );
-?>
-<div class="modal fade" id="editTeamModal-<?= $team['id'] ?>" tabindex="-1">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-pencil me-1"></i><?= h(t('teams.edit_modal_title', ['team' => teamLabel($team['codename'], $team['team_number'])])) ?></h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <form method="post" class="team-form" data-leader-select="#editTeamLeader-<?= $team['id'] ?>">
-                <?= csrfField() ?>
-                <input type="hidden" name="action" value="update_team">
-                <input type="hidden" name="team_id" value="<?= $team['id'] ?>">
-                <div class="modal-body">
-                    <label class="form-label small fw-semibold" for="editTeamName-<?= $team['id'] ?>"><?= t('teams.name_label') ?></label>
-                    <input type="text" class="form-control" name="codename" id="editTeamName-<?= $team['id'] ?>" maxlength="20" value="<?= h($team['codename']) ?>">
-                    <div class="form-text mb-3"><?= t('teams.rename_hint') ?></div>
-                    <div class="border rounded p-2 mb-3" style="max-height:220px;overflow:auto;">
-                        <?php foreach ($editablePool as $person): ?>
-                        <?= $teamMemberCheckbox($person, in_array($person['user_id'], $memberIdsInTeam, true), (int) $team['id']) ?>
-                        <?php endforeach; ?>
-                    </div>
-                    <?php if (count($teams) > 1): ?>
-                    <p class="small text-muted mb-1"><i class="bi bi-info-circle me-1"></i><?= t('teams.move_note') ?></p>
-                    <?php if (count($team['members']) > 1): ?>
-                    <p class="small text-muted"><i class="bi bi-arrow-left-right me-1"></i><?= t('teams.move_out_note') ?></p>
-                    <?php endif; ?>
-                    <?php endif; ?>
-                    <?= $transportPicker('editTeamTransport-' . $team['id'], $team['transport']) ?>
-                    <label class="form-label small fw-semibold"><?= t('teams.leader_label') ?></label>
-                    <select class="form-select team-leader-select" name="leader_id" id="editTeamLeader-<?= $team['id'] ?>" required data-current="<?= $team['leader_id'] ?>"></select>
-                    <div class="small text-warning-emphasis mt-1 d-none team-leader-moving-note"><i class="bi bi-exclamation-triangle me-1"></i><?= t('teams.move_to.leader_note') ?></div>
-                </div>
-                <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal"><?= t('common.cancel') ?></button>
-                    <button type="submit" class="btn btn-primary"><?= t('common.save') ?></button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-<?php endforeach; ?>
-<?php endif; ?>
 
 <div class="card shadow-sm mb-4" data-card-id="chatCard">
     <div class="card-header d-flex justify-content-between align-items-center">
@@ -9332,19 +8895,12 @@ function teamRosterHtml(team) {
     }).join('') + '</div>';
     return html;
 }
-// Live-refreshes each EXISTING team's roster from the poll, so another
-// admin's edit (add/remove a member, change leader) shows up here within
-// one poll cycle instead of needing a manual reload. A disbanded team's row
-// is removed live too. A brand-new team (present in `items`, no row yet)
-// now gets a row appended as well — roster + Delete work immediately
-// (Delete is a plain POST, nothing to duplicate), but Edit just reloads the
-// page instead of opening a modal: #editTeamModal-{id} needs the full
-// eligible-member pool the PHP template builds server-side, which this
-// lightweight poll payload doesn't carry, and reconstructing that query
-// here would duplicate real business logic just to avoid one reload in an
-// edge case (editing a team someone else created, without having reloaded
-// since). Visibility of the team and its roster — the actual complaint —
-// no longer needs that reload at all.
+// Live-refreshes each EXISTING team's roster from the poll, so a change made
+// on the «Ομάδες» page (a member added or moved, a new leader, a new name)
+// shows up here within one poll cycle instead of needing a manual reload. A
+// deleted team's row is removed live too, and a brand-new team (present in
+// `items`, no row yet) gets a row appended. The row is the roster and nothing
+// else: since v3.464.0 this card has no edit or delete of its own.
 function renderTeamRosters(items) {
     const byId = new Map(items.map(team => [String(team.id), team]));
     const seenIds = new Set();
@@ -9371,24 +8927,7 @@ function renderTeamRosters(items) {
         row.dataset.teamId = String(team.id);
         row.innerHTML = `<div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
             <div class="wr-team-roster">${teamRosterHtml(team)}</div>
-            ${CAN_MANAGE_WAR_ROOM ? `<div class="d-flex gap-1">
-                <button type="button" class="btn btn-sm btn-outline-secondary wr-team-edit-reload-btn" title="${escapeHtml(t('common.edit'))}"><i class="bi bi-pencil"></i></button>
-                <form class="wr-team-delete-form">
-                    <button type="submit" class="btn btn-sm btn-outline-danger" title="${escapeHtml(t('teams.delete_btn_title'))}"><i class="bi bi-x-lg"></i></button>
-                </form>
-            </div>` : ''}
         </div>`;
-        if (CAN_MANAGE_WAR_ROOM) {
-            row.querySelector('.wr-team-edit-reload-btn').addEventListener('click', () => location.reload());
-            row.querySelector('.wr-team-delete-form').addEventListener('submit', e => {
-                e.preventDefault();
-                if (!confirm(t('teams.delete_confirm', {team: teamLabel(team.codename, team.team_number)}))) return;
-                const data = new URLSearchParams({csrf_token: csrfToken, action: 'delete_team', team_id: team.id});
-                // WR_MISSION_ID (the one-line boot script above this one) is the
-                // mission this page is about; no function embeds the id itself.
-                fetch('war-room.php?id=' + WR_MISSION_ID, {method: 'POST', body: data}).then(() => location.reload());
-            });
-        }
         listEl.appendChild(row);
     });
 
@@ -27439,128 +26978,6 @@ const POLL_RESUME_STALE_MS = 10000;
 // actually lost its network — a 5G link carrying nothing, as on 26/09,
 // never raises it, which is why the banner's own retry loop does not rely on it.
 window.addEventListener('online', () => { if (!document.hidden) restartPoll(); });
-
-document.querySelectorAll('.team-form').forEach(form => {
-    const leaderSelect = form.querySelector(form.dataset.leaderSelect);
-    if (!leaderSelect) return;
-    const checkboxes = form.querySelectorAll('.team-member-check');
-    const currentLeaderId = leaderSelect.dataset.current || '';
-    function refreshLeaderOptions() {
-        const checked = Array.from(checkboxes).filter(cb => cb.checked);
-        const previousValue = leaderSelect.value || currentLeaderId;
-        leaderSelect.innerHTML = '';
-        if (checked.length === 0) {
-            leaderSelect.innerHTML = '<option value="">' + t('teams.select_members_first') + '</option>';
-            return;
-        }
-        checked.forEach(cb => {
-            const opt = document.createElement('option');
-            opt.value = cb.value;
-            opt.textContent = cb.dataset.name;
-            if (cb.value === String(previousValue)) opt.selected = true;
-            leaderSelect.appendChild(opt);
-        });
-    }
-    // The GPS column: only meaningful for somebody who is actually on the
-    // team, and pre-ticked for whoever is chosen as leader — in practice the
-    // one carrying the phone. Only ever ticks: unticking the leader is a
-    // deliberate choice the form must not undo on the next redraw.
-    const gpsBoxes = form.querySelectorAll('.team-gps-check');
-    function gpsBoxFor(userId) {
-        return Array.from(gpsBoxes).find(box => box.value === String(userId)) || null;
-    }
-    function syncGpsAvailability() {
-        checkboxes.forEach(cb => {
-            const box = gpsBoxFor(cb.value);
-            if (!box || box.disabled) return;
-            const row = box.closest('.team-gps-label');
-            if (row) row.classList.toggle('opacity-25', !cb.checked);
-            if (!cb.checked) box.checked = false;
-        });
-    }
-    // Fires only when the leader genuinely CHANGES, never on every redraw:
-    // otherwise unticking the leader's GPS and then adding one more member
-    // would silently tick them again, and the form would look like it was
-    // fighting the coordinator.
-    let lastLeaderId = leaderSelect.value || currentLeaderId || '';
-    function tickLeaderGpsIfChanged() {
-        if (leaderSelect.value === lastLeaderId) return;
-        lastLeaderId = leaderSelect.value;
-        const box = gpsBoxFor(leaderSelect.value);
-        if (box && !box.disabled) box.checked = true;
-    }
-    checkboxes.forEach(cb => cb.addEventListener('change', () => {
-        refreshLeaderOptions();
-        syncGpsAvailability();
-        tickLeaderGpsIfChanged();
-    }));
-    leaderSelect.addEventListener('change', tickLeaderGpsIfChanged);
-    refreshLeaderOptions();
-    syncGpsAvailability();
-
-    // «Μετακίνηση σε…» beside a member (edit window only). Choosing a team
-    // takes the person off THIS team's list - the server moves them to the
-    // chosen one in the same save - so the leader choices below shrink with
-    // them. Choosing «Μετακίνηση σε…» again puts them back, with the GPS box
-    // as it was before the choice (syncGpsAvailability() clears it for anyone
-    // unticked, which must not outlive a change of mind).
-    const moveSelects = Array.from(form.querySelectorAll('.team-move-select'));
-    if (!moveSelects.length) return;
-    const leaderMovingNote = form.querySelector('.team-leader-moving-note');
-    function memberBoxFor(sel) {
-        const m = /\[(\d+)\]/.exec(sel.name);
-        return m ? Array.from(checkboxes).find(cb => cb.value === m[1]) || null : null;
-    }
-    function refreshLeaderMovingNote() {
-        if (!leaderMovingNote) return;
-        const moving = moveSelects.some(sel => {
-            const cb = memberBoxFor(sel);
-            return sel.value !== '' && cb && cb.value === String(currentLeaderId);
-        });
-        leaderMovingNote.classList.toggle('d-none', !moving);
-    }
-    // Puts back what leaving took with it: the GPS box as it was, and the
-    // leader's seat when the person coming back was the leader.
-    function undoMove(sel, cb) {
-        const gpsBox = gpsBoxFor(cb.value);
-        if (gpsBox && gpsBox.dataset.gpsBeforeMove !== undefined) {
-            gpsBox.checked = gpsBox.dataset.gpsBeforeMove === '1';
-            delete gpsBox.dataset.gpsBeforeMove;
-        }
-        if (sel.dataset.wasLeader === '1') {
-            leaderSelect.value = cb.value;
-            lastLeaderId = leaderSelect.value;
-        }
-        sel.dataset.wasLeader = '';
-        sel.classList.remove('border-primary');
-    }
-    moveSelects.forEach(sel => {
-        const cb = memberBoxFor(sel);
-        if (!cb) return;
-        sel.addEventListener('change', () => {
-            const leaving = sel.value !== '';
-            if (leaving && cb.checked) {
-                const gpsBox = gpsBoxFor(cb.value);
-                if (gpsBox && !gpsBox.disabled) gpsBox.dataset.gpsBeforeMove = gpsBox.checked ? '1' : '0';
-                // Leaving as the leader: the leader list falls back to the
-                // first person left, which a cancelled move must undo.
-                sel.dataset.wasLeader = leaderSelect.value === cb.value ? '1' : '';
-            }
-            cb.checked = !leaving;
-            cb.dispatchEvent(new Event('change'));
-            if (leaving) sel.classList.add('border-primary'); else undoMove(sel, cb);
-            refreshLeaderMovingNote();
-        });
-        // Ticking the person again by hand cancels the move.
-        cb.addEventListener('change', () => {
-            if (cb.checked && sel.value !== '') {
-                sel.value = '';
-                undoMove(sel, cb);
-                refreshLeaderMovingNote();
-            }
-        });
-    });
-});
 
 (function() {
     const chatMessagesEl = document.getElementById('chatMessages');

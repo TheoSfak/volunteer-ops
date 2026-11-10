@@ -144,7 +144,7 @@ function teamTransportIconSvg($transport, int $size = 18): string {
  * participation_requests. Ten volunteers go out as two teams of five and one
  * phone per team carries the operation: the other eight are on duty, on the
  * roster, on the attendance sheet and on their certificate, and they are not
- * in here. Membership is ticked per person in either team form, or with the
+ * in here. Membership is ticked per person on the «Ομάδες» page, or with the
  * GPS switch on the participants card (which also reaches someone on no team
  * at all, and is how a phone is handed over mid-operation).
  *
@@ -886,7 +886,7 @@ function actionRoomNotifyRecipientIds(int $missionId, ?int $teamId = null, int $
 }
 
 /**
- * Apply a team form's GPS ticks: every member this save names is set to
+ * Apply a set of GPS ticks to a team: every member this save names is set to
  * exactly what its checkbox said. Deliberately scoped to the members being
  * saved — dropping somebody from a team does NOT untick them, because a
  * volunteer moved out of a team is usually being moved INTO another one in
@@ -3834,7 +3834,7 @@ function loadMissionTeamsForMission(int $missionId): array {
          LEFT JOIN volunteer_teams mht ON mht.id = u.volunteer_team_id
          LEFT JOIN mission_visitor_tags mmvt ON mmvt.id = u.mission_visitor_tag_id
          WHERE mt.mission_id = ?
-         ORDER BY mt.created_at, u.name",
+         ORDER BY mt.created_at, mt.id, u.name",
         [$missionId]
     );
     $teams = [];
@@ -3878,8 +3878,8 @@ function loadMissionTeamsForMission(int $missionId): array {
 /**
  * War Room: which OTHER team of this mission each volunteer currently belongs
  * to, keyed by user id. Exists so a volunteer can be moved between teams in a
- * single save: both team forms need to show "this person is on ΒΡΑΒΟ 2" next
- * to the checkbox, and both handlers need to know who to unassign.
+ * single save: whoever makes or changes a team has to know "this person is on
+ * ΒΡΑΒΟ 2", and whom to take off which team.
  *
  * Before this, neither form would even list someone already on another team,
  * so a move was two separate saves — remove from A, then add to B — and
@@ -3915,8 +3915,8 @@ function loadOtherTeamAssignments(int $missionId, int $excludeTeamId = 0): array
  * teams' labels (deduplicated), empty when the move is safe.
  *
  * Blocked in two cases, which are really one: the app's own invariant is that
- * a team's leader is always one of its members (both create_team and
- * update_team enforce it), so taking a leader would leave a team pointing at
+ * a team's leader is always one of its members (createMissionTeam() and
+ * setMissionTeamLeader() enforce it), so taking a leader would leave a team pointing at
  * someone who is no longer on it. A one-member team is the same case — that
  * member is necessarily its leader — and taking them would also silently
  * leave an empty team behind.
@@ -3938,41 +3938,10 @@ function teamsBlockedFromMemberMove(array $userIds, array $otherAssignments): ar
 }
 
 /**
- * War Room: the «Μετακίνηση σε…» choices an edit-team form posts, reduced to
- * the ones that can actually be carried out. $posted is the raw
- * $_POST['move_to'] (user id => target team id).
- *
- * A move is only honoured for somebody who is on THIS team right now and
- * towards a team of the same mission that is not this one — anything else is a
- * stale tab or a hand-made request, and is dropped rather than half-applied.
- *
- * @param mixed $posted
- * @return array<int,int> user id => target team id
- */
-function resolveTeamMemberMoves($posted, array $currentMemberIds, array $validTargetTeamIds): array {
-    if (!is_array($posted)) {
-        return [];
-    }
-    $currentMemberIds = array_map('intval', $currentMemberIds);
-    $validTargetTeamIds = array_map('intval', $validTargetTeamIds);
-    $moves = [];
-    foreach ($posted as $userId => $toTeamId) {
-        if (is_array($toTeamId)) continue;
-        $userId = (int) $userId;
-        $toTeamId = (int) $toTeamId;
-        if ($userId <= 0 || $toTeamId <= 0) continue;
-        if (!in_array($userId, $currentMemberIds, true)) continue;
-        if (!in_array($toTeamId, $validTargetTeamIds, true)) continue;
-        $moves[$userId] = $toTeamId;
-    }
-    return $moves;
-}
-
-/**
  * War Room: put each person of $moves (user id => target team id) on their new
  * team, taking them off whichever team they are on in the same breath. The
- * caller owns the transaction. Used by the edit-team save, where the source
- * team's own member list is rewritten around it.
+ * caller owns the transaction. Used by moveMissionTeamMember(), the «Ομάδες»
+ * page's move of one person (includes/functions-mission-teams.php).
  */
 function applyTeamMemberMoves(int $missionId, array $moves): void {
     foreach ($moves as $userId => $toTeamId) {
@@ -3985,14 +3954,14 @@ function applyTeamMemberMoves(int $missionId, array $moves): void {
 }
 
 /**
- * War Room: what an edit-team save does about the team's NAME.
+ * War Room: what a rename does about the team's NAME (renameMissionTeam()).
  *
  * A blank field, or the name the team already has, means "leave it" — so a form
  * from an old tab that never carried the field changes nothing, and the random
  * 2-digit number of an auto NATO name survives an edit that did not touch the
  * name. A new name is used as typed (20 characters at most, like on create) and
  * the caller then drops the number: an admin-chosen name is assumed distinct on
- * its own, the same rule create_team applies.
+ * its own, the same rule createMissionTeam() applies.
  *
  * 'clash' is the label of another team of the mission that already reads the
  * same, in which case nothing is renamed and the save must be refused — two
