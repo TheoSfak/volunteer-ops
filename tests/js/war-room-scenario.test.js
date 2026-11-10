@@ -50,7 +50,7 @@ async function load(scenario, answers = {}, opts = {}) {
     const body = {innerHTML: '', dataset: {scMode: opts.mode || 'page'}, addEventListener: (type, fn) => { handlers[type] = fn; }};
     const winHandlers = {};
     const timeouts = [];
-    const win = {name: opts.windowName || '', addEventListener: (type, fn) => { winHandlers[type] = fn; }};
+    const win = {name: opts.windowName || '', addEventListener: (type, fn) => { winHandlers[type] = fn; }, open: (url, target) => calls.push(['open', url, target])};
     const timers = [];
     const storage = {};
     const doc = {
@@ -1202,7 +1202,9 @@ test('the Action Room draws only a summary line and keeps the map: ghosts, the o
     assert.match(body.innerHTML, /data-sc-summary="chips"/);
     assert.doesNotMatch(body.innerHTML, /data-sc="/, 'nothing to press in the summary');
     assert.doesNotMatch(body.innerHTML, /wr-sc-grid/);
-    assert.deepEqual(Object.keys(handlers), [], 'the summary listens to nothing');
+    // A click listener IS attached in the Action Room now (v3.467.0), for the active nudge's own «Άνοιγμα»/✕ - but
+    // with no nudge showing here, nothing of the summary itself is clickable (checked just above).
+    assert.deepEqual(Object.keys(handlers), ['click']);
     assert.equal(win.name, 'wrActionRoom83', 'so that the page\'s links reach this very tab');
     api.drawGhostsInto({});
     assert.ok(drawn.length >= 2, "the ghosts are the same ones as before: the area's polygon and its number");
@@ -1344,4 +1346,97 @@ test('the page says why when the plan never arrives, and keeps the last good car
     await good.api.reload();
     assert.match(good.body.innerHTML, /data-phase="7"/, 'the card the person was reading stays');
     assert.doesNotMatch(good.body.innerHTML, /data-sc-load-error/);
+});
+
+test('a phase says who built it and when, beside who played it (v3.467.0) - the loader\'s own fields, not computed here', async () => {
+    const withCreator = twoPhases({created_label: '07/11 09:30', created_by_name: 'Scenario Admin'}, {created_label: '07/11 09:45', created_by_name: 'Other Admin'});
+    const {body} = await load(withCreator, {}, {mode: 'page'});
+    assert.match(body.innerHTML, /scenario\.created_line\{"time":"07\/11 09:30","who":"Scenario Admin"\}/);
+    assert.match(body.innerHTML, /scenario\.created_line\{"time":"07\/11 09:45","who":"Other Admin"\}/);
+    assert.match(body.innerHTML, /scenario\.played_line\{"time":"10:00","who":"Admin"\}/, 'played stays its own line, unaffected');
+
+    // No creator on the fixture (older data, or a test that never set it): no empty line is drawn.
+    const bare = await load(twoPhases({}, {}), {}, {mode: 'page'});
+    assert.doesNotMatch(bare.body.innerHTML, /scenario\.created_line/);
+});
+
+test('the duplicate-phase button sends duplicate_phase for that phase, asking nothing first', async () => {
+    const {handlers, calls} = await load(twoPhases({}, {}), {duplicate_phase: {ok: true, phase_id: 9}});
+    await clickOn(handlers, {sc: 'duplicate-phase', phase: '7'});
+    await settle();
+    const post = calls.find((c) => c[0] === 'fetch' && c[2]);
+    assert.ok(post);
+    assert.equal(new URLSearchParams(post[2]).get('action'), 'duplicate_phase');
+    assert.equal(new URLSearchParams(post[2]).get('phase_id'), '7');
+    assert.ok(!calls.some((c) => c[0] === 'confirm'), 'duplicating only ADDS a phase, unlike delete, so it asks nothing first');
+});
+
+// ── The active nudge (v3.467.0): a beep and a row drawn into the card itself, once, on the edge where a phase
+// becomes ready - never on the very first load, and never again for the same phase ──────────────────────────────
+
+const answerWith = (plan) => async () => ({json: async () => ({ok: true, scenario: plan})});
+const readyPhase = (over = {}) => Object.assign({}, {progress: progress({done: 6, open: 0, complete: true, can_withdraw: false})}, over);
+
+test('the nudge fires once a phase goes from not ready to ready, on the page and in the Action Room, and not on the very first load', async () => {
+    // Not ready yet: the first phase still has open orders.
+    const page = await load(twoPhases({}, {}), {}, {mode: 'page'});
+    assert.doesNotMatch(page.body.innerHTML, /data-sc-nudge="1"/, 'nothing ready yet');
+
+    // The poll finds phase 1 finished: the edge fires, once.
+    page.ctx.fetch = answerWith(twoPhases(readyPhase(), {}));
+    page.timers[0]();
+    await settle();
+    assert.match(page.body.innerHTML, /data-sc-nudge="1"/);
+    assert.match(page.body.innerHTML, /scenario\.hint_ready/);
+
+    // A refresh later it is still ready: the nudge was already shown, so it does not fire again - but a row of the
+    // card is still free to say so passively (readyHint(), unaffected by any of this).
+    page.ctx.fetch = answerWith(twoPhases(readyPhase(), {}));
+    page.timers[0]();
+    await settle();
+    // Dismiss and recheck: if checkReadyNudge fired again it would have put the row straight back.
+    const dismiss = page.body.innerHTML.includes('data-sc-nudge="1"');
+    assert.ok(dismiss, 'still showing from the first edge (nobody dismissed it)');
+
+    // Opening the Scenario page fresh on an already-finished phase 1 (no phase 1 was ever "not ready" in THIS load)
+    // nudges nobody for something that became ready an hour ago.
+    const fresh = await load(twoPhases(readyPhase(), {}), {}, {mode: 'page'});
+    assert.doesNotMatch(fresh.body.innerHTML, /data-sc-nudge="1"/);
+    assert.match(fresh.body.innerHTML, /data-sc-ready="1"/, 'the passive note still shows; only the active nudge is edge-triggered');
+});
+
+test('the Action Room\'s nudge opens the Scenario page; the page\'s own nudge only dismisses, and dismissing sends nothing', async () => {
+    const room = await load(twoPhases({}, {}), {}, {mode: 'room'});
+    room.ctx.fetch = answerWith(twoPhases(readyPhase(), {}));
+    room.timers[0]();
+    await settle();
+    assert.match(room.body.innerHTML, /data-sc="nudge-open"/);
+    await clickOn(room.handlers, {sc: 'nudge-open'});
+    const opened = room.calls.find((c) => c[0] === 'open');
+    assert.ok(opened);
+    assert.match(opened[1], /mission-scenario-view\.php\?id=83/);
+    assert.doesNotMatch(room.body.innerHTML, /data-sc-nudge="1"/, 'dismissed itself on the way out');
+
+    const page = await load(twoPhases({}, {}), {}, {mode: 'page'});
+    page.ctx.fetch = answerWith(twoPhases(readyPhase(), {}));
+    page.timers[0]();
+    await settle();
+    assert.doesNotMatch(page.body.innerHTML, /data-sc="nudge-open"/, 'already on the page: nothing to open');
+    page.calls.length = 0;
+    await clickOn(page.handlers, {sc: 'nudge-dismiss'});
+    assert.doesNotMatch(page.body.innerHTML, /data-sc-nudge="1"/);
+    assert.equal(page.calls.filter((c) => c[0] === 'fetch').length, 0, 'a nudge is not an order: dismissing it asks the server nothing');
+});
+
+test('switching the passive hint off hides an already-showing nudge at once, not just the next one', async () => {
+    const page = await load(twoPhases({}, {}), {}, {mode: 'page'});
+    page.ctx.fetch = answerWith(twoPhases(readyPhase(), {}));
+    page.timers[0]();
+    await settle();
+    assert.match(page.body.innerHTML, /data-sc-nudge="1"/);
+
+    page.handlers.change({target: {closest: (sel) => (sel === 'input[data-sc-hint]' ? {checked: false} : null)}});
+    assert.equal(page.storage.wrScenarioHint, '0');
+    assert.doesNotMatch(page.body.innerHTML, /data-sc-nudge="1"/);
+    assert.doesNotMatch(page.body.innerHTML, /data-sc-ready="1"/, 'the passive note is hidden the same way');
 });

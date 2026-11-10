@@ -85,6 +85,10 @@ include __DIR__ . '/includes/header.php';
         <div class="text-end">
             <span class="sc-live"><span class="sc-live-dot"></span><?= h(t('scenario.page_live')) ?></span>
             <div class="mt-2 d-flex gap-2 justify-content-end">
+                <!-- The printable briefing (v3.467.0): every phase and its orders, on paper or as a PDF, for an exercise's own
+                     briefing or for the record once the mission closes. mission-scenario-print.php reads the plan itself, so
+                     this is a plain link - a new tab, named for the mission, so a second press brings the same one back. -->
+                <a href="mission-scenario-print.php?id=<?= $missionId ?>" target="wrScenarioPrint<?= $missionId ?>" class="btn btn-sm btn-outline-light" title="<?= h(t('scenario.print_hero_title')) ?>"><?= h(t('scenario.print_hero_btn')) ?></a>
                 <a href="war-room.php?id=<?= $missionId ?>" class="btn btn-sm btn-outline-light" data-sc-room-link="1"><i class="bi bi-arrow-left me-1"></i><?= h(t('scenario.page_open_room')) ?></a>
             </div>
         </div>

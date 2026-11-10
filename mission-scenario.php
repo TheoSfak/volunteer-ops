@@ -97,6 +97,14 @@ if ($action === 'delete_phase') {
     exit;
 }
 
+if ($action === 'duplicate_phase') {
+    // «Αντιγραφή φάσης» (v3.467.0): a fresh, unplayed copy of a phase at the end of the plan, for a pattern that
+    // repeats - a second sweep of the same sectors, the same patrol for a different team.
+    $result = duplicateScenarioPhase($mission, (int) post('phase_id'), (int) $userId);
+    echo $result['ok'] ? $answer(['phase_id' => $result['id']]) : $fail($result['error']);
+    exit;
+}
+
 if ($action === 'add_item') {
     // "New phase" from the order window: the phase is made and the order put in it in one step. If the order
     // is refused the new, empty phase is taken out again so a bad press leaves nothing behind.

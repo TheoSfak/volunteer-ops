@@ -154,6 +154,9 @@ const SCENARIO_SLOT_LABEL_MAX = 80;
  * when that area has been deleted since: it will fail at play). An item of kind 'route' has type 'route', its
  * waypoints as [[lat, lng], ...] in geo, label = the route's title, point_count, closed_loop, return_to_start and,
  * for a real team, team_empty (true when nobody on that team takes part in the Action Room: it will fail at play).
+ * A phase carries who built it and when (created_by_name, created_label) beside who played it and when
+ * (played_by_name, played_label, null until play is pressed) - v3.467.0, for the small group of system admins
+ * who may now be the only ones who ever see a plan at all (v3.466.0).
  */
 function loadMissionScenario(int $missionId): array {
     $teamLabels = [];
@@ -178,9 +181,10 @@ function loadMissionScenario(int $missionId): array {
     }
 
     $phases = dbFetchAll(
-        "SELECT p.id, p.seq, p.title, p.played_at, p.played_by, u.name AS played_by_name
+        "SELECT p.id, p.seq, p.title, p.played_at, p.played_by, pu.name AS played_by_name, p.created_by, p.created_at, cu.name AS created_by_name
          FROM mission_scenario_phases p
-         LEFT JOIN users u ON u.id = p.played_by
+         LEFT JOIN users pu ON pu.id = p.played_by
+         LEFT JOIN users cu ON cu.id = p.created_by
          WHERE p.mission_id = ?
          ORDER BY p.seq, p.id",
         [$missionId]
@@ -453,6 +457,9 @@ function loadMissionScenario(int $missionId): array {
             'id'             => (int) $phase['id'],
             'n'              => $i + 1,
             'title'          => $phase['title'],
+            'created_at'     => $phase['created_at'],
+            'created_label'  => $phase['created_at'] ? date('d/m H:i', strtotime($phase['created_at'])) : null,
+            'created_by_name' => $phase['created_by_name'],
             'played_at'      => $phase['played_at'],
             'played_label'   => $phase['played_at'] ? date('d/m H:i', strtotime($phase['played_at'])) : null,
             'played_by_name' => $phase['played_by_name'],
@@ -735,6 +742,64 @@ function deleteScenarioPhase(array $mission, int $phaseId, int $userId): ?string
     dbExecute("UPDATE mission_scenario_phases SET seq = seq - 1 WHERE mission_id = ? AND seq > ?", [$missionId, (int) $phase['seq']]);
     logAudit('delete_scenario_phase', 'mission_scenario_phases', $phaseId, null, ['mission_id' => $missionId, 'was_played' => $phase['played_at'] !== null]);
     return null;
+}
+
+/**
+ * «Αντιγραφή φάσης» (v3.467.0): a new phase, at the end of the plan, holding a fresh copy of every order of
+ * $phaseId - played or not, the source is never changed and the copy never remembers it was sent. Every runtime
+ * field (sent_at, sent_ref_id, last_error, waiting_since, wait_cancelled_at, parent_item_id, release_mode,
+ * released_by) starts empty, as if nothing had ever been staged; created_by/created_at become this press. A
+ * sector or a building that names an AREA ITEM or a SECTOR ITEM of the very phase being copied (payload
+ * area_item_id / sector_item_id) is repointed at that item's own copy, so the new phase stays self-contained and
+ * play can make its own area or sector rather than reaching into the original phase for one; a reference to an
+ * item of a DIFFERENT, earlier phase is left alone, since nothing of that phase is being copied. A slot (team_id,
+ * slot_id, payload slot_id/slot_label) is mission-wide, not phase-wide, and is copied unchanged. ['ok' => true,
+ * 'id' => n] or ['ok' => false, 'error' => text].
+ */
+function duplicateScenarioPhase(array $mission, int $phaseId, int $userId): array {
+    $missionId = (int) $mission['id'];
+    $phase = scenarioPhaseRow($missionId, $phaseId);
+    if (!$phase) {
+        return ['ok' => false, 'error' => t('scenario.phase_not_found')];
+    }
+    if ((int) dbFetchValue("SELECT COUNT(*) FROM mission_scenario_phases WHERE mission_id = ?", [$missionId]) >= SCENARIO_MAX_PHASES) {
+        return ['ok' => false, 'error' => t('scenario.too_many_phases', ['max' => SCENARIO_MAX_PHASES])];
+    }
+    $title = trim((string) $phase['title']);
+    $title = mb_substr($title !== '' ? $title . t('scenario.phase_duplicate_suffix') : '', 0, SCENARIO_TITLE_MAX);
+    $seq = 1 + (int) dbFetchValue("SELECT COALESCE(MAX(seq), 0) FROM mission_scenario_phases WHERE mission_id = ?", [$missionId]);
+    $newPhaseId = (int) dbInsert(
+        "INSERT INTO mission_scenario_phases (mission_id, seq, title, created_by, created_at) VALUES (?, ?, ?, ?, NOW())",
+        [$missionId, $seq, $title !== '' ? $title : null, $userId]
+    );
+
+    $items = dbFetchAll(
+        "SELECT id, seq, kind, payload, slot_id FROM mission_scenario_items WHERE phase_id = ? AND mission_id = ? ORDER BY seq, id",
+        [$phaseId, $missionId]
+    );
+    $idMap = [];
+    foreach ($items as $item) {
+        $payload = json_decode((string) $item['payload'], true);
+        if (!is_array($payload)) {
+            $payload = [];
+        }
+        // Items play in the order they were written down, so a reference can only ever point earlier in the same
+        // phase: by the time a sector or a building is copied, the area or sector item it names (if it is one of
+        // this very phase) is already in $idMap.
+        if ($item['kind'] === 'sector' && isset($payload['area_item_id']) && isset($idMap[(int) $payload['area_item_id']])) {
+            $payload['area_item_id'] = $idMap[(int) $payload['area_item_id']];
+        }
+        if ($item['kind'] === 'building' && isset($payload['sector_item_id']) && isset($idMap[(int) $payload['sector_item_id']])) {
+            $payload['sector_item_id'] = $idMap[(int) $payload['sector_item_id']];
+        }
+        $newId = (int) dbInsert(
+            "INSERT INTO mission_scenario_items (phase_id, mission_id, seq, kind, payload, slot_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
+            [$newPhaseId, $missionId, (int) $item['seq'], $item['kind'], json_encode($payload, JSON_UNESCAPED_UNICODE), $item['slot_id'], $userId]
+        );
+        $idMap[(int) $item['id']] = $newId;
+    }
+    logAudit('duplicate_scenario_phase', 'mission_scenario_phases', $newPhaseId, null, ['mission_id' => $missionId, 'from_phase_id' => $phaseId, 'items' => count($items)]);
+    return ['ok' => true, 'id' => $newPhaseId];
 }
 
 /**
@@ -2608,7 +2673,7 @@ function deleteScenarioSlot(array $mission, int $slotId, int $userId): ?string {
  */
 function scenarioPageExtraStringKeys(): array {
     return [
-        'common.send_failed', 'common.cancel', 'common.all_teams',
+        'common.send_failed', 'common.cancel', 'common.all_teams', 'common.close',
         'restricted_area.kind_danger', 'restricted_area.kind_cliff', 'restricted_area.kind_forbidden',
         'restricted_area.shape_polygon', 'restricted_area.shape_line',
     ];
@@ -2628,4 +2693,73 @@ function scenarioPageStrings(string $lang): array {
         'strings'  => $pick($all[$lang] ?? []),
         'fallback' => $pick($all[DEFAULT_LANGUAGE] ?? []),
     ];
+}
+
+/**
+ * One line of a staged order for the printed briefing (mission-scenario-print.php, v3.467.0): the kind and its
+ * own words, who it is for, and how it stands now - the server-side PHP twin of assets/js/war-room-scenario.js's
+ * itemKind()/itemTarget()/itemTitle()/stateLine(), for a page that has no script and no live card to read them
+ * from. A snapshot, not a live card: the per-team broadcast counts still show (done_n/of_n), but the hourglass
+ * icon, the colour and the "taking the phase back leaves this on the map" hints are left to the screen.
+ * ['title' => "Σημείο «...»", 'target' => who it goes to, 'state' => how it stands].
+ */
+function scenarioPrintItemLine(array $item): array {
+    $orderLabelKeys = [
+        'task' => 'scenario.order_type_task', 'speak' => 'scenario.order_type_speak', 'message' => 'scenario.order_type_message',
+        'location' => 'scenario.order_type_location', 'photo' => 'scenario.order_type_photo', 'video' => 'scenario.order_type_video',
+    ];
+    $kindKey = match ($item['type']) {
+        'sector' => 'scenario.kind_sector',
+        'route' => 'scenario.kind_route',
+        'restricted' => 'scenario.kind_restricted',
+        'search_area' => 'scenario.kind_search_area',
+        'building' => 'scenario.kind_building',
+        'order' => $orderLabelKeys[$item['order_type'] ?? ''] ?? 'scenario.order_add_btn',
+        'point' => 'scenario.kind_point',
+        default => 'scenario.kind_area',
+    };
+    $kind = t($kindKey);
+    $label = $item['label'] ?? null;
+    if ($item['type'] === 'order' && $label !== null && mb_strlen($label) > 60) {
+        $label = mb_substr($label, 0, 57) . '…';
+    }
+    $title = $label ? $kind . ' «' . $label . '»' : $kind;
+
+    if ($item['audience'] === 'none') {
+        $target = t('scenario.target_everyone');
+    } elseif ($item['audience'] === 'all') {
+        $target = $item['type'] === 'order' ? t('scenario.target_all_people') : t('common.all_teams');
+    } elseif ($item['audience'] === 'slot') {
+        $target = trim((string) ($item['slot_label'] ?? '') . ($item['team_label'] ? ' → ' . $item['team_label'] : ''));
+    } else {
+        $target = $item['team_label'] ?? t('scenario.team_gone');
+    }
+
+    if (!$item['sent']) {
+        $state = $item['error'] !== null ? t('common.send_failed') . ': ' . $item['error'] : t('scenario.print_not_sent');
+    } else {
+        $isOrder = $item['type'] === 'order';
+        $ackOnly = $isOrder && in_array($item['order_type'] ?? '', ['message', 'speak'], true);
+        $state = match ($item['state']) {
+            'done' => t($ackOnly ? 'scenario.state_done_ack' : 'scenario.state_done'),
+            'withdrawn' => t('scenario.state_withdrawn'),
+            'cancelled' => t('scenario.state_cancelled'),
+            'expanded' => t('scenario.state_split'),
+            'standing' => t('scenario.state_standing'),
+            'waiting' => !empty($item['wait']['phase_n'])
+                ? t(!empty($item['wait']['cant']) ? 'scenario.state_waiting_cant' : 'scenario.state_waiting', [
+                    'team' => $item['wait']['team_label'] ?? $item['team_label'] ?? '',
+                    'phase' => t('scenario.phase_n', ['n' => $item['wait']['phase_n']]),
+                    'done' => $item['wait']['done'] ?? 0, 'of' => $item['wait']['of'] ?? 0,
+                  ])
+                : t('scenario.state_waiting_generic'),
+            'open' => !empty($item['of_n'])
+                ? t($isOrder ? ($ackOnly ? 'scenario.state_open_ack' : 'scenario.state_open_people') : 'scenario.state_open_broadcast', ['done' => $item['done_n'] ?? 0, 'of' => $item['of_n']])
+                : t('scenario.state_open'),
+            // A sent item with no state the server recognises - should not happen, but print never breaks over it.
+            default => t('scenario.item_sent'),
+        };
+    }
+
+    return ['title' => $title, 'target' => $target, 'state' => $state];
 }

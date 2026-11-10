@@ -336,6 +336,10 @@ final class ScenarioTest extends TestCase
         $phaseRow = loadMissionScenario($this->missionId)['phases'][0];
         $this->assertNotNull($phaseRow['played_at']);
         $this->assertSame('Scenario Admin', $phaseRow['played_by_name']);
+        // Who built the phase, beside who played it (v3.467.0) - both admins in this fixture, but two different fields.
+        $this->assertNotNull($phaseRow['created_at']);
+        $this->assertSame('Scenario Admin', $phaseRow['created_by_name']);
+        $this->assertMatchesRegularExpression('#^\d{2}/\d{2} \d{2}:\d{2}$#', $phaseRow['created_label']);
     }
 
     public function testPlayingTwiceSendsOnce(): void

@@ -140,17 +140,98 @@
             '.wr-sc-chip-ready{color:#146c43;border-color:#198754;box-shadow:0 0 0 2px rgba(25,135,84,.18)}',
             // The page: a wide screen holds the phases side by side instead of one long column.
             '.wr-sc-page .wr-sc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:.75rem;align-items:start;margin-bottom:.75rem}',
-            '.wr-sc-page .wr-sc-grid .wr-sc-phase{margin-bottom:0}'
+            '.wr-sc-page .wr-sc-grid .wr-sc-phase{margin-bottom:0}',
+            // The active nudge (v3.467.0): a phase just finished and the next one is waiting for ▶. Drawn into the top of
+            // the very card it is about (renderCard()), on both pages, so it is never a second element to lose track of.
+            '.wr-sc-nudge{background:#146c43;color:#fff;border-radius:8px;padding:.5rem .6rem;margin-bottom:.6rem;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;animation:wrScNudgeIn .25s ease-out}',
+            '.wr-sc-nudge .btn-close{filter:invert(1) grayscale(1) brightness(2)}',
+            '@keyframes wrScNudgeIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}'
         ].join('\n');
         document.head.appendChild(style);
     }
 
+    // ── The active nudge (v3.467.0) ──────────────────────────────────────────────────────────────────────────────
+    //
+    // readyHint() and phaseChip() below already say, passively, when a phase has finished and the next one is
+    // waiting for ▶ - but only to someone looking at that card right now. Nothing there is timed, and this isn't
+    // either: it fires once, on the edge where that becomes true (checkReadyNudge, called from apply() with the
+    // plan as it was a moment ago), not on every poll that finds it still true. Same on/off switch as the passive
+    // hint (hintEnabled()), so turning that off silences this too, and it sends nothing either - a beep, and a row
+    // drawn into the SAME card (renderCard() below), above its phases, rather than an element of its own: the
+    // card already owns one delegated click handler (onCardClick) and one string it draws from, and this is
+    // state for that string to include, not a second DOM tree to keep in sync with it.
+    let activeNudge = null; // {prevN, nextN} or null
+    let scenarioAudioCtx = null;
+    function unlockScenarioAudio() {
+        if (!scenarioAudioCtx) {
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            if (!Ctx) return;
+            try { scenarioAudioCtx = new Ctx(); } catch (e) { return; }
+        }
+        if (scenarioAudioCtx.state === 'suspended') scenarioAudioCtx.resume().catch(() => {});
+    }
+    function scenarioBeep() {
+        unlockScenarioAudio();
+        if (!scenarioAudioCtx || scenarioAudioCtx.state !== 'running') return;
+        const ctx = scenarioAudioCtx;
+        const now = ctx.currentTime;
+        [0, 0.18].forEach(offset => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = 880;
+            gain.gain.setValueAtTime(0.0001, now + offset);
+            gain.gain.exponentialRampToValueAtTime(0.4, now + offset + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + offset + 0.16);
+            osc.connect(gain).connect(ctx.destination);
+            osc.start(now + offset);
+            osc.stop(now + offset + 0.17);
+        });
+    }
+    function nudgeHtml() {
+        // Read live, like readyHint() below: switching the toggle off hides an already-showing nudge at once, the
+        // same as it hides the passive note, rather than only silencing the next one.
+        if (!activeNudge || !hintEnabled()) return '';
+        const open = !pageMode ? `<button type="button" class="btn btn-sm btn-light py-0" data-sc="nudge-open">${esc(t('scenario.summary_open_btn'))}</button>` : '';
+        return `<div class="wr-sc-nudge" role="status" data-sc-nudge="1">
+            <i class="bi bi-flag-fill"></i><span class="flex-grow-1">${esc(t('scenario.hint_ready', {prev: t('scenario.phase_n', {n: activeNudge.prevN}), next: t('scenario.phase_n', {n: activeNudge.nextN})}))}</span>
+            ${open}
+            <button type="button" class="btn-close" data-sc="nudge-dismiss" aria-label="${esc(t('common.close'))}"></button>
+        </div>`;
+    }
+    function dismissNudge() {
+        if (!activeNudge) return;
+        activeNudge = null;
+        renderCard();
+    }
+    // Exactly readyHint()'s own condition (prev played and complete, this one not played), but as a transition: fires
+    // only for a phase that was NOT ready in the plan we had a moment ago and IS ready in the one that just came in.
+    // prevPhases is the plan before this apply() (empty on the very first load, so opening the page never nudges
+    // for something that became ready an hour ago). Stores only the two phase NUMBERS, never the phase objects
+    // themselves, which the next apply() or renderCard() replaces wholesale.
+    function checkReadyNudge(prevPhases, newPhases) {
+        if (!hintEnabled() || !Array.isArray(prevPhases) || !prevPhases.length) return;
+        newPhases.forEach((phase, idx) => {
+            if (idx === 0 || phase.played_at) return;
+            const prev = newPhases[idx - 1];
+            if (!prev.played_at || !prev.progress || !prev.progress.complete) return;
+            const oldPrev = prevPhases.find(p => p.id === prev.id);
+            const wasReady = oldPrev && oldPrev.played_at && oldPrev.progress && oldPrev.progress.complete;
+            if (wasReady) return;
+            activeNudge = {prevN: prev.n, nextN: phase.n};
+            scenarioBeep();
+            setTimeout(dismissNudge, 15000);
+        });
+    }
+
     // ── Talking to the server ──────────────────────────────────────────────────────────────────────────────────
     function apply(fresh) {
+        const prevPhases = scenario.phases;
         lastJson = JSON.stringify(fresh || null);
         scenario = (fresh && Array.isArray(fresh.phases)) ? fresh : {phases: []};
         if (!Array.isArray(scenario.slots)) scenario.slots = [];
         if (!Array.isArray(scenario.teams)) scenario.teams = [];
+        checkReadyNudge(prevPhases, scenario.phases);
         renderCard();
         drawGhosts();
         // The point/area window keeps the slots in its recipient list (war-room.php).
@@ -448,6 +529,10 @@
         const play = played ? '' : `<button type="button" class="btn btn-success btn-sm w-100" data-sc="play" data-phase="${phase.id}" ${unsent ? '' : 'disabled'} title="${esc(t('scenario.play_title'))}"><i class="bi bi-play-fill me-1"></i>${esc(t('scenario.play_btn'))}</button>`;
         const playedLine = played
             ? `<div class="small text-success mt-1"><i class="bi bi-check-circle-fill me-1"></i>${esc(t('scenario.played_line', {time: phase.played_label || '', who: phase.played_by_name || ''}))}</div>` : '';
+        // Who built this phase and when (v3.467.0): now that a plan may be seen by only a couple of system admins
+        // (v3.466.0), which one of them made it is worth saying beside the card, not just in the audit log.
+        const createdLine = phase.created_label
+            ? `<div class="small text-muted mt-1"><i class="bi bi-pencil-square me-1"></i>${esc(t('scenario.created_line', {time: phase.created_label, who: phase.created_by_name || ''}))}</div>` : '';
         const items = phase.items.length
             ? `<ul class="wr-sc-items">${phase.items.map(i => itemHtml(phase, i)).join('')}</ul>`
             : `<div class="small text-muted mt-1">${esc(t('scenario.phase_no_orders'))}</div>`;
@@ -469,9 +554,10 @@
             <div class="d-flex align-items-center gap-1">
                 <span class="flex-grow-1 text-break"><strong>${esc(phaseName(phase))}</strong>${badge}${phase.title ? ` <span class="text-muted small">· ${esc(phase.title)}</span>` : ''}</span>
                 <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" data-sc="rename" data-phase="${phase.id}" title="${esc(t('scenario.phase_rename'))}"><i class="bi bi-pencil"></i></button>
+                <button type="button" class="btn btn-outline-secondary btn-sm py-0 px-2" data-sc="duplicate-phase" data-phase="${phase.id}" title="${esc(t('scenario.phase_duplicate'))}"><i class="bi bi-copy"></i></button>
                 <button type="button" class="btn btn-outline-danger btn-sm py-0 px-2" data-sc="delete-phase" data-phase="${phase.id}" title="${esc(t('scenario.phase_delete'))}"><i class="bi bi-trash"></i></button>
             </div>
-            ${ready}${play ? `<div class="mt-1">${play}</div>` : ''}
+            ${createdLine}${ready}${play ? `<div class="mt-1">${play}</div>` : ''}
             ${playedLine}${waitsHtml(phase)}${withdraw}${items}
         </div>`;
     }
@@ -602,7 +688,7 @@
         const body = document.getElementById('scenarioBody');
         if (!body) return;
         if (!pageMode) {
-            body.innerHTML = summaryHtml();
+            body.innerHTML = nudgeHtml() + summaryHtml();
             return;
         }
         const add = `<button type="button" class="btn btn-outline-primary btn-sm w-100" data-sc="add-phase"><i class="bi bi-plus-lg me-1"></i>${esc(t('scenario.add_phase_btn'))}</button>`;
@@ -611,7 +697,7 @@
             : `<p class="small text-muted mb-2">${esc(t('scenario.empty'))}</p>`;
         const hintToggle = scenario.phases.length > 1
             ? `<label class="d-flex align-items-start gap-1 small text-muted mt-2"><input type="checkbox" class="form-check-input mt-1" data-sc-hint="1"${hintEnabled() ? ' checked' : ''}><span>${esc(t('scenario.hint_toggle'))}</span></label>` : '';
-        body.innerHTML = lead + add + orderFormHtml() + hintToggle + slotsHtml();
+        body.innerHTML = nudgeHtml() + lead + add + orderFormHtml() + hintToggle + slotsHtml();
     }
 
     function findPhase(id) {
@@ -855,7 +941,12 @@
             }).catch(() => alert(t('common.send_failed'))).finally(() => { busy = false; el.disabled = false; });
         };
 
-        if (act === 'add-phase') {
+        if (act === 'nudge-dismiss') {
+            dismissNudge();
+        } else if (act === 'nudge-open') {
+            dismissNudge();
+            window.open('mission-scenario-view.php?id=' + encodeURIComponent(WR_MISSION_ID), roomTarget());
+        } else if (act === 'add-phase') {
             run('add_phase', {});
         } else if (act === 'order-open') {
             orderDraft.open = true;
@@ -887,6 +978,10 @@
             const title = prompt(t('scenario.phase_rename_prompt', {phase: phaseName(phase)}), phase.title || '');
             if (title === null) return;
             run('rename_phase', {phase_id: el.dataset.phase, title: title});
+        } else if (act === 'duplicate-phase') {
+            // «Αντιγραφή φάσης» (v3.467.0): a fresh, unplayed copy at the end of the plan - for a pattern that
+            // repeats, so it need not be built again by hand. Needs no confirmation: it only ever ADDS a phase.
+            run('duplicate_phase', {phase_id: el.dataset.phase});
         } else if (act === 'delete-phase') {
             const phase = findPhase(el.dataset.phase);
             if (!phase) return;
@@ -1135,10 +1230,14 @@
         if (!pageMode) {
             try { if (!window.name) window.name = roomTarget(); } catch (e) { /* a sandboxed frame: the links open a tab of their own */ }
         }
-        if (body && pageMode) {
+        if (body) {
+            // The Action Room's summary has nothing to click on of its own, but the active nudge (v3.467.0) can show
+            // there too, with its own «Άνοιγμα» and ✕ - so onCardClick is wired in both modes now, not page only.
             body.addEventListener('click', onCardClick);
-            body.addEventListener('change', onCardChange);
-            body.addEventListener('input', onCardInput);
+            if (pageMode) {
+                body.addEventListener('change', onCardChange);
+                body.addEventListener('input', onCardInput);
+            }
         }
         // The page waits for the plan before drawing (its placeholder says so): an empty card for a second would read as "no
         // scenario". The Action Room's summary is small enough to start from empty.
@@ -1146,6 +1245,10 @@
         load();
         document.addEventListener('visibilitychange', () => { if (!document.hidden) load(); });
         setInterval(refreshProgress, REFRESH_MS);
+        // Browsers refuse sound until this page itself has seen a gesture (a navigation into it does not count):
+        // the beep of the active nudge is armed by the first click, tap or key here, same as the Action Room's own
+        // alert sound arms itself, and then stays armed.
+        ['click', 'touchstart', 'keydown'].forEach(evt => document.addEventListener(evt, unlockScenarioAudio, {once: true}));
     }
 
     window.wrScenario = {init: init, reload: load, menuHtml: menuHtml, stage: stage, stageSectors: stageSectors, stageRoute: stageRoute, stageRestricted: stageRestricted, stageArea: stageArea, stageBuilding: stageBuilding, phaseNumber: phaseNumber, drawGhostsInto: drawGhostsInto, phases: () => scenario.phases, newSlot: newSlot, fillSlotOptions: fillSlotOptions};
