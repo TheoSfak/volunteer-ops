@@ -2,8 +2,8 @@
 /**
  * VolunteerOps - Mission Teams Endpoint (v3.463.0)
  * The «Ομάδες» page (mission-teams-view.php): GET answers with the teams of the mission and everybody approved on it;
- * POST makes teams (by hand, or the automatic split by a number of people per team), renames and deletes a team,
- * changes its leader and how it moves, moves one person between teams, and switches GPS on and off. Everything it
+ * POST makes teams (by hand, or the automatic split by a number of people per team), edits a team (its name, its
+ * leader, how it moves), deletes it, moves one person between teams, and switches GPS on and off. Everything it
  * does is in includes/functions-mission-teams.php. COMMAND ONLY, for GET as for POST. AJAX only.
  */
 
@@ -79,20 +79,25 @@ if ($action === 'create_team') {
     exit;
 }
 
-if ($action === 'rename_team') {
-    $error = renameMissionTeam($mission, (int) post('team_id'), (string) post('name'));
-    echo $error === null ? $answer() : $fail($error);
+if ($action === 'update_team') {
+    // The «Επεξεργασία» of a team: its name, its leader and how it moves, checked together and saved together.
+    $teamId = (int) post('team_id');
+    $error = updateMissionTeam($mission, $teamId, [
+        'name'      => (string) post('name'),
+        'leader_id' => (int) post('leader_id'),
+        'transport' => (string) post('transport'),
+    ]);
+    if ($error !== null) {
+        echo $fail($error);
+        exit;
+    }
+    $saved = dbFetchOne("SELECT codename, team_number FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
+    echo $answer(['message' => t('teamsp.edit_saved', ['team' => teamLabel($saved['codename'], $saved['team_number'])])]);
     exit;
 }
 
 if ($action === 'set_leader') {
     $error = setMissionTeamLeader($mission, (int) post('team_id'), (int) post('user_id'));
-    echo $error === null ? $answer() : $fail($error);
-    exit;
-}
-
-if ($action === 'set_transport') {
-    $error = setMissionTeamTransport($mission, (int) post('team_id'), (string) post('transport'));
     echo $error === null ? $answer() : $fail($error);
     exit;
 }

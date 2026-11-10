@@ -440,6 +440,66 @@ final class MissionTeamsPageTest extends TestCase
         $this->assertSame('motorbike', dbFetchValue("SELECT transport FROM mission_teams WHERE id = ?", [$one]));
     }
 
+    public function testEditingATeamChangesItsLeaderItsNameAndHowItMovesInOneSave(): void
+    {
+        [$a, $b, $c] = $this->approveMany(3, 'Ours');
+        $one = createMissionTeam($this->mission, $this->adminId, ['member_ids' => [$a, $b], 'leader_id' => $a, 'name' => '', 'transport' => 'foot'])['team_id'];
+        createMissionTeam($this->mission, $this->adminId, ['member_ids' => [$c], 'leader_id' => $c, 'name' => 'Λύκοι', 'transport' => 'foot']);
+        $row = fn() => dbFetchOne("SELECT codename, team_number, leader_id, transport FROM mission_teams WHERE id = ?", [$one]);
+        $before = $row();
+        dbExecute("DELETE FROM notifications WHERE user_id IN (?, ?)", [$a, $b]);
+
+        // The leader alone, after the team was made: the name is posted as it stands and so does not count as new.
+        $this->assertNull(updateMissionTeam($this->mission, $one, ['name' => $before['codename'], 'leader_id' => $b, 'transport' => 'foot']));
+        $this->assertSame($b, (int) $row()['leader_id']);
+        $this->assertSame($before['codename'], $row()['codename']);
+        $this->assertSame($before['team_number'], $row()['team_number'], 'the number stays when the name was not touched');
+        $this->assertSame(2, (int) dbFetchValue("SELECT COUNT(*) FROM notifications WHERE user_id IN (?, ?)", [$a, $b]), 'both members hear who leads them now');
+        $this->assertStringContainsString(t('team.notify.leader_self'), (string) dbFetchValue("SELECT message FROM notifications WHERE user_id = ? ORDER BY id DESC LIMIT 1", [$b]));
+        // The old leader is an ordinary member now and can be moved.
+        $this->assertSame('', (string) moveMissionTeamMember($this->mission, $a, null, $this->adminId));
+        $this->assertNull(moveMissionTeamMember($this->mission, $a, $one, $this->adminId));
+
+        // All three at once, and the team is told once, not once per field.
+        dbExecute("DELETE FROM notifications WHERE user_id IN (?, ?)", [$a, $b]);
+        $this->assertNull(updateMissionTeam($this->mission, $one, ['name' => 'Αετοί', 'leader_id' => $a, 'transport' => 'car']));
+        $this->assertSame(['codename' => 'Αετοί', 'team_number' => null, 'leader_id' => $a, 'transport' => 'car'],
+            array_map(fn($v) => is_numeric($v) ? (int) $v : $v, $row()));
+        $this->assertSame(2, (int) dbFetchValue("SELECT COUNT(*) FROM notifications WHERE user_id IN (?, ?)", [$a, $b]));
+
+        // A save that is refused has changed nothing: not the leader beside a bad name, not the name beside a bad leader.
+        $this->assertSame(t('team.rename.duplicate', ['name' => 'Λύκοι']), updateMissionTeam($this->mission, $one, ['name' => 'λύκοι', 'leader_id' => $b, 'transport' => 'foot']));
+        $this->assertSame(t('team.leader_must_be_member'), updateMissionTeam($this->mission, $one, ['name' => 'Γεράκια', 'leader_id' => $c, 'transport' => 'foot']));
+        $this->assertSame(t('common.invalid_request'), updateMissionTeam($this->mission, $one, ['name' => 'Γεράκια', 'leader_id' => $b, 'transport' => 'boat']));
+        $this->assertSame(['codename' => 'Αετοί', 'team_number' => null, 'leader_id' => $a, 'transport' => 'car'],
+            array_map(fn($v) => is_numeric($v) ? (int) $v : $v, $row()));
+
+        // No leader posted (a team left without one shows «Διάλεξε υπεύθυνο…»): the leader is left alone.
+        $this->assertNull(updateMissionTeam($this->mission, $one, ['name' => 'Αετοί', 'leader_id' => 0, 'transport' => 'motorbike']));
+        $this->assertSame($a, (int) $row()['leader_id']);
+        $this->assertSame('motorbike', $row()['transport']);
+        $this->assertSame(t('common.team_not_found'), updateMissionTeam($this->mission, 999999999, ['name' => 'Χ']));
+    }
+
+    public function testTheEditFormOffersEveryMemberAsLeaderAndSavesThroughOneAction(): void
+    {
+        $js = $this->source('assets/js/mission-teams.js');
+        $form = substr($js, strpos($js, 'const editForm = () =>'), 2600);
+        $this->assertStringContainsString('data-mt-form="edit"', $form);
+        $this->assertStringContainsString('name="leader_id"', $form);
+        $this->assertStringContainsString('members.map((person) => `<option value="${person.id}"${person.id === team.leader_id ? \' selected\' : \'\'}>', $form);
+        $this->assertStringContainsString('name="name"', $form);
+        $this->assertStringContainsString('name="transport"', $form);
+        // One request for the three, and the card says who leads without opening anything.
+        $this->assertSame(1, substr_count($js, "call('update_team', {"));
+        $this->assertStringContainsString("t('teamsp.leader_line', {name: leader.name})", $js);
+        $this->assertStringContainsString("data-mt-act=\"edit\"", $js);
+        // The star stays as the quick way to the same change.
+        $this->assertStringContainsString("call('set_leader', {team_id: team.id, user_id: button.dataset.user})", $js);
+        $endpoint = $this->source('mission-teams.php');
+        $this->assertStringContainsString("updateMissionTeam(\$mission, \$teamId, [", $endpoint);
+    }
+
     public function testDeletingATeamLeavesItsPeopleApprovedWithTheirGps(): void
     {
         [$a, $b] = $this->approveMany(2, 'Ours');
@@ -540,7 +600,7 @@ final class MissionTeamsPageTest extends TestCase
         preg_match_all("/call\\('([a-z_]+)'/", $this->source('assets/js/mission-teams.js'), $sent);
         preg_match_all("/\\\$action === '([a-z_]+)'/", $endpoint, $known);
         $this->assertEqualsCanonicalizing(array_values(array_unique($known[1])), array_values(array_unique($sent[1])));
-        $this->assertCount(9, array_unique($known[1]));
+        $this->assertCount(8, array_unique($known[1]));
     }
 
     public function testEveryKeyTheScriptAsksForIsInThePageTableInBothLanguages(): void

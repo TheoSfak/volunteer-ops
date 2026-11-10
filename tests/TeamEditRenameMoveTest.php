@@ -190,8 +190,8 @@ final class TeamEditRenameMoveTest extends TestCase
     {
         $functions = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../includes/functions-mission-teams.php'));
         // A rename asks the same rule and, when the name is new, drops the number.
-        $this->assertStringContainsString('teamRenameDecision($name, (string) $team[\'codename\'], $others)', $functions);
-        $this->assertMatchesRegularExpression('/SET codename = \?, team_number = NULL, updated_at = NOW\(\)/', $functions);
+        $this->assertStringContainsString('teamRenameDecision($input[\'name\'], (string) $team[\'codename\'], $others)', $functions);
+        $this->assertStringContainsString("\$set['team_number'] = null;", $functions);
         // A move goes through the one function that never leaves a person on two teams.
         $this->assertStringContainsString('applyTeamMemberMoves($missionId, [$userId => $toTeamId]);', $functions);
         // The Action Room page no longer saves a team at all.
@@ -204,7 +204,7 @@ final class TeamEditRenameMoveTest extends TestCase
     {
         $lang = require __DIR__ . '/../includes/lang/war-room.php';
         foreach ([
-            'team.rename.duplicate', 'teamsp.rename_btn', 'teamsp.rename_placeholder', 'teamsp.move_placeholder',
+            'team.rename.duplicate', 'teamsp.edit_btn', 'teamsp.rename_placeholder', 'teamsp.move_placeholder',
             'teamsp.move_title', 'teamsp.move_locked_leader', 'teamsp.move_locked_only',
         ] as $key) {
             $this->assertNotEmpty($lang['el'][$key] ?? '', "el: $key");

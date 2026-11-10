@@ -4,7 +4,7 @@
  *
  * The teams of a mission on a page of their own, like the heart-rate report and the Scenario: the automatic split
  * (command gives one number, how many people a team has; whoever is left over goes into the last team and people of
- * one home team stay together), a team by hand, a new name, a new leader, how a team moves, deleting it, moving one
+ * one home team stay together), a team by hand, editing a team (its name, its leader, how it moves), deleting it, moving one
  * person from a team to another, and GPS - a switch beside every name, off for everybody until it is switched on. It
  * opens in a tab of its own from the header of the Action Room.
  *
@@ -78,7 +78,7 @@ include __DIR__ . '/includes/header.php';
     .mt-who { flex: 1 1 8rem; min-width: 0; overflow-wrap: anywhere; }
     .mt-name { font-weight: 500; }
     .mt-move { width: 9.5rem; flex: none; }
-    .mt-transport { width: auto; }
+    .mt-leader-line { font-size: .88rem; }
     .mt-gps { display: flex; align-items: center; gap: 6px; min-width: 4.6rem; padding-left: 0; }
     .mt-gps .form-check-input { margin: 0; float: none; cursor: pointer; }
     .mt-pick { margin: 0; flex: none; width: 1.15rem; height: 1.15rem; cursor: pointer; }

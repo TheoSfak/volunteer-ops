@@ -12,7 +12,7 @@
  *     organisation, a visitor's tag), the mission team they are on and whether their GPS is on;
  *   - the automatic split (planAutoTeams()): command says how many people a team has, whoever is left over goes into
  *     the last team, and people of one home team are kept side by side;
- *   - making, renaming and deleting a team, choosing its leader and how it moves, moving one person from a team to
+ *   - making and deleting a team, editing it (its name, its leader, how it moves), moving one person from a team to
  *     another, and switching GPS on and off for one person, a team or everybody.
  *
  * GPS is OFF for everybody until somebody switches it on: taking part in the Action Room is a row in
@@ -592,63 +592,85 @@ function missionTeamAnnounce(array $mission, array $team, ?array $onlyNotifyIds 
 }
 
 /**
- * A new name for a team. Typed as it is, twenty characters at most, and the team loses its number, as in the Action
- * Room's edit window; a blank name or the same name changes nothing. Returns the words of the refusal, or null.
+ * The page's «Επεξεργασία» of a team (v3.465.0): its name, its leader and how it moves, in one save.
+ *
+ * $input holds only what is to change: 'name' (typed as it is, twenty characters at most; a new name takes the
+ * team's number away, a blank or unchanged one changes nothing), 'leader_id' (one of the team's members; 0 or absent
+ * leaves the leader alone) and 'transport' (foot, motorbike or car). Everything is checked before anything is
+ * written, so a save that is refused - a name another team reads as, a leader who is not on the team - has changed
+ * nothing. The team is told once, in the words a new team is announced with, when its name or its leader changed.
+ * Returns the words of the refusal, or null.
  */
-function renameMissionTeam(array $mission, int $teamId, string $name): ?string {
+function updateMissionTeam(array $mission, int $teamId, array $input): ?string {
     $missionId = (int) $mission['id'];
     $team = missionTeamWithMembers($missionId, $teamId);
     if (!$team) {
         return t('common.team_not_found');
     }
-    $others = dbFetchAll("SELECT codename, team_number FROM mission_teams WHERE mission_id = ? AND id != ?", [$missionId, $teamId]);
-    $rename = teamRenameDecision($name, (string) $team['codename'], $others);
-    if ($rename['clash'] !== null) {
-        return t('team.rename.duplicate', ['name' => $rename['clash']]);
+
+    $set = [];
+    if (array_key_exists('name', $input)) {
+        $others = dbFetchAll("SELECT codename, team_number FROM mission_teams WHERE mission_id = ? AND id != ?", [$missionId, $teamId]);
+        $rename = teamRenameDecision($input['name'], (string) $team['codename'], $others);
+        if ($rename['clash'] !== null) {
+            return t('team.rename.duplicate', ['name' => $rename['clash']]);
+        }
+        if ($rename['renamed']) {
+            $set['codename'] = $rename['codename'];
+            $set['team_number'] = null;
+        }
     }
-    if (!$rename['renamed']) {
+    $leaderId = (int) ($input['leader_id'] ?? 0);
+    if ($leaderId > 0) {
+        if (!in_array($leaderId, $team['member_ids'], true)) {
+            return t('team.leader_must_be_member');
+        }
+        if ((int) ($team['leader_id'] ?? 0) !== $leaderId) {
+            $set['leader_id'] = $leaderId;
+        }
+    }
+    if (array_key_exists('transport', $input)) {
+        if (!in_array($input['transport'], TEAM_TRANSPORTS, true)) {
+            return t('common.invalid_request');
+        }
+        if (normalizeTeamTransport($team['transport']) !== $input['transport']) {
+            $set['transport'] = $input['transport'];
+        }
+    }
+    if (empty($set)) {
         return null;
     }
-    dbExecute("UPDATE mission_teams SET codename = ?, team_number = NULL, updated_at = NOW() WHERE id = ?", [$rename['codename'], $teamId]);
-    logAudit('update_mission_team', 'mission_teams', $teamId,
-        ['codename' => $team['codename'], 'team_number' => $team['team_number']],
-        ['codename' => $rename['codename'], 'team_number' => null]);
-    missionTeamAnnounce($mission, ['codename' => $rename['codename'], 'team_number' => null] + $team);
+
+    dbExecute(
+        "UPDATE mission_teams SET " . implode(', ', array_map(fn($column) => $column . ' = ?', array_keys($set))) . ", updated_at = NOW() WHERE id = ?",
+        array_merge(array_values($set), [$teamId])
+    );
+    logAudit('update_mission_team', 'mission_teams', $teamId, array_intersect_key($team, $set), $set);
+    if (array_key_exists('codename', $set) || array_key_exists('leader_id', $set)) {
+        missionTeamAnnounce($mission, $set + $team);
+    }
     return null;
 }
 
-/** A new leader for a team: one of its members. Returns the words of the refusal, or null. */
+/** A new name for a team alone: see updateMissionTeam(). Returns the words of the refusal, or null. */
+function renameMissionTeam(array $mission, int $teamId, string $name): ?string {
+    return updateMissionTeam($mission, $teamId, ['name' => $name]);
+}
+
+/**
+ * A new leader for a team alone - the star beside a name on the page: one of its members. Returns the words of the
+ * refusal, or null.
+ */
 function setMissionTeamLeader(array $mission, int $teamId, int $leaderId): ?string {
-    $team = missionTeamWithMembers((int) $mission['id'], $teamId);
-    if (!$team) {
-        return t('common.team_not_found');
-    }
-    if (!in_array($leaderId, $team['member_ids'], true)) {
+    if ($leaderId <= 0) {
         return t('team.leader_must_be_member');
     }
-    if ((int) ($team['leader_id'] ?? 0) === $leaderId) {
-        return null;
-    }
-    dbExecute("UPDATE mission_teams SET leader_id = ?, updated_at = NOW() WHERE id = ?", [$leaderId, $teamId]);
-    logAudit('update_mission_team', 'mission_teams', $teamId, ['leader_id' => $team['leader_id']], ['leader_id' => $leaderId]);
-    missionTeamAnnounce($mission, ['leader_id' => $leaderId] + $team);
-    return null;
+    return updateMissionTeam($mission, $teamId, ['leader_id' => $leaderId]);
 }
 
-/** How a team moves: on foot, by motorbike or by car. Returns the words of the refusal, or null. */
+/** How a team moves, alone: on foot, by motorbike or by car. Returns the words of the refusal, or null. */
 function setMissionTeamTransport(array $mission, int $teamId, string $transport): ?string {
-    $team = dbFetchOne("SELECT id, transport FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, (int) $mission['id']]);
-    if (!$team) {
-        return t('common.team_not_found');
-    }
-    if (!in_array($transport, TEAM_TRANSPORTS, true)) {
-        return t('common.invalid_request');
-    }
-    if (normalizeTeamTransport($team['transport']) !== $transport) {
-        dbExecute("UPDATE mission_teams SET transport = ?, updated_at = NOW() WHERE id = ?", [$transport, $teamId]);
-        logAudit('update_mission_team', 'mission_teams', $teamId, ['transport' => $team['transport']], ['transport' => $transport]);
-    }
-    return null;
+    return updateMissionTeam($mission, $teamId, ['transport' => $transport]);
 }
 
 /**

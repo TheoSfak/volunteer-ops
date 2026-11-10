@@ -5,7 +5,8 @@
  *   - the automatic split: one number, how many people a team has. The server works the split out (whoever is left
  *     over goes into the last team, people of one home team stay together) and this page shows it BEFORE it is made;
  *   - a team by hand, out of the people ticked in «Χωρίς ομάδα»;
- *   - a new name, a new leader (the star), how the team moves, and deleting it;
+ *   - «Επεξεργασία» of a team: its name, its leader and how it moves, in one save (the star beside a name is the
+ *     quick way to the same change of leader), and deleting it;
  *   - moving one person to another team, with the select beside the name or by dragging the name onto the team;
  *   - GPS: a switch beside every name, three buttons under every team and three for the whole mission. It is off for
  *     everybody until it is switched on here (or in the Action Room).
@@ -31,7 +32,7 @@
     let plan = null;              // the split being shown before it is made: {size, redo, teams: [{member_ids, leader_id}]}
     let autoSize = '5';
     let autoRedo = false;
-    let renamingTeamId = null;
+    let editingTeamId = null;     // the team whose «Επεξεργασία» form is open
     let newTeamName = '';
     const picked = new Set();     // people ticked in «Χωρίς ομάδα» for a team made by hand
     let flashTimer = null;
@@ -121,7 +122,7 @@
 
     /** The refresh never redraws under somebody's hands: not while they type, choose from a select, or read a split. */
     function userIsBusy() {
-        if (busy || plan !== null || renamingTeamId !== null || picked.size > 0) return true;
+        if (busy || plan !== null || editingTeamId !== null || picked.size > 0) return true;
         const active = document.activeElement;
         return !!(active && root.contains(active) && /^(INPUT|SELECT|TEXTAREA)$/.test(active.tagName) && active.type !== 'checkbox');
     }
@@ -184,18 +185,33 @@
         const members = team.member_ids.map((id) => people.get(id)).filter(Boolean)
             .sort((a, b) => Number(b.id === team.leader_id) - Number(a.id === team.leader_id));
         const gpsOn = members.filter((person) => person.gps).length;
-        const head = renamingTeamId === team.id
-            ? `<form class="d-flex gap-1 flex-grow-1" data-mt-form="rename" data-team="${team.id}">`
-              + `<input type="text" class="form-control form-control-sm" name="name" maxlength="20" value="${esc(team.codename)}" placeholder="${esc(t('teamsp.rename_placeholder'))}" data-mt-autofocus="1">`
-              + `<button type="submit" class="btn btn-sm btn-primary">${esc(t('common.save'))}</button>`
-              + `<button type="button" class="btn btn-sm btn-outline-secondary" data-mt-act="rename-cancel">${esc(t('common.cancel'))}</button></form>`
+        const leader = members.find((person) => person.id === team.leader_id) || null;
+        // «Επεξεργασία»: the leader - any member of the team - on a row of its own, then the name and how the team
+        // moves side by side; saved together. The card is half the page wide, so the grid goes by the card, not the screen.
+        const editForm = () => `<form class="w-100" data-mt-form="edit" data-team="${team.id}">`
+            + `<div class="row g-2">`
+            + `<div class="col-12"><label class="form-label small fw-semibold mb-1" for="mtEditLeader${team.id}"><i class="bi bi-star-fill text-warning me-1"></i>${esc(t('teamsp.edit_leader_label'))}</label>`
+            + `<select class="form-select form-select-sm" id="mtEditLeader${team.id}" name="leader_id" data-mt-autofocus="1">`
+            + (leader ? '' : `<option value="">${esc(t('teamsp.edit_leader_choose'))}</option>`)
+            + members.map((person) => `<option value="${person.id}"${person.id === team.leader_id ? ' selected' : ''}>${esc(person.name)}</option>`).join('')
+            + `</select></div>`
+            + `<div class="col-7"><label class="form-label small fw-semibold mb-1" for="mtEditName${team.id}">${esc(t('teamsp.edit_name_label'))}</label>`
+            + `<input type="text" class="form-control form-control-sm" id="mtEditName${team.id}" name="name" maxlength="20" value="${esc(team.codename)}" placeholder="${esc(t('teamsp.rename_placeholder'))}"></div>`
+            + `<div class="col-5"><label class="form-label small fw-semibold mb-1" for="mtEditTransport${team.id}">${esc(t('teamsp.edit_transport_label'))}</label>`
+            + `<select class="form-select form-select-sm" id="mtEditTransport${team.id}" name="transport">`
+            + TRANSPORTS.map((tr) => `<option value="${tr}"${tr === team.transport ? ' selected' : ''}>${esc(t('teams.transport.' + tr))}</option>`).join('')
+            + `</select></div>`
+            + `</div><div class="d-flex gap-2 mt-2">`
+            + `<button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-check2 me-1"></i>${esc(t('common.save'))}</button>`
+            + `<button type="button" class="btn btn-sm btn-outline-secondary" data-mt-act="edit-cancel">${esc(t('common.cancel'))}</button>`
+            + `</div></form>`;
+        const head = editingTeamId === team.id
+            ? editForm()
             : `<span class="badge fs-6" style="background:${esc(team.colors[0])};color:${esc(team.colors[1])}">${transportIcon(team.transport, 16)} ${esc(team.label)}</span>`
+              + `<span class="mt-leader-line"><i class="bi bi-star-fill text-warning me-1"></i>${esc(leader ? t('teamsp.leader_line', {name: leader.name}) : t('teamsp.leader_none'))}</span>`
               + `<span class="small text-muted">${esc(t('teamsp.team_members_count', {n: members.length}))} · ${esc(t('teamsp.gps_count', {on: gpsOn, total: members.length}))}</span>`
               + `<div class="ms-auto d-flex gap-1 align-items-center">`
-              + `<select class="form-select form-select-sm mt-transport" data-mt-change="transport" data-team="${team.id}" title="${esc(t('teamsp.transport_title'))}" aria-label="${esc(t('teamsp.transport_title'))}">`
-              + TRANSPORTS.map((tr) => `<option value="${tr}"${tr === team.transport ? ' selected' : ''}>${esc(t('teams.transport.' + tr))}</option>`).join('')
-              + `</select>`
-              + `<button type="button" class="btn btn-sm btn-outline-secondary" data-mt-act="rename" data-team="${team.id}" title="${esc(t('teamsp.rename_btn'))}"><i class="bi bi-pencil"></i></button>`
+              + `<button type="button" class="btn btn-sm btn-outline-secondary" data-mt-act="edit" data-team="${team.id}" title="${esc(t('teamsp.edit_title'))}"><i class="bi bi-pencil me-1"></i>${esc(t('teamsp.edit_btn'))}</button>`
               + `<button type="button" class="btn btn-sm btn-outline-danger" data-mt-act="delete" data-team="${team.id}" title="${esc(t('teams.delete_btn_title'))}"><i class="bi bi-x-lg"></i></button>`
               + `</div>`;
         return `<div class="col-12 col-xl-6"><div class="card shadow-sm mt-team h-100" data-mt-drop="${team.id}" style="border-top:4px solid ${esc(team.colors[0])}">`
@@ -304,6 +320,7 @@
     function render() {
         if (!loaded) return;
         const people = peopleById();
+        if (editingTeamId !== null && !state.teams.some((team) => team.id === editingTeamId)) editingTeamId = null;
         const teams = state.teams.length
             ? `<div class="row g-3 mb-3">${state.teams.map((team) => teamCard(team, people)).join('')}</div>`
             : `<div class="alert alert-light border mb-3">${esc(t('teams.empty'))}</div>`;
@@ -318,7 +335,7 @@
         const focus = root.querySelector('[data-mt-autofocus]');
         if (focus) {
             focus.focus();
-            focus.select();
+            if (typeof focus.select === 'function') focus.select();
         }
     }
 
@@ -342,10 +359,10 @@
         if (act === 'leader') {
             if (!team || team.leader_id === Number(button.dataset.user)) return;
             await call('set_leader', {team_id: team.id, user_id: button.dataset.user});
-        } else if (act === 'rename') {
-            renamingTeamId = team ? team.id : null;
-        } else if (act === 'rename-cancel') {
-            renamingTeamId = null;
+        } else if (act === 'edit') {
+            editingTeamId = team ? team.id : null;
+        } else if (act === 'edit-cancel') {
+            editingTeamId = null;
         } else if (act === 'delete') {
             if (!team || !confirm(t('teams.delete_confirm', {team: team.label}))) return;
             await call('delete_team', {team_id: team.id});
@@ -391,9 +408,6 @@
             if (input.value === '') return;
             await call('move_member', {user_id: userId, to_team_id: input.value});
             render();
-        } else if (kind === 'transport') {
-            await call('set_transport', {team_id: input.dataset.team, transport: input.value});
-            render();
         } else if (kind === 'pick') {
             if (input.checked) picked.add(userId); else picked.delete(userId);
             render();
@@ -431,9 +445,15 @@
             const size = parseInt(autoSize, 10);
             const data = await call('auto_preview', {size: Number.isFinite(size) ? size : 0, redo: autoRedo ? '1' : '0'});
             plan = data && data.ok ? {size, redo: autoRedo, teams: data.plan || []} : null;
-        } else if (kind === 'rename') {
-            const data = await call('rename_team', {team_id: form.dataset.team, name: form.elements.name.value});
-            if (data && data.ok) renamingTeamId = null;
+        } else if (kind === 'edit') {
+            // One save for the three: the server checks them together, so a refused name does not change the leader.
+            const data = await call('update_team', {
+                team_id: form.dataset.team,
+                name: form.elements.name.value,
+                leader_id: form.elements.leader_id.value || '0',
+                transport: form.elements.transport.value,
+            });
+            if (data && data.ok) editingTeamId = null;
         } else if (kind === 'new-team') {
             const members = unassigned().filter((person) => picked.has(person.id));
             if (!members.length) {
