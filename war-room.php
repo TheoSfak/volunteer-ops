@@ -45,47 +45,12 @@ if (!$mission) {
     leaveActionRoom('ended', 'dashboard.php');
 }
 
-if (!defined('MISSION_TEAM_CODENAMES')) {
-    define('MISSION_TEAM_CODENAMES', ['Alpha','Bravo','Charlie','Delta','Echo','Foxtrot','Golf','Hotel','India',
-        'Juliett','Kilo','Lima','Mike','November','Oscar','Papa','Quebec','Romeo',
-        'Sierra','Tango','Uniform','Victor','Whiskey','X-ray','Yankee','Zulu']);
-}
+// MISSION_TEAM_CODENAMES and notifyMissionTeamMembers() moved to includes/functions-mission-teams.php (v3.463.0),
+// which the «Ομάδες» page (mission-teams-view.php) shares with the two team windows of this page.
 
 // MISSION_TEAM_COLORS/MISSION_TEAM_COLOR_TEXT and teamBadgeColors() moved to
 // includes/functions-warroom.php (still same index basis as MISSION_TEAM_CODENAMES
 // above) once loadMissionDispatchesForUser() there needed them too.
-
-/**
- * Notify every team member (individually) about their team assignment.
- * $namesByUserId must map user_id => name for all ids in $memberIds/$leaderId.
- * $onlyNotifyIds, when given, narrows who is told (a person just moved onto the
- * team) while the teammates named in the message are still the whole roster.
- */
-function notifyMissionTeamMembers(int $missionId, string $missionTitle, string $codename, ?int $teamNumber, array $memberIds, int $leaderId, array $namesByUserId, ?array $onlyNotifyIds = null): void {
-    $teamLabel = teamLabel($codename, $teamNumber);
-    $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-    $leaderName = $namesByUserId[$leaderId] ?? '';
-    $langByUserId = getUserLanguages($memberIds);
-    $notifyIds = $onlyNotifyIds === null ? $memberIds : array_values(array_intersect($memberIds, $onlyNotifyIds));
-    foreach ($notifyIds as $memberId) {
-        $lang = $langByUserId[$memberId] ?? DEFAULT_LANGUAGE;
-        $teammateNames = array_filter(array_map(
-            fn($id) => $namesByUserId[$id] ?? '',
-            array_values(array_diff($memberIds, [$memberId]))
-        ));
-        $message = t('team.notify.assigned', ['mission' => $missionTitle, 'team' => $teamLabel], $lang);
-        if (!empty($teammateNames)) {
-            $message .= t('team.notify.mates', ['names' => implode(', ', $teammateNames)], $lang);
-        }
-        $message .= $memberId === $leaderId
-            ? t('team.notify.leader_self', [], $lang)
-            : t('team.notify.leader_other', ['leader' => $leaderName], $lang);
-        sendNotification($memberId, t('team.notify.title', ['team' => $teamLabel], $lang), $message, 'info', '', [
-            'url' => $warRoomUrl,
-            'tag' => 'mission-team-' . $missionId,
-        ]);
-    }
-}
 
 // activeMissionRecipientIds() — who "everybody on duty" means — lives in
 // includes/functions-warroom.php, where tests/ can reach it.
@@ -534,115 +499,21 @@ if (isPost()) {
             redirect('war-room.php?id=' . $missionId);
         }
 
-        $approvedVolunteers = dbFetchAll(
-            "SELECT DISTINCT pr.volunteer_id, u.name
-             FROM participation_requests pr
-             JOIN shifts s ON s.id = pr.shift_id
-             JOIN users u ON u.id = pr.volunteer_id
-             WHERE s.mission_id = ? AND pr.status = ?",
-            [$missionId, PARTICIPATION_APPROVED]
-        );
-        $namesByUserId = array_column($approvedVolunteers, 'name', 'volunteer_id');
-        $approvedIds = array_map('intval', array_column($approvedVolunteers, 'volunteer_id'));
-        // Same relaxation as update_team below: a volunteer already on another
-        // team can be picked here and is MOVED into the new one. Splitting a
-        // big team in two is the common case, and it used to mean emptying
-        // people out of the old team first in a separate save.
-        $otherAssignments = loadOtherTeamAssignments($missionId);
-
-        $memberIds = array_values(array_unique(array_intersect(
-            array_map('intval', (array)($_POST['member_ids'] ?? [])),
-            $approvedIds
-        )));
-        $leaderId = (int) post('leader_id');
-        // Whatever the form's GPS column said, narrowed to people actually
-        // being saved onto this team. No server-side default for the leader:
-        // the form ticks them as the leader is chosen (they are the one who in
-        // practice carries the phone), and a coordinator who then unticks them
-        // means it — a leader without a phone is a real arrangement.
-        $gpsIds = array_values(array_intersect(
-            array_map('intval', (array)($_POST['gps_ids'] ?? [])),
-            $memberIds
-        ));
-        $movedIds = array_values(array_filter($memberIds, fn($id) => isset($otherAssignments[$id])));
-        $blockedTeams = teamsBlockedFromMemberMove($movedIds, $otherAssignments);
-
-        if (empty($memberIds)) {
-            setFlash('warning', t('team.create.select_member_warning'));
-        } elseif (!empty($blockedTeams)) {
-            setFlash('warning', t('team.move.leader_blocked', ['teams' => implode(', ', $blockedTeams)]));
-        } elseif (!in_array($leaderId, $memberIds, true)) {
-            setFlash('warning', t('team.leader_must_be_member'));
+        // The checks, the team and its members, the GPS column, the audit line and the notifications are all in
+        // createMissionTeam() (includes/functions-mission-teams.php), which the «Ομάδες» page calls too. Whatever the
+        // form's GPS column said is handed over as it is: the form ticks the leader as the leader is chosen (they are
+        // the one who in practice carries the phone), and a coordinator who then unticks them means it.
+        $created = createMissionTeam($mission, (int) $user['id'], [
+            'member_ids' => (array) ($_POST['member_ids'] ?? []),
+            'leader_id'  => (int) post('leader_id'),
+            'name'       => (string) post('custom_codename'),
+            'transport'  => post('transport'),
+            'gps_ids'    => (array) ($_POST['gps_ids'] ?? []),
+        ]);
+        if ($created['ok']) {
+            setFlash('success', t('team.create.success_flash', ['team' => $created['label']]));
         } else {
-            $teamCount = (int) dbFetchValue("SELECT COUNT(*) FROM mission_teams WHERE mission_id = ?", [$missionId]);
-            $customCodename = trim((string) post('custom_codename'));
-            $isCustomName = $customCodename !== '';
-            $codename = $isCustomName ? mb_substr($customCodename, 0, 20) : MISSION_TEAM_CODENAMES[$teamCount % count(MISSION_TEAM_CODENAMES)];
-            $teamColor = MISSION_TEAM_COLORS[$teamCount % count(MISSION_TEAM_COLORS)];
-
-            // A custom name never gets the random 2-digit suffix — that's
-            // only there to disambiguate the auto NATO codenames once a
-            // mission cycles past 26 teams and reuses one. An admin-chosen
-            // name is assumed to already be distinct on its own.
-            $teamNumber = null;
-            $numberGenerationFailed = false;
-            if (!$isCustomName) {
-                for ($attempt = 0; $attempt < 50; $attempt++) {
-                    $candidate = random_int(10, 99);
-                    $exists = dbFetchValue(
-                        "SELECT COUNT(*) FROM mission_teams WHERE mission_id = ? AND team_number = ?",
-                        [$missionId, $candidate]
-                    );
-                    if (!$exists) { $teamNumber = $candidate; break; }
-                }
-                $numberGenerationFailed = $teamNumber === null;
-            }
-
-            if ($numberGenerationFailed) {
-                setFlash('error', t('team.create.number_failed'));
-            } else {
-                db()->beginTransaction();
-                try {
-                    // How the team moves; anything the form did not say is on foot.
-                    $teamTransport = normalizeTeamTransport(post('transport'));
-                    $teamId = dbInsert(
-                        "INSERT INTO mission_teams (mission_id, codename, team_number, color, transport, leader_id, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
-                        [$missionId, $codename, $teamNumber, $teamColor, $teamTransport, $leaderId, $user['id']]
-                    );
-                    if (!empty($movedIds)) {
-                        $movePlaceholders = implode(',', array_fill(0, count($movedIds), '?'));
-                        dbExecute(
-                            "DELETE FROM mission_team_members WHERE mission_id = ? AND user_id IN ($movePlaceholders)",
-                            array_merge([$missionId], $movedIds)
-                        );
-                    }
-                    foreach ($memberIds as $memberId) {
-                        dbInsert(
-                            "INSERT INTO mission_team_members (team_id, mission_id, user_id, added_at) VALUES (?, ?, ?, NOW())",
-                            [$teamId, $missionId, $memberId]
-                        );
-                    }
-                    applyTeamActionRoomTicks($missionId, $memberIds, $gpsIds, (int) $user['id']);
-                    db()->commit();
-                } catch (Throwable $e) {
-                    db()->rollBack();
-                    throw $e;
-                }
-                // The static id cache was filled before the write if anything
-                // on this request had already asked — drop it after the commit
-                // too, since the rollback path leaves the table as it was.
-                forgetActionRoomParticipantIds($missionId);
-                logAudit('create_mission_team', 'mission_teams', $teamId, null, [
-                    'mission_id' => $missionId,
-                    'member_ids' => $memberIds,
-                    'leader_id'  => $leaderId,
-                    'transport'  => $teamTransport,
-                    'gps_ids'    => $gpsIds,
-                    'moved_from' => array_map(fn($id) => ['user_id' => $id, 'team' => $otherAssignments[$id]['label']], $movedIds),
-                ]);
-                notifyMissionTeamMembers($missionId, $mission['title'], $codename, $teamNumber, $memberIds, $leaderId, $namesByUserId);
-                setFlash('success', t('team.create.success_flash', ['team' => $codename . ' ' . $teamNumber]));
-            }
+            setFlash($created['level'], $created['error']);
         }
         redirect('war-room.php?id=' . $missionId);
     } elseif (post('action') === 'update_team') {
@@ -842,29 +713,10 @@ if (isPost()) {
             redirect('war-room.php?id=' . $missionId);
         }
 
-        $teamId = (int) post('team_id');
-        $team = dbFetchOne("SELECT * FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
-        if ($team) {
-            $formerMembers = dbFetchAll(
-                "SELECT mtm.user_id, u.name FROM mission_team_members mtm JOIN users u ON u.id = mtm.user_id WHERE mtm.team_id = ?",
-                [$teamId]
-            );
-            dbExecute("DELETE FROM mission_teams WHERE id = ?", [$teamId]);
-            logAudit('delete_mission_team', 'mission_teams', $teamId, ['mission_id' => $missionId], null);
-
-            $teamLabel = teamLabel($team['codename'], $team['team_number']);
-            $warRoomUrl = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
-            $formerMemberLangs = getUserLanguages(array_column($formerMembers, 'user_id'));
-            foreach ($formerMembers as $member) {
-                $lang = $formerMemberLangs[(int)$member['user_id']] ?? DEFAULT_LANGUAGE;
-                sendNotification(
-                    (int)$member['user_id'],
-                    t('team.delete.notify_title', [], $lang),
-                    t('team.delete.notify_message', ['team' => $teamLabel, 'mission' => $mission['title']], $lang),
-                    'warning', '', ['url' => $warRoomUrl]
-                );
-            }
-            setFlash('success', t('team.delete.success_flash', ['team' => $teamLabel]));
+        // deleteMissionTeam() (includes/functions-mission-teams.php) deletes the team and tells its former members.
+        $deletedLabel = deleteMissionTeam($mission, (int) post('team_id'));
+        if ($deletedLabel !== null) {
+            setFlash('success', t('team.delete.success_flash', ['team' => $deletedLabel]));
         } else {
             setFlash('error', t('common.team_not_found'));
         }
@@ -4111,6 +3963,10 @@ include __DIR__ . '/includes/header.php';
              state of every team, ▶ - to sit on a second screen while the map keeps running here. Command only (this block). The
              tab is named for the mission, so pressing this again brings back the one that is open instead of piling up tabs. -->
         <a href="mission-scenario-view.php?id=<?= $missionId ?>" target="wrScenarioPage<?= $missionId ?>" class="btn btn-outline-light" id="scenarioHeroBtn"><i class="bi bi-collection-play-fill me-1"></i><?= t('hero.btn_scenario') ?></a>
+        <!-- «Ομάδες» (v3.463.0): the teams' own page, in a tab of its own like the Scenario - the automatic split by a number of
+             people per team, moving a person between teams, renaming and deleting, and GPS per person or per team. Command only
+             (this block). The tab is named for the mission, so pressing this again brings back the one that is open. -->
+        <a href="mission-teams-view.php?id=<?= $missionId ?>" target="wrTeamsPage<?= $missionId ?>" class="btn btn-outline-light" id="teamsHeroBtn"><i class="bi bi-diagram-3-fill me-1"></i><?= t('hero.btn_teams') ?></a>
         <?php if (vitalsEnabled()): ?>
         <!-- A new tab, not a modal like its neighbour: this one carries a
              chart, three tables and a list of episodes, and it is meant to sit
@@ -5047,10 +4903,16 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                      cards which default closed — the roster is something
                      staff check constantly, not an occasional form/log. -->
                 <h5 class="mb-0 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#teamsCollapse" role="button" aria-expanded="true" aria-controls="teamsCollapse"><i class="bi bi-diagram-3 me-1"></i><?= t('teams.panel_title') ?> <i class="bi bi-chevron-down wr-collapsible-chevron ms-1"></i></h5>
-                <?php if ($canManageWarRoom && !empty($unassignedApproved)): ?>
-                <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#createTeamModal">
-                    <i class="bi bi-plus-lg me-1"></i><?= t('teams.new_btn') ?>
-                </button>
+                <?php if ($canManageWarRoom): ?>
+                <div class="d-flex gap-1 flex-wrap justify-content-end">
+                    <!-- The teams' own page (v3.463.0): automatic split, moves and GPS in one place. -->
+                    <a href="mission-teams-view.php?id=<?= $missionId ?>" target="wrTeamsPage<?= $missionId ?>" class="btn btn-sm btn-outline-primary" id="teamsPageBtn" title="<?= h(t('teams.manage_page_title')) ?>"><i class="bi bi-box-arrow-up-right me-1"></i><?= t('teams.manage_page_btn') ?></a>
+                    <?php if (!empty($unassignedApproved)): ?>
+                    <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#createTeamModal">
+                        <i class="bi bi-plus-lg me-1"></i><?= t('teams.new_btn') ?>
+                    </button>
+                    <?php endif; ?>
+                </div>
                 <?php endif; ?>
             </div>
             <div class="collapse show" id="teamsCollapse">

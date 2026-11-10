@@ -32,6 +32,9 @@ final class GuestAccessTest extends TestCase
         'mission-annotation.php',
         'mission-assistant.php',
         'mission-battery-alert.php',
+        // The «Ομάδες» page's endpoint (v3.463.0): called only by assets/js/mission-teams.js, which only that
+        // command-only page loads.
+        'mission-teams.php',
     ];
 
     /** Reachable by a partner-org guest but deliberately not by a mission visitor. */
