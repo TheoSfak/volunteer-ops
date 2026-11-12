@@ -14340,6 +14340,66 @@ function reportAnswerState(?string $acknowledgedAt, ?string $resolvedAt, ?string
     return ['sent', null];
 }
 
+/**
+ * This person's own shortage/incident reports whose outcome (resolved or
+ * not-resolved) they have not yet seen a popup for — command's note
+ * included, exactly as typed. Checked fresh on every page load, unlike the
+ * live ticker banner (notifyShortageAffectedUsers()/notifyIncidentAffectedUsers()),
+ * which only reaches a phone that happens to already be on this page at the
+ * exact moment command acts — a report's own row is the durable record, the
+ * same reasoning as "Οι Εντολές μου" (see opEntries' own comment in
+ * war-room.php). Dismissing the popup (ackReportOutcomeSeen()) is what stops
+ * it coming back.
+ */
+function loadMyUnseenReportOutcomes(int $missionId, int $userId): array {
+    $out = [];
+    foreach (dbFetchAll(
+        "SELECT id, shortage_type, severity, not_resolved_at, outcome_note
+         FROM mission_shortage_reports
+         WHERE mission_id = ? AND reporter_id = ? AND outcome_seen_at IS NULL
+           AND (resolved_at IS NOT NULL OR not_resolved_at IS NOT NULL)
+         ORDER BY COALESCE(resolved_at, not_resolved_at)",
+        [$missionId, $userId]
+    ) as $row) {
+        $out[] = [
+            'kind' => 'shortage', 'id' => (int) $row['id'],
+            'state' => $row['not_resolved_at'] ? 'not_resolved' : 'resolved',
+            'title' => shortageTypeLabel($row['shortage_type']) . ' · ' . shortageSeverityLabel($row['severity']),
+            'outcome' => null,
+            'note' => trim((string) $row['outcome_note']),
+        ];
+    }
+    foreach (dbFetchAll(
+        "SELECT id, incident_type, severity, outcome, outcome_location, outcome_note
+         FROM mission_incidents
+         WHERE mission_id = ? AND reporter_id = ? AND outcome_seen_at IS NULL AND resolved_at IS NOT NULL
+         ORDER BY resolved_at",
+        [$missionId, $userId]
+    ) as $row) {
+        $out[] = [
+            'kind' => 'incident', 'id' => (int) $row['id'], 'state' => 'resolved',
+            'title' => incidentTypeLabel($row['incident_type']) . ' · ' . incidentSeverityLabel($row['severity']),
+            'outcome' => $row['outcome'] ? incidentOutcomeText($row) : null,
+            'note' => trim((string) $row['outcome_note']),
+        ];
+    }
+    return $out;
+}
+
+/**
+ * The popup dismissed, for good: resolving/not-resolving a report again is
+ * not possible (both actions above are gated on resolved_at/not_resolved_at
+ * already being NULL), so one ack per report is all there ever is. $userId
+ * must be the reporter — nobody else's dismissal should silence it for them.
+ */
+function ackReportOutcomeSeen(string $kind, int $reportId, int $userId): bool {
+    $table = $kind === 'incident' ? 'mission_incidents' : 'mission_shortage_reports';
+    return dbExecute(
+        "UPDATE $table SET outcome_seen_at = NOW() WHERE id = ? AND reporter_id = ? AND outcome_seen_at IS NULL",
+        [$reportId, $userId]
+    ) > 0;
+}
+
 function loadMyReportsForMission(int $missionId, int $userId, int $limit = 15): array {
     $limit = max(1, $limit);
     $out = ['shortage' => [], 'incident' => []];

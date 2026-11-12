@@ -1601,6 +1601,11 @@ $myLive = loadMyLiveStreamForUser($missionId, (int)$user['id']);
 $routes = loadRoutesForUser($missionId, (int)$user['id'], $canManageWarRoom);
 $shortageReports = $canManageWarRoom ? loadUnresolvedShortageReportsForMission($missionId) : [];
 $incidents = ($canManageWarRoom || $isApprovedParticipant) ? loadUnresolvedIncidentsForMission($missionId, $canManageWarRoom, (int) $user['id']) : [];
+// Whoever reported a shortage or incident (a volunteer, or staff doing it
+// themselves) gets a popup with command's note the moment they are next on
+// this page — see loadMyUnseenReportOutcomes()'s docblock for why this does
+// not depend on the live ticker catching them at the right moment.
+$myReportOutcomes = loadMyUnseenReportOutcomes($missionId, (int) $user['id']);
 $triage = ($canManageWarRoom || $isApprovedParticipant) ? loadTriageStateForMission($missionId, $canManageWarRoom, (int) $user['id']) : null;
 // The Συντονιστικό: everybody on the operation sees it (null until placed).
 $commandPost = ($canManageWarRoom || $isApprovedParticipant) ? loadMissionCommandPost($missionId) : null;
@@ -3348,7 +3353,12 @@ include __DIR__ . '/includes/header.php';
        needed this there. */
     body.modal-open .ack-tracker,
     body.modal-open .ack-tracker-float,
-    body.modal-open .team-board,
+    body.modal-open .team-board { z-index: 1040; }
+    /* Same reasoning and the same target z-index as the rule above (a
+       separate rule, not folded into it, so FloatingPanelsUnderModalsTest's
+       exact-match on that one keeps meaning what it says): a FAB floating
+       at 1200 sat on top of every modal it should instead open, this
+       session's voiceReportModal included. */
     body.modal-open .assistant-fab,
     body.modal-open .voice-report-fab { z-index: 1040; }
     /* Phone: along the top, full width less the gutters; the acknowledgement
@@ -4658,6 +4668,32 @@ include __DIR__ . '/includes/header.php';
           <button type="button" id="vrStep4Back" class="btn btn-link w-100"><?= t('voicereport.back_btn') ?></button>
         </div>
 
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- One per unseen outcome (loadMyUnseenReportOutcomes()), shown one at a
+     time and never dismissable by tapping outside: the whole point is that
+     this reaches the reporter even when they were not watching the live
+     ticker at the moment command acted, so it must not be possible to lose
+     it to a stray tap either. -->
+<div class="modal fade" id="reportOutcomeModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><?= t('reportoutcome.title') ?></h5>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex justify-content-between align-items-start gap-2 mb-2">
+          <strong id="reportOutcomeReportTitle"></strong>
+          <span id="reportOutcomeBadge" class="flex-shrink-0"></span>
+        </div>
+        <div id="reportOutcomeOutcome" class="mb-1 d-none"></div>
+        <div id="reportOutcomeNote" class="p-2 rounded bg-light border-start border-3 border-success d-none"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="reportOutcomeOkBtn" class="btn btn-primary w-100"><?= t('popup.btn.got_it') ?></button>
       </div>
     </div>
   </div>
@@ -6760,6 +6796,7 @@ const WR_BOOT = {
 )), JSON_UNESCAPED_UNICODE) ?>,
     shortageReports: <?= json_encode($shortageReports) ?>,
     missionIncidents: <?= json_encode($incidents) ?>,
+    myReportOutcomes: <?= json_encode($myReportOutcomes, JSON_UNESCAPED_UNICODE) ?>,
     triageState: <?= json_encode($triage, JSON_UNESCAPED_UNICODE) ?>,
     sosAlerts: <?= json_encode($sosAlerts) ?>,
     voiceMessages: <?= json_encode($voiceMessages, JSON_UNESCAPED_UNICODE) ?>,
@@ -22104,6 +22141,65 @@ function waitForNativeSpeech(maxMs) {
         const rect = fab.getBoundingClientRect();
         placeAt(rect.left, rect.top);
     });
+})();
+
+(function wireReportOutcomePopup() {
+    // What loadMyUnseenReportOutcomes() found still owed to THIS person on
+    // THIS page load — durable, unlike the live ticker banner, so a report
+    // answered while the reporter's phone was elsewhere still reaches them
+    // the next time they open the page. One modal at a time; dismissing
+    // (ack_outcome) is what stops it coming back.
+    const modalEl = document.getElementById('reportOutcomeModal');
+    if (!modalEl) return;
+    const queue = (WR_BOOT.myReportOutcomes || []).slice();
+    if (!queue.length) return;
+    let current = null;
+
+    function render() {
+        document.getElementById('reportOutcomeReportTitle').textContent = current.title;
+        const notResolved = current.state === 'not_resolved';
+        document.getElementById('reportOutcomeBadge').innerHTML = '<span class="badge '
+            + (notResolved ? 'bg-danger' : 'bg-success') + '">'
+            + escapeHtml(notResolved ? t('myreports.not_resolved') : t(current.kind === 'incident' ? 'myreports.closed' : 'myreports.resolved'))
+            + '</span>';
+        const outcomeEl = document.getElementById('reportOutcomeOutcome');
+        if (current.outcome) {
+            outcomeEl.innerHTML = '<span class="text-muted">' + escapeHtml(t('myreports.outcome')) + '</span> ' + escapeHtml(current.outcome);
+            outcomeEl.classList.remove('d-none');
+        } else {
+            outcomeEl.classList.add('d-none');
+        }
+        const noteEl = document.getElementById('reportOutcomeNote');
+        if (current.note) {
+            noteEl.className = 'p-2 rounded bg-light border-start border-3 ' + (notResolved ? 'border-danger' : 'border-success');
+            // Free text, shown exactly as command typed it — same rule as the inline card.
+            noteEl.innerHTML = '<span class="text-muted">' + escapeHtml(t('myreports.comment')) + '</span> ' + escapeHtml(current.note).replace(/\n/g, '<br>');
+        } else {
+            noteEl.className = 'p-2 rounded bg-light border-start border-3 d-none';
+        }
+    }
+
+    function showNext() {
+        if (!queue.length) { current = null; return; }
+        current = queue.shift();
+        render();
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    }
+
+    document.getElementById('reportOutcomeOkBtn').addEventListener('click', () => {
+        if (!current) return;
+        const data = new URLSearchParams({csrf_token: csrfToken, action: 'ack_outcome'});
+        data.set(current.kind === 'incident' ? 'incident_id' : 'report_id', current.id);
+        fetch(current.kind === 'incident' ? 'mission-incident.php' : 'mission-shortage.php', {method: 'POST', body: data}).catch(() => {});
+        bootstrap.Modal.getOrCreateInstance(modalEl).hide();
+    });
+    // Next one waits for the close transition to finish rather than popping
+    // up mid-fade.
+    modalEl.addEventListener('hidden.bs.modal', () => setTimeout(showNext, 250));
+
+    // Deferred to 'load': this runs inline, before the bootstrap.bundle.js
+    // script tag that defines window.bootstrap has necessarily executed.
+    window.addEventListener('load', showNext, {once: true});
 })();
 
 function speakAnnouncementNative(text) {

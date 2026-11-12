@@ -42,6 +42,19 @@ if (!$report) {
     exit;
 }
 
+// Dismissing the outcome popup is the reporter's own call, not command's —
+// checked before (not with) canManageWarRoom below, which would otherwise
+// refuse every volunteer who is not also staff.
+if ($action === 'ack_outcome') {
+    if ((int) $report['reporter_id'] !== $userId) {
+        echo json_encode(['ok' => false, 'error' => t('common.invalid_request')]);
+        exit;
+    }
+    ackReportOutcomeSeen('shortage', $reportId, $userId);
+    echo json_encode(['ok' => true]);
+    exit;
+}
+
 $canManageWarRoom = canManageActionRoom($report['responsible_user_id'] ? (int) $report['responsible_user_id'] : null, (int) $userId);
 if (!$canManageWarRoom) {
     echo json_encode(['ok' => false, 'error' => t('shortage.no_manage_permission')]);

@@ -302,6 +302,7 @@ return [
         'voicereport.mic_permission_denied' => 'Δεν δόθηκε άδεια μικροφώνου.',
         'voicereport.speech_error' => 'Δεν κατάλαβα — προσπάθησε ξανά ή γράψε το χειροκίνητα.',
         'voicereport.pick_type_first' => 'Επιλέξτε τύπο και σοβαρότητα πρώτα.',
+        'reportoutcome.title' => 'Απάντηση στην αναφορά σας',
 
         // Search-sector coverage tracking
         'sector.card_title' => 'Τομείς Έρευνας',
@@ -3947,6 +3948,7 @@ return [
         'voicereport.mic_permission_denied' => 'Microphone permission was not granted.',
         'voicereport.speech_error' => 'Did not catch that — try again or type it manually.',
         'voicereport.pick_type_first' => 'Pick a type and severity first.',
+        'reportoutcome.title' => 'Reply to your report',
 
         // Search-sector coverage tracking
         'sector.card_title' => 'Search Sectors',

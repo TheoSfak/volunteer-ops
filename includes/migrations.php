@@ -8147,6 +8147,37 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 212,
+            'description' => "Shortage/incident outcome popup: a reporter's «Λύθηκε»/«Δεν λύθηκε»/incident-closed answer, with command's note, used to only ever reach them through the live ticker banner — nothing if their phone was not on the page at that exact moment, same gap the «Αναφορά Έλλειψης»/«Αναφορά Περιστατικού» cards' own outcome badge already covered quietly but nobody actually noticed. mission_shortage_reports and mission_incidents each gain outcome_seen_at (NULL = still owed a popup on next load; set once the reporter dismisses it). Re-running it changes nothing.",
+            'up' => function () {
+                // A fresh INFORMATION_SCHEMA lookup rather than
+                // dbColumnExists(): that helper memoises per request, which
+                // MigrationsRunnerTest's own "run it twice in one process"
+                // idempotency check defeats for any column new enough not
+                // to already be in the test fixture — its first (correct)
+                // "false" lingers cached after the ALTER below makes it
+                // true, so the second run tries to add it again and MySQL
+                // throws "Duplicate column".
+                $shortageCol = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_shortage_reports' AND COLUMN_NAME = 'outcome_seen_at'"
+                );
+                if (!$shortageCol) {
+                    dbExecute("ALTER TABLE mission_shortage_reports
+                        ADD COLUMN outcome_seen_at TIMESTAMP NULL COMMENT 'When the reporter dismissed the resolved/not-resolved popup; NULL = still owed one' AFTER outcome_note");
+                }
+                $incidentCol = dbFetchOne(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'mission_incidents' AND COLUMN_NAME = 'outcome_seen_at'"
+                );
+                if (!$incidentCol) {
+                    dbExecute("ALTER TABLE mission_incidents
+                        ADD COLUMN outcome_seen_at TIMESTAMP NULL COMMENT 'When the reporter dismissed the resolved popup; NULL = still owed one' AFTER outcome_note");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
