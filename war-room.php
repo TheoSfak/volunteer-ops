@@ -3054,7 +3054,10 @@ include __DIR__ . '/includes/header.php';
         border: none; background: #0d6efd; color: #fff;
         box-shadow: 0 4px 14px rgba(0,0,0,.35);
         font-size: 1.25rem; line-height: 1;
+        touch-action: none; user-select: none; -webkit-user-select: none;
+        cursor: grab;
     }
+    .voice-report-fab:active { cursor: grabbing; }
     body.wr-tabs-ready .voice-report-fab { bottom: 140px; }
     .voice-report-fab:hover { background: #0b5ed7; }
 
@@ -4568,8 +4571,10 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <!-- Always-reachable accelerator for the card above: same modal, no scroll
-     or tab switch needed first. -->
-<button type="button" class="voice-report-fab" data-bs-toggle="modal" data-bs-target="#voiceReportModal" aria-label="<?= t('voicereport.trigger_btn') ?>">
+     or tab switch needed first. Draggable (wireVoiceReportFabDrag below), so
+     it's opened via JS rather than data-bs-toggle — a drag's own pointerup
+     must never also count as the click that opens the modal. -->
+<button type="button" id="voiceReportFab" class="voice-report-fab" aria-label="<?= t('voicereport.trigger_btn') ?>">
     <i class="bi bi-mic-fill"></i>
 </button>
 
@@ -22023,6 +22028,81 @@ function waitForNativeSpeech(maxMs) {
         document.getElementById('vrPatientPhone').value = '';
         document.getElementById('vrPatientNameWrap').classList.remove('d-none');
         vrShowStep(1);
+    });
+})();
+
+(function wireVoiceReportFabDrag() {
+    // A FAB that floats over the live map has to be movable — wherever the
+    // default bottom-left spot lands, it WILL sometimes sit on top of
+    // something the volunteer needs to see or tap underneath it. Drag
+    // position is per-device (localStorage), not synced: two different
+    // phones having their own favourite spot for this is the point.
+    const fab = document.getElementById('voiceReportFab');
+    if (!fab) return;
+    const STORAGE_KEY = 'wrVoiceFabPos';
+    const DRAG_THRESHOLD = 6; // px of movement before a press counts as a drag, not a tap
+    let dragging = false, moved = false, startX = 0, startY = 0, startLeft = 0, startTop = 0;
+
+    function placeAt(left, top) {
+        const w = fab.offsetWidth || 52, h = fab.offsetHeight || 52;
+        left = Math.max(4, Math.min(window.innerWidth - w - 4, left));
+        top = Math.max(4, Math.min(window.innerHeight - h - 4, top));
+        fab.style.left = left + 'px';
+        fab.style.top = top + 'px';
+        fab.style.right = 'auto';
+        fab.style.bottom = 'auto';
+    }
+
+    try {
+        const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null');
+        if (saved && Number.isFinite(saved.left) && Number.isFinite(saved.top)) {
+            // Runs after the stylesheet has already given the button its
+            // size via CSS, so offsetWidth/Height in placeAt() are real.
+            placeAt(saved.left, saved.top);
+        }
+    } catch (e) {}
+
+    fab.addEventListener('pointerdown', e => {
+        dragging = true;
+        moved = false;
+        startX = e.clientX;
+        startY = e.clientY;
+        const rect = fab.getBoundingClientRect();
+        startLeft = rect.left;
+        startTop = rect.top;
+        try { fab.setPointerCapture(e.pointerId); } catch (err) {}
+    });
+    fab.addEventListener('pointermove', e => {
+        if (!dragging) return;
+        const dx = e.clientX - startX, dy = e.clientY - startY;
+        if (!moved && Math.hypot(dx, dy) > DRAG_THRESHOLD) moved = true;
+        if (moved) placeAt(startLeft + dx, startTop + dy);
+    });
+    function endDrag() {
+        if (!dragging) return;
+        dragging = false;
+        if (moved) {
+            const rect = fab.getBoundingClientRect();
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify({left: rect.left, top: rect.top})); } catch (err) {}
+        }
+    }
+    fab.addEventListener('pointerup', endDrag);
+    fab.addEventListener('pointercancel', endDrag);
+    // Opened from here, not data-bs-toggle: a drag's pointerup also fires a
+    // click, and that click must NOT reopen the modal the drag just meant
+    // to move the button away from.
+    fab.addEventListener('click', () => {
+        if (moved) { moved = false; return; }
+        const modalEl = document.getElementById('voiceReportModal');
+        if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    });
+    // Once dragged, position is an explicit inline left/top rather than the
+    // CSS left:16px/bottom:96px default — re-clamp it on resize (rotation,
+    // keyboard opening) so it can't get stranded off-screen.
+    window.addEventListener('resize', () => {
+        if (!fab.style.left) return;
+        const rect = fab.getBoundingClientRect();
+        placeAt(rect.left, rect.top);
     });
 })();
 
