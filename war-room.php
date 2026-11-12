@@ -4612,7 +4612,7 @@ include __DIR__ . '/includes/header.php';
         <div id="vrStep3" class="d-none">
           <p class="fw-semibold"><?= t('voicereport.step3_title') ?></p>
           <div class="text-center mb-3">
-            <button type="button" id="vrRecordBtn" class="btn btn-outline-primary rounded-circle" style="width:84px;height:84px;font-size:1.8rem;">
+            <button type="button" id="vrRecordBtn" class="btn btn-outline-primary rounded-circle" style="width:84px;height:84px;font-size:1.8rem;touch-action:none;user-select:none;-webkit-user-select:none;">
               <i class="bi bi-mic-fill"></i>
             </button>
             <div id="vrListeningHint" class="small text-muted mt-2"><?= t('voicereport.record_start_hint') ?></div>
@@ -21770,6 +21770,16 @@ function waitForNativeSpeech(maxMs) {
     let vrListening = false;
     let vrNativeListenerHandle = null;
     let vrWebRecognizer = null;
+    // The button looks and is held like a walkie-talkie mic, so it has to
+    // actually behave like one: press-down starts it, release stops it. A
+    // click-to-toggle on the same button meant start only fired on RELEASE —
+    // by which point whoever was holding it had already said their piece
+    // into dead air, so the transcript came back empty every time. Native
+    // start (requestPermissions, then sr.start()) is a promise chain, so a
+    // press short enough to release before it resolves has to be able to
+    // cancel what it kicked off rather than leave an orphaned recognizer
+    // listening after the finger is gone.
+    let vrHoldActive = false;
 
     function vrShowStep(n) {
         [1, 2, 3, 4].forEach(i => document.getElementById('vrStep' + i).classList.toggle('d-none', i !== n));
@@ -21794,11 +21804,14 @@ function waitForNativeSpeech(maxMs) {
 
         if (inAndroidWebView()) {
             waitForNativeSpeech(5000).then(sr => {
-                if (!sr) { opToast(t('voicereport.no_mic_support'), {warn: true}); return; }
-                sr.available().then(res => {
+                if (!vrHoldActive) return Promise.reject(null); // released before the plugin even answered
+                if (!sr) { opToast(t('voicereport.no_mic_support'), {warn: true}); return Promise.reject(null); }
+                return sr.available().then(res => {
+                    if (!vrHoldActive) return Promise.reject(null);
                     if (!res || !res.available) { opToast(t('voicereport.no_mic_support'), {warn: true}); return Promise.reject(null); }
                     return sr.requestPermissions();
                 }).then(perm => {
+                    if (!vrHoldActive) return Promise.reject(null); // released while the permission prompt was up
                     if (perm && perm.speechRecognition && perm.speechRecognition !== 'granted') {
                         opToast(t('voicereport.mic_permission_denied'), {warn: true});
                         return Promise.reject(null);
@@ -21810,7 +21823,13 @@ function waitForNativeSpeech(maxMs) {
                     vrNativeListenerHandle = sr.addListener('partialResults', data => {
                         if (data && data.matches && data.matches.length) textarea.value = data.matches[0];
                     });
-                    return sr.start({language: 'el-GR', partialResults: true, popup: false});
+                    return sr.start({language: 'el-GR', partialResults: true, popup: false}).then(res => {
+                        // Finger already lifted by the time the recognizer actually
+                        // started — stop it right away instead of leaving it to
+                        // listen to whatever's happening after the release.
+                        if (!vrHoldActive) sr.stop().catch(() => {});
+                        return res;
+                    });
                 }).then(res => {
                     if (res && res.matches && res.matches.length && !textarea.value.trim()) textarea.value = res.matches[0];
                 }).catch(err => {
@@ -21844,6 +21863,8 @@ function waitForNativeSpeech(maxMs) {
     }
 
     function vrStopListening() {
+        vrHoldActive = false;
+        if (!vrListening) return; // start is still pending — its own vrHoldActive checks will unwind it
         if (inAndroidWebView()) {
             const sr = nativeSpeechPlugin();
             if (sr) sr.stop().catch(() => {});
@@ -21853,8 +21874,20 @@ function waitForNativeSpeech(maxMs) {
         vrStopListeningUi();
     }
 
-    document.getElementById('vrRecordBtn').addEventListener('click', () => {
-        if (vrListening) vrStopListening(); else vrStartListening();
+    // Press-and-hold, like the walkie-talkie button it looks like: down
+    // starts it, up/cancel/leaving the button stops it. Pointer capture
+    // keeps the up (and the boundary events below) targeted at this button
+    // even if the finger drifts off its circle while held, instead of
+    // stranding the recognizer running with no way to stop it.
+    const vrRecordBtn = document.getElementById('vrRecordBtn');
+    vrRecordBtn.addEventListener('pointerdown', e => {
+        e.preventDefault();
+        if (vrRecordBtn.setPointerCapture) { try { vrRecordBtn.setPointerCapture(e.pointerId); } catch (err) {} }
+        vrHoldActive = true;
+        vrStartListening();
+    });
+    ['pointerup', 'pointercancel', 'pointerleave'].forEach(evt => {
+        vrRecordBtn.addEventListener(evt, () => vrStopListening());
     });
 
     document.querySelectorAll('.vr-chip-group').forEach(group => {
