@@ -404,6 +404,33 @@
     function setHintEnabled(on) {
         try { localStorage.setItem('wrScenarioHint', on ? '1' : '0'); } catch (e) { /* private window: stays on for this page only */ }
     }
+
+    // The «active phase» (v3.469.0): the phase an order most recently went into, so the next one defaults there
+    // instead of asking from a blank slate - the point/area, sector, route, zone, area and building windows all
+    // stage through the six functions below, so remembering it there covers every one of them in one place; the
+    // «Εντολή σε άτομα» form reads it too (orderPhase()). Per mission, per browser (WR_MISSION_ID is not known
+    // until this script is called, never at load, so the key is built lazily, not at the top of the file).
+    let lastPhaseId = null;
+    let lastPhaseLoaded = false;
+    function lastPhaseKey() {
+        return 'wrScenarioLastPhase:' + WR_MISSION_ID;
+    }
+    function getLastPhaseId() {
+        if (!lastPhaseLoaded) {
+            lastPhaseLoaded = true;
+            try { lastPhaseId = localStorage.getItem(lastPhaseKey()) || null; } catch (e) { lastPhaseId = null; }
+        }
+        return lastPhaseId;
+    }
+    // id is the phase an order actually landed in (the endpoint's own phase_id - 'new' resolves to a real one
+    // before this is ever called), never the literal 'new'.
+    function rememberPhase(id) {
+        if (!id || id === 'new') return;
+        lastPhaseId = String(id);
+        lastPhaseLoaded = true;
+        try { localStorage.setItem(lastPhaseKey(), lastPhaseId); } catch (e) { /* private window: stays for this tab only */ }
+    }
+
     function readyHint(phase) {
         if (phase.played_at || !hintEnabled()) return '';
         const idx = scenario.phases.indexOf(phase);
@@ -590,6 +617,10 @@
         const open = scenario.phases.filter(p => !p.played_at);
         if (orderDraft.phase === 'new') return 'new';
         if (orderDraft.phase && open.some(p => String(p.id) === String(orderDraft.phase))) return String(orderDraft.phase);
+        // Nothing picked yet in this form: the active phase (last used anywhere in the scenario), if it is still
+        // open, beats always falling back to the first one.
+        const last = getLastPhaseId();
+        if (last && open.some(p => String(p.id) === String(last))) return String(last);
         return open.length ? String(open[0].id) : 'new';
     }
 
@@ -961,6 +992,7 @@
             run('add_order', {phase_id: orderPhase(), order_type: orderDraft.type, text: orderDraft.text, team_id: orderDraft.to}, res => {
                 orderDraft.text = '';
                 orderDraft.phase = String(res.phase_id);
+                rememberPhase(res.phase_id);
                 orderDraft.note = t('scenario.order_staged', {n: phaseNumber(res.phase_id)});
                 renderCard();
             });
@@ -1148,11 +1180,15 @@
     }
 
     // ── For the point/area window ─────────────────────────────────────────────────────────────────────────────
+    // The active phase (last used, if still open) is marked, not moved: the list stays in phase order so its
+    // position stays predictable, but the one an order would land in by habit is the one that stands out.
     function menuHtml() {
         const open = scenario.phases.filter(p => !p.played_at);
-        let html = open.map(p =>
-            `<li><a class="dropdown-item" href="#" data-sc-phase="${p.id}">${esc(phaseName(p))}${p.title ? ' · ' + esc(p.title) : ''} <span class="text-muted small">(${p.items.length})</span></a></li>`
-        ).join('');
+        const last = getLastPhaseId();
+        let html = open.map(p => {
+            const active = last && String(p.id) === String(last);
+            return `<li><a class="dropdown-item${active ? ' active' : ''}" href="#" data-sc-phase="${p.id}">${active ? '<i class="bi bi-check-lg me-1"></i>' : ''}${esc(phaseName(p))}${p.title ? ' · ' + esc(p.title) : ''} <span class="text-muted small">(${p.items.length})</span></a></li>`;
+        }).join('');
         if (open.length) html += '<li><hr class="dropdown-divider"></li>';
         html += `<li><a class="dropdown-item" href="#" data-sc-phase="new"><i class="bi bi-plus-lg me-1"></i>${esc(t('scenario.new_phase_n', {n: scenario.phases.length + 1}))}</a></li>`;
         return html;
@@ -1162,7 +1198,7 @@
     // has already been shown to the person.
     function stage(phaseId, fields) {
         return request('add_item', Object.assign({phase_id: String(phaseId)}, fields))
-            .then(res => { if (!res || !res.ok) failed(res); return res; })
+            .then(res => { if (!res || !res.ok) failed(res); else rememberPhase(res.phase_id); return res; })
             .catch(() => { alert(t('common.send_failed')); return {ok: false}; });
     }
 
@@ -1171,7 +1207,7 @@
     // with the endpoint's answer (phase_id, count on success); a refusal has already been shown to the person.
     function stageSectors(phaseId, areaId, sectors) {
         return request('add_sectors', {phase_id: String(phaseId), area_id: String(areaId), sectors: JSON.stringify(sectors)})
-            .then(res => { if (!res || !res.ok) failed(res); return res; })
+            .then(res => { if (!res || !res.ok) failed(res); else rememberPhase(res.phase_id); return res; })
             .catch(() => { alert(t('common.send_failed')); return {ok: false}; });
     }
 
@@ -1182,7 +1218,7 @@
     // refusal has already been shown to the person.
     function stageRoute(phaseId, fields) {
         return request('add_route', Object.assign({phase_id: String(phaseId)}, fields))
-            .then(res => { if (!res || !res.ok) failed(res); return res; })
+            .then(res => { if (!res || !res.ok) failed(res); else rememberPhase(res.phase_id); return res; })
             .catch(() => { alert(t('common.send_failed')); return {ok: false}; });
     }
 
@@ -1191,7 +1227,7 @@
     // team or slot. Resolves with the endpoint's answer (phase_id on success); a refusal has already been shown to the person.
     function stageRestricted(phaseId, fields) {
         return request('add_restricted', Object.assign({phase_id: String(phaseId)}, fields))
-            .then(res => { if (!res || !res.ok) failed(res); return res; })
+            .then(res => { if (!res || !res.ok) failed(res); else rememberPhase(res.phase_id); return res; })
             .catch(() => { alert(t('common.send_failed')); return {ok: false}; });
     }
 
@@ -1201,7 +1237,7 @@
     // success); a refusal has already been shown to the person.
     function stageArea(phaseId, fields) {
         return request('add_area', Object.assign({phase_id: String(phaseId)}, fields))
-            .then(res => { if (!res || !res.ok) failed(res); return res; })
+            .then(res => { if (!res || !res.ok) failed(res); else rememberPhase(res.phase_id); return res; })
             .catch(() => { alert(t('common.send_failed')); return {ok: false}; });
     }
 
@@ -1211,7 +1247,7 @@
     // outside the sector, a phase before the sector) has already been shown to the person.
     function stageBuilding(phaseId, fields) {
         return request('add_building', Object.assign({phase_id: String(phaseId)}, fields))
-            .then(res => { if (!res || !res.ok) failed(res); return res; })
+            .then(res => { if (!res || !res.ok) failed(res); else rememberPhase(res.phase_id); return res; })
             .catch(() => { alert(t('common.send_failed')); return {ok: false}; });
     }
 
