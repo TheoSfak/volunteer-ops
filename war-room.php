@@ -2651,8 +2651,8 @@ include __DIR__ . '/includes/header.php';
     .wr-ar-banner { padding: 8px 12px; text-align: center; font-weight: 600; font-size: 14px; background: rgba(8, 12, 10, .62); border: 1px solid rgba(255, 255, 255, .14); border-radius: 10px; }
     .wr-ar-tape { display: block; width: 100%; height: 34px; border-radius: 8px; }
     .wr-ar-warn { position: absolute; left: 10px; right: 10px; top: calc(max(8px, env(safe-area-inset-top)) + 134px); padding: 8px 11px; border-radius: 10px; background: rgba(180, 35, 24, .92); border: 1px solid #ff9a90; font-weight: 600; font-size: 12.5px; }
-    .wr-ar-rail { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 6px; }
-    .wr-ar-chip { padding: 5px 11px; border-radius: 99px; border: 1px solid rgba(255, 255, 255, .28); background: rgba(8, 12, 10, .55); font-size: 11.5px; }
+    .wr-ar-rail { display: flex; flex-direction: row; flex-wrap: nowrap; justify-content: space-between; gap: 4px; }
+    .wr-ar-chip { flex: 1; padding: 5px 2px; border-radius: 99px; border: 1px solid rgba(255, 255, 255, .28); background: rgba(8, 12, 10, .55); font-size: 9.5px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .wr-ar-chip[aria-pressed="true"] { background: #e8efe9; color: #0a110d; border-color: #e8efe9; }
     .wr-ar-radar { position: absolute; right: 10px; top: calc(max(8px, env(safe-area-inset-top)) + 184px); width: 80px; height: 80px; }
     .wr-ar-bottom { position: absolute; left: 0; right: 0; bottom: 0; padding: 40px 12px max(12px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, rgba(8, 12, 10, 0), rgba(8, 12, 10, .88) 36%); display: flex; flex-direction: column; gap: 6px; }
