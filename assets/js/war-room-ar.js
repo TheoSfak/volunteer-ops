@@ -265,7 +265,11 @@ function arCompassQuality(signals) {
 
 // ── The screen ───────────────────────────────────────────────────────────────
 
-const AR_COL = {green: [74, 222, 128], cyan: [34, 211, 238], red: [248, 81, 73], orange: [255, 145, 60], amber: [251, 191, 36], white: [240, 246, 242], grey: [160, 170, 165]};
+const AR_COL = {green: [74, 222, 128], cyan: [34, 211, 238], red: [248, 81, 73], orange: [255, 145, 60], amber: [251, 191, 36], white: [240, 246, 242], grey: [160, 170, 165], blue: [96, 165, 250], gap: [20, 20, 22]};
+const AR_POI_RANGE_M = 600;       // further POI pins would just clutter the screen; the 2D map is the place for those
+const AR_COVERAGE_REFRESH_MS = 20000; // mission-sector-coverage.php re-grids the whole sector; not worth asking more often than this
+const AR_COVERAGE_MAX_CELLS = 500;    // a cap on how many gap rectangles one frame paints, not on how many the sector can have
+const AR_COVERAGE_RANGE_M = 150;      // paint the ground around the walker, not a whole multi-km sector at once — the 2D map is the place for that overview
 const AR_FONT = 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
 const AR_MOVING_MPS = 1.5;        // faster than this and the screen dims: look where you are going
 const AR_STILL_MPS = 0.8;         // and it stays dimmed until the speed has fallen below this
@@ -336,6 +340,8 @@ function arElement() {
             <button type="button" class="wr-ar-chip" data-ar-layer="bound" aria-pressed="true">${escapeHtml(t('ar.layer_bound'))}</button>
             <button type="button" class="wr-ar-chip" data-ar-layer="team" aria-pressed="true">${escapeHtml(t('ar.layer_team'))}</button>
             <button type="button" class="wr-ar-chip" data-ar-layer="haz" aria-pressed="true">${escapeHtml(t('ar.layer_haz'))}</button>
+            <button type="button" class="wr-ar-chip" data-ar-layer="poi" aria-pressed="true">${escapeHtml(t('ar.layer_poi'))}</button>
+            <button type="button" class="wr-ar-chip" data-ar-layer="cov" aria-pressed="true">${escapeHtml(t('ar.layer_cov'))}</button>
         </div>
         <canvas class="wr-ar-radar"></canvas>
         <div class="wr-ar-bottom">
@@ -352,6 +358,7 @@ function arElement() {
             <button type="button" class="wr-ar-go" data-ar="go" hidden></button>
             <div class="wr-ar-links">
                 <button type="button" data-ar="compass"><i class="bi bi-compass me-1"></i>${escapeHtml(t('arrow.open_btn'))}</button>
+                <button type="button" data-ar="poi"><i class="bi bi-camera-fill me-1"></i>${escapeHtml(t('ar.poi_btn'))}</button>
                 <button type="button" data-ar="calib">${escapeHtml(t('ar.calib_link'))}</button>
                 <button type="button" data-ar="decline" hidden>${escapeHtml(t('decline.btn'))}</button>
             </div>
@@ -391,6 +398,7 @@ function arElement() {
             case 'calibdone': arCloseCalib(); break;
             case 'compass': { const m = opEntries.get(arState.key); arClose(); if (m) arrowOpen(m); break; }
             case 'decline': { const m = opEntries.get(arState.key); arClose(); if (m) opAct('decline', m, btn); break; }
+            case 'poi': arCapturePoi(); break;
         }
     });
     return el;
@@ -402,8 +410,9 @@ function arOpen(m) {
     arClose();
     const el = arElement();
     arState = {
-        key: m ? m.key : null, layers: {bound: true, team: true, haz: true},
+        key: m ? m.key : null, layers: {bound: true, team: true, haz: true, poi: true, cov: true},
         pose: null, orientAt: 0, absolute: false, iosOffset: 0, sm: null, compass: {samples: [], fieldUt: null, fieldAt: 0, iosAcc: null, jitter: null, level: 'good', poorSince: 0, goodSince: 0, reasons: [], at: 0, shown: false, openedAt: 0}, mag: null, fastFixes: 0, evUsed: 0, evIgnored: 0, evRate: '', evAt: 0, debug: false,
+        coverage: {sectorId: null, cells: null, at: 0, busy: false},
         fix: null, watchId: null, stream: null, wakeLock: null, raf: 0, onOrient: null, onKey: null, onResize: null,
         elev: new Map(), meElev: null, meElevAt: null, elevBusy: false, elevKey: '',
         openedAt: Date.now(), elevAt: -1e9, message: null, moving: false, warnSig: '', cw: 0, ch: 0, dpr: 1,
@@ -708,6 +717,59 @@ function arLoadElevations(force) {
         if (arState.elev.has(k)) { arState.meElev = arState.elev.get(k); arState.meElevAt = {lat: me.lat, lng: me.lng}; }
     });
 }
+// The ground-paint layer: Verified Coverage's gap rectangles for the ONE
+// sector the current order targets, re-asked every AR_COVERAGE_REFRESH_MS
+// (mission-sector-coverage.php re-grids the whole sector, not cheap enough to
+// ask every frame). Server-gated to the viewer's own team's sector
+// (canViewOwnSectorCoverage) — a sector that isn't theirs just answers !ok,
+// same as having nothing to show.
+function arLoadCoverage(m) {
+    if (!arState) return;
+    const sectorId = m && m.kind === 'sector' ? Number(m.id) : null;
+    if (!sectorId) { arState.coverage = {sectorId: null, cells: null, at: 0, busy: false}; return; }
+    if (arState.coverage.busy) return;
+    if (arState.coverage.sectorId === sectorId && Date.now() - arState.coverage.at < AR_COVERAGE_REFRESH_MS) return;
+    arState.coverage.busy = true;
+    fetch('mission-sector-coverage.php?mission_id=' + WR_MISSION_ID + '&sector_id=' + sectorId).then(r => r.json()).then(result => {
+        if (!arState) return;
+        arState.coverage.busy = false;
+        const entry = result && result.ok ? (result.coverage || {})[sectorId] : null;
+        arState.coverage = {sectorId: sectorId, cells: entry ? entry.gap_cells : [], at: Date.now(), busy: false};
+    }).catch(() => { if (arState) arState.coverage.busy = false; });
+}
+
+// A quad lying flat on the ground, not a wall — this layer paints what has
+// NOT been walked yet (same meaning as the 2D map's own dark coverage
+// overlay, drawCoverageGapCells() in war-room.php), so it has to read as
+// "the ground itself", never as danger (that is what AR's red fences mean).
+function arDrawCoverageGap(S, me, cell) {
+    const corners = [[cell[0], cell[1]], [cell[0], cell[3]], [cell[2], cell[3]], [cell[2], cell[1]]];
+    const vecs = corners.map(([lat, lng]) => arVec(me, lat, lng, 0.05));
+    const cx = (vecs[0].x + vecs[2].x) / 2, cy = (vecs[0].y + vecs[2].y) / 2;
+    if (Math.hypot(cx, cy) > AR_COVERAGE_RANGE_M) return null;
+    const pts = vecs.map(v => arProject([v.x, v.y, v.z], S.basis, S.focal, S.cw, S.ch));
+    if (pts.some(p => !p)) return null;
+    const depth = (pts[0].depth + pts[1].depth + pts[2].depth + pts[3].depth) / 4;
+    return {pts: pts, depth: depth};
+}
+function arDrawCoverageGaps(S, me, cells) {
+    const ctx = S.ctx;
+    const quads = [];
+    for (let i = 0; i < cells.length && quads.length < AR_COVERAGE_MAX_CELLS; i++) {
+        const q = arDrawCoverageGap(S, me, cells[i]);
+        if (q) quads.push(q);
+    }
+    quads.sort((a, b) => b.depth - a.depth);
+    quads.forEach(q => {
+        const al = arClamp(1.1 - q.depth / 500, .12, .4);
+        ctx.beginPath();
+        ctx.moveTo(q.pts[0].x, q.pts[0].y);
+        for (let i = 1; i < q.pts.length; i++) ctx.lineTo(q.pts[i].x, q.pts[i].y);
+        ctx.closePath();
+        ctx.fillStyle = arRgba(AR_COL.gap, al);
+        ctx.fill();
+    });
+}
 // Height of a spot above where I stand, or 0 when the terrain lookup missed.
 function arZ(lat, lng) {
     if (arState.meElev === null) return 0;
@@ -930,6 +992,7 @@ function arFrame(now) {
     const me = arMe();
     // The ground heights, once a spot is known and again when it has moved far or the order changed.
     if (now - arState.elevAt > 2500) { arState.elevAt = now; arLoadElevations(false); }
+    if (arState.layers.cov) arLoadCoverage(m);
     // Browsers send orientation events only when the reading changes, so a phone held still goes quiet: the last
     // pose stays good for a long while instead of the beam vanishing and coming back with the next wobble.
     const poseFresh = arState.pose && Date.now() - arState.orientAt < AR_COMPASS_STALE_MS;
@@ -995,6 +1058,10 @@ function arDrawWorld(S, m, me) {
         const sector = m.kind === 'sector' ? (sectors || []).find(s => String(s.id) === String(m.id)) : null;
         info.out = !!(sector && sector.status === 'in_progress' && !info.inside && near && near.dist > AR_SECTOR_OUT_M);
         const col = info.out ? AR_COL.red : (info.inside ? AR_COL.green : AR_COL.amber);
+        // Ground-paint, drawn first so the boundary wall and beacons stay crisp on top of it.
+        if (m.kind === 'sector' && arState.layers.cov && arState.coverage.sectorId === Number(m.id) && arState.coverage.cells && arState.coverage.cells.length) {
+            arDrawCoverageGaps(S, me, arState.coverage.cells);
+        }
         if (arState.layers.bound) {
             arDrawWall(S, geo.map(p => arVec(me, p[0], p[1])), col, 30, true, false);
             geo.forEach(p => { const v = arVec(me, p[0], p[1]); pushMark(arBearingElevation([v.x, v.y, 0]).az, col, 'sq'); });
@@ -1090,6 +1157,84 @@ function arDrawLayers(S, me, info) {
             pushMark(arBearingElevation([v.x, v.y, 0]).az, tm.is_stale ? AR_COL.grey : AR_COL.cyan, 'dia');
         });
     }
+    // Points of Interest: clues other volunteers already photographed, visible
+    // to every approved participant (same data the 2D map's poiLayer draws from
+    // — see mission_points_of_interest). Clipped to AR_POI_RANGE_M so a mission
+    // spanning kilometres doesn't turn the screen into a wall of pins.
+    if (arState.layers.poi) {
+        (pointsOfInterest || []).forEach(poi => {
+            if (poi.lat === null || poi.lat === undefined) return;
+            const v = arVec(me, poi.lat, poi.lng, 1.2);
+            const flat = Math.hypot(v.x, v.y);
+            if (flat > AR_POI_RANGE_M) return;
+            arDrawPoi(S, poi, v, flat);
+            const col = poi.checked_at ? AR_COL.grey : AR_COL.blue;
+            S.radar.push({poly: null, lat: poi.lat, lng: poi.lng, col: col, size: 3});
+            pushMark(arBearingElevation([v.x, v.y, 0]).az, col, 'sq');
+        });
+    }
+    // A teammate's own SOS — the "buddy system" arrow (teamSosAlerts, read
+    // from the same 5s poll as sosAlerts/nearbyTeams). Always drawn, not
+    // behind a layer chip: this is the one thing on this screen somebody
+    // else is actively waiting on, not background situational awareness.
+    (teamSosAlerts || []).forEach(alert => {
+        if (alert.lat === null || alert.lat === undefined) return;
+        const v = arVec(me, alert.lat, alert.lng, 1.2);
+        const flat = Math.hypot(v.x, v.y);
+        arDrawTeamSos(S, alert, v, flat);
+        S.radar.push({poly: null, lat: alert.lat, lng: alert.lng, col: AR_COL.red, size: 4});
+        pushMark(arBearingElevation([v.x, v.y, 0]).az, AR_COL.red, 'tri');
+    });
+}
+
+function arDrawTeamSos(S, alert, v, flatDist) {
+    const p = arProject([v.x, v.y, v.z], S.basis, S.focal, S.cw, S.ch);
+    const az = arBearingElevation([v.x, v.y, 0]).az;
+    const label = t('ar.sos_label', {name: alert.user_name});
+    if (p && p.x > -20 && p.x < S.cw + 20) {
+        const top = arProject([v.x, v.y, v.z + 30], S.basis, S.focal, S.cw, S.ch);
+        arDrawBeacon(S, p, {
+            color: AR_COL.red, big: true, ring: true, top: top ? top.y : -20,
+            lines: [{t: '⚠ ' + label, b: true, c: AR_COL.red}, {t: formatDistanceMeters(flatDist)}],
+        });
+    } else {
+        S.edges.push({turn: arTurnTo(S.heading, az), label: label + ' ' + formatDistanceMeters(flatDist), col: AR_COL.red});
+    }
+}
+
+// A clue someone already photographed: a short pillar, dimmer than an order's
+// own beacon (that one is what the person is walking TO), grey once command
+// has checked it so attention goes to the still-open ones first.
+function arDrawPoi(S, poi, v, flatDist) {
+    const col = poi.checked_at ? AR_COL.grey : AR_COL.blue;
+    const p = arProject([v.x, v.y, v.z], S.basis, S.focal, S.cw, S.ch);
+    const az = arBearingElevation([v.x, v.y, 0]).az;
+    if (p && p.x > -20 && p.x < S.cw + 20) {
+        const top = arProject([v.x, v.y, v.z + 22], S.basis, S.focal, S.cw, S.ch);
+        const opt = {color: col, big: false, top: top ? top.y : -20};
+        if (flatDist < 200) opt.lines = [{t: t('poi.popup_title') + (poi.checked_at ? t('ar.poi_checked_suffix') : ''), b: true, c: col}, {t: formatDistanceMeters(flatDist)}];
+        arDrawBeacon(S, p, opt);
+    } else {
+        S.edges.push({turn: arTurnTo(S.heading, az), label: t('poi.popup_title') + ' ' + formatDistanceMeters(flatDist), col: col});
+    }
+}
+
+// The AR screen's own way into the Point of Interest feature. Deliberately
+// does NOT touch the live AR camera stream (see testTheCameraNeverLeavesThePhone
+// in tests/ArFieldViewTest.php — that feed is display-only, on purpose): this
+// opens the device's OWN camera app through the exact same hidden
+// #poiCaptureInput the Media panel's «Σημείο Ενδιαφέροντος» button uses, so
+// the whole tested flow (GPS lock, 30m merge, offline queue, notifications)
+// runs unchanged. Its Send button sits in a panel AR is drawn fully over, so
+// window.arPoiAutoSend tells wirePoiInput() (war-room.php) to press it the
+// moment the fix is ready instead of leaving it for a tap nobody can see.
+function arCapturePoi() {
+    const input = document.getElementById('poiCaptureInput');
+    if (!input) return;
+    const noteInput = document.getElementById('poiNoteInput');
+    if (noteInput) noteInput.value = (prompt(t('poi.note_placeholder'), '') || '').trim();
+    window.arPoiAutoSend = true;
+    input.click();
 }
 
 // What the screen is working from, for when it misbehaves on a phone: tap the GPS tile.

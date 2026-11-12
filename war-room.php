@@ -1360,6 +1360,12 @@ if (get('ajax') === '1') {
     // Command staff only, same as $sosAlerts: a volunteer's tab must not
     // carry other people's voice messages, and has nothing to do with them.
     $voiceMessages = $canManageWarRoom ? loadUnacknowledgedVoiceMessagesForMission($missionId) : [];
+    // Everyone's own team's open SOS alerts — a "buddy system" arrow, not
+    // command staff's full alarm feed above: just whether a TEAMMATE needs
+    // help, which the AR screen (war-room-ar.js) turns into a direction and
+    // distance. Nobody is shown their own alert.
+    $myTeamId = getUserTeamIdForMission($missionId, (int) $user['id']);
+    $teamSosAlerts = $myTeamId ? loadOpenSosAlertsForTeammates($missionId, $myTeamId, (int) $user['id']) : [];
     $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
     $missingPerson = ($isMissingPersonMission && ($canManageWarRoom || $isApprovedParticipant)) ? loadMissingPersonForMission($missionId) : null;
     // Both gated behind their own Settings toggle (default off) — see the
@@ -1441,6 +1447,7 @@ if (get('ajax') === '1') {
         'mapPointsVersion' => $mapPointsVersion,
         'sosAlerts' => $sosAlerts,
         'voiceMessages' => $voiceMessages,
+        'teamSosAlerts' => $teamSosAlerts,
         'pointsOfInterest' => $pointsOfInterest,
         'missingPerson' => $missingPerson,
         'weather' => $weather,
@@ -1607,6 +1614,8 @@ $mapPointRoute = $mapPointsVisible ? loadMapPointRoute($missionId) : null;
 $mapPointsRouting = trim((string) getSetting('google_maps_api_key', '')) !== '' && function_exists('curl_init') && function_exists('curl_multi_init');
 $sosAlerts = $canManageWarRoom ? loadOpenSosAlertsForMission($missionId) : [];
 $voiceMessages = $canManageWarRoom ? loadUnacknowledgedVoiceMessagesForMission($missionId) : [];
+$myTeamIdForSos = getUserTeamIdForMission($missionId, (int) $user['id']);
+$teamSosAlerts = $myTeamIdForSos ? loadOpenSosAlertsForTeammates($missionId, $myTeamIdForSos, (int) $user['id']) : [];
 $pointsOfInterest = ($canManageWarRoom || $isApprovedParticipant) ? loadPointsOfInterestForMission($missionId) : [];
 $missingPerson = ($isMissingPersonMission && ($canManageWarRoom || $isApprovedParticipant)) ? loadMissingPersonForMission($missionId) : null;
 // The lists only exist on the card while the mission has a visitor link.
@@ -6618,6 +6627,7 @@ const WR_BOOT = {
     triageState: <?= json_encode($triage, JSON_UNESCAPED_UNICODE) ?>,
     sosAlerts: <?= json_encode($sosAlerts) ?>,
     voiceMessages: <?= json_encode($voiceMessages, JSON_UNESCAPED_UNICODE) ?>,
+    teamSosAlerts: <?= json_encode($teamSosAlerts, JSON_UNESCAPED_UNICODE) ?>,
     commandPost: <?= json_encode($commandPost, JSON_UNESCAPED_UNICODE) ?>,
     mapPoints: <?= json_encode($mapPoints, JSON_UNESCAPED_UNICODE) ?>,
     mapPointsVersion: <?= json_encode($mapPointsVersion) ?>,
@@ -6987,6 +6997,7 @@ const TRIAGE_MISSION_ID = WR_MISSION_ID;
 const TRIAGE_CLOCK_OFFSET_S = WR_BOOT.serverTime - Math.floor(Date.now() / 1000);
 let sosAlerts = WR_BOOT.sosAlerts;
 let voiceMessages = WR_BOOT.voiceMessages;
+let teamSosAlerts = WR_BOOT.teamSosAlerts;
 // The Συντονιστικό (null until command places it). See renderCommandPost().
 let commandPost = WR_BOOT.commandPost;
 // Its own copy of canManageWarRoom: CAN_MANAGE_WAR_ROOM is declared further
@@ -20851,6 +20862,9 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
         sendBtn.classList.add('d-none');
         sendBtn.disabled = false;
         input.value = '';
+        // A failed GPS lock (or any other reset) must not leave the flag set
+        // for a later, unrelated capture to auto-send.
+        window.arPoiAutoSend = false;
     }
 
     input.addEventListener('change', () => {
@@ -20890,6 +20904,11 @@ wireMediaInput('videoGalleryInput', t('media.video_label'));
             stagedCoords = fix;
             sendBtn.disabled = false;
             sendBtn.innerHTML = '<i class="bi bi-send-fill me-1"></i>' + t('poi.send_btn');
+            // Set by the AR screen's own «Σημείο» button (war-room-ar.js,
+            // arCapturePoi()) right before it opens this same input — its Send
+            // button sits in a panel AR is drawn fully over, so nobody could
+            // ever see or tap it there.
+            if (window.arPoiAutoSend) { window.arPoiAutoSend = false; sendBtn.click(); }
         });
     });
 
@@ -26844,6 +26863,9 @@ function pollWarRoomData() {
             renderVoiceMessages(voiceMessages = data.voiceMessages);
             updateVoiceAlarmState(voiceMessages);
         }
+        // No card of its own — read directly by the AR screen's own arrow
+        // (war-room-ar.js, arDrawLayers()).
+        if (data.teamSosAlerts) teamSosAlerts = data.teamSosAlerts;
         if (data.pointsOfInterest) {
             pointsOfInterest = data.pointsOfInterest;
             renderPointsOfInterest(pointsOfInterest);

@@ -59,10 +59,16 @@ final class ArFieldViewTest extends TestCase
 
     public function testTheCameraNeverLeavesThePhone(): void
     {
-        // Only the picture on this screen: no upload, no recording of the stream.
+        // Only the picture on this screen: no recording of the stream, no
+        // grabbing a frame off it. The «Σημείο» button (v3.468.0) still goes
+        // through the device's OWN camera app and the existing, separately
+        // tested #poiCaptureInput flow in war-room.php — never this video
+        // element — and the ground-paint layer's fetch() (mission-sector-coverage.php)
+        // is a plain GET of sector numbers, nothing captured from the stream.
         $this->assertStringNotContainsString('MediaRecorder', $this->module);
         $this->assertStringNotContainsString('toBlob', $this->module);
-        $this->assertStringNotContainsString('fetch(', $this->module);
+        $this->assertStringNotContainsString('drawImage', $this->module, 'would be grabbing a frame off the live video element');
+        $this->assertStringNotContainsString('captureStream', $this->module);
     }
 
     public function testEveryStringTheScreenAsksForExistsInGreekAndEnglish(): void

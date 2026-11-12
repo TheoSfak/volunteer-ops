@@ -9158,6 +9158,35 @@ function loadOpenSosAlertsForMission(int $missionId): array {
 }
 
 /**
+ * War Room: a volunteer's own team's OPEN SOS alerts, excluding their own —
+ * the "buddy system" the AR screen's arrow (war-room-ar.js) points toward.
+ * Deliberately narrower than loadOpenSosAlertsForMission() just above (command
+ * staff's full alarm feed, every team): this is read by anyone on the team,
+ * not just command staff, so it carries none of that one's guest/home-team
+ * badge data and nothing an acknowledge/resolve action needs — just who,
+ * where, and how sure the fix is.
+ */
+function loadOpenSosAlertsForTeammates(int $missionId, int $teamId, int $excludeUserId): array {
+    $rows = dbFetchAll(
+        "SELECT a.id, a.user_id, u.name AS user_name, a.lat, a.lng, a.accuracy_m, a.created_at
+         FROM mission_sos_alerts a
+         JOIN users u ON u.id = a.user_id
+         WHERE a.mission_id = ? AND a.team_id = ? AND a.user_id != ? AND a.resolved_at IS NULL
+         ORDER BY a.created_at ASC",
+        [$missionId, $teamId, $excludeUserId]
+    );
+    return array_map(fn($row) => [
+        'id'         => (int) $row['id'],
+        'user_id'    => (int) $row['user_id'],
+        'user_name'  => $row['user_name'],
+        'lat'        => $row['lat'] !== null ? (float) $row['lat'] : null,
+        'lng'        => $row['lng'] !== null ? (float) $row['lng'] : null,
+        'accuracy_m' => $row['accuracy_m'] !== null ? (int) round((float) $row['accuracy_m']) : null,
+        'created_at' => date('d/m H:i', strtotime($row['created_at'])),
+    ], $rows);
+}
+
+/**
  * War Room: push-to-talk voice messages from the field that nobody has
  * confirmed hearing yet.
  *
@@ -10615,6 +10644,26 @@ function coverageSweepPolygon(array $geo, array $tracks, array $profile, array $
         'covered_cells'  => $coveredCells,
         'excluded_cells' => $excludedCells,
     ];
+}
+
+/**
+ * Whether $userId may see Verified Coverage for exactly this ONE sector —
+ * the AR ground-paint layer's gate (war-room-ar.js, mission-sector-coverage.php),
+ * narrower than the admin-only $canManageWarRoom gate the rest of this feature
+ * uses. "Theirs" is mission_search_sectors.team_id, the same assignment the
+ * dispatch/order system already keys off; being on no team, or on a team
+ * that is not this sector's, answers false exactly like an outsider would.
+ */
+function canViewOwnSectorCoverage(int $missionId, int $sectorId, int $userId): bool {
+    $myTeamId = getUserTeamIdForMission($missionId, $userId);
+    if (!$myTeamId) {
+        return false;
+    }
+    $sectorTeamId = dbFetchValue(
+        "SELECT team_id FROM mission_search_sectors WHERE id = ? AND mission_id = ?",
+        [$sectorId, $missionId]
+    );
+    return $sectorTeamId !== null && (int) $sectorTeamId === $myTeamId;
 }
 
 /**
