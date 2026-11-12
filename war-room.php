@@ -3042,6 +3042,22 @@ include __DIR__ . '/includes/header.php';
     body.wr-tabs-ready .assistant-fab { bottom: 140px; }
     .assistant-fab:hover { background: #1e3a8a; }
 
+    /* Mirrors .assistant-fab above, on the opposite edge: a volunteer
+       reporting a shortage or incident by voice shouldn't have to scroll to
+       the «Πεδίο» tab and find the card first. Always visible (unlike the
+       assistant FAB, which only appears once scrolled past the hero AND
+       there's something to report) — reporting is urgent by nature, so
+       there is no "nothing to show yet" state to hide behind. */
+    .voice-report-fab {
+        position: fixed; left: 16px; bottom: 96px; z-index: 1200;
+        width: 52px; height: 52px; border-radius: 50%;
+        border: none; background: #0d6efd; color: #fff;
+        box-shadow: 0 4px 14px rgba(0,0,0,.35);
+        font-size: 1.25rem; line-height: 1;
+    }
+    body.wr-tabs-ready .voice-report-fab { bottom: 140px; }
+    .voice-report-fab:hover { background: #0b5ed7; }
+
     /* ── Acknowledgement panel ────────────────────────────────────────────
        Fixed to the right edge so it survives scrolling — the whole point of
        the thing it replaced. z-index 1150: above the map and its controls,
@@ -3329,7 +3345,9 @@ include __DIR__ . '/includes/header.php';
        needed this there. */
     body.modal-open .ack-tracker,
     body.modal-open .ack-tracker-float,
-    body.modal-open .team-board { z-index: 1040; }
+    body.modal-open .team-board,
+    body.modal-open .assistant-fab,
+    body.modal-open .voice-report-fab { z-index: 1040; }
     /* Phone: along the top, full width less the gutters; the acknowledgement
        panel has the bottom. Starts minimized there (initTeamBoard()), and the
        list scrolls inside a short cap so the page is still the page. */
@@ -4549,6 +4567,12 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 
+<!-- Always-reachable accelerator for the card above: same modal, no scroll
+     or tab switch needed first. -->
+<button type="button" class="voice-report-fab" data-bs-toggle="modal" data-bs-target="#voiceReportModal" aria-label="<?= t('voicereport.trigger_btn') ?>">
+    <i class="bi bi-mic-fill"></i>
+</button>
+
 <div class="modal fade" id="voiceReportModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
@@ -4571,34 +4595,34 @@ include __DIR__ . '/includes/header.php';
         <div id="vrStep2" class="d-none">
           <div id="vrFieldsShortage" class="d-none">
             <p class="small fw-semibold mb-1"><?= t('shortage.type_label') ?></p>
-            <div class="d-flex flex-wrap gap-2 mb-3 vr-chip-group" data-field="shortage_type">
+            <div class="d-flex flex-wrap gap-1 mb-2 vr-chip-group" data-field="shortage_type">
               <?php foreach (SHORTAGE_TYPE_LABELS as $val => $label): ?>
-              <button type="button" class="btn btn-outline-secondary vr-chip" data-field="shortage_type" data-value="<?= h($val) ?>" data-label="<?= h(shortageTypeLabel($val)) ?>"><?= h(shortageTypeLabel($val)) ?></button>
+              <button type="button" class="btn btn-sm btn-outline-secondary vr-chip" data-field="shortage_type" data-value="<?= h($val) ?>" data-label="<?= h(shortageTypeLabel($val)) ?>"><?= h(shortageTypeLabel($val)) ?></button>
               <?php endforeach; ?>
             </div>
             <p class="small fw-semibold mb-1"><?= t('shortage.severity_label') ?></p>
-            <div class="d-flex flex-wrap gap-2 mb-3 vr-chip-group" data-field="severity">
+            <div class="d-flex flex-wrap gap-1 mb-2 vr-chip-group" data-field="severity">
               <?php foreach (SHORTAGE_SEVERITY_LABELS as $val => $label): ?>
-              <button type="button" class="btn btn-outline-secondary vr-chip" data-field="severity" data-value="<?= h($val) ?>" data-label="<?= h(shortageSeverityLabel($val)) ?>"><?= h(shortageSeverityLabel($val)) ?></button>
+              <button type="button" class="btn btn-sm btn-outline-secondary vr-chip" data-field="severity" data-value="<?= h($val) ?>" data-label="<?= h(shortageSeverityLabel($val)) ?>"><?= h(shortageSeverityLabel($val)) ?></button>
               <?php endforeach; ?>
             </div>
           </div>
           <div id="vrFieldsIncident" class="d-none">
             <p class="small fw-semibold mb-1"><?= t('incident.type_label') ?></p>
-            <div class="d-flex flex-wrap gap-2 mb-3 vr-chip-group" data-field="incident_type">
+            <div class="d-flex flex-wrap gap-1 mb-2 vr-chip-group" data-field="incident_type">
               <?php foreach (INCIDENT_TYPE_LABELS as $val => $label): ?>
-              <button type="button" class="btn btn-outline-secondary vr-chip" data-field="incident_type" data-value="<?= h($val) ?>" data-label="<?= h(incidentTypeLabel($val)) ?>"><?= h(incidentTypeLabel($val)) ?></button>
+              <button type="button" class="btn btn-sm btn-outline-secondary vr-chip" data-field="incident_type" data-value="<?= h($val) ?>" data-label="<?= h(incidentTypeLabel($val)) ?>"><?= h(incidentTypeLabel($val)) ?></button>
               <?php endforeach; ?>
             </div>
             <p class="small fw-semibold mb-1"><?= t('incident.severity_label') ?></p>
-            <div class="d-flex flex-wrap gap-2 mb-3 vr-chip-group" data-field="severity">
+            <div class="d-flex flex-wrap gap-1 mb-2 vr-chip-group" data-field="severity">
               <?php foreach (SHORTAGE_SEVERITY_LABELS as $val => $label): ?>
-              <button type="button" class="btn btn-outline-secondary vr-chip" data-field="severity" data-value="<?= h($val) ?>" data-label="<?= h(incidentSeverityLabel($val)) ?>"><?= h(incidentSeverityLabel($val)) ?></button>
+              <button type="button" class="btn btn-sm btn-outline-secondary vr-chip" data-field="severity" data-value="<?= h($val) ?>" data-label="<?= h(incidentSeverityLabel($val)) ?>"><?= h(incidentSeverityLabel($val)) ?></button>
               <?php endforeach; ?>
             </div>
-            <div class="d-flex flex-wrap gap-2 mb-3 vr-chip-group" data-field="is_unknown_patient">
-              <button type="button" class="btn btn-outline-secondary vr-chip" data-field="is_unknown_patient" data-value="0" data-label="<?= h(t('voicereport.unknown_patient_no')) ?>"><?= t('voicereport.unknown_patient_no') ?></button>
-              <button type="button" class="btn btn-outline-secondary vr-chip" data-field="is_unknown_patient" data-value="1" data-label="<?= h(t('voicereport.unknown_patient_yes')) ?>"><?= t('voicereport.unknown_patient_yes') ?></button>
+            <div class="d-flex flex-wrap gap-1 mb-2 vr-chip-group" data-field="is_unknown_patient">
+              <button type="button" class="btn btn-sm btn-outline-secondary vr-chip" data-field="is_unknown_patient" data-value="0" data-label="<?= h(t('voicereport.unknown_patient_no')) ?>"><?= t('voicereport.unknown_patient_no') ?></button>
+              <button type="button" class="btn btn-sm btn-outline-secondary vr-chip" data-field="is_unknown_patient" data-value="1" data-label="<?= h(t('voicereport.unknown_patient_yes')) ?>"><?= t('voicereport.unknown_patient_yes') ?></button>
             </div>
             <div id="vrPatientNameWrap">
               <input type="text" id="vrPatientName" class="form-control mb-2" maxlength="255" placeholder="<?= t('incident.patient_name_placeholder') ?>">
