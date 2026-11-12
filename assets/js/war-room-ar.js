@@ -336,13 +336,6 @@ function arElement() {
             <canvas class="wr-ar-tape"></canvas>
         </div>
         <div class="wr-ar-warn" hidden></div>
-        <div class="wr-ar-rail">
-            <button type="button" class="wr-ar-chip" data-ar-layer="bound" aria-pressed="true">${escapeHtml(t('ar.layer_bound'))}</button>
-            <button type="button" class="wr-ar-chip" data-ar-layer="team" aria-pressed="true">${escapeHtml(t('ar.layer_team'))}</button>
-            <button type="button" class="wr-ar-chip" data-ar-layer="haz" aria-pressed="true">${escapeHtml(t('ar.layer_haz'))}</button>
-            <button type="button" class="wr-ar-chip" data-ar-layer="poi" aria-pressed="true">${escapeHtml(t('ar.layer_poi'))}</button>
-            <button type="button" class="wr-ar-chip" data-ar-layer="cov" aria-pressed="true">${escapeHtml(t('ar.layer_cov'))}</button>
-        </div>
         <canvas class="wr-ar-radar"></canvas>
         <div class="wr-ar-bottom">
             <button type="button" class="wr-ar-calibpill" data-ar="calib" hidden></button>
@@ -355,6 +348,13 @@ function arElement() {
             <div class="wr-ar-debug" data-ar-k="debug" hidden></div>
             <div class="wr-ar-title" data-ar-k="title"></div>
             <div class="wr-ar-hint" data-ar-k="hint"></div>
+            <div class="wr-ar-rail">
+                <button type="button" class="wr-ar-chip" data-ar-layer="bound" aria-pressed="true">${escapeHtml(t('ar.layer_bound'))}</button>
+                <button type="button" class="wr-ar-chip" data-ar-layer="team" aria-pressed="true">${escapeHtml(t('ar.layer_team'))}</button>
+                <button type="button" class="wr-ar-chip" data-ar-layer="haz" aria-pressed="true">${escapeHtml(t('ar.layer_haz'))}</button>
+                <button type="button" class="wr-ar-chip" data-ar-layer="poi" aria-pressed="true">${escapeHtml(t('ar.layer_poi'))}</button>
+                <button type="button" class="wr-ar-chip" data-ar-layer="cov" aria-pressed="true">${escapeHtml(t('ar.layer_cov'))}</button>
+            </div>
             <button type="button" class="wr-ar-go" data-ar="go" hidden></button>
             <div class="wr-ar-links">
                 <button type="button" data-ar="compass"><i class="bi bi-compass me-1"></i>${escapeHtml(t('arrow.open_btn'))}</button>
