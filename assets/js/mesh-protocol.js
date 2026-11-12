@@ -32,6 +32,11 @@
  * contain the node's private key.
  *
  * The pure functions are exported for Node (tests/js/mesh-protocol.test.js).
+ *
+ * Over BLE (assets/js/mesh-ble.js) there is no 0x94 0xC3 frame at all: a GATT
+ * characteristic read/write already carries exactly one message, so the same
+ * ToRadio/FromRadio bytes go through MP.encodeVarint(3, id) / decodeFromRadio
+ * directly - frame()/FrameReader are serial-only. See the BLE map below.
  */
 (function (root) {
     'use strict';
@@ -42,6 +47,16 @@
     const MAX_FRAME = 512;
 
     const PORT = {TEXT: 1, POSITION: 3, NODEINFO: 4, ALERT: 11, TELEMETRY: 67};
+
+    // The node's GATT service and its three characteristics (from the official
+    // meshtastic-sdk's transport-ble docs, not from any of their code: these are
+    // just identifiers, the same way a URL or a port number is).
+    const BLE = {
+        SERVICE: '6ba1b218-15a8-461f-9fa8-5dcae273eafd',
+        FROMRADIO: '2c55e69e-4993-11ed-b878-0242ac120002',   // read: one FromRadio per read, empty = queue drained
+        TORADIO: 'f75c76d2-129e-4dad-a1dd-7866124401e7',      // write: one ToRadio per write
+        FROMNUM: 'ed9da18c-a800-4f66-a670-aa7547e34453',      // notify: "something is waiting in fromradio"
+    };
 
     // ── Wire format ─────────────────────────────────────────────────────────
     class Reader {
@@ -368,7 +383,7 @@
     }
 
     const api = {
-        START1, START2, MAX_FRAME, PORT,
+        START1, START2, MAX_FRAME, PORT, BLE,
         frame, FrameReader, encodeWantConfig, encodeHeartbeat, encodeDisconnect, wakeBytes,
         decodeFromRadio, decodeMeshPacket, decodePosition, decodeNodeInfo,
         nodeHex, hopsOf, positionRecord,

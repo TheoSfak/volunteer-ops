@@ -2872,6 +2872,23 @@ return [
         'mesh.err_manage' => 'Μόνο το συντονιστικό μπορεί να χρησιμοποιήσει την πύλη LoRa.',
         'mesh.err_person' => 'Αυτός ο άνθρωπος δεν συμμετέχει στην αποστολή.',
         'mesh.err_node' => 'Ο αριθμός κόμβου δεν είναι έγκυρος.',
+
+        // Δοκιμή BLE (M1): χειροκίνητη σύνδεση τηλεφώνου/υπολογιστή με τον δικό του κόμβο Meshtastic
+        // μέσω Bluetooth, για να επιβεβαιωθεί το handshake πριν φτιαχτεί αυτόματη αποστολή θέσης.
+        'mesh_ble.btn' => 'Δοκιμή BLE',
+        'mesh_ble.btn_title' => 'Δοκιμαστική σύνδεση σε κόμβο Meshtastic μέσω Bluetooth (χωρίς καλώδιο)',
+        'mesh_ble.modal_title' => 'Δοκιμή σύνδεσης BLE (Meshtastic)',
+        'mesh_ble.intro' => 'Σύνδεση με έναν κόμβο Meshtastic μέσω Bluetooth, για δοκιμή. Καμία θέση δεν στέλνεται ακόμη· απλά βλέπετε αν ο κόμβος απαντά.',
+        'mesh_ble.unsupported' => 'Αυτή η συσκευή/φυλλομετρητής δεν υποστηρίζει Bluetooth Low Energy.',
+        'mesh_ble.connect' => 'Σύνδεση',
+        'mesh_ble.disconnect' => 'Αποσύνδεση',
+        'mesh_ble.state_idle' => 'Δεν έχει συνδεθεί κόμβος.',
+        'mesh_ble.state_connecting' => 'Σύνδεση…',
+        'mesh_ble.state_reading' => 'Συνδέθηκε, περιμένει απάντηση κόμβου…',
+        'mesh_ble.state_done' => 'Ο κόμβος απάντησε πλήρως.',
+        'mesh_ble.state_lost' => 'Η σύνδεση χάθηκε.',
+        'mesh_ble.state_error' => 'Αποτυχία: {error}',
+        'mesh_ble.log_empty' => '(ακόμη τίποτα)',
         // Σημεία χάρτη: imported reference points (v3.361.0).
         'mp.label' => 'Σημεία',
         'mp.btn_title' => 'Σημεία χάρτη',
@@ -6442,6 +6459,23 @@ return [
         'mesh.err_manage' => 'Only the command post can use the LoRa gateway.',
         'mesh.err_person' => 'That person is not on the mission.',
         'mesh.err_node' => 'That is not a valid node number.',
+
+        // BLE test (M1): manually connect this phone/computer to its own Meshtastic
+        // node over Bluetooth, to confirm the handshake before we build auto-sending.
+        'mesh_ble.btn' => 'BLE test',
+        'mesh_ble.btn_title' => 'Test connection to a Meshtastic node over Bluetooth (no cable)',
+        'mesh_ble.modal_title' => 'BLE connection test (Meshtastic)',
+        'mesh_ble.intro' => 'Connect to a Meshtastic node over Bluetooth, to test it. No position is sent yet - this just checks whether the node answers.',
+        'mesh_ble.unsupported' => 'This device/browser does not support Bluetooth Low Energy.',
+        'mesh_ble.connect' => 'Connect',
+        'mesh_ble.disconnect' => 'Disconnect',
+        'mesh_ble.state_idle' => 'No node connected.',
+        'mesh_ble.state_connecting' => 'Connecting…',
+        'mesh_ble.state_reading' => 'Connected, waiting for the node to answer…',
+        'mesh_ble.state_done' => 'The node answered in full.',
+        'mesh_ble.state_lost' => 'The connection was lost.',
+        'mesh_ble.state_error' => 'Failed: {error}',
+        'mesh_ble.log_empty' => '(nothing yet)',
         // Map points: imported reference points (v3.361.0).
         'mp.label' => 'Points',
         'mp.btn_title' => 'Map points',

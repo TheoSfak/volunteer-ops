@@ -472,7 +472,8 @@ if (typeof module !== 'undefined' && module.exports) {
                 <header class="wrc-sec-h"><i class="bi bi-people-fill"></i><span class="wrc-h">${esc(t('console.teams_title'))}</span><span class="wrc-cnt" id="wrcTeamsCnt">0</span>
                     <button type="button" class="wrc-link ms-auto" id="wrcSelAll">${esc(t('console.select_all'))}</button>
                     ${typeof floorBaselineOpen === 'function' ? `<button type="button" class="wrc-link" id="wrcFloorBtn" title="${esc(t('floor.btn_title'))}" aria-label="${esc(t('floor.btn'))}"><i class="bi bi-building-up"></i></button>` : ''}
-                    ${typeof meshGatewayOpen === 'function' && window.MeshGateway ? `<button type="button" class="wrc-link" id="wrcMeshBtn" data-mesh-btn title="${esc(t('mesh.btn_title'))}" aria-label="${esc(t('mesh.btn'))}"><i class="bi bi-broadcast-pin"></i></button>` : ''}</header>
+                    ${typeof meshGatewayOpen === 'function' && window.MeshGateway ? `<button type="button" class="wrc-link" id="wrcMeshBtn" data-mesh-btn title="${esc(t('mesh.btn_title'))}" aria-label="${esc(t('mesh.btn'))}"><i class="bi bi-broadcast-pin"></i></button>` : ''}
+                    ${typeof meshBleOpen === 'function' && window.MeshBle ? `<button type="button" class="wrc-link" id="wrcMeshBleBtn" title="${esc(t('mesh_ble.btn_title'))}" aria-label="${esc(t('mesh_ble.btn'))}"><i class="bi bi-bluetooth"></i></button>` : ''}</header>
                 <div class="wrc-teams-body" id="wrcTeamsBody"></div>
             </section>
         </div>
@@ -1359,6 +1360,8 @@ if (typeof module !== 'undefined' && module.exports) {
     if (floorBtn) floorBtn.addEventListener('click', () => floorBaselineOpen());
     const meshBtn = $('#wrcMeshBtn', root);
     if (meshBtn) meshBtn.addEventListener('click', () => meshGatewayOpen());
+    const meshBleBtn = $('#wrcMeshBleBtn', root);
+    if (meshBleBtn) meshBleBtn.addEventListener('click', () => meshBleOpen());
 
     function selectionChanged() {
         syncSelection();

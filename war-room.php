@@ -6456,6 +6456,20 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         </div>
     </div>
 </div>
+
+<?php /* BLE test (M1, v3.478.0): manual handshake check against the volunteer's own
+         node over Bluetooth - assets/js/mesh-ble.js. No position is sent yet. */ ?>
+<div class="modal fade" id="meshBleModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-bluetooth me-1"></i><?= h(t('mesh_ble.modal_title')) ?></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="meshBleBody"></div>
+        </div>
+    </div>
+</div>
 <?php endif; ?>
 
 <?php if ($mapPointsVisible): ?>
@@ -6689,6 +6703,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 <?php if ($canManageWarRoom): ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/mesh-protocol.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/mesh-protocol.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/mesh-gateway.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/mesh-gateway.js') ?>"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/mesh-ble.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/mesh-ble.js') ?>"></script>
 <?php endif; ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-ar.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-ar.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-team-arcs.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-team-arcs.js') ?>"></script>
@@ -18344,6 +18359,17 @@ function meshGatewayOpen() {
 (function meshGatewayWire() {
     if (!window.MeshGateway || !document.getElementById('meshGatewayModal')) return;
     window.MeshGateway.init({post: meshPost, t, esc: escapeHtml});
+})();
+
+// ── BLE test (M1): same command-staff audience as the gateway above, its own
+// small window so MeshGateway's full-body render() never fights it for meshBleBody. ──
+function meshBleOpen() {
+    if (window.MeshBle) window.MeshBle.open();
+}
+
+(function meshBleWire() {
+    if (!window.MeshBle || !document.getElementById('meshBleModal')) return;
+    window.MeshBle.init({t, esc: escapeHtml});
 })();
 
 function renderParticipantLiveData(data) {
