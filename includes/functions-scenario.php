@@ -2708,6 +2708,21 @@ function scenarioPrintItemLine(array $item): array {
         'task' => 'scenario.order_type_task', 'speak' => 'scenario.order_type_speak', 'message' => 'scenario.order_type_message',
         'location' => 'scenario.order_type_location', 'photo' => 'scenario.order_type_photo', 'video' => 'scenario.order_type_video',
     ];
+    // The same icon-per-type the live card uses (war-room-scenario.js itemHtml()), spelled out again here since
+    // this page has no script to read it from.
+    $orderIcons = [
+        'task' => 'bi-clipboard-check-fill', 'speak' => 'bi-megaphone-fill', 'message' => 'bi-chat-left-text-fill',
+        'location' => 'bi-crosshair', 'photo' => 'bi-camera-fill', 'video' => 'bi-camera-reels-fill',
+    ];
+    $icon = match ($item['type']) {
+        'point' => 'bi-geo-alt-fill',
+        'sector' => 'bi-grid-3x3-gap-fill',
+        'route' => 'bi-signpost-split-fill',
+        'restricted' => 'bi-exclamation-triangle-fill',
+        'building' => 'bi-building-fill',
+        'order' => $orderIcons[$item['order_type'] ?? ''] ?? 'bi-chat-left-text-fill',
+        default => 'bi-bounding-box',
+    };
     $kindKey = match ($item['type']) {
         'sector' => 'scenario.kind_sector',
         'route' => 'scenario.kind_route',
@@ -2735,6 +2750,24 @@ function scenarioPrintItemLine(array $item): array {
         $target = $item['team_label'] ?? t('scenario.team_gone');
     }
 
+    // A colour for the state badge (print-only, decided from the raw fields - never by parsing the words above).
+    $tone = 'muted';
+    if (!$item['sent']) {
+        $tone = $item['error'] !== null ? 'danger' : 'muted';
+    } elseif (in_array($item['state'], ['withdrawn', 'cancelled', 'expanded'], true)) {
+        $tone = 'secondary';
+    } elseif ($item['state'] === 'standing') {
+        $tone = 'info';
+    } elseif ($item['state'] === 'waiting') {
+        $tone = 'warning';
+    } elseif ($item['state'] === 'open') {
+        $tone = 'primary';
+    } else {
+        $tone = 'success';
+    }
+    // When it went out, in words: the one timestamp print can show for an item (there is no "withdrawn at" to show).
+    $time = $item['sent'] && !empty($item['sent_at']) ? date('d/m H:i', strtotime($item['sent_at'])) : null;
+
     if (!$item['sent']) {
         $state = $item['error'] !== null ? t('common.send_failed') . ': ' . $item['error'] : t('scenario.print_not_sent');
     } else {
@@ -2761,5 +2794,5 @@ function scenarioPrintItemLine(array $item): array {
         };
     }
 
-    return ['title' => $title, 'target' => $target, 'state' => $state];
+    return ['title' => $title, 'target' => $target, 'state' => $state, 'icon' => $icon, 'tone' => $tone, 'time' => $time];
 }
