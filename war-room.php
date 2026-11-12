@@ -4528,13 +4528,120 @@ include __DIR__ . '/includes/header.php';
 
 <?php if ($isApprovedParticipant): ?>
 <div class="row g-4 mb-4 wr-legacy-row">
+    <div class="col-12">
+        <!-- Quick path into the two forms below: tap the type/severity (never
+             guessed from speech — those drive which table the report lands in
+             and how urgently command treats it), then speak the free-text
+             part once. Submits through the SAME #shortageReportForm /
+             #incidentReportForm as the manual path, so validation, CSRF,
+             notifications and audit logging are all untouched. -->
+        <div class="card shadow-sm border-primary" data-card-id="voiceReportCard">
+            <div class="card-body d-flex flex-wrap align-items-center justify-content-between gap-2">
+                <div>
+                    <h5 class="mb-1"><i class="bi bi-mic-fill me-1 text-primary"></i><?= t('voicereport.trigger_btn') ?></h5>
+                    <p class="small text-muted mb-0"><?= t('voicereport.trigger_hint') ?></p>
+                </div>
+                <button type="button" class="btn btn-primary btn-lg" data-bs-toggle="modal" data-bs-target="#voiceReportModal">
+                    <i class="bi bi-mic-fill me-1"></i><?= t('voicereport.trigger_btn') ?>
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="voiceReportModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-mic-fill me-1"></i><?= t('voicereport.trigger_btn') ?></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="<?= t('common.close') ?>"></button>
+      </div>
+      <div class="modal-body">
+
+        <div id="vrStep1">
+          <p class="fw-semibold"><?= t('voicereport.step1_title') ?></p>
+          <button type="button" id="vrPickIncident" class="btn btn-danger btn-lg w-100 mb-2 d-flex align-items-center justify-content-center gap-2">
+            <i class="bi bi-heart-pulse-fill"></i><?= t('voicereport.pick_incident') ?>
+          </button>
+          <button type="button" id="vrPickShortage" class="btn btn-warning btn-lg w-100 d-flex align-items-center justify-content-center gap-2">
+            <i class="bi bi-exclamation-triangle-fill"></i><?= t('voicereport.pick_shortage') ?>
+          </button>
+        </div>
+
+        <div id="vrStep2" class="d-none">
+          <div id="vrFieldsShortage" class="d-none">
+            <p class="small fw-semibold mb-1"><?= t('shortage.type_label') ?></p>
+            <div class="d-flex flex-wrap gap-2 mb-3 vr-chip-group" data-field="shortage_type">
+              <?php foreach (SHORTAGE_TYPE_LABELS as $val => $label): ?>
+              <button type="button" class="btn btn-outline-secondary vr-chip" data-field="shortage_type" data-value="<?= h($val) ?>" data-label="<?= h(shortageTypeLabel($val)) ?>"><?= h(shortageTypeLabel($val)) ?></button>
+              <?php endforeach; ?>
+            </div>
+            <p class="small fw-semibold mb-1"><?= t('shortage.severity_label') ?></p>
+            <div class="d-flex flex-wrap gap-2 mb-3 vr-chip-group" data-field="severity">
+              <?php foreach (SHORTAGE_SEVERITY_LABELS as $val => $label): ?>
+              <button type="button" class="btn btn-outline-secondary vr-chip" data-field="severity" data-value="<?= h($val) ?>" data-label="<?= h(shortageSeverityLabel($val)) ?>"><?= h(shortageSeverityLabel($val)) ?></button>
+              <?php endforeach; ?>
+            </div>
+          </div>
+          <div id="vrFieldsIncident" class="d-none">
+            <p class="small fw-semibold mb-1"><?= t('incident.type_label') ?></p>
+            <div class="d-flex flex-wrap gap-2 mb-3 vr-chip-group" data-field="incident_type">
+              <?php foreach (INCIDENT_TYPE_LABELS as $val => $label): ?>
+              <button type="button" class="btn btn-outline-secondary vr-chip" data-field="incident_type" data-value="<?= h($val) ?>" data-label="<?= h(incidentTypeLabel($val)) ?>"><?= h(incidentTypeLabel($val)) ?></button>
+              <?php endforeach; ?>
+            </div>
+            <p class="small fw-semibold mb-1"><?= t('incident.severity_label') ?></p>
+            <div class="d-flex flex-wrap gap-2 mb-3 vr-chip-group" data-field="severity">
+              <?php foreach (SHORTAGE_SEVERITY_LABELS as $val => $label): ?>
+              <button type="button" class="btn btn-outline-secondary vr-chip" data-field="severity" data-value="<?= h($val) ?>" data-label="<?= h(incidentSeverityLabel($val)) ?>"><?= h(incidentSeverityLabel($val)) ?></button>
+              <?php endforeach; ?>
+            </div>
+            <div class="d-flex flex-wrap gap-2 mb-3 vr-chip-group" data-field="is_unknown_patient">
+              <button type="button" class="btn btn-outline-secondary vr-chip" data-field="is_unknown_patient" data-value="0" data-label="<?= h(t('voicereport.unknown_patient_no')) ?>"><?= t('voicereport.unknown_patient_no') ?></button>
+              <button type="button" class="btn btn-outline-secondary vr-chip" data-field="is_unknown_patient" data-value="1" data-label="<?= h(t('voicereport.unknown_patient_yes')) ?>"><?= t('voicereport.unknown_patient_yes') ?></button>
+            </div>
+            <div id="vrPatientNameWrap">
+              <input type="text" id="vrPatientName" class="form-control mb-2" maxlength="255" placeholder="<?= t('incident.patient_name_placeholder') ?>">
+              <input type="tel" id="vrPatientPhone" class="form-control mb-2" maxlength="30" placeholder="<?= t('incident.phone_placeholder') ?>">
+            </div>
+          </div>
+          <button type="button" id="vrStep2Next" class="btn btn-primary w-100 mt-2"><?= t('voicereport.next_btn') ?></button>
+          <button type="button" id="vrStep2Back" class="btn btn-link w-100"><?= t('voicereport.back_btn') ?></button>
+        </div>
+
+        <div id="vrStep3" class="d-none">
+          <p class="fw-semibold"><?= t('voicereport.step3_title') ?></p>
+          <div class="text-center mb-3">
+            <button type="button" id="vrRecordBtn" class="btn btn-outline-primary rounded-circle" style="width:84px;height:84px;font-size:1.8rem;">
+              <i class="bi bi-mic-fill"></i>
+            </button>
+            <div id="vrListeningHint" class="small text-muted mt-2"><?= t('voicereport.record_start_hint') ?></div>
+          </div>
+          <textarea id="vrTranscript" class="form-control mb-2" rows="3" maxlength="2000" placeholder="<?= t('voicereport.transcript_label') ?>"></textarea>
+          <button type="button" id="vrStep3Next" class="btn btn-primary w-100 mt-2"><?= t('voicereport.next_btn') ?></button>
+          <button type="button" id="vrStep3Back" class="btn btn-link w-100"><?= t('voicereport.back_btn') ?></button>
+        </div>
+
+        <div id="vrStep4" class="d-none">
+          <p class="fw-semibold"><?= t('voicereport.step4_title') ?></p>
+          <div id="vrSummary" class="mb-3"></div>
+          <button type="button" id="vrSendBtn" class="btn btn-success btn-lg w-100"><i class="bi bi-send-fill me-1"></i><?= t('voicereport.send_btn') ?></button>
+          <button type="button" id="vrStep4Back" class="btn btn-link w-100"><?= t('voicereport.back_btn') ?></button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4 mb-4 wr-legacy-row">
     <div class="col-12 col-md-6">
         <div class="card shadow-sm h-100 border-warning" data-card-id="shortageFormCard">
             <div class="card-header bg-warning bg-opacity-25 wr-collapsible-header" data-bs-toggle="collapse" data-bs-target="#shortageFormCollapse" role="button" aria-expanded="false" aria-controls="shortageFormCollapse">
                 <h5 class="mb-0 d-flex justify-content-between align-items-center"><span><i class="bi bi-exclamation-triangle-fill me-1"></i><?= t('shortage.card_title') ?></span><i class="bi bi-chevron-down d-lg-none wr-collapsible-chevron"></i></h5>
             </div>
             <div class="card-body collapse d-lg-block" id="shortageFormCollapse">
-                <form method="post">
+                <form method="post" id="shortageReportForm">
                     <?= csrfField() ?>
                     <input type="hidden" name="action" value="report_shortage">
                     <label class="form-label small fw-semibold"><?= t('shortage.type_label') ?></label>
@@ -7298,7 +7405,7 @@ let cardLabels = WR_BOOT.cardLabels;
                 'restrictedAreaProximityCard'],
         map:   ['mapCard', 'missingPersonCard', 'weatherCard', 'sectorsListCard', 'poiListCard'],
         team:  ['nearbyTeamsCard', 'teamsCard', 'participantsCard', 'chatCard'],
-        field: ['shortageFormCard', 'incidentFormCard', 'incidentsListCard',
+        field: ['voiceReportCard', 'shortageFormCard', 'incidentFormCard', 'incidentsListCard',
                 'broadcastPhotoCard', 'mediaCard', 'activityCard'],
     };
 
@@ -21626,6 +21733,241 @@ function waitForNativeTts(maxMs) {
         look();
     });
 }
+
+// Same family as the TTS bridge above, mirror architecture: the APK WebView
+// has no Web Speech API either (speechSynthesis's own absence is proven at
+// [[project_action_room_voice_announcements]]), so dictation inside the app
+// goes through @capacitor-community/speech-recognition — Android's own
+// on-device/offline-capable recognizer, never a cloud call. This is also why
+// it is safe for a live incident report: nothing here sends the mission's
+// field data to any AI/cloud step, unlike the (deliberately rejected) idea of
+// an LLM parsing the report — see [[project_action_room_ai_integration_plan]].
+function nativeSpeechPlugin() {
+    const cap = window.Capacitor;
+    return (cap && cap.Plugins && cap.Plugins.SpeechRecognition) || null;
+}
+function waitForNativeSpeech(maxMs) {
+    return new Promise(resolve => {
+        const started = Date.now();
+        const look = () => {
+            const sr = nativeSpeechPlugin();
+            if (sr) { resolve(sr); return; }
+            const cap = window.Capacitor;
+            if (cap && typeof cap.isNativePlatform === 'function' && cap.isNativePlatform()) { resolve(null); return; }
+            if (Date.now() - started >= maxMs) { resolve(null); return; }
+            setTimeout(look, 250);
+        };
+        look();
+    });
+}
+
+(function wireVoiceReportModal() {
+    const modalEl = document.getElementById('voiceReportModal');
+    if (!modalEl) return;
+
+    const vrState = {kind: null, shortage_type: null, shortage_type_label: '', severity: null, severity_label: '',
+        incident_type: null, incident_type_label: '', is_unknown_patient: null};
+    let vrListening = false;
+    let vrNativeListenerHandle = null;
+    let vrWebRecognizer = null;
+
+    function vrShowStep(n) {
+        [1, 2, 3, 4].forEach(i => document.getElementById('vrStep' + i).classList.toggle('d-none', i !== n));
+    }
+
+    function vrStopListeningUi() {
+        vrListening = false;
+        document.getElementById('vrRecordBtn').classList.remove('btn-danger');
+        document.getElementById('vrRecordBtn').classList.add('btn-outline-primary');
+        document.getElementById('vrListeningHint').textContent = t('voicereport.record_start_hint');
+        if (vrNativeListenerHandle) {
+            vrNativeListenerHandle.then(h => h.remove()).catch(() => {});
+            vrNativeListenerHandle = null;
+        }
+    }
+
+    function vrStartListening() {
+        if (vrListening) return;
+        const textarea = document.getElementById('vrTranscript');
+        const hint = document.getElementById('vrListeningHint');
+        const btn = document.getElementById('vrRecordBtn');
+
+        if (inAndroidWebView()) {
+            waitForNativeSpeech(5000).then(sr => {
+                if (!sr) { opToast(t('voicereport.no_mic_support'), {warn: true}); return; }
+                sr.available().then(res => {
+                    if (!res || !res.available) { opToast(t('voicereport.no_mic_support'), {warn: true}); return Promise.reject(null); }
+                    return sr.requestPermissions();
+                }).then(perm => {
+                    if (perm && perm.speechRecognition && perm.speechRecognition !== 'granted') {
+                        opToast(t('voicereport.mic_permission_denied'), {warn: true});
+                        return Promise.reject(null);
+                    }
+                    vrListening = true;
+                    btn.classList.remove('btn-outline-primary');
+                    btn.classList.add('btn-danger');
+                    hint.textContent = t('voicereport.listening');
+                    vrNativeListenerHandle = sr.addListener('partialResults', data => {
+                        if (data && data.matches && data.matches.length) textarea.value = data.matches[0];
+                    });
+                    return sr.start({language: 'el-GR', partialResults: true, popup: false});
+                }).then(res => {
+                    if (res && res.matches && res.matches.length && !textarea.value.trim()) textarea.value = res.matches[0];
+                }).catch(err => {
+                    if (err !== null) opToast(t('voicereport.speech_error'), {warn: true});
+                }).finally(() => vrStopListeningUi());
+            });
+            return;
+        }
+
+        // Browser fallback (desktop testing mainly — most mobile browsers lack
+        // this too; the native path above is what the APK actually uses).
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR) { opToast(t('voicereport.no_mic_support'), {warn: true}); return; }
+        const rec = new SR();
+        rec.lang = 'el-GR';
+        rec.interimResults = true;
+        rec.continuous = false;
+        rec.onresult = ev => {
+            let text = '';
+            for (let i = 0; i < ev.results.length; i++) text += ev.results[i][0].transcript;
+            textarea.value = text;
+        };
+        rec.onerror = () => opToast(t('voicereport.speech_error'), {warn: true});
+        rec.onend = () => vrStopListeningUi();
+        vrWebRecognizer = rec;
+        vrListening = true;
+        btn.classList.remove('btn-outline-primary');
+        btn.classList.add('btn-danger');
+        hint.textContent = t('voicereport.listening');
+        rec.start();
+    }
+
+    function vrStopListening() {
+        if (inAndroidWebView()) {
+            const sr = nativeSpeechPlugin();
+            if (sr) sr.stop().catch(() => {});
+        } else if (vrWebRecognizer) {
+            vrWebRecognizer.stop();
+        }
+        vrStopListeningUi();
+    }
+
+    document.getElementById('vrRecordBtn').addEventListener('click', () => {
+        if (vrListening) vrStopListening(); else vrStartListening();
+    });
+
+    document.querySelectorAll('.vr-chip-group').forEach(group => {
+        group.addEventListener('click', ev => {
+            const btn = ev.target.closest('.vr-chip');
+            if (!btn || !group.contains(btn)) return;
+            group.querySelectorAll('.vr-chip').forEach(b => { b.classList.remove('btn-primary'); b.classList.add('btn-outline-secondary'); });
+            btn.classList.remove('btn-outline-secondary');
+            btn.classList.add('btn-primary');
+            const field = group.dataset.field;
+            vrState[field] = btn.dataset.value;
+            vrState[field + '_label'] = btn.dataset.label || btn.textContent.trim();
+            if (field === 'is_unknown_patient') {
+                document.getElementById('vrPatientNameWrap').classList.toggle('d-none', btn.dataset.value === '1');
+            }
+        });
+    });
+
+    document.getElementById('vrPickIncident').addEventListener('click', () => {
+        vrState.kind = 'incident';
+        document.getElementById('vrFieldsShortage').classList.add('d-none');
+        document.getElementById('vrFieldsIncident').classList.remove('d-none');
+        // Kicks off the SAME one-shot GPS fix the manual incident form
+        // acquires on its own first focus (wireIncidentReportForm above) —
+        // started now so it has the chip-picking and speaking steps to
+        // resolve in. Never duplicated here: the real submit handler already
+        // falls back to the passive position if this one isn't ready yet.
+        document.getElementById('incidentReportForm').dispatchEvent(new Event('focusin', {bubbles: true}));
+        vrShowStep(2);
+    });
+    document.getElementById('vrPickShortage').addEventListener('click', () => {
+        vrState.kind = 'shortage';
+        document.getElementById('vrFieldsIncident').classList.add('d-none');
+        document.getElementById('vrFieldsShortage').classList.remove('d-none');
+        vrShowStep(2);
+    });
+
+    document.getElementById('vrStep2Back').addEventListener('click', () => vrShowStep(1));
+    document.getElementById('vrStep3Back').addEventListener('click', () => vrShowStep(2));
+    document.getElementById('vrStep4Back').addEventListener('click', () => vrShowStep(3));
+
+    document.getElementById('vrStep2Next').addEventListener('click', () => {
+        if (vrState.kind === 'shortage') {
+            if (!vrState.shortage_type || !vrState.severity) { opToast(t('voicereport.pick_type_first'), {warn: true}); return; }
+        } else {
+            if (!vrState.incident_type || !vrState.severity || !vrState.is_unknown_patient) {
+                opToast(t('voicereport.pick_type_first'), {warn: true}); return;
+            }
+            if (vrState.is_unknown_patient === '0' && !document.getElementById('vrPatientName').value.trim()) {
+                opToast(t('incident.missing_fields'), {warn: true}); return;
+            }
+        }
+        vrShowStep(3);
+    });
+
+    document.getElementById('vrStep3Next').addEventListener('click', () => {
+        if (vrListening) vrStopListening();
+        const transcript = document.getElementById('vrTranscript').value.trim();
+        let html = '';
+        if (vrState.kind === 'shortage') {
+            html += '<span class="badge bg-warning text-dark me-1">' + escapeHtml(vrState.shortage_type_label) + '</span>'
+                + '<span class="badge bg-secondary me-1">' + escapeHtml(vrState.severity_label) + '</span>';
+        } else {
+            html += '<span class="badge bg-danger me-1">' + escapeHtml(vrState.incident_type_label) + '</span>'
+                + '<span class="badge bg-secondary me-1">' + escapeHtml(vrState.severity_label) + '</span>';
+            if (vrState.is_unknown_patient === '1') {
+                html += '<span class="badge bg-dark me-1">' + escapeHtml(t('voicereport.unknown_patient_yes')) + '</span>';
+            } else {
+                const name = document.getElementById('vrPatientName').value.trim();
+                if (name) html += '<span class="badge bg-light text-dark border me-1">' + escapeHtml(name) + '</span>';
+            }
+        }
+        html += '<p class="mt-2 mb-0">' + (transcript ? escapeHtml(transcript) : '<span class="text-muted">—</span>') + '</p>';
+        document.getElementById('vrSummary').innerHTML = html;
+        vrShowStep(4);
+    });
+
+    document.getElementById('vrSendBtn').addEventListener('click', () => {
+        const transcript = document.getElementById('vrTranscript').value.trim();
+        if (vrState.kind === 'shortage') {
+            const form = document.getElementById('shortageReportForm');
+            form.querySelector('[name="shortage_type"]').value = vrState.shortage_type;
+            form.querySelector('[name="severity"]').value = vrState.severity;
+            form.querySelector('[name="title"]').value = vrState.shortage_type_label;
+            form.querySelector('[name="description"]').value = transcript;
+            form.submit();
+        } else {
+            const form = document.getElementById('incidentReportForm');
+            form.querySelector('[name="incident_type"]').value = vrState.incident_type;
+            form.querySelector('[name="severity"]').value = vrState.severity;
+            const unknown = vrState.is_unknown_patient === '1';
+            document.getElementById('incidentUnknownPatient').checked = unknown;
+            form.querySelector('[name="patient_name"]').value = unknown ? '' : document.getElementById('vrPatientName').value.trim();
+            form.querySelector('[name="phone"]').value = unknown ? '' : document.getElementById('vrPatientPhone').value.trim();
+            form.querySelector('[name="notes"]').value = transcript;
+            form.submit();
+        }
+    });
+
+    // Full reset on close — reopening must never show the previous report's
+    // picks, a stuck "listening" state, or a stale transcript.
+    modalEl.addEventListener('hidden.bs.modal', () => {
+        if (vrListening) vrStopListening();
+        vrState.kind = null; vrState.shortage_type = null; vrState.severity = null;
+        vrState.incident_type = null; vrState.is_unknown_patient = null;
+        document.querySelectorAll('.vr-chip').forEach(b => { b.classList.remove('btn-primary'); b.classList.add('btn-outline-secondary'); });
+        document.getElementById('vrTranscript').value = '';
+        document.getElementById('vrPatientName').value = '';
+        document.getElementById('vrPatientPhone').value = '';
+        document.getElementById('vrPatientNameWrap').classList.remove('d-none');
+        vrShowStep(1);
+    });
+})();
 
 function speakAnnouncementNative(text) {
     // Supersedes whatever the web engine or an earlier native call was doing:
