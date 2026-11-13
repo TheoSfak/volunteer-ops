@@ -43,6 +43,16 @@ const MESH_PHONE_ACTIVE_SECONDS = 90;
 const MESH_HEARD_WINDOW_MINUTES = 30;
 
 /**
+ * M3 (Settings > Action Room): whether war-room.php arms the automatic
+ * NORMAL/MESH trigger for field participants at all. Off by default - the
+ * per-volunteer BLE pairing (assets/js/mesh-ble.js) works either way as a
+ * manual test tool, this only gates the unattended part.
+ */
+function meshFallbackEnabled(): bool {
+    return getSetting('war_room_mesh_fallback_enabled', '0') === '1';
+}
+
+/**
  * One record from the page, validated, or null. Numbers are range-checked and
  * rejected rather than clamped, like every other ingest in the app.
  */

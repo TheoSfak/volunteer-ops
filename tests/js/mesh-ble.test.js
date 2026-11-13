@@ -1,15 +1,16 @@
 // Run with: node --test tests/js
 //
-// assets/js/mesh-ble.js: the pure bits of the M1 BLE test harness - turning a
-// decoded FromRadio message into a log line, the bounded log, and the hex <->
-// bytes conversions the Capacitor plugin's bridge needs. The actual Bluetooth
-// stack (native and Web Bluetooth) is checked by hand against real hardware.
+// assets/js/mesh-ble.js: the pure bits of the BLE field harness - turning a
+// decoded FromRadio message into a log line, the bounded log, the hex <->
+// bytes conversions the Capacitor plugin's bridge needs, and M3's
+// NORMAL/MESH hysteresis. The actual Bluetooth stack (native and Web
+// Bluetooth) is checked by hand against real hardware.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const MP = require('../../assets/js/mesh-protocol.js');
-const {logLineFor, pushLog, hexToBytes, bytesToHex} = require('../../assets/js/mesh-ble.js');
+const {logLineFor, pushLog, hexToBytes, bytesToHex, FallbackState} = require('../../assets/js/mesh-ble.js');
 
 test('logLineFor describes each message type', () => {
     assert.equal(logLineFor(null), 'empty read (queue drained)');
@@ -65,4 +66,63 @@ test('a want_config written for BLE is the bare ToRadio bytes, no 0x94 0xC3 fram
     const ble = MP.encodeVarint(3, 42);
     assert.ok(serial.length > ble.length, 'the serial version carries the extra 4-byte header');
     assert.deepEqual(serial.slice(4), ble, 'once the header is stripped, the payload is identical');
+});
+
+// ── M3: NORMAL/MESH hysteresis ──────────────────────────────────────────────
+
+test('a brief poll hiccup never enters MESH', () => {
+    const f = new FallbackState(75000, 2);
+    const t0 = 1000000;
+    assert.equal(f.tick(true, t0), null);
+    assert.equal(f.tick(true, t0 + 30000), null, 'well under the 75s entry delay');
+    assert.equal(f.mode, 'normal');
+});
+
+test('sustained failure enters MESH exactly once, the instant the threshold is crossed', () => {
+    const f = new FallbackState(75000, 2);
+    const t0 = 1000000;
+    assert.equal(f.tick(true, t0), null);
+    assert.equal(f.tick(true, t0 + 74999), null, '1ms short');
+    assert.equal(f.tick(true, t0 + 75000), 'entered');
+    assert.equal(f.mode, 'mesh');
+    // Still offline afterwards: no second 'entered', nothing re-fires.
+    assert.equal(f.tick(true, t0 + 200000), null);
+});
+
+test('leaving MESH needs two successes in a row, not one', () => {
+    const f = new FallbackState(75000, 2);
+    const t0 = 1000000;
+    f.tick(true, t0);
+    f.tick(true, t0 + 75000); // entered
+    assert.equal(f.mode, 'mesh');
+    assert.equal(f.tick(false, t0 + 80000), null, 'first success: not yet');
+    assert.equal(f.mode, 'mesh');
+    assert.equal(f.tick(false, t0 + 85000), 'exited');
+    assert.equal(f.mode, 'normal');
+});
+
+test('a success in between resets the exit streak, not just the entry clock', () => {
+    const f = new FallbackState(75000, 2);
+    const t0 = 1000000;
+    f.tick(true, t0);
+    f.tick(true, t0 + 75000); // entered
+    f.tick(false, t0 + 80000); // 1st success
+    f.tick(true, t0 + 85000);  // flaky: fails again before the 2nd success lands
+    assert.equal(f.mode, 'mesh', 'still in MESH - the streak broke');
+    assert.equal(f.tick(false, t0 + 90000), null, 'this is only the 1st success of a new streak');
+    assert.equal(f.tick(false, t0 + 95000), 'exited');
+});
+
+test('a failure that clears before the entry delay resets the offline clock too', () => {
+    const f = new FallbackState(75000, 2);
+    const t0 = 1000000;
+    f.tick(true, t0);
+    f.tick(true, t0 + 50000);
+    f.tick(false, t0 + 60000); // back before 75s - never entered MESH
+    assert.equal(f.mode, 'normal');
+    // A fresh failure now starts counting from here (t0+60000), not from t0.
+    const restart = t0 + 60000;
+    f.tick(true, restart);
+    assert.equal(f.tick(true, restart + 74999), null);
+    assert.equal(f.tick(true, restart + 75000), 'entered');
 });

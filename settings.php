@@ -70,6 +70,11 @@ $defaults = [
     'war_room_external_js' => '0',
     'war_room_poll_idle_max_seconds' => '0',
     'war_room_poll_idle_staff' => '0',
+    // LoRa mesh fallback (M3, project_lora_meshtastic_fallback_brainstorm). Off by
+    // default: it needs each volunteer to have paired a Meshtastic node by hand at
+    // least once (assets/js/mesh-ble.js), and nothing should start transmitting over
+    // radio because of an upgrade rather than a deliberate choice by the org.
+    'war_room_mesh_fallback_enabled' => '0',
     // Rescuer heart rate (volunteer_vitals). Off by default: it needs a
     // sensor per volunteer and it collects health data, so it must be an
     // explicit decision by the org, never something that starts working
@@ -530,7 +535,7 @@ $actionRoomFields = [
     'war_room_native_sampling', 'war_room_native_full_tracking',
     'war_room_max_ping_accuracy_m', 'war_room_max_ping_speed_kmh', 'war_room_max_ping_speed_kmh_vehicle', 'war_room_gps_smoothing',
     'arrival_auto_enabled', 'war_room_light_script', 'war_room_external_js', 'war_room_poll_idle_max_seconds', 'war_room_poll_idle_staff',
-    'war_room_low_battery_pct', 'war_room_max_shift_minutes', 'war_room_floor_height_m',
+    'war_room_low_battery_pct', 'war_room_max_shift_minutes', 'war_room_floor_height_m', 'war_room_mesh_fallback_enabled',
     'vitals_enabled', 'vitals_sample_seconds', 'vitals_elevated_pct', 'vitals_critical_pct',
     'vitals_low_bpm', 'vitals_reference_age', 'vitals_stale_seconds', 'vitals_retention_days',
     'vitals_episode_tachy_minutes', 'vitals_episode_brady_minutes', 'vitals_episode_strain_minutes',
@@ -560,7 +565,7 @@ if (isPost()) {
         foreach ($fieldsToUpdate as $field) {
                     $value = isset($_POST[$field]) ? $_POST[$field] : '';
 
-                    if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'osm_layer_enabled', 'triage_expectant_enabled', 'triage_trts_suggestion_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy', 'war_room_gps_smoothing', 'arrival_auto_enabled', 'war_room_native_sampling', 'war_room_native_full_tracking', 'war_room_light_script', 'war_room_poll_idle_staff'])) {
+                    if (in_array($field, ['achievements_enabled', 'points_enabled', 'registration_enabled', 'show_register_button', 'require_approval', 'maintenance_mode', 'resend_mission_enabled', 'qr_checkin_enabled', 'weather_map_compass_enabled', 'exposure_urgency_enabled', 'search_rings_enabled', 'osm_layer_enabled', 'triage_expectant_enabled', 'triage_trts_suggestion_enabled', 'vitals_enabled', 'ai_enabled', 'war_room_auto_ping_high_accuracy', 'war_room_gps_smoothing', 'arrival_auto_enabled', 'war_room_native_sampling', 'war_room_native_full_tracking', 'war_room_light_script', 'war_room_poll_idle_staff', 'war_room_mesh_fallback_enabled'])) {
                         $value = isset($_POST[$field]) ? '1' : '0';
                     }
 
@@ -2380,6 +2385,14 @@ $settingsHref = fn(array $i) => $i['url'] ?? ('settings.php?tab=' . $i['tab']);
                             <label class="form-check-label" for="warRoomPollIdleStaff">Να αραιώνει και για τη διοίκηση (αλλιώς η διοίκηση μένει πάντα στα 5 δλ.)</label>
                         </div>
                         <small class="text-muted">Η σελίδα ρωτά τον server κάθε 5 δλ. αν άλλαξε κάτι — και όταν δεν συμβαίνει τίποτα, κάθε ερώτηση κοστίζει δεδομένα στο κινητό και δουλειά στον server. Με αυτή τη ρύθμιση, όσο δεν αλλάζει τίποτα, οι ερωτήσεις αραιώνουν σταδιακά: μετά από 30 δλ. ησυχίας κάθε 10 δλ., μετά από 1,5 λεπτό κάθε 15, μετά από 3 λεπτά κάθε 30 — ποτέ πιο αραιά από την τιμή που διαλέγεις. <strong>Γυρίζει αμέσως στα 5 δλ.</strong> μόλις αλλάξει κάτι (θέση, εντολή, SOS, μήνυμα), μόλις κάποιος πατήσει ή αγγίξει την οθόνη, μόλις ξαναφανεί η σελίδα και αν χαθεί η σύνδεση. Το τίμημα: αν ήταν όλα ήσυχα, ένα καινούργιο SOS, μια εντολή ή ένα μήνυμα μπορεί να φανεί σε όποιον απλώς κοιτάζει τη σελίδα με καθυστέρηση μέχρι την τιμή που διάλεξες. Σε αποστολή με συνεχή κίνηση (θέσεις που ανανεώνονται) σχεδόν δεν αραιώνει. Το μήνυμα «χάθηκε η επαφή» περιμένει ανάλογα περισσότερο όσο η σελίδα είναι σε αργό ρυθμό. Δεν αγγίζει το GPS ούτε τις ειδοποιήσεις.</small>
+                    </div>
+                    <div class="mb-3">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="war_room_mesh_fallback_enabled" id="warRoomMeshFallbackEnabled"
+                                   <?= ($settings['war_room_mesh_fallback_enabled'] ?? '0') === '1' ? 'checked' : '' ?>>
+                            <label class="form-check-label" for="warRoomMeshFallbackEnabled">Αυτόματη εναλλαγή σε LoRa όταν χαθεί η σύνδεση δεδομένων (πειραματικό)</label>
+                        </div>
+                        <small class="text-muted">Κάθε εθελοντής πρέπει πρώτα να έχει συνδέσει το κινητό του με τον δικό του κόμβο Meshtastic με το χέρι μία φορά (κουμπί «Δοκιμή BLE»), κάτι που ο browser επιτρέπει μόνο με πραγματικό πάτημα. Από εκεί και πέρα, αν χαθεί η κανονική σύνδεση δεδομένων για αρκετή ώρα, το κινητό ξανασυνδέεται μόνο του στον ίδιο κόμβο — χωρίς να ξαναζητήσει άδεια — και στέλνει τη θέση του μέσω LoRa κάθε 90 δλ., μέχρι η κανονική σύνδεση να επιστρέψει σταθερά. Ο κόμβος πρέπει να είναι δεμένος με τον εθελοντή (ίδιο παράθυρο «Πύλη LoRa») για να φτάσει η θέση στον ζωντανό χάρτη· αλλιώς μένει στη λίστα «ακούστηκε, χωρίς ιδιοκτήτη».</small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Μέγιστη Αποδεκτή Αβεβαιότητα Στίγματος (μ.)</label>

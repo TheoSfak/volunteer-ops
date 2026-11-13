@@ -1577,6 +1577,9 @@ $participants = dbFetchAll(
     [$missionId, $missionId, PARTICIPATION_APPROVED]
 );
 $myAssignments = array_values(array_filter($participants, fn($participant) => (int)$participant['volunteer_id'] === (int)$user['id']));
+// assets/js/mesh-ble.js: command staff get it regardless, as the admin test tool
+// (M1/M2); a field participant only once M3 is turned on - see includes/functions-mesh.php.
+$meshBleAvailable = $canManageWarRoom || (meshFallbackEnabled() && $iTakePartInActionRoom && !empty($myAssignments));
 $onlinePresenceIds = loadOnlinePresenceUserIds($missionId);
 
 $shifts = loadMissionShiftsWithCounts($missionId);
@@ -4518,6 +4521,19 @@ include __DIR__ . '/includes/header.php';
                     </div>
                     <div id="vitalsSensorStatus" class="small text-muted mb-2"></div>
                     <?php endif; ?>
+                    <?php if (meshFallbackEnabled() && $iTakePartInActionRoom): ?>
+                    <!-- M3: pair this phone with your own Meshtastic node, once. The
+                         browser only allows picking a Bluetooth device from a real
+                         click (assets/js/mesh-ble.js autoConnect() explains why), so
+                         this is the one manual step - after it, automatic LoRa
+                         fallback can reconnect to the same node on its own. -->
+                    <hr class="my-2">
+                    <div class="small fw-bold mb-1"><i class="bi bi-bluetooth text-primary me-1"></i><?= t('mesh_ble.card_title') ?></div>
+                    <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                        <button type="button" class="btn btn-sm btn-outline-primary" onclick="meshBleOpen()"><i class="bi bi-bluetooth me-1"></i><?= t('mesh_ble.pair_btn') ?></button>
+                    </div>
+                    <div class="small text-muted mb-2"><?= t('mesh_ble.card_hint') ?></div>
+                    <?php endif; ?>
                     <?php if (!$iTakePartInActionRoom): ?>
                     <!-- No .send-ping button was rendered above, which is what
                          actually switches this person's tracking off: both the
@@ -6456,20 +6472,6 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
         </div>
     </div>
 </div>
-
-<?php /* BLE test (M1, v3.478.0): manual handshake check against the volunteer's own
-         node over Bluetooth - assets/js/mesh-ble.js. No position is sent yet. */ ?>
-<div class="modal fade" id="meshBleModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-scrollable">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title"><i class="bi bi-bluetooth me-1"></i><?= h(t('mesh_ble.modal_title')) ?></h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body" id="meshBleBody"></div>
-        </div>
-    </div>
-</div>
 <?php endif; ?>
 
 <?php if ($mapPointsVisible): ?>
@@ -6652,6 +6654,28 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 </div>
 <?php endif; ?>
 
+<?php /* BLE pairing/test (M1-M3, v3.478.0+): the volunteer's own node over Bluetooth -
+         assets/js/mesh-ble.js. Command staff get it as a manual test tool regardless;
+         a field participant gets it once M3 (automatic fallback) is turned on, to pair
+         their own node by hand the one time the browser requires a real click. Placed
+         here, OUTSIDE the big $canManageWarRoom block above (reportModal and friends,
+         lines ~5945-6655): nesting it in there - the bug actually shipped and found live
+         by rendering this page as a non-admin participant - meant $meshBleAvailable was
+         never even reached for anyone but command staff, no matter what it evaluated to. */ ?>
+<?php if ($meshBleAvailable): ?>
+<div class="modal fade" id="meshBleModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-bluetooth me-1"></i><?= h(t('mesh_ble.modal_title')) ?></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="meshBleBody"></div>
+        </div>
+    </div>
+</div>
+<?php endif; ?>
+
 <div class="modal fade" id="mediaViewModal" tabindex="-1">
     <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content bg-dark">
@@ -6700,10 +6724,17 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/media-queue.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/trail-display.js?v=<?= APP_VERSION ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/floor-display.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/floor-display.js') ?>"></script>
-<?php if ($canManageWarRoom): ?>
+<?php /* mesh-protocol.js/mesh-ble.js ($meshBleAvailable, set near $iTakePartInActionRoom above):
+         command staff (the admin test tool) OR a field participant once M3 is turned on
+         (Settings > Action Room) - their own BLE pairing and the automatic fallback both
+         need it. mesh-gateway.js (the USB gateway at the command post) stays command-staff
+         only; nobody else has a reason to load it. */ ?>
+<?php if ($meshBleAvailable): ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/mesh-protocol.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/mesh-protocol.js') ?>"></script>
-<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/mesh-gateway.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/mesh-gateway.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/mesh-ble.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/mesh-ble.js') ?>"></script>
+<?php endif; ?>
+<?php if ($canManageWarRoom): ?>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/mesh-gateway.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/mesh-gateway.js') ?>"></script>
 <?php endif; ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-ar.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-ar.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-team-arcs.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-team-arcs.js') ?>"></script>
@@ -6743,6 +6774,7 @@ const WR_BOOT = {
     serverTime: <?= time() ?>,
     jsLocale: <?= json_encode($__viewerLang === 'en' ? 'en-US' : 'el-GR') ?>,
     pollIdleMaxMs: <?= wrPollIdleMaxMs($canManageWarRoom) ?>,
+    meshFallbackEnabled: <?= json_encode($meshBleAvailable && meshFallbackEnabled() && $iTakePartInActionRoom && !empty($myAssignments)) ?>,
     canManage: <?= json_encode($canManageWarRoom) ?>,
     canField: <?= json_encode($isApprovedParticipant || $canManageWarRoom) ?>,
     mapPointLinkMax: <?= (int) MAP_POINT_LINK_MAX ?>,
@@ -18361,15 +18393,28 @@ function meshGatewayOpen() {
     window.MeshGateway.init({post: meshPost, t, esc: escapeHtml});
 })();
 
-// ── BLE test (M1): same command-staff audience as the gateway above, its own
-// small window so MeshGateway's full-body render() never fights it for meshBleBody. ──
+// ── BLE node pairing/test (M1-M3): command staff's manual test tool, and (once
+// Settings > Action Room turns M3 on) a field participant's own one-time pairing.
+// Its own small window so MeshGateway's full-body render() never fights it for
+// meshBleBody. getFix() hands the automatic sender (M3, below) the SAME live
+// position the normal auto-ping already tracks, not a second geolocation watch -
+// referencing latestAutoPosition/AUTO_PING_MAX_FIX_AGE_MS here is safe even though
+// both are declared further down: this closure only runs once something actually
+// calls it, by which point the whole script has executed top to bottom. ──
 function meshBleOpen() {
     if (window.MeshBle) window.MeshBle.open();
 }
 
 (function meshBleWire() {
     if (!window.MeshBle || !document.getElementById('meshBleModal')) return;
-    window.MeshBle.init({t, esc: escapeHtml});
+    window.MeshBle.init({
+        t, esc: escapeHtml,
+        getFix: () => {
+            if (!latestAutoPosition) return null;
+            if (Date.now() - latestAutoPosition.timestamp > AUTO_PING_MAX_FIX_AGE_MS) return null;
+            return {lat: latestAutoPosition.coords.latitude, lng: latestAutoPosition.coords.longitude, time: latestAutoPosition.timestamp};
+        },
+    });
 })();
 
 function renderParticipantLiveData(data) {
@@ -25009,6 +25054,24 @@ function pollIsOffline() {
     return !!(lastPollFailure && lastPollFailure.at > lastPollOkAt);
 }
 
+// M3: NORMAL/MESH hysteresis (assets/js/mesh-ble.js's FallbackState - the rule
+// itself, with its own tests, lives there). Armed only when Settings > Action
+// Room has turned the automatic fallback on for THIS participant
+// (WR_BOOT.meshFallbackEnabled already folds in whether they take part at all
+// and have an assignment - see $meshBleAvailable in war-room.php). Ticked from
+// the very top of renderPollStaleness(), so every poll outcome reaches it the
+// same tick the banner itself reacts to, not on some separate timer of its own.
+const meshFallback = (window.MeshBle && WR_BOOT.meshFallbackEnabled) ? new MeshBle.FallbackState() : null;
+function meshFallbackTick() {
+    if (!meshFallback) return;
+    const change = meshFallback.tick(pollIsOffline(), Date.now());
+    if (change === 'entered') window.MeshBle.autoConnect();
+    // false: this is the state machine ending MESH mode because the normal
+    // connection is back, not a volunteer choosing to un-pair their node -
+    // the whole point of remembering it is to use it again next time.
+    else if (change === 'exited') window.MeshBle.disconnect(false);
+}
+
 // Told people what was wrong and left them with nothing to do about it — the
 // one thing everybody tried anyway was to reload, so the banner now carries
 // the button. Built ONCE and thereafter only updated, never re-innerHTML'd:
@@ -25017,6 +25080,7 @@ function pollIsOffline() {
 // keyboard focus on a control someone in the field is actively using.
 let pollStaleBuilt = false;
 function renderPollStaleness() {
+    meshFallbackTick();
     const el = document.getElementById('pollStaleBanner');
     if (!el) return;
     const ageMs = Date.now() - lastPollOkAt;
