@@ -108,8 +108,13 @@
         render();
     }
 
+    // Throws when there is no node connected, rather than silently doing
+    // nothing: the heartbeat/want_config callers already .catch() and do not
+    // care, but M4's sendOrderOverMesh() needs this to tell command staff the
+    // truth - found live, clicking "send" with no node connected quietly
+    // showed "sent" with nothing actually transmitted.
     async function write(bytes) {
-        if (!writer) return;
+        if (!writer) throw new Error('not connected');
         await writer.write(bytes);
     }
 
