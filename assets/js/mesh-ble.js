@@ -157,10 +157,22 @@
                 const deviceId = picked.deviceId;
                 await ble.addListener('disconnected|' + deviceId, onLost);
                 await ble.connect({deviceId});
+                // Warmup read (meshtastic-sdk's own transport-ble does this before
+                // anything else): fromradio is encrypted, so this is what actually
+                // triggers bonding/pairing on most platforms. Skipping it, writing
+                // want_config went through with no error, but the node never
+                // answered - it was still waiting on this read to consider the link
+                // ready. Result is discarded; only the side effect matters here.
+                await readOneNative(deviceId).catch(() => {});
                 await ble.addListener('notification|' + deviceId + '|' + MP.BLE.SERVICE + '|' + MP.BLE.FROMNUM, () => drainNative(deviceId));
                 await ble.startNotifications({deviceId, service: MP.BLE.SERVICE, characteristic: MP.BLE.FROMNUM});
                 device = {kind: 'native', id: deviceId};
                 await ble.write({deviceId, service: MP.BLE.SERVICE, characteristic: MP.BLE.TORADIO, value: bytesToHex(MP.encodeVarint(3, wantConfigId))});
+                setPhase('reading');
+                log('want_config sent (id ' + wantConfigId + ')');
+                // Belt-and-braces: a fromnum notification that fired before the
+                // listener above was attached is lost, so drain once ourselves too.
+                drainNative(deviceId);
             } else {
                 const btDevice = await root.navigator.bluetooth.requestDevice({filters: [{services: [MP.BLE.SERVICE]}]});
                 btDevice.addEventListener('gattserverdisconnected', onLost);
@@ -169,13 +181,16 @@
                 const toradio = await service.getCharacteristic(MP.BLE.TORADIO);
                 const fromradio = await service.getCharacteristic(MP.BLE.FROMRADIO);
                 const fromnum = await service.getCharacteristic(MP.BLE.FROMNUM);
+                // Warmup read, see the native branch above for why.
+                await fromradio.readValue().catch(() => {});
                 await fromnum.startNotifications();
                 fromnum.addEventListener('characteristicvaluechanged', () => drainWeb(fromradio));
                 device = {kind: 'web', btDevice, toradio, fromradio};
                 await toradio.writeValueWithResponse(MP.encodeVarint(3, wantConfigId));
+                setPhase('reading');
+                log('want_config sent (id ' + wantConfigId + ')');
+                drainWeb(fromradio);
             }
-            setPhase('reading');
-            log('want_config sent (id ' + wantConfigId + ')');
         } catch (e) {
             device = null;
             const cancelled = /cancel|user did not|no device selected/i.test(String(e && e.message));
