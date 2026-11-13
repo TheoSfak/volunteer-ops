@@ -2872,6 +2872,25 @@ return [
         'mesh.err_manage' => 'Μόνο το συντονιστικό μπορεί να χρησιμοποιήσει την πύλη LoRa.',
         'mesh.err_person' => 'Αυτός ο άνθρωπος δεν συμμετέχει στην αποστολή.',
         'mesh.err_node' => 'Ο αριθμός κόμβου δεν είναι έγκυρος.',
+        'mesh.err_order' => 'Αυτή η εντολή δεν ανήκει σε αυτή την αποστολή.',
+
+        // M4: στείλε μια εντολή μέσω LoRa σε έναν δεμένο κόμβο, και η αυτόματη επιβεβαίωσή της.
+        'mesh.orders_btn_title' => 'Εντολές αυτού του ανθρώπου — στείλε μία μέσω LoRa',
+        'mesh.orders_loading' => 'Φόρτωση…',
+        'mesh.orders_none' => 'Καμία εκκρεμής εντολή για αυτόν τον άνθρωπο.',
+        'mesh.send_order_btn' => 'Στείλε μέσω LoRa',
+        'mesh.toast_order_sent' => 'Η εντολή #{id} στάλθηκε μέσω LoRa.',
+        'mesh.toast_order_acked' => 'Η εντολή #{id} επιβεβαιώθηκε μέσω LoRa.',
+        'mesh.order_type_location' => 'Θέση',
+        'mesh.order_type_photo' => 'Φωτογραφία',
+        'mesh.order_type_video' => 'Βίντεο',
+        'mesh.order_type_task' => 'Εργασία',
+        'mesh.order_type_message' => 'Μήνυμα',
+        'mesh.order_type_return_to_base' => 'Επιστροφή στη βάση',
+        'mesh.order_type_route' => 'Πορεία',
+        'mesh.order_type_charge_phone' => 'Φόρτιση κινητού',
+        'mesh.order_type_live' => 'Live μετάδοση',
+        'mesh.order_type_speak' => 'Φωνητική ανακοίνωση',
 
         // Δοκιμή BLE (M1): χειροκίνητη σύνδεση τηλεφώνου/υπολογιστή με τον δικό του κόμβο Meshtastic
         // μέσω Bluetooth, για να επιβεβαιωθεί το handshake πριν φτιαχτεί αυτόματη αποστολή θέσης.
@@ -2883,6 +2902,7 @@ return [
         'mesh_ble.connect' => 'Σύνδεση',
         'mesh_ble.disconnect' => 'Αποσύνδεση',
         'mesh_ble.send_position' => 'Στείλε δοκιμαστική θέση',
+        'mesh_ble.order_received' => '📨 Νέα εντολή #{id} έφτασε μέσω LoRa. Θα τη δεις πλήρως όταν επανέλθει η σύνδεση.',
         'mesh_ble.remembered' => 'Υπάρχει αποθηκευμένος κόμβος· η αυτόματη εναλλαγή σε LoRa μπορεί να τον χρησιμοποιήσει.',
         'mesh_ble.none_remembered' => 'Κανένας κόμβος δεν έχει συνδεθεί ακόμη σε αυτή τη συσκευή.',
         'mesh_ble.card_title' => 'Εφεδρικό LoRa',
@@ -6465,6 +6485,25 @@ return [
         'mesh.err_manage' => 'Only the command post can use the LoRa gateway.',
         'mesh.err_person' => 'That person is not on the mission.',
         'mesh.err_node' => 'That is not a valid node number.',
+        'mesh.err_order' => 'That order does not belong to this mission.',
+
+        // M4: send an order over LoRa to a bound node, and its automatic acknowledgement.
+        'mesh.orders_btn_title' => "This person's orders - send one over LoRa",
+        'mesh.orders_loading' => 'Loading…',
+        'mesh.orders_none' => 'No pending order for this person.',
+        'mesh.send_order_btn' => 'Send over LoRa',
+        'mesh.toast_order_sent' => 'Order #{id} was sent over LoRa.',
+        'mesh.toast_order_acked' => 'Order #{id} was acknowledged over LoRa.',
+        'mesh.order_type_location' => 'Location',
+        'mesh.order_type_photo' => 'Photo',
+        'mesh.order_type_video' => 'Video',
+        'mesh.order_type_task' => 'Task',
+        'mesh.order_type_message' => 'Message',
+        'mesh.order_type_return_to_base' => 'Return to base',
+        'mesh.order_type_route' => 'Route',
+        'mesh.order_type_charge_phone' => 'Charge phone',
+        'mesh.order_type_live' => 'Live stream',
+        'mesh.order_type_speak' => 'Voice announcement',
 
         // BLE test (M1): manually connect this phone/computer to its own Meshtastic
         // node over Bluetooth, to confirm the handshake before we build auto-sending.
@@ -6476,6 +6515,7 @@ return [
         'mesh_ble.connect' => 'Connect',
         'mesh_ble.disconnect' => 'Disconnect',
         'mesh_ble.send_position' => 'Send test position',
+        'mesh_ble.order_received' => '📨 New order #{id} arrived over LoRa. You will see it in full once your connection is back.',
         'mesh_ble.remembered' => 'A node is remembered - automatic LoRa fallback can use it.',
         'mesh_ble.none_remembered' => 'No node has connected on this device yet.',
         'mesh_ble.card_title' => 'LoRa fallback',

@@ -12,6 +12,8 @@
  *            that nobody carries yet, and the people a node can be bound to
  *   bind     node (number) + user_id, optional label: this node is that person's
  *   unbind   node
+ *   pending_orders  node: that person's orders on this mission not yet acknowledged
+ *   order_ack       node + order_id: their "Ελήφθη" arrived by radio, not the app
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -103,6 +105,43 @@ if ($action === 'unbind') {
         logAudit('mesh_node_unbind', 'missions', $missionId, null, ['node' => $node]);
     }
     echo json_encode(['ok' => true, 'removed' => $removed]);
+    exit;
+}
+
+// M4: node -> owner, shared by both actions below - only a node bound to
+// somebody of THIS mission, same rule as 'unbind'.
+$meshOwnerOf = function (int $node) use ($missionId): ?int {
+    $owner = meshBoundUsers([$node])[$node] ?? null;
+    return ($owner !== null && in_array($owner, actionRoomParticipantIds($missionId), true)) ? $owner : null;
+};
+
+if ($action === 'pending_orders') {
+    $owner = $meshOwnerOf((int) post('node'));
+    if ($owner === null) {
+        echo json_encode(['ok' => false, 'error' => t('mesh.err_person')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    echo json_encode(['ok' => true, 'orders' => meshPendingOrders($missionId, $owner)], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+if ($action === 'order_ack') {
+    $owner = $meshOwnerOf((int) post('node'));
+    if ($owner === null) {
+        echo json_encode(['ok' => false, 'error' => t('mesh.err_person')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    $orderId = (int) post('order_id');
+    // The order must be this mission's own - a radio ack must not be able to
+    // touch a recipient row belonging to some other mission this person is on.
+    $belongs = dbFetchValue("SELECT COUNT(*) FROM mission_orders WHERE id = ? AND mission_id = ?", [$orderId, $missionId]);
+    if (!$belongs) {
+        echo json_encode(['ok' => false, 'error' => t('mesh.err_order')], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+    $ownerName = (string) (dbFetchValue("SELECT name FROM users WHERE id = ?", [$owner]) ?? '');
+    $error = receiveMissionOrder($orderId, $owner, $ownerName, MESH_ACK_VIA);
+    echo json_encode($error === null ? ['ok' => true] : ['ok' => false, 'error' => $error], JSON_UNESCAPED_UNICODE);
     exit;
 }
 

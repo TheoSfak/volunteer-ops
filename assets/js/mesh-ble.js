@@ -189,7 +189,9 @@
             for (;;) {
                 const bytes = await readOneNative(deviceId);
                 if (!bytes.length) break;
-                log(logLineFor(MP.decodeFromRadio(bytes)));
+                const msg = MP.decodeFromRadio(bytes);
+                log(logLineFor(msg));
+                handleDecodedMessage(msg);
             }
         } catch (e) {
             log('read failed: ' + (e && e.message ? e.message : e));
@@ -206,12 +208,44 @@
                 const dv = await fromradioChar.readValue();
                 const bytes = dataViewToBytes(dv);
                 if (!bytes.length) break;
-                log(logLineFor(MP.decodeFromRadio(bytes)));
+                const msg = MP.decodeFromRadio(bytes);
+                log(logLineFor(msg));
+                handleDecodedMessage(msg);
             }
         } catch (e) {
             log('read failed: ' + (e && e.message ? e.message : e));
         } finally {
             draining = false;
+        }
+    }
+
+    /**
+     * M4: an order from command staff, heard as any other packet is - no
+     * separate channel. A notify not meant for this device (wrong node) was
+     * already filtered by the radio itself addressing the MeshPacket's `to`;
+     * anything that reaches here is ours. Acking immediately, automatically,
+     * is the whole point: the volunteer should never have to do anything for
+     * command to know the order got through, the same way the normal in-app
+     * notification already auto-delivers without a tap.
+     */
+    function handleDecodedMessage(msg) {
+        if (msg.type !== 'packet' || !msg.packet || msg.packet.portnum !== MP.PORT.PRIVATE) return;
+        const order = MP.decodeOrderMsg(msg.packet.payload);
+        if (!order || order.type !== MP.ORDER_MSG.NOTIFY) return;
+        log('order notify received: #' + order.orderId);
+        if (host && typeof host.onOrderNotify === 'function') host.onOrderNotify(order.orderId);
+        sendOrderAck(order.orderId);
+    }
+
+    async function sendOrderAck(orderId) {
+        try {
+            const payload = MP.encodeOrderMsg({type: MP.ORDER_MSG.ACK, orderId});
+            const id = (Math.random() * 0xffffffff) >>> 0 || 1;
+            const bytes = MP.encodeToRadioPacket({portnum: MP.PORT.PRIVATE, payload, id});
+            await writeToRadio(bytes);
+            log('order ack sent: #' + orderId);
+        } catch (e) {
+            log('order ack failed: ' + (e && e.message ? e.message : e));
         }
     }
 

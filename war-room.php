@@ -18414,6 +18414,11 @@ function meshBleOpen() {
             if (Date.now() - latestAutoPosition.timestamp > AUTO_PING_MAX_FIX_AGE_MS) return null;
             return {lat: latestAutoPosition.coords.latitude, lng: latestAutoPosition.coords.longitude, time: latestAutoPosition.timestamp};
         },
+        // M4: an order's own text never arrives this way (see mesh-protocol.js
+        // ORDER_MSG) - just enough to tell the volunteer now, in case this device
+        // is offline for a while yet, rather than leaving them to only find out
+        // once the normal connection is back.
+        onOrderNotify: orderId => opToast(t('mesh_ble.order_received', {id: orderId}), {ms: 10000}),
     });
 })();
 
@@ -25057,7 +25062,7 @@ function pollIsOffline() {
 // M3: NORMAL/MESH hysteresis (assets/js/mesh-ble.js's FallbackState - the rule
 // itself, with its own tests, lives there). Armed only when Settings > Action
 // Room has turned the automatic fallback on for THIS participant
-// (WR_BOOT.meshFallbackEnabled already folds in whether they take part at all
+// (the flag read below already folds in whether they take part at all
 // and have an assignment - see $meshBleAvailable in war-room.php). Ticked from
 // the very top of renderPollStaleness(), so every poll outcome reaches it the
 // same tick the banner itself reacts to, not on some separate timer of its own.

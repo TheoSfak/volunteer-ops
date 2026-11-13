@@ -41,6 +41,8 @@ const MESH_PACKETS_KEEP_HOURS = 48;
 const MESH_PHONE_ACTIVE_SECONDS = 90;
 /** A node heard within this many minutes is offered for binding. */
 const MESH_HEARD_WINDOW_MINUTES = 30;
+/** receiveMissionOrder()'s $via for an "Ελήφθη" that arrived over the radio, not the app. */
+const MESH_ACK_VIA = 'mesh';
 
 /**
  * M3 (Settings > Action Room): whether war-room.php arms the automatic
@@ -284,6 +286,34 @@ function meshHeardUnbound(): array {
         'rssi'  => $r['rssi'] === null ? null : (int) $r['rssi'],
         'hops'  => $r['hops'] === null ? null : (int) $r['hops'],
     ], $rows);
+}
+
+/**
+ * M4: a short label for one order, for the gateway's "send this over LoRa"
+ * picker - never the order's own text (task_text can run to hundreds of
+ * characters; LoRa carries none of it, only the order id, see mesh-protocol.js
+ * ORDER_MSG), just enough for command staff to tell their pending orders apart.
+ */
+function meshOrderLabel(string $orderType, ?string $taskText): string {
+    $label = t('mesh.order_type_' . $orderType);
+    if (($orderType === 'task' || $orderType === 'speak') && $taskText !== null && $taskText !== '') {
+        $label .= ': ' . mb_substr(trim($taskText), 0, 40);
+    }
+    return $label;
+}
+
+/** This person's orders on $missionId not yet acknowledged - what a LoRa notify is for; newest first, capped. */
+function meshPendingOrders(int $missionId, int $userId): array {
+    $rows = dbFetchAll(
+        "SELECT o.id, o.order_type, o.task_text
+           FROM mission_order_recipients r
+           JOIN mission_orders o ON o.id = r.order_id
+          WHERE o.mission_id = ? AND r.user_id = ? AND r.acknowledged_at IS NULL
+          ORDER BY o.created_at DESC
+          LIMIT 20",
+        [$missionId, $userId]
+    );
+    return array_map(fn($r) => ['id' => (int) $r['id'], 'label' => meshOrderLabel($r['order_type'], $r['task_text'])], $rows);
 }
 
 /** Bind a node to a person (replacing whoever had it). False when the number is not a node number. */

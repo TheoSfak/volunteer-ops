@@ -46,7 +46,10 @@
     // MAX_TO_FROM_RADIO_SIZE in the firmware: a longer "length" is line noise.
     const MAX_FRAME = 512;
 
-    const PORT = {TEXT: 1, POSITION: 3, NODEINFO: 4, ALERT: 11, TELEMETRY: 67};
+    // PRIVATE_APP = 256: Meshtastic's own "yours to define" port number, reserved
+    // in their portnums.proto for exactly this - an app's own payload that no
+    // other node or app on the mesh tries to interpret. See ORDER_MSG below.
+    const PORT = {TEXT: 1, POSITION: 3, NODEINFO: 4, ALERT: 11, TELEMETRY: 67, PRIVATE: 256};
 
     // The node's GATT service and its three characteristics (from the official
     // meshtastic-sdk's transport-ble docs, not from any of their code: these are
@@ -355,6 +358,27 @@
         return enc.bytes(1, concat(parts));
     }
 
+    // ── M4: orders over the radio (PORT.PRIVATE) ────────────────────────────
+    // Not a Meshtastic message - ours alone, so no protobuf, just 5 bytes: one
+    // type byte and the order id as a plain big-endian uint32. LoRa airtime is
+    // scarce and shared, so this carries only enough to look the order up
+    // server-side once the result reaches it - never the order's own text.
+    const ORDER_MSG = {NOTIFY: 1, ACK: 2};
+
+    /** {type, orderId} -> 5 bytes, to go as the Data.payload of a PORT.PRIVATE packet. */
+    function encodeOrderMsg(m) {
+        const out = new Uint8Array(5);
+        out[0] = m.type & 0xff;
+        new DataView(out.buffer).setUint32(1, m.orderId >>> 0, false);
+        return out;
+    }
+
+    /** The reverse, or null for anything that is not 5 bytes of ours. */
+    function decodeOrderMsg(bytes) {
+        if (!bytes || bytes.length !== 5) return null;
+        return {type: bytes[0], orderId: new DataView(bytes.buffer, bytes.byteOffset, 5).getUint32(1, false)};
+    }
+
     // ── What the gateway makes of it ────────────────────────────────────────
     /** "!570dee8c": how Meshtastic shows a node number everywhere. */
     function nodeHex(num) {
@@ -402,10 +426,10 @@
     }
 
     const api = {
-        START1, START2, MAX_FRAME, PORT, BLE,
+        START1, START2, MAX_FRAME, PORT, BLE, ORDER_MSG,
         frame, FrameReader, encodeWantConfig, encodeHeartbeat, encodeDisconnect, wakeBytes,
         decodeFromRadio, decodeMeshPacket, decodePosition, decodeNodeInfo,
-        nodeHex, hopsOf, positionRecord, encodePosition, encodeToRadioPacket,
+        nodeHex, hopsOf, positionRecord, encodePosition, encodeToRadioPacket, encodeOrderMsg, decodeOrderMsg,
         // For tests: build the bytes a node would send.
         encodeFromRadioPacket, encodeFixed32: enc.fixed32, encodeVarint: enc.varint, encodeBytes: enc.bytes, concat,
     };

@@ -269,3 +269,31 @@ test('encodeToRadioPacket is unframed: the node reads it back as a plain MeshPac
     assert.equal(pkt.portnum, M.PORT.POSITION);
     assert.ok(Math.abs(pkt.position.lat - 35.3387) < 1e-6);
 });
+
+// M4: order notify/ack over PORT.PRIVATE - ours alone, not a Meshtastic
+// message, so there is no real-definitions fixture to check against; just the
+// round trip and the exact wire size (every byte counts on a shared radio).
+test('encodeOrderMsg/decodeOrderMsg round-trips type and a 32-bit order id', () => {
+    const bytes = M.encodeOrderMsg({type: M.ORDER_MSG.NOTIFY, orderId: 42});
+    assert.equal(bytes.length, 5, 'one type byte + a 4-byte id, nothing more');
+    assert.deepEqual(M.decodeOrderMsg(bytes), {type: M.ORDER_MSG.NOTIFY, orderId: 42});
+
+    const big = M.encodeOrderMsg({type: M.ORDER_MSG.ACK, orderId: 0xfffffffe});
+    assert.deepEqual(M.decodeOrderMsg(big), {type: M.ORDER_MSG.ACK, orderId: 0xfffffffe});
+});
+
+test('decodeOrderMsg refuses anything that is not exactly 5 bytes', () => {
+    assert.equal(M.decodeOrderMsg(null), null);
+    assert.equal(M.decodeOrderMsg(Uint8Array.of(1, 2, 3)), null);
+    assert.equal(M.decodeOrderMsg(Uint8Array.of(1, 2, 3, 4, 5, 6)), null);
+});
+
+test('an order notify travels end to end through the same ToRadio/MeshPacket path as a position', () => {
+    const payload = M.encodeOrderMsg({type: M.ORDER_MSG.NOTIFY, orderId: 123456});
+    const bytes = M.encodeToRadioPacket({portnum: M.PORT.PRIVATE, payload, id: 7, to: 0x570dee8c});
+    const inner = bytes.slice(2);
+    const pkt = M.decodeMeshPacket(inner);
+    assert.equal(pkt.portnum, M.PORT.PRIVATE);
+    assert.equal(pkt.to, 0x570dee8c);
+    assert.deepEqual(M.decodeOrderMsg(pkt.payload), {type: M.ORDER_MSG.NOTIFY, orderId: 123456});
+});

@@ -91,6 +91,9 @@
         recorded: 0,        // ...of which became a position
         lastSummary: null,
         bound: [], heardUnbound: [], people: [],
+        // M4: which bound node's order picker is open, and what it loaded -
+        // null orders means "loading", [] means "nothing pending".
+        orderPicker: {node: null, orders: null},
     };
     let host = null;
     let port = null, reader = null, writer = null;
@@ -159,6 +162,18 @@
             } else if (msg.type === 'nodeInfo' && msg.node.num === myNum && myNum !== null) {
                 state.ownNode = {num: myNum, name: (msg.node.longName || msg.node.shortName || '') + ' ' + MP.nodeHex(myNum)};
                 render();
+            } else if (msg.type === 'packet' && msg.packet.portnum === MP.PORT.PRIVATE) {
+                // M4: an order's "Ελήφθη" arriving by radio instead of the app.
+                // Same dedupe set as positions - a repeated/relayed ack must not
+                // call receiveMissionOrder() twice (harmless, since it is
+                // idempotent, but there is no reason to spam the request).
+                const order = MP.decodeOrderMsg(msg.packet.payload);
+                const node = msg.packet.from;
+                if (!order || order.type !== MP.ORDER_MSG.ACK || node === myNum || !seen.add(node, msg.packet.id)) return;
+                if (host) host.post({action: 'order_ack', node, order_id: order.orderId}).then(res => {
+                    message(res && res.ok ? t('mesh.toast_order_acked', {id: order.orderId}) : (res && res.error) || t('common.failed'),
+                        res && res.ok ? 'text-success' : 'text-danger');
+                });
             } else if (msg.type === 'packet') {
                 const rec = MP.positionRecord(msg.packet, Date.now());
                 // The gateway's own node reports itself too; its position is
@@ -213,6 +228,32 @@
         });
     }
 
+    /** M4: toggles the order list under one bound node; fetched once per open, not kept fresh. */
+    function toggleOrderPicker(node) {
+        if (state.orderPicker.node === node) {
+            state.orderPicker = {node: null, orders: null};
+            render();
+            return;
+        }
+        state.orderPicker = {node, orders: null};
+        render();
+        host.post({action: 'pending_orders', node}).then(res => {
+            if (state.orderPicker.node !== node) return; // picked another node, or closed, while this was in flight
+            state.orderPicker = {node, orders: (res && res.ok) ? res.orders : []};
+            render();
+        });
+    }
+
+    /** M4: writes an order-notify addressed to one node's own number - never a broadcast. */
+    function sendOrderOverMesh(node, orderId) {
+        write(MP.encodeToRadioPacket({
+            to: node, portnum: MP.PORT.PRIVATE,
+            payload: MP.encodeOrderMsg({type: MP.ORDER_MSG.NOTIFY, orderId}),
+            id: (Math.random() * 0xffffffff) >>> 0 || 1,
+        })).then(() => message(t('mesh.toast_order_sent', {id: orderId}), 'text-success'))
+            .catch(e => message((e && e.message) || t('common.failed'), 'text-danger'));
+    }
+
     // ── The window ──────────────────────────────────────────────────────────
     function el(id) { return document.getElementById(id); }
 
@@ -244,13 +285,27 @@
             ? `<div class="small text-muted mt-1">${esc(t('mesh.counts', {heard: state.heard, sent: state.sent, recorded: state.recorded, waiting: queue.length}))}</div>` : '';
 
         const ageOf = n => n.age_s === null || n.age_s === undefined ? esc(t('mesh.never')) : esc(t('mesh.heard_ago', {age: ageText(n.age_s)}));
+        // M4: the order list under whichever bound node currently has it open.
+        const orderPickerHtml = node => {
+            if (state.orderPicker.node !== node) return '';
+            const orders = state.orderPicker.orders;
+            let body2;
+            if (orders === null) body2 = `<div class="small text-muted">${esc(t('mesh.orders_loading'))}</div>`;
+            else if (!orders.length) body2 = `<div class="small text-muted">${esc(t('mesh.orders_none'))}</div>`;
+            else body2 = orders.map(o => `<div class="d-flex align-items-center gap-2 mb-1">
+                    <span class="small flex-grow-1">#${o.id} — ${esc(o.label)}</span>
+                    <button type="button" class="btn btn-sm btn-outline-primary mesh-send-order" data-node="${node}" data-order="${o.id}">${esc(t('mesh.send_order_btn'))}</button>
+                </div>`).join('');
+            return `<div class="ms-3 ps-2 border-start mb-2">${body2}</div>`;
+        };
         const bound = state.bound.length
             ? state.bound.map(n => `<div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
                     <span class="fw-semibold">${esc(n.name)}</span>
                     <code class="small">${esc(MP.nodeHex(n.node))}</code>${n.label ? `<span class="small text-muted">${esc(n.label)}</span>` : ''}
                     <span class="small text-muted ms-auto">${ageOf(n)}${signalText(n) ? ' · ' + esc(signalText(n)) : ''}</span>
+                    <button type="button" class="btn btn-sm btn-link p-0 mesh-order-toggle" data-node="${n.node}" title="${esc(t('mesh.orders_btn_title'))}"><i class="bi bi-envelope${state.orderPicker.node === n.node ? '-open' : ''}"></i></button>
                     <button type="button" class="btn btn-sm btn-link text-danger p-0 mesh-unbind" data-node="${n.node}" title="${esc(t('mesh.unbind_btn'))}"><i class="bi bi-x-circle"></i></button>
-                </div>`).join('')
+                </div>${orderPickerHtml(n.node)}`).join('')
             : `<div class="small text-muted">${esc(t('mesh.bound_none'))}</div>`;
 
         const options = `<option value="">${esc(t('mesh.pick_person'))}</option>` + state.people.map(g =>
@@ -309,7 +364,12 @@
                 message(t('mesh.toast_unbound'), 'text-success');
                 loadNodes();
             });
+            return;
         }
+        const orderToggle = e.target.closest('.mesh-order-toggle');
+        if (orderToggle) { toggleOrderPicker(Number(orderToggle.dataset.node)); return; }
+        const sendOrder = e.target.closest('.mesh-send-order');
+        if (sendOrder) { sendOrderOverMesh(Number(sendOrder.dataset.node), Number(sendOrder.dataset.order)); return; }
     }
 
     function open() {

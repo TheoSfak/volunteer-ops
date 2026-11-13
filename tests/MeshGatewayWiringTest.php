@@ -89,20 +89,48 @@ PHP;
         $this->assertStringContainsString('session_write_close()', $endpoint);
     }
 
-    public function testOnlyCommandStaffGetTheGatewayScriptsAndWindow(): void
+    public function testOnlyCommandStaffGetTheGatewayScriptAndWindow(): void
     {
+        // mesh-gateway.js (the USB gateway itself) and its window stay
+        // command-staff only - unlike mesh-protocol.js/mesh-ble.js below,
+        // which M3 opened to field participants too.
         $page = self::source('war-room.php');
         $this->assertMatchesRegularExpression(
-            '/<\?php if \(\$canManageWarRoom\): \?>\s*<script src="[^"]*mesh-protocol\.js[^"]*"><\/script>\s*<script src="[^"]*mesh-gateway\.js[^"]*"><\/script>\s*<\?php endif; \?>/',
+            '/<\?php if \(\$canManageWarRoom\): \?>\s*<script src="[^"]*mesh-gateway\.js[^"]*"><\/script>\s*<\?php endif; \?>/',
             $page
         );
         $this->assertMatchesRegularExpression(
             '/<\?php if \(\$canManageWarRoom\): \?>\s*<\?php \/\*[^*]*«Πύλη LoRa»[^?]*\?>\s*<div class="modal fade" id="meshGatewayModal"/s',
             $page
         );
-        // The protocol file loads before the gateway that needs it.
-        $this->assertLessThan(strpos($page, 'mesh-gateway.js?v='), strpos($page, 'mesh-protocol.js?v='));
         $this->assertStringContainsString('meshGatewayOpen()', self::source('assets/js/war-room-console.js'));
+    }
+
+    public function testMeshBleReachesFieldParticipantsTooButOnlyWhenMeshBleAvailable(): void
+    {
+        $page = self::source('war-room.php');
+        // Command staff are covered unconditionally - $meshBleAvailable's own
+        // definition ORs in $canManageWarRoom - so this one gate serves both
+        // the admin test tool and M3's field-participant pairing button.
+        $this->assertMatchesRegularExpression(
+            '/\$meshBleAvailable\s*=\s*\$canManageWarRoom\s*\|\|/',
+            $page
+        );
+        $this->assertMatchesRegularExpression(
+            '/<\?php if \(\$meshBleAvailable\): \?>\s*<script src="[^"]*mesh-protocol\.js[^"]*"><\/script>\s*<script src="[^"]*mesh-ble\.js[^"]*"><\/script>\s*<\?php endif; \?>/',
+            $page
+        );
+        // Regression guard for the bug caught live in M3 (v3.480.0): the modal
+        // landed inside an unrelated, much larger $canManageWarRoom block and
+        // silently never rendered for anyone else. Pinning the exact markup
+        // immediately before the div, not just "the div exists somewhere".
+        $this->assertMatchesRegularExpression(
+            '/<\?php if \(\$meshBleAvailable\): \?>\s*<div class="modal fade" id="meshBleModal"/',
+            $page
+        );
+        // The protocol file loads before the modules that need it.
+        $this->assertLessThan(strpos($page, 'mesh-ble.js?v='), strpos($page, 'mesh-protocol.js?v='));
+        $this->assertLessThan(strpos($page, 'mesh-gateway.js?v='), strpos($page, 'mesh-protocol.js?v='));
     }
 
     public function testTheRadiosPositionsStayOutOfThePhonesGpsReport(): void
