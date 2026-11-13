@@ -231,3 +231,41 @@ test('heartbeat, goodbye and wake-up bytes match what the real Meshtastic client
     assert.equal(wake.length, 32);
     assert.ok(wake.every(b => b === 0xc3));
 });
+
+// M2: the phone sending its own position. Bytes from a real ToRadio() with its
+// `packet` field set, from the Meshtastic protobufs (same library, same lat/lng/
+// time as REAL.position above, so this also doubles as a round-trip check:
+// encode here, decode as decodeMeshPacket would see it on the way back).
+const REAL_TORADIO = {
+    // to=broadcast, channel 0 (omitted, proto3 default), POSITION_APP, want_ack.
+    withAck: '0a2415ffffffff2216080312120df84110151550b3fc0e25227be86ab8012035efbeadde5001',
+    // channel 2, no want_ack, a different id and no time/precision on the position.
+    channel2: '0a1c15ffffffff1802220e0803120a0df84110151550b3fc0e3507000000',
+};
+
+test('encodeToRadioPacket matches a real ToRadio{packet} byte for byte', () => {
+    const payload = M.encodePosition({lat: 35.3387, lng: 25.1442, time: NOW_S - 30, precisionBits: 32});
+    const withAck = M.encodeToRadioPacket({portnum: M.PORT.POSITION, payload, id: 0xdeadbeef, wantAck: true});
+    assert.deepEqual(Array.from(withAck), Array.from(hex(REAL_TORADIO.withAck)));
+
+    const payload2 = M.encodePosition({lat: 35.3387, lng: 25.1442});
+    const channel2 = M.encodeToRadioPacket({portnum: M.PORT.POSITION, payload: payload2, id: 7, channel: 2});
+    assert.deepEqual(Array.from(channel2), Array.from(hex(REAL_TORADIO.channel2)));
+});
+
+test('encodeToRadioPacket is unframed: the node reads it back as a plain MeshPacket, no from, no 0x94 0xC3', () => {
+    const payload = M.encodePosition({lat: 35.3387, lng: 25.1442});
+    const bytes = M.encodeToRadioPacket({portnum: M.PORT.POSITION, payload, id: 99, to: 0x1234abcd});
+    // Strip the ToRadio{packet=1} wrapper by hand to get at the MeshPacket a
+    // receiving decodeMeshPacket() would be given (the node does this part).
+    const tag = bytes[0];
+    assert.equal(tag >>> 3, 1, 'field 1');
+    assert.equal(tag & 7, 2, 'length-delimited');
+    const inner = bytes.slice(2); // skip tag + 1-byte varint length
+    const pkt = M.decodeMeshPacket(inner);
+    assert.equal(pkt.from, null, 'the phone never sets its own node number');
+    assert.equal(pkt.to, 0x1234abcd);
+    assert.equal(pkt.id, 99);
+    assert.equal(pkt.portnum, M.PORT.POSITION);
+    assert.ok(Math.abs(pkt.position.lat - 35.3387) < 1e-6);
+});

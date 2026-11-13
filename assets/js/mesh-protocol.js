@@ -336,6 +336,25 @@
         return concat([enc.varint(1, p.fromRadioId || 1), enc.bytes(2, concat(parts))]);
     }
 
+    /**
+     * ToRadio{packet: MeshPacket} - the opposite direction from decodeMeshPacket:
+     * this is the phone sending its OWN data (M2), not the node reporting what it
+     * heard. Unframed, like encodeVarint(3, id) for want_config: write the result
+     * straight to the BLE `toradio` characteristic, or wrap in frame() for serial.
+     * No `from` - the node fills that in itself from its own node number.
+     * Field numbers (packet=1, to=2, channel=3, decoded=4, id=6, want_ack=10)
+     * checked against bytes a real ToRadio() from the Meshtastic protobufs wrote.
+     */
+    function encodeToRadioPacket(p) {
+        const data = concat([enc.varint(1, p.portnum), enc.bytes(2, p.payload)]);
+        const parts = [enc.fixed32(2, p.to != null ? p.to : 0xffffffff)];
+        if (p.channel) parts.push(enc.varint(3, p.channel));
+        parts.push(enc.bytes(4, data));
+        parts.push(enc.fixed32(6, p.id));
+        if (p.wantAck) parts.push(enc.varint(10, 1));
+        return enc.bytes(1, concat(parts));
+    }
+
     // ── What the gateway makes of it ────────────────────────────────────────
     /** "!570dee8c": how Meshtastic shows a node number everywhere. */
     function nodeHex(num) {
@@ -386,9 +405,9 @@
         START1, START2, MAX_FRAME, PORT, BLE,
         frame, FrameReader, encodeWantConfig, encodeHeartbeat, encodeDisconnect, wakeBytes,
         decodeFromRadio, decodeMeshPacket, decodePosition, decodeNodeInfo,
-        nodeHex, hopsOf, positionRecord,
+        nodeHex, hopsOf, positionRecord, encodePosition, encodeToRadioPacket,
         // For tests: build the bytes a node would send.
-        encodePosition, encodeFromRadioPacket, encodeFixed32: enc.fixed32, encodeVarint: enc.varint, encodeBytes: enc.bytes, concat,
+        encodeFromRadioPacket, encodeFixed32: enc.fixed32, encodeVarint: enc.varint, encodeBytes: enc.bytes, concat,
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.MeshProtocol = api;

@@ -1,11 +1,15 @@
 /**
- * M1 of the BLE leg (project_lora_meshtastic_fallback_brainstorm Phase 2):
- * connect this device, over Bluetooth Low Energy, to the volunteer's own
- * Meshtastic node, and log what the node tells us. Nothing is sent to the
- * node beyond the standard want_config handshake, and nothing reaches the
- * server - this is a manual test harness for command staff to confirm the
- * handshake actually works against real hardware, before any phone tries to
- * send its own position over it (that is M2).
+ * The BLE leg (project_lora_meshtastic_fallback_brainstorm Phase 2): connect
+ * this device, over Bluetooth Low Energy, to the volunteer's own Meshtastic
+ * node. M1 is the want_config handshake and the log of what the node says.
+ * M2 adds one button: send a real position of this device's own, over
+ * `toradio`, so the command-post gateway (assets/js/mesh-gateway.js) can hear
+ * it and mesh-ingest.php can record it - exactly the same path a heard radio
+ * packet takes, just starting one hop earlier. This is still a manual test
+ * harness for command staff, not the automatic field-mode trigger (M3): a
+ * node this tests from is not bound to anyone (see includes/functions-mesh.php),
+ * so a sent position sits in the admin's "heard, unbound" list and never
+ * reaches the live map on its own.
  *
  * Same split as assets/js/mesh-gateway.js: the bytes are assets/js/mesh-protocol.js
  * (MP.BLE has the service/characteristic UUIDs), this file is just the transport.
@@ -142,6 +146,55 @@
         setPhase('lost');
     }
 
+    /** Writes unframed bytes to `toradio` - want_config today, a position for M2. */
+    async function writeToRadio(bytes) {
+        if (!device) throw new Error('not connected');
+        if (device.kind === 'native') {
+            await root.Capacitor.Plugins.BluetoothLe.write({
+                deviceId: device.id, service: MP.BLE.SERVICE, characteristic: MP.BLE.TORADIO, value: bytesToHex(bytes),
+            });
+        } else {
+            await device.toradio.writeValueWithResponse(bytes);
+        }
+    }
+
+    /** A Promise wrapper around getCurrentPosition, field-mode.js's own style. */
+    function getPosition() {
+        return new Promise((resolve, reject) => {
+            if (!root.navigator || !root.navigator.geolocation) { reject(new Error('no geolocation')); return; }
+            root.navigator.geolocation.getCurrentPosition(
+                pos => resolve(pos.coords),
+                err => reject(err),
+                {enableHighAccuracy: true, maximumAge: 60000, timeout: 10000}
+            );
+        });
+    }
+
+    /**
+     * M2: this device's own position, written straight to `toradio`. The node
+     * fills in `from` itself, so the resulting record cannot be confused with
+     * anything the gateway heard over the air - it genuinely went out on this
+     * link. Only possible once want_config has gone through (phase 'reading'
+     * or 'done'): writing before that raced the node's own handshake in testing.
+     */
+    async function sendTestPosition() {
+        if (state.phase !== 'reading' && state.phase !== 'done') return;
+        try {
+            log('getting this device\'s position…');
+            const coords = await getPosition();
+            const payload = MP.encodePosition({
+                lat: coords.latitude, lng: coords.longitude,
+                time: Math.round(Date.now() / 1000), precisionBits: 32,
+            });
+            const id = (Math.random() * 0xffffffff) >>> 0 || 1;
+            const bytes = MP.encodeToRadioPacket({portnum: MP.PORT.POSITION, payload, id});
+            await writeToRadio(bytes);
+            log('test position sent (id ' + id + '): ' + coords.latitude.toFixed(5) + ',' + coords.longitude.toFixed(5));
+        } catch (e) {
+            log('test position failed: ' + (e && e.message ? e.message : e));
+        }
+    }
+
     async function connect() {
         const transport = detectTransport();
         if (!transport) { setPhase('error', 'unsupported'); return; }
@@ -167,7 +220,7 @@
                 await ble.addListener('notification|' + deviceId + '|' + MP.BLE.SERVICE + '|' + MP.BLE.FROMNUM, () => drainNative(deviceId));
                 await ble.startNotifications({deviceId, service: MP.BLE.SERVICE, characteristic: MP.BLE.FROMNUM});
                 device = {kind: 'native', id: deviceId};
-                await ble.write({deviceId, service: MP.BLE.SERVICE, characteristic: MP.BLE.TORADIO, value: bytesToHex(MP.encodeVarint(3, wantConfigId))});
+                await writeToRadio(MP.encodeVarint(3, wantConfigId));
                 setPhase('reading');
                 log('want_config sent (id ' + wantConfigId + ')');
                 // Belt-and-braces: a fromnum notification that fired before the
@@ -186,7 +239,7 @@
                 await fromnum.startNotifications();
                 fromnum.addEventListener('characteristicvaluechanged', () => drainWeb(fromradio));
                 device = {kind: 'web', btDevice, toradio, fromradio};
-                await toradio.writeValueWithResponse(MP.encodeVarint(3, wantConfigId));
+                await writeToRadio(MP.encodeVarint(3, wantConfigId));
                 setPhase('reading');
                 log('want_config sent (id ' + wantConfigId + ')');
                 drainWeb(fromradio);
@@ -229,19 +282,23 @@
             ? `<button type="button" class="btn btn-sm btn-outline-secondary" id="meshBleDisconnectBtn">${esc(t('mesh_ble.disconnect'))}</button>`
             : `<button type="button" class="btn btn-sm btn-primary" id="meshBleConnectBtn"><i class="bi bi-bluetooth me-1"></i>${esc(t('mesh_ble.connect'))}</button>`;
 
+        const sendBtn = (state.phase === 'reading' || state.phase === 'done')
+            ? `<button type="button" class="btn btn-sm btn-outline-primary" id="meshBleSendBtn"><i class="bi bi-geo-alt me-1"></i>${esc(t('mesh_ble.send_position'))}</button>` : '';
+
         const logHtml = state.log.length
             ? state.log.map(esc).join('\n')
             : esc(t('mesh_ble.log_empty'));
 
         body.innerHTML = `
             <p class="small text-muted mb-2">${esc(t('mesh_ble.intro'))}</p>
-            <div class="d-flex align-items-center gap-3 mb-2 flex-wrap"><div class="flex-grow-1">${status}</div>${btn}</div>
+            <div class="d-flex align-items-center gap-3 mb-2 flex-wrap"><div class="flex-grow-1">${status}</div>${sendBtn}${btn}</div>
             <pre class="small bg-body-secondary p-2 rounded" style="max-height:16rem;overflow-y:auto;white-space:pre-wrap">${logHtml}</pre>`;
     }
 
     function onClick(e) {
         if (e.target.closest('#meshBleConnectBtn')) { connect(); return; }
         if (e.target.closest('#meshBleDisconnectBtn')) { disconnect(); return; }
+        if (e.target.closest('#meshBleSendBtn')) { sendTestPosition(); return; }
     }
 
     function open() {
@@ -257,7 +314,7 @@
         if (modal) modal.addEventListener('click', onClick);
     }
 
-    const api = {init, open, connect, disconnect, state, logLineFor, pushLog, hexToBytes, bytesToHex, dataViewToBytes};
+    const api = {init, open, connect, disconnect, sendTestPosition, state, logLineFor, pushLog, hexToBytes, bytesToHex, dataViewToBytes};
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.MeshBle = api;
 })(typeof window !== 'undefined' ? window : globalThis);
