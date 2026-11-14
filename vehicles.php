@@ -202,6 +202,9 @@ include __DIR__ . '/includes/header.php';
                                         <?php if ($canManage): ?>
                                         <td data-label="Ενέργειες" class="text-end mobile-card-actions">
                                             <div class="btn-group btn-group-sm">
+                                                <a href="vehicle-view.php?id=<?= $veh['id'] ?>" class="btn btn-outline-secondary" title="Λεπτομέρειες">
+                                                    <i class="bi bi-journal-text"></i>
+                                                </a>
                                                 <a href="?edit=<?= $veh['id'] ?>" class="btn btn-outline-secondary" title="Επεξεργασία">
                                                     <i class="bi bi-pencil"></i>
                                                 </a>

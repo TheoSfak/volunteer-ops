@@ -1830,6 +1830,18 @@ if (isLoggedIn()) {
                     <i class="bi bi-truck"></i> Οχήματα
                 </a>
             </li>
+            <?php if (isSystemAdmin() || hasPagePermission('fleet_manage')): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'vehicle-handover' ? 'active' : '' ?>" href="vehicle-handover.php">
+                    <i class="bi bi-key"></i> Παραλαβή / Επιστροφή
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'vehicle-checklist' ? 'active' : '' ?>" href="vehicle-checklist.php">
+                    <i class="bi bi-list-check"></i> Checklist Οχημάτων
+                </a>
+            </li>
+            <?php endif; ?>
             <?php endif; ?>
 
             <div class="sidebar-section" data-sec="gamification">Gamification</div>

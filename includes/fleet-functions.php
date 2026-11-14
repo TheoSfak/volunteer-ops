@@ -138,3 +138,147 @@ function syncShiftVehicles(int $shiftId, array $requestedVehicleIds, ?int $userI
 
     return $skipped;
 }
+
+// =============================================
+// HANDOVER (checkout / check-in) + CHECKLIST, M2
+// =============================================
+
+/** Checklist statuses, in display order. */
+function getChecklistStatuses(): array {
+    return [
+        'ok'      => 'Εντάξει',
+        'damaged' => 'Φθορά',
+        'missing' => 'Λείπει',
+    ];
+}
+
+/** Checklist items that apply to a vehicle of the given type: type-specific ones plus every type-agnostic one. */
+function getChecklistItemsForType(string $type): array {
+    return dbFetchAll(
+        "SELECT * FROM vehicle_checklist_items
+         WHERE is_active = 1 AND (type = ? OR type IS NULL)
+         ORDER BY sort_order, label",
+        [$type]
+    );
+}
+
+/** The handover a vehicle is currently out on, or null if it is checked in. */
+function getOpenHandover(int $vehicleId): ?array {
+    return dbFetchOne(
+        "SELECT * FROM vehicle_handovers WHERE vehicle_id = ? AND checkin_at IS NULL ORDER BY id DESC LIMIT 1",
+        [$vehicleId]
+    ) ?: null;
+}
+
+/** Every vehicle currently checked out, with its open handover. */
+function getOpenHandovers(): array {
+    return dbFetchAll(
+        "SELECT h.*, v.label AS vehicle_label, v.plate_number, v.type AS vehicle_type
+         FROM vehicle_handovers h
+         JOIN vehicles v ON v.id = h.vehicle_id
+         WHERE h.checkin_at IS NULL
+         ORDER BY h.checkout_at DESC"
+    );
+}
+
+/** A handover's full history (checkout + checkin) for one vehicle, most recent first. */
+function getVehicleHandoverHistory(int $vehicleId): array {
+    return dbFetchAll(
+        "SELECT * FROM vehicle_handovers WHERE vehicle_id = ? ORDER BY checkout_at DESC",
+        [$vehicleId]
+    );
+}
+
+/** Checklist ticks recorded for one handover, keyed "<checklist_item_id>:<stage>". */
+function getHandoverChecks(int $handoverId): array {
+    $rows = dbFetchAll(
+        "SELECT hc.*, ci.label AS item_label
+         FROM vehicle_handover_checks hc
+         JOIN vehicle_checklist_items ci ON ci.id = hc.checklist_item_id
+         WHERE hc.handover_id = ?",
+        [$handoverId]
+    );
+    $byKey = [];
+    foreach ($rows as $row) {
+        $byKey[$row['checklist_item_id'] . ':' . $row['stage']] = $row;
+    }
+    return $byKey;
+}
+
+/**
+ * Record one stage's checklist ticks for a handover.
+ * $checks: [checklist_item_id => ['status' => 'ok'|'damaged'|'missing', 'note' => string]]
+ */
+function saveHandoverChecks(int $handoverId, string $stage, array $checks): void {
+    foreach ($checks as $itemId => $check) {
+        $status = in_array($check['status'] ?? 'ok', ['ok', 'damaged', 'missing'], true) ? $check['status'] : 'ok';
+        $note = trim($check['note'] ?? '') ?: null;
+        dbExecute(
+            "INSERT INTO vehicle_handover_checks (handover_id, checklist_item_id, stage, status, note)
+             VALUES (?, ?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE status = VALUES(status), note = VALUES(note)",
+            [$handoverId, (int) $itemId, $stage, $status, $note]
+        );
+    }
+}
+
+/**
+ * Check a vehicle out: opens a handover. Fails if one is already open.
+ * @return array{success:bool, error?:string, handover_id?:int}
+ */
+function openHandover(int $vehicleId, ?int $shiftId, int $userId, ?float $km, ?int $fuelLevel, string $notes, array $checks): array {
+    if (getOpenHandover($vehicleId)) {
+        return ['success' => false, 'error' => 'Το όχημα είναι ήδη εκτός - δεν έχει επιστραφεί.'];
+    }
+
+    $handoverId = (int) dbInsert(
+        "INSERT INTO vehicle_handovers (vehicle_id, shift_id, checkout_by, checkout_at, checkout_km, checkout_fuel_level, checkout_notes)
+         VALUES (?, ?, ?, NOW(), ?, ?, ?)",
+        [$vehicleId, $shiftId ?: null, $userId, $km, $fuelLevel, $notes ?: null]
+    );
+    saveHandoverChecks($handoverId, 'checkout', $checks);
+
+    if ($km !== null) {
+        dbExecute("UPDATE vehicles SET odometer_value = ? WHERE id = ?", [$km, $vehicleId]);
+    }
+
+    return ['success' => true, 'handover_id' => $handoverId];
+}
+
+/**
+ * Check a vehicle back in: closes its open handover.
+ * Any checkin tick other than 'ok' moves the vehicle into maintenance - a
+ * handover is precisely where damage from use actually gets noticed.
+ * @return array{success:bool, error?:string, flagged?:bool}
+ */
+function closeHandover(int $vehicleId, int $userId, ?float $km, ?int $fuelLevel, string $notes, array $checks): array {
+    $handover = getOpenHandover($vehicleId);
+    if (!$handover) {
+        return ['success' => false, 'error' => 'Το όχημα δεν είναι εκτός αυτή τη στιγμή.'];
+    }
+
+    dbExecute(
+        "UPDATE vehicle_handovers
+         SET checkin_by = ?, checkin_at = NOW(), checkin_km = ?, checkin_fuel_level = ?, checkin_notes = ?
+         WHERE id = ?",
+        [$userId, $km, $fuelLevel, $notes ?: null, $handover['id']]
+    );
+    saveHandoverChecks($handover['id'], 'checkin', $checks);
+
+    if ($km !== null) {
+        dbExecute("UPDATE vehicles SET odometer_value = ? WHERE id = ?", [$km, $vehicleId]);
+    }
+
+    $flagged = false;
+    foreach ($checks as $check) {
+        if (($check['status'] ?? 'ok') !== 'ok') {
+            $flagged = true;
+            break;
+        }
+    }
+    if ($flagged) {
+        dbExecute("UPDATE vehicles SET status = 'maintenance' WHERE id = ? AND status != 'out_of_service'", [$vehicleId]);
+    }
+
+    return ['success' => true, 'flagged' => $flagged];
+}

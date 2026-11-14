@@ -8220,6 +8220,56 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 214,
+            'description' => "Fleet management, M2 (v3.483.0): vehicle handover (checkout/check-in with odometer + fuel level) and its equipment checklist. New `vehicle_checklist_items` - per vehicle type (NULL = every type) - is the checklist template, ticked off both when a vehicle goes out and when it comes back so a handover catches what went missing or got damaged in between. New `vehicle_handovers` is one row per loan: checkout_* columns are set when it is taken out, checkin_* columns stay NULL until it is returned (checkin_at IS NULL = currently out) - vehicle-handover.php. New `vehicle_handover_checks` holds each checklist tick, one row per (handover, item, stage). Any checkin tick other than 'ok' moves the vehicle to status='maintenance' (see includes/fleet-functions.php closeHandover()). Re-running it changes nothing.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS `vehicle_checklist_items` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `type` ENUM('car','motorbike','van','truck','boat','other') NULL COMMENT 'NULL = applies to every vehicle type',
+                    `label` VARCHAR(255) NOT NULL,
+                    `sort_order` INT DEFAULT 0,
+                    `is_active` TINYINT(1) DEFAULT 1,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    INDEX `idx_checklist_items_type` (`type`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+                dbExecute("CREATE TABLE IF NOT EXISTS `vehicle_handovers` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `vehicle_id` INT UNSIGNED NOT NULL,
+                    `shift_id` INT UNSIGNED NULL,
+                    `checkout_by` INT UNSIGNED NULL,
+                    `checkout_at` DATETIME NOT NULL,
+                    `checkout_km` DECIMAL(10, 1) NULL COMMENT 'Same unit as vehicles.odometer_unit for this vehicle',
+                    `checkout_fuel_level` TINYINT UNSIGNED NULL COMMENT '0-100 percent',
+                    `checkout_notes` TEXT NULL,
+                    `checkin_by` INT UNSIGNED NULL,
+                    `checkin_at` DATETIME NULL COMMENT 'NULL = the vehicle is still out',
+                    `checkin_km` DECIMAL(10, 1) NULL,
+                    `checkin_fuel_level` TINYINT UNSIGNED NULL,
+                    `checkin_notes` TEXT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`shift_id`) REFERENCES `shifts`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`checkout_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`checkin_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+                    INDEX `idx_handovers_vehicle_open` (`vehicle_id`, `checkin_at`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+                dbExecute("CREATE TABLE IF NOT EXISTS `vehicle_handover_checks` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `handover_id` INT UNSIGNED NOT NULL,
+                    `checklist_item_id` INT UNSIGNED NOT NULL,
+                    `stage` ENUM('checkout','checkin') NOT NULL,
+                    `status` ENUM('ok','damaged','missing') NOT NULL DEFAULT 'ok',
+                    `note` VARCHAR(255) NULL,
+                    FOREIGN KEY (`handover_id`) REFERENCES `vehicle_handovers`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`checklist_item_id`) REFERENCES `vehicle_checklist_items`(`id`) ON DELETE CASCADE,
+                    UNIQUE KEY `unique_handover_check` (`handover_id`, `checklist_item_id`, `stage`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 
