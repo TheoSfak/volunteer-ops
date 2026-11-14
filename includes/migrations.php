@@ -8311,6 +8311,40 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 216,
+            'description' => "Fleet management, M4 backend (v3.485.0): GPS position logging for vehicles, decoupled from any phone login or shift - a dedicated LoRa/SIM tracker riding in a boat has neither. New `vehicle_ping_tokens` (bearer token per vehicle, same bearer-auth shape as mobile_api_tokens but keyed on vehicle_id instead of user_id, since a hardware tracker has no user to log in as) and `vehicle_pings` (lat/lng/accuracy/speed/heading, one row per fix). vehicle-ping.php accepts a fix from whatever ends up sending them (phone app or dedicated tracker - deliberately undecided for now, see includes/fleet-functions.php), and vehicle-view.php draws the last 24h as a route. Re-running it changes nothing.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS `vehicle_ping_tokens` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `vehicle_id` INT UNSIGNED NOT NULL,
+                    `token_hash` CHAR(64) NOT NULL,
+                    `label` VARCHAR(100) NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `last_used_at` TIMESTAMP NULL,
+                    `revoked_at` TIMESTAMP NULL,
+                    FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles`(`id`) ON DELETE CASCADE,
+                    UNIQUE KEY `unique_vehicle_ping_token_hash` (`token_hash`),
+                    INDEX `idx_vehicle_ping_tokens_vehicle` (`vehicle_id`, `revoked_at`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+                dbExecute("CREATE TABLE IF NOT EXISTS `vehicle_pings` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `vehicle_id` INT UNSIGNED NOT NULL,
+                    `lat` DECIMAL(10, 8) NOT NULL,
+                    `lng` DECIMAL(11, 8) NOT NULL,
+                    `accuracy_meters` DECIMAL(8, 2) NULL,
+                    `speed_mps` DECIMAL(6, 2) NULL,
+                    `heading_deg` DECIMAL(5, 1) NULL,
+                    `source` VARCHAR(50) NULL COMMENT 'free text identifying the sender, e.g. a device label - no fixed source list yet, the ingestion method is still undecided',
+                    `recorded_at` TIMESTAMP NULL COMMENT 'when the sender says the fix happened; NULL = unknown, fall back to created_at',
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT 'when the server received it',
+                    FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles`(`id`) ON DELETE CASCADE,
+                    INDEX `idx_vehicle_pings_vehicle_time` (`vehicle_id`, `created_at`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

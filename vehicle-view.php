@@ -33,6 +33,23 @@ if (isPost() && canManageFleet() && post('action') === 'add_refuel') {
     redirect('vehicle-view.php?id=' . $id);
 }
 
+if (isPost() && canManageFleet() && post('action') === 'issue_ping_token') {
+    verifyCsrf();
+    $rawToken = issueVehiclePingToken($id, trim(post('label')));
+    // Shown once, in the flash message only - the hash stored in the DB can't
+    // reproduce it, same one-time-reveal rule as every other token in this app.
+    // displayFlash() HTML-escapes the message, so this stays plain text.
+    setFlash('success', 'Νέο token καταγραφής θέσης: ' . $rawToken . ' — Αντιγράψτε το τώρα, δεν θα εμφανιστεί ξανά.');
+    redirect('vehicle-view.php?id=' . $id);
+}
+
+if (isPost() && canManageFleet() && post('action') === 'revoke_ping_token') {
+    verifyCsrf();
+    revokeVehiclePingToken($id);
+    setFlash('success', 'Το token καταγραφής θέσης ανακλήθηκε.');
+    redirect('vehicle-view.php?id=' . $id);
+}
+
 $pageTitle = $vehicle['label'] . ' — Όχημα';
 $vehicleTypes = getVehicleTypes();
 $vehicleStatuses = getVehicleStatuses();
@@ -43,6 +60,9 @@ $odoUnit = $vehicle['odometer_unit'] === 'engine_hours' ? 'ώρες' : 'km';
 $openHandover = getOpenHandover($id);
 $openMaintenance = getOpenMaintenanceRecords($id);
 $costSummary = getVehicleCostSummary($id);
+$pingTokenInfo = getVehiclePingTokenInfo($id);
+$latestPing = getLatestVehiclePing($id);
+$route = getVehicleRoute($id, 24);
 
 // Combined logbook: handovers, refuels and maintenance, merged by time.
 $events = [];
@@ -165,10 +185,58 @@ include __DIR__ . '/includes/header.php';
                 </a>
             </div>
         </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-broadcast me-2"></i>Καταγραφή Θέσης GPS</h6></div>
+            <div class="card-body">
+                <?php if ($pingTokenInfo): ?>
+                    <p class="mb-1"><span class="badge bg-success">Ενεργό token</span>
+                        <?= $pingTokenInfo['label'] ? h($pingTokenInfo['label']) : '' ?></p>
+                    <p class="text-muted small mb-2">
+                        Εκδόθηκε: <?= formatDateTime($pingTokenInfo['created_at']) ?><br>
+                        Τελευταία χρήση: <?= $pingTokenInfo['last_used_at'] ? formatDateTime($pingTokenInfo['last_used_at']) : 'Ποτέ' ?>
+                    </p>
+                    <form method="post" onsubmit="return confirm('Ανάκληση token; Η πηγή που το χρησιμοποιεί θα σταματήσει να στέλνει θέση.');">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="revoke_ping_token">
+                        <button type="submit" class="btn btn-sm btn-outline-danger w-100">Ανάκληση Token</button>
+                    </form>
+                <?php else: ?>
+                    <p class="text-muted small">Χωρίς ενεργό token - δεν στέλνεται ακόμα θέση για αυτό το όχημα.</p>
+                <?php endif; ?>
+                <form method="post" class="mt-2" onsubmit="return confirm('<?= $pingTokenInfo ? 'Έκδοση νέου token; Το τρέχον θα ανακληθεί.' : 'Έκδοση token καταγραφής θέσης;' ?>');">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="issue_ping_token">
+                    <input type="text" name="label" class="form-control form-control-sm mb-2" placeholder="Ετικέτα συσκευής (προαιρετικό)">
+                    <button type="submit" class="btn btn-sm btn-primary w-100"><?= $pingTokenInfo ? 'Έκδοση Νέου Token' : 'Έκδοση Token' ?></button>
+                </form>
+            </div>
+        </div>
         <?php endif; ?>
     </div>
 
     <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-geo-alt me-2"></i>Διαδρομή 24ώρου</h5>
+                <?php if ($latestPing): ?>
+                    <span class="text-muted small">Τελευταία θέση: <?= formatDateTime($latestPing['created_at']) ?></span>
+                <?php endif; ?>
+            </div>
+            <div class="card-body">
+                <?php if (empty($route)): ?>
+                    <p class="text-muted text-center py-3 mb-0">
+                        Δεν έχουν καταγραφεί θέσεις GPS τις τελευταίες 24 ώρες.
+                        <?php if (canManageFleet()): ?>
+                            Εκδώστε ένα token καταγραφής θέσης παρακάτω για να συνδέσετε μια πηγή GPS.
+                        <?php endif; ?>
+                    </p>
+                <?php else: ?>
+                    <div id="vehicleRouteMap" style="height: 350px; border-radius: 6px;"></div>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <div class="card">
             <div class="card-header">
                 <h5 class="mb-0"><i class="bi bi-journal-text me-2"></i>Ημερολόγιο Οχήματος</h5>
@@ -259,5 +327,25 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+
+<?php if (!empty($route)): ?>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha384-cxOPjt7s7Iz04uaHJceBmS+qpjv2JkIHNVcuOrM+YHwZOmJGBXI00mdUXEq65HTH" crossorigin="anonymous"></script>
+<script>
+(function () {
+    var points = <?= json_encode(array_map(fn($p) => [(float) $p['lat'], (float) $p['lng']], $route)) ?>;
+    var map = L.map('vehicleRouteMap', { zoomControl: true });
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+
+    var line = L.polyline(points, { color: '#0d6efd', weight: 4 }).addTo(map);
+    L.circleMarker(points[0], { radius: 6, color: '#6c757d' }).addTo(map).bindPopup('Αρχή (24ωρο)');
+    L.circleMarker(points[points.length - 1], { radius: 7, color: '#198754' }).addTo(map).bindPopup('Τρέχουσα θέση');
+    map.fitBounds(line.getBounds(), { padding: [20, 20] });
+})();
+</script>
+<?php endif; ?>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

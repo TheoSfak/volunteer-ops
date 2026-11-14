@@ -46,7 +46,7 @@ final class BearerOnlyMobileEndpointsTest extends TestCase
 
     public function testABearerRequestToTheServiceEndpointsStartsNoSession(): void
     {
-        foreach (['mobile-ping-location.php', 'mobile-alerts.php', 'mobile-order-ack.php', 'mobile-gps-error.php'] as $script) {
+        foreach (['mobile-ping-location.php', 'mobile-alerts.php', 'mobile-order-ack.php', 'mobile-gps-error.php', 'vehicle-ping.php'] as $script) {
             $this->request($script, 'Bearer abc123DEF456');
             $this->assertTrue(isBearerOnlyMobileRequest(), "$script with a bearer token runs without a session");
         }
@@ -106,7 +106,7 @@ final class BearerOnlyMobileEndpointsTest extends TestCase
             $this->assertSame(0, preg_match('/\$_SESSION\s*\[/', $src), "$script reads \$_SESSION");
             $this->assertStringContainsString('HTTP_AUTHORIZATION', $src, "$script authenticates with the bearer token");
         }
-        $this->assertCount(4, MOBILE_BEARER_ONLY_SCRIPTS);
+        $this->assertCount(5, MOBILE_BEARER_ONLY_SCRIPTS);
     }
 
     public function testTheGuestGateStillExemptsNothingNew(): void

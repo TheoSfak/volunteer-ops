@@ -205,6 +205,11 @@ define('WAR_ROOM_PARTNER_GUEST_PAGES', [
 // mobile-debug-log.php and vitals-ingest.php take either) must keep it.
 define('MOBILE_BEARER_ONLY_SCRIPTS', [
     'mobile-ping-location.php', 'mobile-alerts.php', 'mobile-order-ack.php', 'mobile-gps-error.php',
+    // Fleet M4: a vehicle tracker (phone or dedicated hardware) authenticates
+    // with its own vehicle-scoped bearer token, never a user session - same
+    // v3.420.3 reason as the other four: a shared cookie jar must not make
+    // this request "logged in" as whoever last used the browser/WebView.
+    'vehicle-ping.php',
 ]);
 
 /**

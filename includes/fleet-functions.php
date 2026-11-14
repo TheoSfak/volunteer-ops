@@ -421,3 +421,75 @@ function getVehicleCostSummary(int $vehicleId): array {
         'total_cost'       => (float) $fuel['total_cost'] + (float) $maintenance['total_cost'],
     ];
 }
+
+// =============================================
+// GPS POSITION LOG, M4 (backend only - the ingestion method, phone app vs.
+// a dedicated tracker, is deliberately undecided; vehicle-ping.php accepts a
+// fix from whatever ends up sending it)
+// =============================================
+
+/**
+ * Issue a fresh bearer token for a vehicle's tracker and revoke any
+ * previous one - only one active token per vehicle at a time, same
+ * one-active-credential rule as the rest of this app's tokens. The raw
+ * token is returned once; only its hash is ever stored (mirrors
+ * mobile_api_tokens - see mobile-token-issue.php).
+ */
+function issueVehiclePingToken(int $vehicleId, ?string $label): string {
+    dbExecute("UPDATE vehicle_ping_tokens SET revoked_at = NOW() WHERE vehicle_id = ? AND revoked_at IS NULL", [$vehicleId]);
+    $rawToken = bin2hex(random_bytes(32));
+    dbInsert(
+        "INSERT INTO vehicle_ping_tokens (vehicle_id, token_hash, label) VALUES (?, ?, ?)",
+        [$vehicleId, hash('sha256', $rawToken), trim((string) $label) ?: null]
+    );
+    return $rawToken;
+}
+
+/** Revoke a vehicle's active tracker token, if any. */
+function revokeVehiclePingToken(int $vehicleId): void {
+    dbExecute("UPDATE vehicle_ping_tokens SET revoked_at = NOW() WHERE vehicle_id = ? AND revoked_at IS NULL", [$vehicleId]);
+}
+
+/** The vehicle's active tracker token's info (never the token itself - that is only ever shown once, at issue time). */
+function getVehiclePingTokenInfo(int $vehicleId): ?array {
+    return dbFetchOne(
+        "SELECT id, label, created_at, last_used_at FROM vehicle_ping_tokens WHERE vehicle_id = ? AND revoked_at IS NULL ORDER BY id DESC LIMIT 1",
+        [$vehicleId]
+    ) ?: null;
+}
+
+/** Look up which vehicle a raw bearer token belongs to, and touch last_used_at. Returns null if missing/revoked. */
+function authenticateVehiclePingToken(string $rawToken): ?int {
+    $tokenHash = hash('sha256', $rawToken);
+    $row = dbFetchOne("SELECT vehicle_id FROM vehicle_ping_tokens WHERE token_hash = ? AND revoked_at IS NULL", [$tokenHash]);
+    if (!$row) {
+        return null;
+    }
+    dbExecute("UPDATE vehicle_ping_tokens SET last_used_at = NOW() WHERE token_hash = ?", [$tokenHash]);
+    return (int) $row['vehicle_id'];
+}
+
+/** Record one GPS fix for a vehicle. */
+function addVehiclePing(int $vehicleId, float $lat, float $lng, ?float $accuracy, ?float $speed, ?float $heading, ?string $source): int {
+    return (int) dbInsert(
+        "INSERT INTO vehicle_pings (vehicle_id, lat, lng, accuracy_meters, speed_mps, heading_deg, source, recorded_at, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
+        [$vehicleId, $lat, $lng, $accuracy, $speed, $heading, $source !== null ? mb_substr(trim($source), 0, 50) : null]
+    );
+}
+
+/** A vehicle's most recent GPS fix, or null if it has never reported one. */
+function getLatestVehiclePing(int $vehicleId): ?array {
+    return dbFetchOne(
+        "SELECT * FROM vehicle_pings WHERE vehicle_id = ? ORDER BY created_at DESC LIMIT 1",
+        [$vehicleId]
+    ) ?: null;
+}
+
+/** A vehicle's GPS fixes from the last $hours, oldest first (for drawing a route). */
+function getVehicleRoute(int $vehicleId, int $hours = 24): array {
+    return dbFetchAll(
+        "SELECT * FROM vehicle_pings WHERE vehicle_id = ? AND created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR) ORDER BY created_at",
+        [$vehicleId, $hours]
+    );
+}

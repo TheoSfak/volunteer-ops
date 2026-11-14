@@ -532,6 +532,36 @@ CREATE TABLE IF NOT EXISTS `vehicle_maintenance` (
     INDEX `idx_maintenance_vehicle_status` (`vehicle_id`, `status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `vehicle_ping_tokens` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `vehicle_id` INT UNSIGNED NOT NULL,
+    `token_hash` CHAR(64) NOT NULL,
+    `label` VARCHAR(100) NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `last_used_at` TIMESTAMP NULL,
+    `revoked_at` TIMESTAMP NULL,
+
+    FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles`(`id`) ON DELETE CASCADE,
+    UNIQUE KEY `unique_vehicle_ping_token_hash` (`token_hash`),
+    INDEX `idx_vehicle_ping_tokens_vehicle` (`vehicle_id`, `revoked_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `vehicle_pings` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `vehicle_id` INT UNSIGNED NOT NULL,
+    `lat` DECIMAL(10, 8) NOT NULL,
+    `lng` DECIMAL(11, 8) NOT NULL,
+    `accuracy_meters` DECIMAL(8, 2) NULL,
+    `speed_mps` DECIMAL(6, 2) NULL,
+    `heading_deg` DECIMAL(5, 1) NULL,
+    `source` VARCHAR(50) NULL,
+    `recorded_at` TIMESTAMP NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles`(`id`) ON DELETE CASCADE,
+    INDEX `idx_vehicle_pings_vehicle_time` (`vehicle_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- =============================================
 -- ACHIEVEMENTS TABLE
 -- =============================================
