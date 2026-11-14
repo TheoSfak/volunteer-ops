@@ -8270,6 +8270,47 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 215,
+            'description' => "Fleet management, M3 (v3.484.0): refuelling and a maintenance log with cost, the two pieces the per-vehicle logbook (vehicle-view.php) needed to actually answer 'what does this vehicle cost us'. New `vehicle_refuels` - liters, cost, odometer, station - one row per fill-up, vehicle-refuel.php. New `vehicle_maintenance` - type (scheduled/repair/inspection), description, cost, workshop, odometer, status open/done - vehicle-maintenance.php; opening one sets the vehicle to status='maintenance' (see includes/fleet-functions.php openMaintenance()), closing the last open one for that vehicle returns it to 'available' (closeMaintenance()). A handover checkin flagging damage (M2) now opens a real maintenance row here instead of only flipping the status flag, so the cost of fixing what a handover caught is no longer invisible. Re-running it changes nothing.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS `vehicle_refuels` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `vehicle_id` INT UNSIGNED NOT NULL,
+                    `liters` DECIMAL(6, 2) NULL,
+                    `cost` DECIMAL(8, 2) NULL,
+                    `odometer_value` DECIMAL(10, 1) NULL,
+                    `station` VARCHAR(255) NULL,
+                    `user_id` INT UNSIGNED NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+                    INDEX `idx_refuels_vehicle` (`vehicle_id`, `created_at`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+                dbExecute("CREATE TABLE IF NOT EXISTS `vehicle_maintenance` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `vehicle_id` INT UNSIGNED NOT NULL,
+                    `type` ENUM('scheduled','repair','inspection') NOT NULL DEFAULT 'repair',
+                    `description` TEXT NULL,
+                    `cost` DECIMAL(8, 2) NULL,
+                    `workshop` VARCHAR(255) NULL,
+                    `odometer_value` DECIMAL(10, 1) NULL,
+                    `status` ENUM('open','done') NOT NULL DEFAULT 'open',
+                    `opened_by` INT UNSIGNED NULL,
+                    `opened_at` DATETIME NOT NULL,
+                    `closed_by` INT UNSIGNED NULL,
+                    `closed_at` DATETIME NULL,
+                    `notes` TEXT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`opened_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`closed_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+                    INDEX `idx_maintenance_vehicle_status` (`vehicle_id`, `status`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

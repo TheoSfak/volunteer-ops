@@ -1,8 +1,8 @@
 <?php
 /**
  * VolunteerOps - Vehicle Detail / Logbook
- * Shows one vehicle's info, current handover status, and its logbook
- * (handovers for now; refuels and maintenance join the same logbook in M3).
+ * Shows one vehicle's info, current handover + maintenance status, cost
+ * summary, and its combined logbook (handovers, refuels, maintenance).
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -21,13 +21,41 @@ if (!$vehicle) {
     redirect('vehicles.php');
 }
 
+if (isPost() && canManageFleet() && post('action') === 'add_refuel') {
+    verifyCsrf();
+    $liters = post('liters') !== '' ? (float) post('liters') : null;
+    $cost = post('cost') !== '' ? (float) post('cost') : null;
+    $odometer = post('odometer_value') !== '' ? (float) post('odometer_value') : null;
+    $station = trim(post('station'));
+
+    addRefuel($id, $liters, $cost, $odometer, $station, getCurrentUser()['id']);
+    setFlash('success', 'Ο ανεφοδιασμός καταχωρήθηκε.');
+    redirect('vehicle-view.php?id=' . $id);
+}
+
 $pageTitle = $vehicle['label'] . ' — Όχημα';
 $vehicleTypes = getVehicleTypes();
 $vehicleStatuses = getVehicleStatuses();
 $checklistStatuses = getChecklistStatuses();
+$maintenanceTypes = getMaintenanceTypes();
+$odoUnit = $vehicle['odometer_unit'] === 'engine_hours' ? 'ώρες' : 'km';
 
 $openHandover = getOpenHandover($id);
-$history = getVehicleHandoverHistory($id);
+$openMaintenance = getOpenMaintenanceRecords($id);
+$costSummary = getVehicleCostSummary($id);
+
+// Combined logbook: handovers, refuels and maintenance, merged by time.
+$events = [];
+foreach (getVehicleHandoverHistory($id) as $h) {
+    $events[] = ['type' => 'handover', 'time' => $h['checkout_at'], 'data' => $h];
+}
+foreach (getVehicleRefuels($id) as $r) {
+    $events[] = ['type' => 'refuel', 'time' => $r['created_at'], 'data' => $r];
+}
+foreach (getVehicleMaintenanceHistory($id) as $m) {
+    $events[] = ['type' => 'maintenance', 'time' => $m['opened_at'], 'data' => $m];
+}
+usort($events, fn($a, $b) => strcmp($b['time'], $a['time']));
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -54,15 +82,25 @@ include __DIR__ . '/includes/header.php';
                 <p><strong>Τύπος:</strong> <?= h($vehicleTypes[$vehicle['type']] ?? $vehicle['type']) ?></p>
                 <p><strong>Παράρτημα:</strong> <?= $vehicle['department_name'] ? h($vehicle['department_name']) : '-' ?></p>
                 <p><strong>Οδόμετρο:</strong>
-                    <?= $vehicle['odometer_value'] !== null ? number_format((float) $vehicle['odometer_value'], 1) . ' ' . ($vehicle['odometer_unit'] === 'engine_hours' ? 'ώρες' : 'km') : '-' ?>
+                    <?= $vehicle['odometer_value'] !== null ? number_format((float) $vehicle['odometer_value'], 1) . ' ' . $odoUnit : '-' ?>
                 </p>
-                <p><strong>Κατάσταση:</strong>
+                <p class="mb-0"><strong>Κατάσταση:</strong>
                     <?php $statusBadge = ['available' => 'success', 'maintenance' => 'warning', 'out_of_service' => 'danger'][$vehicle['status']] ?? 'secondary'; ?>
                     <span class="badge bg-<?= $statusBadge ?>"><?= h($vehicleStatuses[$vehicle['status']] ?? $vehicle['status']) ?></span>
                 </p>
                 <?php if ($vehicle['notes']): ?>
-                    <p class="mb-0"><strong>Σημειώσεις:</strong><br><?= nl2br(h($vehicle['notes'])) ?></p>
+                    <p class="mb-0 mt-2"><strong>Σημειώσεις:</strong><br><?= nl2br(h($vehicle['notes'])) ?></p>
                 <?php endif; ?>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-cash-coin me-2"></i>Κόστος</h6></div>
+            <div class="card-body">
+                <p class="mb-1">Καύσιμα: <strong><?= number_format($costSummary['fuel_cost'], 2) ?> €</strong>
+                    <span class="text-muted">(<?= number_format($costSummary['fuel_liters'], 1) ?> L)</span></p>
+                <p class="mb-1">Συντήρηση: <strong><?= number_format($costSummary['maintenance_cost'], 2) ?> €</strong></p>
+                <p class="mb-0 border-top pt-2">Σύνολο: <strong><?= number_format($costSummary['total_cost'], 2) ?> €</strong></p>
             </div>
         </div>
 
@@ -82,6 +120,51 @@ include __DIR__ . '/includes/header.php';
                 <?php endif; ?>
             </div>
         </div>
+
+        <?php if (!empty($openMaintenance)): ?>
+        <div class="card mb-4 border-warning">
+            <div class="card-header bg-warning"><h6 class="mb-0"><i class="bi bi-tools me-2"></i>Ανοιχτή Συντήρηση</h6></div>
+            <div class="card-body">
+                <?php foreach ($openMaintenance as $m): ?>
+                    <p class="mb-1"><?= h($maintenanceTypes[$m['type']] ?? $m['type']) ?> — <?= formatDateTime($m['opened_at']) ?></p>
+                <?php endforeach; ?>
+                <a href="vehicle-maintenance.php" class="btn btn-sm btn-outline-warning w-100 mt-1">Διαχείριση στο Συντήρηση Οχημάτων</a>
+            </div>
+        </div>
+        <?php endif; ?>
+
+        <div class="card mb-4">
+            <div class="card-header"><h6 class="mb-0"><i class="bi bi-fuel-pump me-2"></i>Νέος Ανεφοδιασμός</h6></div>
+            <div class="card-body">
+                <form method="post">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="add_refuel">
+                    <div class="row">
+                        <div class="col-6 mb-2">
+                            <label class="form-label small mb-0">Λίτρα</label>
+                            <input type="number" step="0.01" min="0" class="form-control form-control-sm" name="liters">
+                        </div>
+                        <div class="col-6 mb-2">
+                            <label class="form-label small mb-0">Κόστος €</label>
+                            <input type="number" step="0.01" min="0" class="form-control form-control-sm" name="cost">
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-0">Οδόμετρο</label>
+                        <input type="number" step="0.1" min="0" class="form-control form-control-sm" name="odometer_value"
+                               value="<?= h($vehicle['odometer_value'] ?? '') ?>">
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-0">Πρατήριο</label>
+                        <input type="text" class="form-control form-control-sm" name="station">
+                    </div>
+                    <button type="submit" class="btn btn-sm btn-primary w-100">Καταχώρηση</button>
+                </form>
+                <a href="vehicle-maintenance.php?vehicle_id=<?= $id ?>" class="btn btn-sm btn-outline-secondary w-100 mt-2">
+                    <i class="bi bi-wrench-adjustable me-1"></i>Νέα Εργασία Συντήρησης
+                </a>
+            </div>
+        </div>
         <?php endif; ?>
     </div>
 
@@ -91,48 +174,82 @@ include __DIR__ . '/includes/header.php';
                 <h5 class="mb-0"><i class="bi bi-journal-text me-2"></i>Ημερολόγιο Οχήματος</h5>
             </div>
             <div class="card-body p-0">
-                <?php if (empty($history)): ?>
+                <?php if (empty($events)): ?>
                     <p class="text-muted text-center py-4 mb-0">Δεν υπάρχουν καταχωρήσεις ακόμα.</p>
                 <?php else: ?>
                     <div class="list-group list-group-flush">
-                        <?php foreach ($history as $h):
-                            $checks = getHandoverChecks($h['id']);
-                            $flaggedChecks = array_filter($checks, fn($c) => $c['status'] !== 'ok' && $c['stage'] === 'checkin');
-                        ?>
+                        <?php foreach ($events as $event): ?>
                             <div class="list-group-item">
-                                <div class="d-flex justify-content-between align-items-start">
-                                    <div>
-                                        <strong><i class="bi bi-box-arrow-right me-1"></i>Παραλαβή</strong> — <?= formatDateTime($h['checkout_at']) ?>
-                                        <?php if ($h['checkout_km'] !== null): ?> · <?= number_format((float) $h['checkout_km'], 1) ?> <?= $vehicle['odometer_unit'] === 'engine_hours' ? 'ώρες' : 'km' ?><?php endif; ?>
-                                        <?php if ($h['checkout_fuel_level'] !== null): ?> · καύσιμο <?= (int) $h['checkout_fuel_level'] ?>%<?php endif; ?>
+                                <?php if ($event['type'] === 'handover'):
+                                    $h = $event['data'];
+                                    $checks = getHandoverChecks($h['id']);
+                                    $flaggedChecks = array_filter($checks, fn($c) => $c['status'] !== 'ok' && $c['stage'] === 'checkin');
+                                ?>
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div>
+                                            <strong><i class="bi bi-box-arrow-right me-1"></i>Παραλαβή</strong> — <?= formatDateTime($h['checkout_at']) ?>
+                                            <?php if ($h['checkout_km'] !== null): ?> · <?= number_format((float) $h['checkout_km'], 1) ?> <?= $odoUnit ?><?php endif; ?>
+                                            <?php if ($h['checkout_fuel_level'] !== null): ?> · καύσιμο <?= (int) $h['checkout_fuel_level'] ?>%<?php endif; ?>
+                                        </div>
+                                        <?php if (!$h['checkin_at']): ?><span class="badge bg-warning text-dark">Εκτός</span><?php endif; ?>
                                     </div>
-                                    <?php if (!$h['checkin_at']): ?>
-                                        <span class="badge bg-warning text-dark">Εκτός</span>
-                                    <?php endif; ?>
-                                </div>
-                                <?php if ($h['checkout_notes']): ?><div class="text-muted small"><?= h($h['checkout_notes']) ?></div><?php endif; ?>
+                                    <?php if ($h['checkout_notes']): ?><div class="text-muted small"><?= h($h['checkout_notes']) ?></div><?php endif; ?>
 
-                                <?php if ($h['checkin_at']): ?>
-                                    <div class="mt-2">
-                                        <strong><i class="bi bi-box-arrow-in-left me-1"></i>Επιστροφή</strong> — <?= formatDateTime($h['checkin_at']) ?>
-                                        <?php if ($h['checkin_km'] !== null): ?> · <?= number_format((float) $h['checkin_km'], 1) ?> <?= $vehicle['odometer_unit'] === 'engine_hours' ? 'ώρες' : 'km' ?>
-                                            <?php if ($h['checkout_km'] !== null): ?>
-                                                <span class="text-muted">(+<?= number_format((float) $h['checkin_km'] - (float) $h['checkout_km'], 1) ?>)</span>
+                                    <?php if ($h['checkin_at']): ?>
+                                        <div class="mt-2">
+                                            <strong><i class="bi bi-box-arrow-in-left me-1"></i>Επιστροφή</strong> — <?= formatDateTime($h['checkin_at']) ?>
+                                            <?php if ($h['checkin_km'] !== null): ?> · <?= number_format((float) $h['checkin_km'], 1) ?> <?= $odoUnit ?>
+                                                <?php if ($h['checkout_km'] !== null): ?>
+                                                    <span class="text-muted">(+<?= number_format((float) $h['checkin_km'] - (float) $h['checkout_km'], 1) ?>)</span>
+                                                <?php endif; ?>
                                             <?php endif; ?>
-                                        <?php endif; ?>
-                                        <?php if ($h['checkin_fuel_level'] !== null): ?> · καύσιμο <?= (int) $h['checkin_fuel_level'] ?>%<?php endif; ?>
-                                    </div>
-                                    <?php if ($h['checkin_notes']): ?><div class="text-muted small"><?= h($h['checkin_notes']) ?></div><?php endif; ?>
-                                <?php endif; ?>
+                                            <?php if ($h['checkin_fuel_level'] !== null): ?> · καύσιμο <?= (int) $h['checkin_fuel_level'] ?>%<?php endif; ?>
+                                        </div>
+                                        <?php if ($h['checkin_notes']): ?><div class="text-muted small"><?= h($h['checkin_notes']) ?></div><?php endif; ?>
+                                    <?php endif; ?>
 
-                                <?php if (!empty($flaggedChecks)): ?>
-                                    <div class="mt-2">
-                                        <?php foreach ($flaggedChecks as $fc): ?>
-                                            <span class="badge bg-danger me-1">
-                                                <?= h($fc['item_label']) ?>: <?= h($checklistStatuses[$fc['status']] ?? $fc['status']) ?>
-                                            </span>
-                                        <?php endforeach; ?>
+                                    <?php if (!empty($flaggedChecks)): ?>
+                                        <div class="mt-2">
+                                            <?php foreach ($flaggedChecks as $fc): ?>
+                                                <span class="badge bg-danger me-1">
+                                                    <?= h($fc['item_label']) ?>: <?= h($checklistStatuses[$fc['status']] ?? $fc['status']) ?>
+                                                </span>
+                                            <?php endforeach; ?>
+                                        </div>
+                                    <?php endif; ?>
+
+                                <?php elseif ($event['type'] === 'refuel'):
+                                    $r = $event['data'];
+                                ?>
+                                    <div>
+                                        <strong><i class="bi bi-fuel-pump me-1"></i>Ανεφοδιασμός</strong> — <?= formatDateTime($r['created_at']) ?>
+                                        <?php if ($r['liters'] !== null): ?> · <?= number_format((float) $r['liters'], 1) ?> L<?php endif; ?>
+                                        <?php if ($r['cost'] !== null): ?> · <?= number_format((float) $r['cost'], 2) ?> €<?php endif; ?>
+                                        <?php if ($r['odometer_value'] !== null): ?> · <?= number_format((float) $r['odometer_value'], 1) ?> <?= $odoUnit ?><?php endif; ?>
+                                        <?php if ($r['station']): ?> · <?= h($r['station']) ?><?php endif; ?>
                                     </div>
+
+                                <?php else:
+                                    $m = $event['data'];
+                                ?>
+                                    <div class="d-flex justify-content-between align-items-start">
+                                        <div>
+                                            <strong><i class="bi bi-wrench-adjustable me-1"></i>Συντήρηση</strong>
+                                            <span class="badge bg-secondary"><?= h($maintenanceTypes[$m['type']] ?? $m['type']) ?></span>
+                                            — <?= formatDateTime($m['opened_at']) ?>
+                                        </div>
+                                        <span class="badge bg-<?= $m['status'] === 'open' ? 'warning text-dark' : 'success' ?>">
+                                            <?= $m['status'] === 'open' ? 'Ανοιχτή' : 'Ολοκληρώθηκε' ?>
+                                        </span>
+                                    </div>
+                                    <?php if ($m['description']): ?><div class="text-muted small"><?= nl2br(h($m['description'])) ?></div><?php endif; ?>
+                                    <div class="small mt-1">
+                                        <?php if ($m['workshop']): ?>Συνεργείο: <?= h($m['workshop']) ?> · <?php endif; ?>
+                                        <?php if ($m['cost'] !== null): ?>Κόστος: <strong><?= number_format((float) $m['cost'], 2) ?> €</strong><?php endif; ?>
+                                    </div>
+                                    <?php if ($m['closed_at']): ?>
+                                        <div class="text-muted small">Ολοκληρώθηκε: <?= formatDateTime($m['closed_at']) ?><?php if ($m['notes']): ?> — <?= h($m['notes']) ?><?php endif; ?></div>
+                                    <?php endif; ?>
                                 <?php endif; ?>
                             </div>
                         <?php endforeach; ?>

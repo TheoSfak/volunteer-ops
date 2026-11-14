@@ -490,6 +490,49 @@ CREATE TABLE IF NOT EXISTS `vehicle_handover_checks` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
+-- VEHICLE REFUELS TABLE (Fleet management, M3)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `vehicle_refuels` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `vehicle_id` INT UNSIGNED NOT NULL,
+    `liters` DECIMAL(6, 2) NULL,
+    `cost` DECIMAL(8, 2) NULL,
+    `odometer_value` DECIMAL(10, 1) NULL,
+    `station` VARCHAR(255) NULL,
+    `user_id` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_refuels_vehicle` (`vehicle_id`, `created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- VEHICLE MAINTENANCE TABLE (cost log)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `vehicle_maintenance` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `vehicle_id` INT UNSIGNED NOT NULL,
+    `type` ENUM('scheduled','repair','inspection') NOT NULL DEFAULT 'repair',
+    `description` TEXT NULL,
+    `cost` DECIMAL(8, 2) NULL,
+    `workshop` VARCHAR(255) NULL,
+    `odometer_value` DECIMAL(10, 1) NULL,
+    `status` ENUM('open','done') NOT NULL DEFAULT 'open',
+    `opened_by` INT UNSIGNED NULL,
+    `opened_at` DATETIME NOT NULL,
+    `closed_by` INT UNSIGNED NULL,
+    `closed_at` DATETIME NULL,
+    `notes` TEXT NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`opened_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`closed_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_maintenance_vehicle_status` (`vehicle_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
 -- ACHIEVEMENTS TABLE
 -- =============================================
 CREATE TABLE IF NOT EXISTS `achievements` (

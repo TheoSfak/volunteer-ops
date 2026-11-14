@@ -1841,6 +1841,11 @@ if (isLoggedIn()) {
                     <i class="bi bi-list-check"></i> Checklist Οχημάτων
                 </a>
             </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'vehicle-maintenance' ? 'active' : '' ?>" href="vehicle-maintenance.php">
+                    <i class="bi bi-wrench-adjustable"></i> Συντήρηση Οχημάτων
+                </a>
+            </li>
             <?php endif; ?>
             <?php endif; ?>
 

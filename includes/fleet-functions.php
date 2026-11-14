@@ -230,6 +230,10 @@ function openHandover(int $vehicleId, ?int $shiftId, int $userId, ?float $km, ?i
     if (getOpenHandover($vehicleId)) {
         return ['success' => false, 'error' => 'Το όχημα είναι ήδη εκτός - δεν έχει επιστραφεί.'];
     }
+    $status = dbFetchValue("SELECT status FROM vehicles WHERE id = ?", [$vehicleId]);
+    if ($status !== 'available') {
+        return ['success' => false, 'error' => 'Το όχημα δεν είναι διαθέσιμο (' . (getVehicleStatuses()[$status] ?? $status) . ') και δεν μπορεί να παραληφθεί.'];
+    }
 
     $handoverId = (int) dbInsert(
         "INSERT INTO vehicle_handovers (vehicle_id, shift_id, checkout_by, checkout_at, checkout_km, checkout_fuel_level, checkout_notes)
@@ -269,16 +273,151 @@ function closeHandover(int $vehicleId, int $userId, ?float $km, ?int $fuelLevel,
         dbExecute("UPDATE vehicles SET odometer_value = ? WHERE id = ?", [$km, $vehicleId]);
     }
 
-    $flagged = false;
-    foreach ($checks as $check) {
+    $flaggedLabels = [];
+    foreach ($checks as $itemId => $check) {
         if (($check['status'] ?? 'ok') !== 'ok') {
-            $flagged = true;
-            break;
+            $item = dbFetchOne("SELECT label FROM vehicle_checklist_items WHERE id = ?", [(int) $itemId]);
+            $flaggedLabels[] = ($item['label'] ?? ('#' . $itemId)) . ' (' . (getChecklistStatuses()[$check['status']] ?? $check['status']) . ')';
         }
     }
+    $flagged = !empty($flaggedLabels);
     if ($flagged) {
-        dbExecute("UPDATE vehicles SET status = 'maintenance' WHERE id = ? AND status != 'out_of_service'", [$vehicleId]);
+        openMaintenance(
+            $vehicleId,
+            'repair',
+            'Βλάβη/έλλειψη στο checklist επιστροφής: ' . implode(', ', $flaggedLabels),
+            null,
+            null,
+            $km,
+            $userId
+        );
     }
 
     return ['success' => true, 'flagged' => $flagged];
+}
+
+// =============================================
+// REFUEL + MAINTENANCE COST LOG, M3
+// =============================================
+
+/** Maintenance types, in display order. */
+function getMaintenanceTypes(): array {
+    return [
+        'scheduled'  => 'Προγραμματισμένη',
+        'repair'     => 'Επισκευή',
+        'inspection' => 'Έλεγχος / ΚΤΕΟ',
+    ];
+}
+
+/** Open (unresolved) maintenance records for one vehicle. */
+function getOpenMaintenanceRecords(int $vehicleId): array {
+    return dbFetchAll(
+        "SELECT * FROM vehicle_maintenance WHERE vehicle_id = ? AND status = 'open' ORDER BY opened_at DESC",
+        [$vehicleId]
+    );
+}
+
+/** Every open maintenance record across the fleet. */
+function getAllOpenMaintenanceRecords(): array {
+    return dbFetchAll(
+        "SELECT m.*, v.label AS vehicle_label, v.plate_number
+         FROM vehicle_maintenance m
+         JOIN vehicles v ON v.id = m.vehicle_id
+         WHERE m.status = 'open'
+         ORDER BY m.opened_at"
+    );
+}
+
+/** One vehicle's full maintenance history, most recent first. */
+function getVehicleMaintenanceHistory(int $vehicleId): array {
+    return dbFetchAll(
+        "SELECT * FROM vehicle_maintenance WHERE vehicle_id = ? ORDER BY opened_at DESC",
+        [$vehicleId]
+    );
+}
+
+/**
+ * Open a maintenance record. Moves the vehicle to status='maintenance',
+ * unless it is already 'out_of_service' - that is a deliberate retirement,
+ * never silently reversed by a maintenance ticket, automatic or not.
+ */
+function openMaintenance(int $vehicleId, string $type, string $description, ?float $cost, ?string $workshop, ?float $odometer, ?int $userId): array {
+    if (!array_key_exists($type, getMaintenanceTypes())) {
+        $type = 'repair';
+    }
+    $maintenanceId = (int) dbInsert(
+        "INSERT INTO vehicle_maintenance (vehicle_id, type, description, cost, workshop, odometer_value, opened_by, opened_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NOW())",
+        [$vehicleId, $type, $description ?: null, $cost, $workshop ?: null, $odometer, $userId]
+    );
+    dbExecute("UPDATE vehicles SET status = 'maintenance' WHERE id = ? AND status != 'out_of_service'", [$vehicleId]);
+
+    return ['success' => true, 'maintenance_id' => $maintenanceId];
+}
+
+/**
+ * Close a maintenance record. If no other maintenance record for the same
+ * vehicle is still open, the vehicle returns to 'available' - an admin who
+ * wants it out_of_service instead can still set that by hand on vehicles.php.
+ */
+function closeMaintenance(int $maintenanceId, int $userId, ?string $notes, ?float $cost): array {
+    $record = dbFetchOne("SELECT * FROM vehicle_maintenance WHERE id = ?", [$maintenanceId]);
+    if (!$record || $record['status'] !== 'open') {
+        return ['success' => false, 'error' => 'Η εργασία συντήρησης δεν είναι ανοιχτή.'];
+    }
+
+    dbExecute(
+        "UPDATE vehicle_maintenance SET status = 'done', closed_by = ?, closed_at = NOW(), notes = ?, cost = COALESCE(?, cost) WHERE id = ?",
+        [$userId, $notes ?: null, $cost, $maintenanceId]
+    );
+
+    $stillOpen = (int) dbFetchValue(
+        "SELECT COUNT(*) FROM vehicle_maintenance WHERE vehicle_id = ? AND status = 'open'",
+        [$record['vehicle_id']]
+    );
+    if ($stillOpen === 0) {
+        dbExecute("UPDATE vehicles SET status = 'available' WHERE id = ? AND status = 'maintenance'", [$record['vehicle_id']]);
+    }
+
+    return ['success' => true];
+}
+
+/** Record a refuel. Updates the vehicle's odometer when a reading is given. */
+function addRefuel(int $vehicleId, ?float $liters, ?float $cost, ?float $odometer, ?string $station, ?int $userId): int {
+    $refuelId = (int) dbInsert(
+        "INSERT INTO vehicle_refuels (vehicle_id, liters, cost, odometer_value, station, user_id)
+         VALUES (?, ?, ?, ?, ?, ?)",
+        [$vehicleId, $liters, $cost, $odometer, $station ?: null, $userId]
+    );
+    if ($odometer !== null) {
+        dbExecute("UPDATE vehicles SET odometer_value = ? WHERE id = ?", [$odometer, $vehicleId]);
+    }
+    return $refuelId;
+}
+
+/** One vehicle's refuel history, most recent first. */
+function getVehicleRefuels(int $vehicleId): array {
+    return dbFetchAll(
+        "SELECT * FROM vehicle_refuels WHERE vehicle_id = ? ORDER BY created_at DESC",
+        [$vehicleId]
+    );
+}
+
+/** Total fuel/maintenance cost and liters for one vehicle - the logbook's cost summary. */
+function getVehicleCostSummary(int $vehicleId): array {
+    $fuel = dbFetchOne(
+        "SELECT COALESCE(SUM(cost), 0) AS total_cost, COALESCE(SUM(liters), 0) AS total_liters
+         FROM vehicle_refuels WHERE vehicle_id = ?",
+        [$vehicleId]
+    );
+    $maintenance = dbFetchOne(
+        "SELECT COALESCE(SUM(cost), 0) AS total_cost FROM vehicle_maintenance WHERE vehicle_id = ?",
+        [$vehicleId]
+    );
+    return [
+        'fuel_cost'        => (float) $fuel['total_cost'],
+        'fuel_liters'      => (float) $fuel['total_liters'],
+        'maintenance_cost' => (float) $maintenance['total_cost'],
+        'total_cost'       => (float) $fuel['total_cost'] + (float) $maintenance['total_cost'],
+    ];
 }
