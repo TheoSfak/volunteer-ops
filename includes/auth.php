@@ -144,6 +144,12 @@ define('WAR_ROOM_ACTION_SCRIPTS', [
     // is asked every half minute from the same long-open tab while the layer is on;
     // command staff only, which the endpoint itself checks.
     'mission-coverage-heat.php',
+    // mission-team-equipment.php (which equipment a team carries - AED, a stretcher, ...
+    // v3.488.0) is called from the same long-open tab: command staff for any team, but
+    // also any member of a team for THEIR OWN team alone, and that member may well be a
+    // partner-org guest or a mission visitor - the same two account types every other
+    // self-service endpoint on this list already had to be added for.
+    'mission-team-equipment.php',
 ]);
 
 // Pages (not AJAX) a partner-org guest AND a mission visitor may open, on top

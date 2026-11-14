@@ -8345,6 +8345,43 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 217,
+            'description' => "Team equipment (v3.488.0): which of the mission's equipment types (AED, a stretcher, ...) a team carries right now, shown as chips on the Teams card and the War Room's position popups. New `team_equipment_types` - an admin-managed catalog (add/edit/delete on team-equipment-types.php), seeded with AED, Φορείο - Σπαστό, Φορείο - Scoop, Σανίδα ακινητοποίησης - and `mission_team_equipment`, which of them a given mission_teams row currently carries. Set by command staff for any team, or by any member of a team for their own team alone. Re-running it changes nothing beyond the seed, which is ON DUPLICATE KEY harmless.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS `team_equipment_types` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `name` VARCHAR(100) NOT NULL,
+                    `icon` VARCHAR(10) NOT NULL DEFAULT '🎒',
+                    `sort_order` INT DEFAULT 0,
+                    `is_active` TINYINT(1) DEFAULT 1,
+                    `created_by` INT UNSIGNED NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY `unique_name` (`name`),
+                    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+                    INDEX `idx_active` (`is_active`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+                dbExecute("INSERT INTO `team_equipment_types` (`name`, `icon`, `sort_order`) VALUES
+                    ('AED', '⚡', 1),
+                    ('Φορείο - Σπαστό', '🛏️', 2),
+                    ('Φορείο - Scoop', '🛏️', 3),
+                    ('Σανίδα ακινητοποίησης', '📏', 4)
+                    ON DUPLICATE KEY UPDATE `sort_order` = VALUES(`sort_order`)");
+
+                dbExecute("CREATE TABLE IF NOT EXISTS `mission_team_equipment` (
+                    `team_id` INT UNSIGNED NOT NULL,
+                    `equipment_type_id` INT UNSIGNED NOT NULL,
+                    `set_by` INT UNSIGNED NULL,
+                    `set_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`team_id`, `equipment_type_id`),
+                    FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`equipment_type_id`) REFERENCES `team_equipment_types`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`set_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

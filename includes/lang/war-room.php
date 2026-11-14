@@ -90,6 +90,8 @@ return [
         'teams.empty' => 'Δεν έχουν δημιουργηθεί ομάδες ακόμη.',
         'teams.panel_title' => 'Ομάδες Αποστολής',
         'teams.distances_title' => 'Αποστάσεις Ομάδων',
+        'teams.equipment.edit_btn' => 'Υλικό',
+        'teams.equipment.edit_title' => 'Ποιο υλικό κουβαλάει αυτή η ομάδα (AED, φορείο, ...)',
 
         // Nearby Teams (field-card column, every view) +
         // the compass/unit labels it shares with Team Distances above.
@@ -3808,6 +3810,8 @@ return [
         'teams.empty' => 'No teams have been created yet.',
         'teams.panel_title' => 'Mission Teams',
         'teams.distances_title' => 'Team Distances',
+        'teams.equipment.edit_btn' => 'Equipment',
+        'teams.equipment.edit_title' => 'What equipment this team is carrying (AED, a stretcher, ...)',
 
         'nearby.panel_title' => 'Nearby Teams',
         'nearby.empty' => 'No other teams have a location yet.',

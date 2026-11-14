@@ -213,7 +213,7 @@
               + `<div class="ms-auto d-flex gap-1 align-items-center">`
               + `<button type="button" class="btn btn-sm btn-outline-secondary" data-mt-act="edit" data-team="${team.id}" title="${esc(t('teamsp.edit_title'))}"><i class="bi bi-pencil me-1"></i>${esc(t('teamsp.edit_btn'))}</button>`
               + `<button type="button" class="btn btn-sm btn-outline-danger" data-mt-act="delete" data-team="${team.id}" title="${esc(t('teams.delete_btn_title'))}"><i class="bi bi-x-lg"></i></button>`
-              + `</div>`;
+              + `</div>${equipmentHtml(team)}`;
         return `<div class="col-12 col-xl-6"><div class="card shadow-sm mt-team h-100" data-mt-drop="${team.id}" style="border-top:4px solid ${esc(team.colors[0])}">`
             + `<div class="card-header d-flex align-items-center flex-wrap gap-2">${head}</div>`
             + `<div class="card-body p-2">${members.map((person) => memberRow(person, team)).join('')}</div>`
@@ -224,6 +224,23 @@
             + `<button type="button" class="btn btn-outline-primary" data-mt-act="gps-team" data-mode="leader" data-team="${team.id}">${esc(t('teamsp.gps_team_leader'))}</button>`
             + `<button type="button" class="btn btn-outline-secondary" data-mt-act="gps-team" data-mode="none" data-team="${team.id}">${esc(t('teamsp.gps_team_none'))}</button>`
             + `</div></div></div></div>`;
+    }
+
+    /** The equipment line of a team's card: its current chips, plus a checklist that saves on every change. */
+    function equipmentHtml(team) {
+        if (!MT_EQUIPMENT_TYPES.length) return '';
+        const activeIds = (team.equipment || []).map(Number);
+        const chips = MT_EQUIPMENT_TYPES.filter((et) => activeIds.includes(et.id))
+            .map((et) => `<span class="badge bg-info-subtle text-info-emphasis border me-1 mb-1">${esc(et.icon)} ${esc(et.name)}</span>`).join('');
+        const items = MT_EQUIPMENT_TYPES.map((et) => {
+            const id = `mtEq${team.id}_${et.id}`;
+            return `<li class="form-check mb-1 px-2"><input class="form-check-input" type="checkbox" id="${id}" data-mt-change="equipment" data-team="${team.id}" data-type="${et.id}"${activeIds.includes(et.id) ? ' checked' : ''}>`
+                + `<label class="form-check-label small" for="${id}">${esc(et.icon)} ${esc(et.name)}</label></li>`;
+        }).join('');
+        return `<div class="w-100 small mt-1 d-flex align-items-center gap-1 flex-wrap"><span>${chips}</span>`
+            + `<div class="dropdown"><button type="button" class="btn btn-sm btn-link p-0" data-bs-toggle="dropdown" title="${esc(t('teams.equipment.edit_title'))}">`
+            + `<i class="bi bi-plus-circle"></i> ${esc(t('teams.equipment.edit_btn'))}</button>`
+            + `<ul class="dropdown-menu p-1" style="min-width:220px;">${items}</ul></div></div>`;
     }
 
     function statsHtml() {
@@ -350,6 +367,36 @@
         render();
     }
 
+    /**
+     * The whole new set of equipment a team carries, posted at once. A different endpoint from call() above
+     * (mission-team-equipment.php, not mission-teams.php) - it is shared with the War Room's Teams card, where a
+     * team's own member may use it too, not only command staff. Merges the server's answer straight into state
+     * rather than re-fetching the whole page, same idiom as setGps() above re-rendering off call()'s own answer.
+     */
+    async function setEquipment(teamId, ids) {
+        if (busy) return;
+        busy = true;
+        root.classList.add('mt-busy');
+        const body = new URLSearchParams({csrf_token: csrfToken, mission_id: String(WR_MISSION_ID), team_id: String(teamId)});
+        for (const id of ids) body.append('equipment_type_ids[]', String(id));
+        let data;
+        try {
+            const response = await fetch('mission-team-equipment.php', {method: 'POST', body, credentials: 'same-origin'});
+            data = await response.json();
+        } catch (error) {
+            data = {ok: false, error: t('common.send_failed')};
+        }
+        busy = false;
+        root.classList.remove('mt-busy');
+        if (!data.ok) {
+            flash(data.error || t('common.send_failed'), 'danger');
+        } else {
+            const team = teamById(teamId);
+            if (team) team.equipment = data.equipment || [];
+        }
+        render();
+    }
+
     async function onClick(event) {
         const button = event.target.closest('[data-mt-act]');
         if (!button || !root.contains(button) || busy) return;
@@ -415,6 +462,13 @@
             autoRedo = input.checked;
             plan = null;
             render();
+        } else if (kind === 'equipment') {
+            const team = teamById(Number(input.dataset.team));
+            if (!team) return;
+            const typeId = Number(input.dataset.type);
+            const ids = new Set(team.equipment || []);
+            if (input.checked) ids.add(typeId); else ids.delete(typeId);
+            await setEquipment(team.id, Array.from(ids));
         }
     }
 

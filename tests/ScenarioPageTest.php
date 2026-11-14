@@ -88,7 +88,7 @@ final class ScenarioPageTest extends TestCase
 
     public function testThePageHasNoEndpointOrMigrationOfItsOwn(): void
     {
-        $this->assertSame(216, DB_SCHEMA_VERSION, 'v3.462.0 changes no table');
+        $this->assertSame(217, DB_SCHEMA_VERSION, 'v3.462.0 changes no table');
         $page = $this->source('mission-scenario-view.php');
         $this->assertStringNotContainsString('isPost()', $page, 'it is a page to read: every change goes through mission-scenario.php');
         $this->assertStringContainsString("'war-room.php?id=' . \$missionId", $page);

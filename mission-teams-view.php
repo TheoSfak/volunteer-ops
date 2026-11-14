@@ -119,6 +119,7 @@ include __DIR__ . '/includes/header.php';
 const WR_MISSION_ID = <?= (int) $missionId ?>;
 const csrfToken = <?= json_encode(csrfToken(), $jsonFlags) ?>;
 const MT_TRANSPORT_ICONS = <?= json_encode(teamTransportIconPaths(), $jsonFlags) ?>;
+const MT_EQUIPMENT_TYPES = <?= json_encode(teamEquipmentTypes(true), $jsonFlags) ?>;
 const WR_STRINGS = <?= json_encode($pageStrings['strings'], $jsonFlags) ?>;
 const WR_STRINGS_FALLBACK = <?= json_encode($pageStrings['fallback'], $jsonFlags) ?>;
 function t(key, vars = {}) {

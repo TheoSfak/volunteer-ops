@@ -1747,6 +1747,13 @@ if (isLoggedIn()) {
                 </a>
             </li>
             <?php endif; ?>
+            <?php if (isSystemAdmin()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'team-equipment-types' ? 'active' : '' ?>" href="team-equipment-types.php">
+                    <i class="bi bi-bag-heart-fill"></i> Υλικό Ομάδων
+                </a>
+            </li>
+            <?php endif; ?>
             <?php if (isSystemAdmin() || hasPagePermission('reports')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'reports' ? 'active' : '' ?>" href="reports.php">

@@ -2266,6 +2266,40 @@ CREATE TABLE IF NOT EXISTS `mission_team_members` (
     UNIQUE KEY `uniq_mission_user` (`mission_id`, `user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- TEAM EQUIPMENT TYPES (v3.488.0): the catalog of equipment a mission team can be marked as carrying (AED, a
+-- stretcher, ...) - admin-managed, on team-equipment-types.php.
+CREATE TABLE IF NOT EXISTS `team_equipment_types` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `name` VARCHAR(100) NOT NULL,
+    `icon` VARCHAR(10) NOT NULL DEFAULT '🎒',
+    `sort_order` INT DEFAULT 0,
+    `is_active` TINYINT(1) DEFAULT 1,
+    `created_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `unique_name` (`name`),
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_active` (`is_active`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `team_equipment_types` (`name`, `icon`, `sort_order`) VALUES
+('AED', '⚡', 1),
+('Φορείο - Σπαστό', '🛏️', 2),
+('Φορείο - Scoop', '🛏️', 3),
+('Σανίδα ακινητοποίησης', '📏', 4)
+ON DUPLICATE KEY UPDATE `sort_order` = VALUES(`sort_order`);
+
+-- TEAM EQUIPMENT: which of the catalog's types a mission team currently carries.
+CREATE TABLE IF NOT EXISTS `mission_team_equipment` (
+    `team_id` INT UNSIGNED NOT NULL,
+    `equipment_type_id` INT UNSIGNED NOT NULL,
+    `set_by` INT UNSIGNED NULL,
+    `set_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`team_id`, `equipment_type_id`),
+    FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`equipment_type_id`) REFERENCES `team_equipment_types`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`set_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- =============================================
 -- ACTION ROOM PARTICIPANTS (who takes part with GPS + orders)
 -- A row here means the volunteer takes part in the Action Room: their position

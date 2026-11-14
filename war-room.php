@@ -1026,7 +1026,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                 SELECT vp.user_id, vp.shift_id, vp.lat, vp.lng, vp.accuracy_meters, vp.battery_level, vp.via, vp.speed_mps, vp.created_at, u.name,
                         u.is_external, u.guest_org_name, u.guest_country_code,
                         COALESCE(ht.name, mvt.label) AS home_team_name, COALESCE(ht.color, mvt.color) AS home_team_color,
-                        mt.color AS team_color, mt.transport AS team_transport, mt.codename, mt.team_number{$field},
+                        mt.id AS team_id, mt.color AS team_color, mt.transport AS team_transport, mt.codename, mt.team_number{$field},
                         pvp.lat AS prev_lat, pvp.lng AS prev_lng,
                         pvp.accuracy_meters AS prev_accuracy_meters, pvp.created_at AS prev_created_at,
                         ROW_NUMBER() OVER (PARTITION BY vp.user_id, vp.shift_id ORDER BY vp.id DESC) AS rn
@@ -1062,6 +1062,9 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
         );
 
         $pins = [];
+        // Which equipment each pin's team carries (v3.488.0), for the marker popup's own line - one query for
+        // every team of the mission, not one per pin.
+        $pinEquipmentByTeam = missionTeamsEquipmentByTeam($missionId);
         foreach ($rawPins as $pin) {
             // A volunteer without the GPS tick leaves no pin on the map, even
             // when older fixes of theirs are still on file from before they
@@ -1144,6 +1147,7 @@ $loadPins = function () use ($missionId, $hasFieldStatus, $pingStaleThresholdSec
                 // is on foot, like every team that was never set otherwise.
                 'transport' => normalizeTeamTransport($pin['team_transport']),
                 'team_label' => $pin['codename'] ? teamLabel($pin['codename'], $pin['team_number']) : null,
+                'team_equipment' => $pin['team_id'] !== null ? ($pinEquipmentByTeam[(int) $pin['team_id']] ?? []) : [],
                 'is_external' => (bool) $pin['is_external'], 'guest_org_name' => $pin['guest_org_name'],
                 'home_team_name' => $pin['home_team_name'], 'home_team_color_bg' => $homeBg, 'home_team_color_fg' => $homeFg,
                 'guest_country_code' => $pin['guest_country_code'],
@@ -1710,6 +1714,9 @@ $noActiveMsg = ($onDutyNotInActionRoomCount > 0 && empty($activeParticipants))
 
 // ── Mission teams ─────────────────────────────────────────────────────────
 $teams = loadMissionTeamsForMission($missionId);
+// The equipment catalog (v3.488.0): admin-managed on team-equipment-types.php, read once here and handed to the
+// page as a JS global - it is the same for every mission, so the poll only ever carries each team's chosen ids.
+$teamEquipmentTypes = teamEquipmentTypes(true);
 
 // Lazy briefing-link generation: a team created before its mission was
 // flagged special (or before this feature existed) simply has a NULL
@@ -4917,6 +4924,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                             </div>
                         </div>
                     </div>
+                    <?= teamEquipmentBlockHtml($team, $teamEquipmentTypes, $canManageWarRoom || $isMyTeam) ?>
                 </div>
                 <?php endforeach; ?>
                 <?php if (empty($teams)): ?>
@@ -6804,6 +6812,7 @@ const WR_BOOT = {
     maxShiftMinutes: <?= (int) getSetting('war_room_max_shift_minutes', '480') ?>,
     chargeAlertThresholdPct: <?= CHARGE_ALERT_THRESHOLD_PCT ?>,
     teamTransportIcons: <?= json_encode(teamTransportIconPaths()) ?>,
+    teamEquipmentTypes: <?= json_encode($teamEquipmentTypes, JSON_UNESCAPED_UNICODE) ?>,
     arrivalPromptRadiusM: <?= (int) ARRIVAL_PROMPT_RADIUS_M ?>,
     viewerLang: <?= json_encode($__viewerLang) ?>,
     myAssignmentId: <?= json_encode(!empty($myAssignments) ? (int) $myAssignments[0]['pr_id'] : null) ?>,
@@ -9187,7 +9196,7 @@ function renderTeamRosters(items) {
         row.dataset.teamId = String(team.id);
         row.innerHTML = `<div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
             <div class="wr-team-roster">${teamRosterHtml(team)}</div>
-        </div>`;
+        </div>${teamEquipmentHtml(team, CAN_MANAGE_WAR_ROOM || teamIsMine(team))}`;
         listEl.appendChild(row);
     });
 
@@ -9201,6 +9210,82 @@ function renderTeamRosters(items) {
         listEl.insertBefore(mineRow, listEl.firstElementChild);
     }
 }
+// Mirrors teamEquipmentBlockHtml() in the PHP render exactly - used only for
+// a brand-new team row (renderTeamRosters() above, the seenIds.has() miss),
+// which has no .wr-team-equipment element yet for renderTeamEquipment() to
+// update in place. An existing row's block is left to renderTeamEquipment(),
+// which syncs chips and checkbox state WITHOUT rebuilding this markup, so an
+// open dropdown survives a poll tick instead of being closed under the
+// coordinator's or the team's own finger every 5s.
+function teamEquipmentHtml(team, canEdit) {
+    if (!WR_TEAM_EQUIPMENT_TYPES.length) return '';
+    const activeIds = (team.equipment || []).map(Number);
+    const chips = WR_TEAM_EQUIPMENT_TYPES.filter(et => activeIds.includes(et.id))
+        .map(et => `<span class="badge bg-info-subtle text-info-emphasis border me-1 mb-1">${escapeHtml(et.icon)} ${escapeHtml(et.name)}</span>`).join('');
+    let edit = '';
+    if (canEdit) {
+        const items = WR_TEAM_EQUIPMENT_TYPES.map(et => {
+            const checked = activeIds.includes(et.id) ? ' checked' : '';
+            const id = `teamEq${team.id}_${et.id}`;
+            return `<li class="form-check mb-1 px-2"><input class="form-check-input team-equipment-check" type="checkbox" id="${id}" data-type-id="${et.id}"${checked}>`
+                + `<label class="form-check-label small" for="${id}">${escapeHtml(et.icon)} ${escapeHtml(et.name)}</label></li>`;
+        }).join('');
+        edit = `<div class="dropdown d-inline-block"><button type="button" class="btn btn-sm btn-link p-0 team-equipment-edit-btn" data-bs-toggle="dropdown" title="${escapeHtml(t('teams.equipment.edit_title'))}">`
+            + `<i class="bi bi-plus-circle"></i> ${escapeHtml(t('teams.equipment.edit_btn'))}</button>`
+            + `<ul class="dropdown-menu p-1" style="min-width:220px;">${items}</ul></div>`;
+    }
+    return `<div class="w-100 small mt-1 wr-team-equipment" data-team-id="${team.id}"><span class="wr-team-equipment-chips">${chips}</span>${edit}</div>`;
+}
+/**
+ * Live-refreshes the equipment chips of every EXISTING team row from the poll, same purpose as
+ * renderTeamRosters() beside it - but deliberately NOT by replacing .wr-team-equipment's innerHTML (that would be
+ * teamEquipmentHtml() again): rebuilding the dropdown's <li> list would close it on whoever has it open to tick a
+ * box right now, every single poll tick. Instead this only rewrites the read-only chips span and syncs each
+ * checkbox's own .checked, leaving the dropdown's DOM - and whether it is open - untouched.
+ */
+function renderTeamEquipment(items) {
+    items.forEach(team => {
+        const block = document.querySelector(`[data-card-id="teamsCard"] .wr-team-equipment[data-team-id="${team.id}"]`);
+        if (!block) return;
+        const activeIds = (team.equipment || []).map(Number);
+        const chipsEl = block.querySelector('.wr-team-equipment-chips');
+        if (chipsEl) {
+            chipsEl.innerHTML = WR_TEAM_EQUIPMENT_TYPES.filter(et => activeIds.includes(et.id))
+                .map(et => `<span class="badge bg-info-subtle text-info-emphasis border me-1 mb-1">${escapeHtml(et.icon)} ${escapeHtml(et.name)}</span>`).join('');
+        }
+        block.querySelectorAll('.team-equipment-check').forEach(cb => {
+            cb.checked = activeIds.includes(Number(cb.dataset.typeId));
+        });
+    });
+}
+// A click on a team's equipment checklist - command staff, any team; a team's own member, their team alone (the
+// same rule mission-team-equipment.php enforces server-side; this delegated listener fires for either, since the
+// dropdown is only rendered at all when the viewer may use it - see teamEquipmentBlockHtml()/teamEquipmentHtml()).
+document.addEventListener('change', e => {
+    if (!e.target.classList.contains('team-equipment-check')) return;
+    const block = e.target.closest('.wr-team-equipment');
+    if (!block) return;
+    const teamId = block.dataset.teamId;
+    const typeIds = Array.from(block.querySelectorAll('.team-equipment-check:checked')).map(cb => cb.dataset.typeId);
+    const checkbox = e.target;
+    checkbox.disabled = true;
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: String(WR_MISSION_ID), team_id: teamId});
+    typeIds.forEach(id => data.append('equipment_type_ids[]', id));
+    fetch('mission-team-equipment.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+        checkbox.disabled = false;
+        if (!result.ok) {
+            checkbox.checked = !checkbox.checked;
+            alert(result.error || t('common.failed'));
+            return;
+        }
+        const chipsEl = block.querySelector('.wr-team-equipment-chips');
+        const activeIds = (result.equipment || []).map(Number);
+        if (chipsEl) {
+            chipsEl.innerHTML = WR_TEAM_EQUIPMENT_TYPES.filter(et => activeIds.includes(et.id))
+                .map(et => `<span class="badge bg-info-subtle text-info-emphasis border me-1 mb-1">${escapeHtml(et.icon)} ${escapeHtml(et.name)}</span>`).join('');
+        }
+    }).catch(err => { checkbox.disabled = false; actionRequestFailed(checkbox, err); });
+});
 // Small colored pill (team's own badge color, or the dark "all teams" fallback
 // teamBadgeColors() already returns for a null team) shown as a permanent —
 // not hover/click-only — Leaflet tooltip, so which team a dispatch point/area
@@ -13849,6 +13934,9 @@ const CHARGE_ALERT_THRESHOLD_PCT = WR_BOOT.chargeAlertThresholdPct;
 // canManageActionRoom() regardless — this only controls whether the button
 // renders, never trusted as the real gate.
 const CAN_MANAGE_WAR_ROOM = WR_BOOT.canManage;
+// The equipment catalog (v3.488.0): same for every mission, read once at boot. teamEquipmentHtml()/
+// renderTeamEquipment() below look ids up against it; buildPinMarker()'s popup line does too.
+const WR_TEAM_EQUIPMENT_TYPES = WR_BOOT.teamEquipmentTypes;
 
 // How a team moves, drawn (v3.357.0). The same list the server prints into the
 // team forms (teamTransportIconPaths() in functions-warroom.php), so the map
@@ -14001,6 +14089,12 @@ function buildPinMarker(pin, interactive = true) {
         ? ` · ${transportGlyphSvg(pin.transport, 14, 'currentColor').replace('style="display:block"', 'style="vertical-align:-2px"')} ${escapeHtml(t('teams.transport.' + pin.transport))}`
         : '';
     const teamLine = pin.team_label ? `<br>${escapeHtml(pin.team_label)}${transportWord}` : '';
+    // Which equipment the pin's team carries (v3.488.0) - AED, a stretcher, ... - right under the team's own line,
+    // so a coordinator who clicks a position to find, say, the AED sees it without opening the Teams card too.
+    const teamEquipIds = (pin.team_equipment || []).map(Number);
+    const teamEquipLine = teamEquipIds.length
+        ? '<br>' + WR_TEAM_EQUIPMENT_TYPES.filter(et => teamEquipIds.includes(et.id)).map(et => escapeHtml(et.icon) + ' ' + escapeHtml(et.name)).join(' · ')
+        : '';
     // Directly under the timestamp below, because the two qualify each other:
     // "20:57, ±120 m" is a different piece of information from "20:57".
     const accuracyLine = accuracyLineHtml(pin.accuracy_m);
@@ -14041,7 +14135,7 @@ function buildPinMarker(pin, interactive = true) {
     // (depends on which render*() happened to run last that poll tick). A
     // volunteer's own live position should never be the one that silently
     // disappears underneath another marker.
-    const marker = L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}${k9BadgeHtml(pin.user_id)}${captainBadgeHtml(pin.user_id)}${liveBadgeHtml(pin.user_id)}</strong>${teamLine}${heartRateBlock}<br>${pin.time}${accuracyLine}${floorLine}${trackingLine}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${fatigueLine}${navLine}`);
+    const marker = L.marker([pin.lat, pin.lng], {icon, zIndexOffset: 1000}).bindPopup(`<strong>${guestNameHtml(pin.name, pin.is_external, pin.home_team_name, pin.home_team_color_bg, pin.home_team_color_fg, pin.guest_country_code)}${k9BadgeHtml(pin.user_id)}${captainBadgeHtml(pin.user_id)}${liveBadgeHtml(pin.user_id)}</strong>${teamLine}${teamEquipLine}${heartRateBlock}<br>${pin.time}${accuracyLine}${floorLine}${trackingLine}${statusLine ? '<br>' + statusLine : ''}${extraLine}${batteryLine}${fatigueLine}${navLine}`);
     // The team's name above the dot, so which team a position belongs to reads
     // off the map without a click. Not on the read-only Route Order composer
     // map (interactive=false), and a volunteer with no team has no name to
@@ -27566,6 +27660,7 @@ function pollWarRoomData() {
         if (data.areas) areas = data.areas;
         if (data.teams) {
             renderTeamRosters(data.teams);
+            renderTeamEquipment(data.teams);
             // Chat room tabs are server-rendered ONCE, at page load, from
             // $chatTeams - so a volunteer put on a team AFTER opening this
             // page never grew their team's tab, and one moved off a team kept

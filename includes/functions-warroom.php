@@ -3811,6 +3811,42 @@ function homeTeamCornerBadgeHtml(?string $teamName, ?string $teamColor, bool $is
 }
 
 /**
+ * The Teams card's equipment line (v3.488.0): which of the catalog's types ($types, teamEquipmentTypes()) this team
+ * currently carries, as small chips, plus - for whoever may change it ($canEdit: command staff for any team, a
+ * team's own member for their team alone) - a checklist that posts to mission-team-equipment.php on every change.
+ *
+ * Mirrored in JS by teamEquipmentHtml()/renderTeamEquipment() for the same reason teamRosterHtml() mirrors the rest
+ * of this card: the 5s poll must not wipe what the first paint already drew, and here that matters even more, since
+ * an open dropdown must survive a poll tick, not just the chips reading the same.
+ */
+function teamEquipmentBlockHtml(array $team, array $types, bool $canEdit): string {
+    if (empty($types)) {
+        return '';
+    }
+    $activeIds = array_map('intval', $team['equipment'] ?? []);
+    $chips = '';
+    foreach ($types as $type) {
+        if (!in_array((int) $type['id'], $activeIds, true)) continue;
+        $chips .= '<span class="badge bg-info-subtle text-info-emphasis border me-1 mb-1">' . h($type['icon']) . ' ' . h($type['name']) . '</span>';
+    }
+    $edit = '';
+    if ($canEdit) {
+        $items = '';
+        foreach ($types as $type) {
+            $checked = in_array((int) $type['id'], $activeIds, true) ? ' checked' : '';
+            $id = 'teamEq' . (int) $team['id'] . '_' . (int) $type['id'];
+            $items .= '<li class="form-check mb-1 px-2"><input class="form-check-input team-equipment-check" type="checkbox" id="' . $id . '" data-type-id="' . (int) $type['id'] . '"' . $checked . '>'
+                . '<label class="form-check-label small" for="' . $id . '">' . h($type['icon']) . ' ' . h($type['name']) . '</label></li>';
+        }
+        $edit = '<div class="dropdown d-inline-block"><button type="button" class="btn btn-sm btn-link p-0 team-equipment-edit-btn" data-bs-toggle="dropdown" title="' . h(t('teams.equipment.edit_title')) . '">'
+            . '<i class="bi bi-plus-circle"></i> ' . h(t('teams.equipment.edit_btn')) . '</button>'
+            . '<ul class="dropdown-menu p-1" style="min-width:220px;">' . $items . '</ul></div>';
+    }
+    return '<div class="w-100 small mt-1 wr-team-equipment" data-team-id="' . (int) $team['id'] . '">'
+        . '<span class="wr-team-equipment-chips">' . $chips . '</span>' . $edit . '</div>';
+}
+
+/**
  * War Room: every mission team with its leader and full member roster, keyed
  * by team id (not a plain 0-indexed array — war-room.php's lazy
  * briefing-token backfill on the full-page render still needs the id as the
@@ -3872,6 +3908,11 @@ function loadMissionTeamsForMission(int $missionId): array {
             ];
         }
     }
+    $equipmentByTeam = missionTeamsEquipmentByTeam($missionId);
+    foreach ($teams as $tid => &$team) {
+        $team['equipment'] = $equipmentByTeam[$tid] ?? [];
+    }
+    unset($team);
     return $teams;
 }
 

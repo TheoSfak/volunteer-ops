@@ -779,6 +779,68 @@ function setMissionTeamsGps(array $mission, array $userIds, bool $on, int $byUse
     return $changed;
 }
 
+// ── Equipment ────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The equipment catalog (v3.488.0): what a team can be marked as carrying - AED, a stretcher, ... - managed by an
+ * admin on team-equipment-types.php, add/edit/delete. Ordered the way that page's own list is.
+ *
+ * @return array<int,array{id:int,name:string,icon:string}>
+ */
+function teamEquipmentTypes(bool $onlyActive = true): array {
+    return dbFetchAll(
+        "SELECT id, name, icon FROM team_equipment_types" . ($onlyActive ? " WHERE is_active = 1" : "") . " ORDER BY sort_order, name"
+    );
+}
+
+/**
+ * Every team of the mission with the equipment it currently carries, team_id => [equipment_type_id, ...]. A type an
+ * admin has since deactivated is left out - a chip for something no longer in the catalog would be a dead end.
+ */
+function missionTeamsEquipmentByTeam(int $missionId): array {
+    $rows = dbFetchAll(
+        "SELECT mte.team_id, mte.equipment_type_id
+           FROM mission_team_equipment mte
+           JOIN mission_teams mt ON mt.id = mte.team_id
+           JOIN team_equipment_types tet ON tet.id = mte.equipment_type_id
+          WHERE mt.mission_id = ? AND tet.is_active = 1",
+        [$missionId]
+    );
+    $byTeam = [];
+    foreach ($rows as $row) {
+        $byTeam[(int) $row['team_id']][] = (int) $row['equipment_type_id'];
+    }
+    return $byTeam;
+}
+
+/**
+ * Replaces the whole set of equipment a team carries - the same "send the complete set, not a diff" idiom as a
+ * multi-select save. Anything not in the active catalog (an id that was never real, or a type switched off since the
+ * caller last loaded the page) is silently dropped rather than refused: it is simply not one of the choices anymore.
+ * No permission check here - the caller (mission-team-equipment.php) decides who may touch which team.
+ * Returns null on success, or the words of a refusal.
+ */
+function setMissionTeamEquipment(int $missionId, int $teamId, array $equipmentTypeIds, int $byUserId): ?string {
+    $team = dbFetchOne("SELECT id FROM mission_teams WHERE id = ? AND mission_id = ?", [$teamId, $missionId]);
+    if (!$team) {
+        return t('common.team_not_found');
+    }
+    $validIds = array_map('intval', array_column(teamEquipmentTypes(true), 'id'));
+    $ids = array_values(array_unique(array_intersect(array_map('intval', $equipmentTypeIds), $validIds)));
+
+    missionTeamsTransaction(function () use ($teamId, $ids, $byUserId) {
+        dbExecute("DELETE FROM mission_team_equipment WHERE team_id = ?", [$teamId]);
+        foreach ($ids as $typeId) {
+            dbInsert(
+                "INSERT INTO mission_team_equipment (team_id, equipment_type_id, set_by, set_at) VALUES (?, ?, ?, NOW())",
+                [$teamId, $typeId, $byUserId]
+            );
+        }
+    });
+    logAudit('set_mission_team_equipment', 'mission_teams', $teamId, null, ['equipment_type_ids' => $ids]);
+    return null;
+}
+
 // ── The page ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -788,6 +850,7 @@ function setMissionTeamsGps(array $mission, array $userIds, bool $on, int $byUse
 function missionTeamsPageState(int $missionId): array {
     forgetActionRoomParticipantIds($missionId);
     $roster = missionTeamRoster($missionId);
+    $equipmentByTeam = missionTeamsEquipmentByTeam($missionId);
     $teams = [];
     foreach (dbFetchAll(
         "SELECT id, codename, team_number, color, transport, leader_id FROM mission_teams WHERE mission_id = ? ORDER BY created_at, id",
@@ -801,6 +864,7 @@ function missionTeamsPageState(int $missionId): array {
             'transport'  => normalizeTeamTransport($row['transport']),
             'leader_id'  => $row['leader_id'] !== null ? (int) $row['leader_id'] : null,
             'member_ids' => [],
+            'equipment'  => $equipmentByTeam[(int) $row['id']] ?? [],
         ];
     }
     $people = [];
@@ -843,6 +907,7 @@ function missionTeamsPageExtraStringKeys(): array {
         'teams.transport.foot', 'teams.transport.motorbike', 'teams.transport.car',
         'teams.delete_confirm', 'teams.delete_btn_title', 'teams.empty',
         'gps_participant.label', 'gps_participant.tick_title', 'captain.label', 'guest.org_unknown',
+        'teams.equipment.edit_btn', 'teams.equipment.edit_title',
     ];
 }
 
