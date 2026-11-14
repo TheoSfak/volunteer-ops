@@ -1,6 +1,6 @@
 <?php
 /**
- * VolunteerOps - Team Equipment Types Management (v3.488.0)
+ * VolunteerOps - Team Equipment Types Management (v3.488.0, icon picker v3.489.0)
  *
  * The catalog an Action Room team's equipment chips are drawn from (AED, a stretcher, ...) - add, edit, delete.
  * System admin only: the catalog is shared by every mission, not a mission's own setting. Used by the Teams card
@@ -12,6 +12,28 @@ requireLogin();
 requireRole([ROLE_SYSTEM_ADMIN]);
 
 $pageTitle = 'Υλικό Ομάδων';
+
+// A ready-made picker so an admin never has to go hunting for an emoji keyboard: common rescue/medical glyphs,
+// shown as big buttons (iconPickerHtml() below). The icon input stays a plain text field too, so a custom emoji
+// typed or pasted in still works - the picker is a shortcut, not the only way.
+// A few of the "obvious" rescue emoji (the knot, the ring buoy, the ladder) render as a blank box on common
+// fonts/browsers - newer Unicode additions most platforms haven't caught up to yet. Swapped for equally
+// recognisable, long-standing glyphs instead (checked against this app's own target browsers, not guessed).
+define('TEAM_EQUIPMENT_ICON_CHOICES', [
+    '⚡', '🛏️', '📏', '🩹', '💊', '🏥', '🚑', '🧯',
+    '🦺', '⛑️', '🔦', '🧰', '🎒', '📻', '🔧', '🧗',
+    '🚨', '🚁', '🚤', '🧭', '🔋', '🌡', '💉', '🩺',
+    '🧊', '⚓', '🧤', '🥽',
+]);
+
+/** The big-emoji grid under an icon input - clicking a button writes that emoji into $inputId via pickIcon(). */
+function iconPickerHtml(string $inputId): string {
+    $buttons = '';
+    foreach (TEAM_EQUIPMENT_ICON_CHOICES as $emoji) {
+        $buttons .= '<button type="button" class="btn btn-outline-secondary icon-pick-btn" onclick="pickIcon(\'' . $inputId . '\', this.textContent)">' . $emoji . '</button>';
+    }
+    return '<div class="icon-picker">' . $buttons . '</div>';
+}
 
 // ─── POST Actions ──────────────────────────────────────────────────────────────
 if (isPost()) {
@@ -167,7 +189,17 @@ include __DIR__ . '/includes/header.php';
     .admin-mobile-cards tr:not(:has(td[colspan])) td::before { content: attr(data-label); flex: 0 0 38%; color: var(--bs-secondary-color); font-weight: 600; text-align: left; }
     .admin-mobile-cards .mobile-card-actions { align-items: center; padding-top: .75rem !important; border-top: 1px solid var(--bs-border-color) !important; }
 }
+.icon-picker { display: flex; flex-wrap: wrap; gap: .35rem; max-height: 11rem; overflow-y: auto; }
+.icon-pick-btn { width: 2.75rem; height: 2.75rem; padding: 0; font-size: 1.5rem; line-height: 1; display: flex; align-items: center; justify-content: center; }
 </style>
+<script>
+// Writes the clicked emoji into the icon text input beside it - shared by the create modal and every edit modal
+// (team-equipment-types.php, v3.489.0). The input stays editable too, so a typed/pasted custom emoji still works.
+function pickIcon(inputId, icon) {
+    const input = document.getElementById(inputId);
+    if (input) input.value = icon;
+}
+</script>
 
 <!-- ════ CREATE MODAL ═══════════════════════════════════════════════════════ -->
 <div class="modal fade" id="createModal" tabindex="-1">
@@ -184,7 +216,7 @@ include __DIR__ . '/includes/header.php';
                     <div class="row g-2">
                         <div class="col-3">
                             <label class="form-label fw-semibold">Εικονίδιο</label>
-                            <input type="text" name="icon" class="form-control text-center" maxlength="10" value="🎒" placeholder="🎒">
+                            <input type="text" name="icon" id="createIconInput" class="form-control text-center" maxlength="10" value="🎒" placeholder="🎒">
                         </div>
                         <div class="col-9">
                             <label class="form-label fw-semibold">Όνομα <span class="text-danger">*</span></label>
@@ -192,7 +224,8 @@ include __DIR__ . '/includes/header.php';
                                    placeholder="π.χ. Φορείο - Scoop">
                         </div>
                     </div>
-                    <div class="form-text mt-2">Το εικονίδιο μπορεί να είναι ένα emoji (π.χ. ⚡, 🛏️, 📏) - εμφανίζεται δίπλα στο όνομα παντού.</div>
+                    <div class="form-text mt-2 mb-1">Διάλεξε ένα εικονίδιο, ή γράψε/κόλλησε το δικό σου emoji παραπάνω:</div>
+                    <?= iconPickerHtml('createIconInput') ?>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Ακύρωση</button>
@@ -220,13 +253,14 @@ include __DIR__ . '/includes/header.php';
                     <div class="row g-2">
                         <div class="col-3">
                             <label class="form-label fw-semibold">Εικονίδιο</label>
-                            <input type="text" name="icon" class="form-control text-center" maxlength="10" value="<?= h($t['icon']) ?>">
+                            <input type="text" name="icon" id="editIconInput<?= $t['id'] ?>" class="form-control text-center" maxlength="10" value="<?= h($t['icon']) ?>">
                         </div>
                         <div class="col-9">
                             <label class="form-label fw-semibold">Όνομα <span class="text-danger">*</span></label>
                             <input type="text" name="name" class="form-control" required maxlength="100" value="<?= h($t['name']) ?>">
                         </div>
                     </div>
+                    <?= iconPickerHtml('editIconInput' . $t['id']) ?>
                     <div class="mb-3 mt-2">
                         <label class="form-label fw-semibold">Σειρά εμφάνισης</label>
                         <input type="number" name="sort_order" class="form-control" value="<?= (int) $t['sort_order'] ?>">
