@@ -13,6 +13,7 @@
  *   citizens_manage   → implies citizens_view
  *   inventory_manage  → implies inventory_view
  *   volunteers_manage → implies volunteers_view
+ *   fleet_manage      → implies fleet_view
  */
 
 if (!defined('VOLUNTEEROPS')) {
@@ -52,6 +53,10 @@ function getPermissionMap(): array {
             ['slug' => 'inventory_view',     'label' => 'Απόθεμα (Προβολή Διαχείρισης)',       'icon' => 'bi-eye',              'description' => 'Ράφια, κατηγορίες, τοποθεσίες (implied από inventory_manage)'],
             ['slug' => 'inventory_manage',   'label' => 'Απόθεμα (Διαχείριση)',                'icon' => 'bi-box-seam',         'description' => 'Σημειώσεις υλικών, φόρμες & διαχείριση αποθέματος'],
         ],
+        'Στόλος' => [
+            ['slug' => 'fleet_view',         'label' => 'Στόλος (Προβολή)',                    'icon' => 'bi-eye',              'description' => 'Λίστα & κατάσταση οχημάτων (implied από fleet_manage)'],
+            ['slug' => 'fleet_manage',       'label' => 'Στόλος (Διαχείριση)',                 'icon' => 'bi-truck',            'description' => 'Δημιουργία, επεξεργασία οχημάτων & αλλαγή κατάστασης'],
+        ],
         'Πολίτες' => [
             ['slug' => 'citizens_view',      'label' => 'Πολίτες (Προβολή)',                   'icon' => 'bi-person-vcard',     'description' => 'Λίστα πολιτών (implied από citizens_manage)'],
             ['slug' => 'citizens_manage',    'label' => 'Πολίτες (Διαχείριση)',                'icon' => 'bi-file-earmark-medical', 'description' => 'Πιστοποιητικά πολιτών & τύποι πιστοποιητικών'],
@@ -90,5 +95,6 @@ function getImpliedSlugs(): array {
         'citizens_view'   => 'citizens_manage',
         'inventory_view'  => 'inventory_manage',
         'volunteers_view' => 'volunteers_manage',
+        'fleet_view'      => 'fleet_manage',
     ];
 }

@@ -8178,6 +8178,48 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 213,
+            'description' => "Fleet management, M1 (v3.482.0): the vehicle fleet (cars, motorbikes, vans, boats...) as its own entity, separate from inventory_locations.location_type='vehicle' (which only ever tagged a storage spot, never a real vehicle record). New `vehicles` table: plate/registration, label, type, department, odometer (value + unit, since a boat is tracked in engine hours, not km), fuel type, seats, status (available/maintenance/out_of_service). New `shift_vehicles` table assigns a vehicle to a shift, same shape as participation_requests but for vehicles - shift-form.php refuses to newly assign a vehicle whose status is not 'available' (an already-assigned vehicle that later goes into maintenance is left alone rather than silently dropped). Re-running it changes nothing.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS `vehicles` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `plate_number` VARCHAR(20) NOT NULL COMMENT 'Registration/plate number, or a boat''s registration',
+                    `label` VARCHAR(100) NOT NULL COMMENT 'Friendly name shown everywhere, e.g. \"Όχημα 1 - Ford Ranger\"',
+                    `type` ENUM('car','motorbike','van','truck','boat','other') NOT NULL DEFAULT 'car',
+                    `department_id` INT UNSIGNED NULL,
+                    `odometer_value` DECIMAL(10, 1) NULL COMMENT 'Current reading; km for road vehicles, engine hours for a boat',
+                    `odometer_unit` ENUM('km','engine_hours') NOT NULL DEFAULT 'km',
+                    `fuel_type` VARCHAR(30) NULL COMMENT 'Free text: βενζίνη, πετρέλαιο, υβριδικό, ηλεκτρικό...',
+                    `seats` TINYINT UNSIGNED NULL,
+                    `status` ENUM('available','maintenance','out_of_service') NOT NULL DEFAULT 'available' COMMENT 'maintenance/out_of_service block NEW shift assignment (shift-form.php); an existing assignment is left alone',
+                    `notes` TEXT NULL,
+                    `is_active` TINYINT(1) DEFAULT 1,
+                    `created_by` INT UNSIGNED NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY `unique_plate_number` (`plate_number`),
+                    FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+                    INDEX `idx_vehicles_status` (`status`),
+                    INDEX `idx_vehicles_active` (`is_active`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+                dbExecute("CREATE TABLE IF NOT EXISTS `shift_vehicles` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `shift_id` INT UNSIGNED NOT NULL,
+                    `vehicle_id` INT UNSIGNED NOT NULL,
+                    `assigned_by` INT UNSIGNED NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (`shift_id`) REFERENCES `shifts`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`assigned_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+                    UNIQUE KEY `unique_shift_vehicle` (`shift_id`, `vehicle_id`),
+                    INDEX `idx_shift_vehicles_vehicle` (`vehicle_id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

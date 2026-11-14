@@ -4,6 +4,7 @@
  */
 
 require_once __DIR__ . '/bootstrap.php';
+require_once __DIR__ . '/includes/fleet-functions.php';
 requirePermission('shifts_manage');
 
 $id = (int) get('id');
@@ -36,6 +37,14 @@ $requiredSkills = [];
 if ($shift && $shift['required_skills']) {
     $requiredSkills = json_decode($shift['required_skills'], true) ?: [];
 }
+
+// Vehicles: every active vehicle is listed (so a maintenance one is visible,
+// with an explanation, rather than silently missing); a maintenance vehicle
+// not already assigned to this shift is shown disabled.
+$assignedVehicles = $shift ? getShiftVehicles($shift['id']) : [];
+$assignedVehicleIds = array_column($assignedVehicles, 'id');
+$vehiclePickerList = getAllActiveVehicles();
+$vehicleTypes = getVehicleTypes();
 
 $errors = [];
 
@@ -108,6 +117,16 @@ if (isPost()) {
             logAudit('create', 'shifts', $id);
             setFlash('success', 'Η βάρδια δημιουργήθηκε.');
         }
+
+        $requestedVehicleIds = array_map('intval', post('vehicles', []) ?: []);
+        $skippedVehicleIds = syncShiftVehicles($id, $requestedVehicleIds, getCurrentUser()['id']);
+        if (!empty($skippedVehicleIds)) {
+            $skippedLabels = dbFetchAll(
+                "SELECT label FROM vehicles WHERE id IN (" . implode(',', $skippedVehicleIds) . ")"
+            );
+            setFlash('error', 'Δεν ανατέθηκαν (δεν είναι διαθέσιμα): ' . implode(', ', array_column($skippedLabels, 'label')));
+        }
+
         redirect('mission-view.php?id=' . $missionId);
     }
 }
@@ -219,7 +238,36 @@ include __DIR__ . '/includes/header.php';
                 </div>
             </div>
             <?php endif; ?>
-            
+
+            <?php if (!empty($vehiclePickerList)): ?>
+            <div class="mb-3">
+                <label class="form-label">Οχήματα</label>
+                <div class="row">
+                    <?php foreach ($vehiclePickerList as $veh):
+                        $isAssigned = in_array($veh['id'], $assignedVehicleIds, true);
+                        $isAssignable = $veh['status'] === 'available';
+                        $disabled = !$isAssigned && !$isAssignable;
+                    ?>
+                        <div class="col-md-4">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" name="vehicles[]"
+                                       value="<?= $veh['id'] ?>" id="vehicle<?= $veh['id'] ?>"
+                                       <?= $isAssigned ? 'checked' : '' ?>
+                                       <?= $disabled ? 'disabled' : '' ?>>
+                                <label class="form-check-label" for="vehicle<?= $veh['id'] ?>">
+                                    <i class="bi <?= getVehicleTypeIcon($veh['type']) ?> me-1"></i><?= h($veh['label']) ?>
+                                    <?php if (!$isAssignable): ?>
+                                        <span class="badge bg-warning text-dark"><?= h(getVehicleStatuses()[$veh['status']] ?? $veh['status']) ?></span>
+                                    <?php endif; ?>
+                                </label>
+                            </div>
+                        </div>
+                    <?php endforeach; ?>
+                </div>
+                <small class="text-muted">Ένα όχημα σε συντήρηση δεν μπορεί να ανατεθεί σε νέα βάρδια· ήδη ανατεθειμένα οχήματα παραμένουν.</small>
+            </div>
+            <?php endif; ?>
+
             <div class="mb-3">
                 <label class="form-label">Σημειώσεις (εσωτερικές)</label>
                 <textarea class="form-control" name="notes" rows="2"><?= h($form['notes']) ?></textarea>

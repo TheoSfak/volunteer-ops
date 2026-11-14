@@ -5,6 +5,7 @@
 
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/shift-swap-functions.php';
+require_once __DIR__ . '/includes/fleet-functions.php';
 requireLogin();
 
 $id = (int) get('id');
@@ -55,6 +56,8 @@ $participants = dbFetchAll(
      ORDER BY pr.status ASC, pr.created_at ASC",
     [$id]
 );
+
+$shiftVehicles = getShiftVehicles($id);
 
 // QR check-in feature flag
 $qrEnabled = getSetting('qr_checkin_enabled', '0') === '1';
@@ -862,7 +865,18 @@ include __DIR__ . '/includes/header.php';
                         <?php endforeach; ?>
                     </p>
                 <?php endif; endif; ?>
-                
+
+                <?php if (!empty($shiftVehicles)): ?>
+                    <p><strong><i class="bi bi-truck me-1"></i>Οχήματα:</strong><br>
+                        <?php foreach ($shiftVehicles as $veh): ?>
+                            <span class="badge bg-secondary">
+                                <i class="bi <?= getVehicleTypeIcon($veh['type']) ?> me-1"></i><?= h($veh['label']) ?>
+                                <?php if ($veh['status'] !== 'available'): ?> (σε συντήρηση)<?php endif; ?>
+                            </span>
+                        <?php endforeach; ?>
+                    </p>
+                <?php endif; ?>
+
                 <?php if ($shift['notes'] && $canManage): ?>
                     <div class="alert alert-secondary">
                         <strong>Σημειώσεις:</strong><br>

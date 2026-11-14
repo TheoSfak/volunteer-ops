@@ -390,6 +390,50 @@ CREATE TABLE IF NOT EXISTS `participation_requests` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- =============================================
+-- VEHICLES TABLE (Fleet management, M1)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `vehicles` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `plate_number` VARCHAR(20) NOT NULL,
+    `label` VARCHAR(100) NOT NULL,
+    `type` ENUM('car','motorbike','van','truck','boat','other') NOT NULL DEFAULT 'car',
+    `department_id` INT UNSIGNED NULL,
+    `odometer_value` DECIMAL(10, 1) NULL,
+    `odometer_unit` ENUM('km','engine_hours') NOT NULL DEFAULT 'km',
+    `fuel_type` VARCHAR(30) NULL,
+    `seats` TINYINT UNSIGNED NULL,
+    `status` ENUM('available','maintenance','out_of_service') NOT NULL DEFAULT 'available',
+    `notes` TEXT NULL,
+    `is_active` TINYINT(1) DEFAULT 1,
+    `created_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+
+    UNIQUE KEY `unique_plate_number` (`plate_number`),
+    FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    INDEX `idx_vehicles_status` (`status`),
+    INDEX `idx_vehicles_active` (`is_active`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
+-- SHIFT VEHICLES TABLE (vehicle assigned to a shift)
+-- =============================================
+CREATE TABLE IF NOT EXISTS `shift_vehicles` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `shift_id` INT UNSIGNED NOT NULL,
+    `vehicle_id` INT UNSIGNED NOT NULL,
+    `assigned_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    FOREIGN KEY (`shift_id`) REFERENCES `shifts`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`assigned_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    UNIQUE KEY `unique_shift_vehicle` (`shift_id`, `vehicle_id`),
+    INDEX `idx_shift_vehicles_vehicle` (`vehicle_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================
 -- ACHIEVEMENTS TABLE
 -- =============================================
 CREATE TABLE IF NOT EXISTS `achievements` (

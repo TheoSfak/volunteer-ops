@@ -1122,6 +1122,7 @@ function hasPagePermission(string $slug): bool {
         'citizens_view'   => ['citizens_manage'],
         'inventory_view'  => ['inventory_manage'],
         'volunteers_view' => ['volunteers_manage'],
+        'fleet_view'      => ['fleet_manage'],
     ];
 
     if (isset($implications[$slug])) {

@@ -1821,7 +1821,17 @@ if (isLoggedIn()) {
             <?php endif; ?>
             <!-- Παραρτήματα: accessible via Διοίκηση → Παραρτήματα -->
             <?php endif; // !isTraineeRescuer ?>
-            
+
+            <?php if (isSystemAdmin() || hasPagePermission('fleet_manage') || hasPagePermission('fleet_view')): ?>
+            <div class="sidebar-section" data-sec="fleet">Στόλος</div>
+
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'vehicles' ? 'active' : '' ?>" href="vehicles.php">
+                    <i class="bi bi-truck"></i> Οχήματα
+                </a>
+            </li>
+            <?php endif; ?>
+
             <div class="sidebar-section" data-sec="gamification">Gamification</div>
             
             <?php if (getSetting('points_enabled', '1') === '1'): ?>
