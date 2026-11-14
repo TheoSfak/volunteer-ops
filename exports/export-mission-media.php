@@ -45,14 +45,21 @@ if ($mission['status'] === STATUS_OPEN && empty($mission['show_in_ops'])) {
 }
 
 $canManageWarRoom = canManageActionRoom($mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, (int) $user['id']);
+// Closed/completed sends command staff to the read-only archive page
+// (war-room.php itself redirects there for them - see its own STATUS_CLOSED/
+// STATUS_COMPLETED check), so any error below needs to bounce back to
+// whichever of the two pages actually has this button.
+$backPage = in_array($mission['status'], [STATUS_CLOSED, STATUS_COMPLETED], true)
+    ? 'mission-archive.php?id=' . $missionId
+    : 'war-room.php?id=' . $missionId;
 if (!$canManageWarRoom) {
     setFlash('error', t('wr.access_denied'));
-    redirect('war-room.php?id=' . $missionId);
+    redirect($backPage);
 }
 
 if (!class_exists('ZipArchive')) {
     setFlash('error', t('media.download_all_zip_unavailable'));
-    redirect('war-room.php?id=' . $missionId);
+    redirect($backPage);
 }
 
 $rows = dbFetchAll(
@@ -98,7 +105,7 @@ foreach ($rows as $row) {
 
 if (empty($entries)) {
     setFlash('error', t('media.download_all_empty'));
-    redirect('war-room.php?id=' . $missionId);
+    redirect($backPage);
 }
 
 $zipFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vomedia_' . $missionId . '_' . bin2hex(random_bytes(4)) . '.zip';
@@ -106,7 +113,7 @@ $zipFile = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'vomedia_' . $missionId . 
 $zip = new ZipArchive();
 if ($zip->open($zipFile, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
     setFlash('error', t('media.download_all_zip_unavailable'));
-    redirect('war-room.php?id=' . $missionId);
+    redirect($backPage);
 }
 
 set_time_limit(300); // A mission's whole media set can run into several hundred MB of video.

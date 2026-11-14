@@ -338,7 +338,14 @@ include __DIR__ . '/includes/header.php';
     </div>
 
     <div class="ar-card" id="archiveMedia">
-        <h2><i class="bi bi-images me-1"></i><?= h(t('archive.media_title')) ?> <span class="badge bg-secondary"><?= count($media) ?></span></h2>
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <h2 class="mb-0"><i class="bi bi-images me-1"></i><?= h(t('archive.media_title')) ?> <span class="badge bg-secondary"><?= count($media) ?></span></h2>
+            <?php if ($media): ?>
+            <a href="exports/export-mission-media.php?mission_id=<?= $missionId ?>" class="btn btn-sm btn-outline-secondary" title="<?= h(t('media.download_all_title')) ?>">
+                <i class="bi bi-file-earmark-zip me-1"></i><?= h(t('media.download_all_btn')) ?>
+            </a>
+            <?php endif; ?>
+        </div>
         <?php if ($videoRetentionDays > 0): ?>
             <p class="small text-muted mb-2"><i class="bi bi-info-circle me-1"></i><?= h(t('archive.media_retention', ['days' => $videoRetentionDays])) ?></p>
         <?php endif; ?>
