@@ -5298,7 +5298,14 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
              The column itself still stretches, so the equal-height look
              next to the col-lg-8 is unchanged. -->
         <div class="card shadow-sm" data-card-id="mediaCard">
-            <div class="card-header"><h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i><?= t('media.panel_title') ?></h5></div>
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-camera-fill me-1"></i><?= t('media.panel_title') ?></h5>
+                <?php if ($canManageWarRoom): ?>
+                <a href="exports/export-mission-media.php?mission_id=<?= $missionId ?>" class="btn btn-sm btn-outline-secondary" title="<?= t('media.download_all_title') ?>">
+                    <i class="bi bi-file-earmark-zip me-1"></i><?= t('media.download_all_btn') ?>
+                </a>
+                <?php endif; ?>
+            </div>
             <div class="card-body d-flex flex-column" style="height:520px;">
                 <?php if ($isApprovedParticipant): ?>
                 <!-- The two solid-blue buttons are the direct-camera shortcuts, and
