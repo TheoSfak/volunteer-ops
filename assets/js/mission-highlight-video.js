@@ -1,5 +1,5 @@
 /**
- * Mission highlight video — client-side renderer (v3.495.0).
+ * Mission highlight video — client-side renderer (v3.496.0).
  *
  * Renders a short (20-40s) highlight reel entirely in the admin's browser:
  * a big opening title card (mission name + date, 3-4s), a music-backed
@@ -43,8 +43,9 @@
     // this is a cheap heuristic rather than real face tracking: rescue-op
     // photos are overwhelmingly people standing/walking, and a dead-centre
     // crop (0.5) keeps cropping heads off in favour of legs/ground once
-    // zoomed in. Biasing toward the upper third fixes the common case.
-    const FACE_BIAS_Y = 0.38;
+    // zoomed in. v3.495.0 shipped 0.38 but still lost faces often enough to
+    // report - moved further up toward the top third.
+    const FACE_BIAS_Y = 0.3;
 
     /** Total render duration and the per-slideshow-item slice, given how many media items were picked. */
     function computeTiming(selectedCount) {
@@ -60,10 +61,16 @@
         return typeof MediaRecorder !== 'undefined'
             && typeof HTMLCanvasElement !== 'undefined'
             && typeof HTMLCanvasElement.prototype.captureStream === 'function'
-            && (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') || MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') || MediaRecorder.isTypeSupported('video/webm'));
+            && (MediaRecorder.isTypeSupported('video/mp4') || MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus') || MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus') || MediaRecorder.isTypeSupported('video/webm'));
     }
 
+    // MP4 (H.264/AAC) first where the browser can actually record it: far
+    // better native playback elsewhere (iOS, WhatsApp, Windows' own player)
+    // than WebM, which several of those don't open at all. Falls back to
+    // WebM where MediaRecorder can't produce MP4.
     function pickMimeType() {
+        if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1.42E01E,mp4a.40.2')) return 'video/mp4;codecs=avc1.42E01E,mp4a.40.2';
+        if (MediaRecorder.isTypeSupported('video/mp4')) return 'video/mp4';
         if (MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')) return 'video/webm;codecs=vp9,opus';
         if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')) return 'video/webm;codecs=vp8,opus';
         return 'video/webm';

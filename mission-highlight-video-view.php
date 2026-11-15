@@ -59,13 +59,16 @@ if (!is_file($filePath) || !is_readable($filePath)) {
 
 $finfo = new finfo(FILEINFO_MIME_TYPE);
 $mime = $finfo->file($filePath) ?: 'video/webm';
-if ($mime !== 'video/webm') {
+// MP4 where the browser's MediaRecorder could produce it, WebM otherwise -
+// see mission-highlight-video.php's upload handler.
+$extensionByMime = ['video/webm' => 'webm', 'video/mp4' => 'mp4'];
+if (!isset($extensionByMime[$mime])) {
     http_response_code(415);
     exit(t('media.unsupported_file_type'));
 }
 
 $dayStr = date('Y-m-d', strtotime((string) $video['created_at']));
-$downloadName = preg_replace('/[^A-Za-z0-9._-]/', '_', 'highlight_' . $missionId . '_' . $dayStr) . '.webm';
+$downloadName = preg_replace('/[^A-Za-z0-9._-]/', '_', 'highlight_' . $missionId . '_' . $dayStr) . '.' . $extensionByMime[$mime];
 
 // Cache validators FIRST, exempt from the 304 on a ranged (scrubbing) request -
 // same ordering as mission-photo-view.php, for the same reason.

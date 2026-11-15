@@ -8,8 +8,9 @@
  *
  * The video itself is rendered entirely in the admin's browser (Canvas +
  * MediaRecorder - no ffmpeg/exec on the server, see assets/js/mission-highlight-video.js)
- * and handed to this endpoint as a finished .webm blob. This file only stores
- * it and answers status/delete - it does no rendering of its own.
+ * and handed to this endpoint as a finished blob - MP4 where the browser's
+ * MediaRecorder could produce it, WebM otherwise. This file only stores it
+ * and answers status/delete - it does no rendering of its own.
  *
  * action=status (GET) - anyone with $canManageWarRoom (same tier as the media
  *   zip download) may check/see the current video.
@@ -133,9 +134,12 @@ if ($action === 'upload') {
     $file = $_FILES['video'];
     $finfo = new finfo(FILEINFO_MIME_TYPE);
     $mime = $finfo->file($file['tmp_name']);
-    // The renderer only ever produces WebM (MediaRecorder's output format in
-    // every browser this feature targets - see assets/js/mission-highlight-video.js).
-    if ($mime !== 'video/webm') {
+    // The renderer tries MP4 (H.264/AAC) first where the browser's
+    // MediaRecorder supports it - far better native playback elsewhere
+    // (iOS, WhatsApp, Windows' own player) than WebM - falling back to WebM
+    // where it doesn't (see assets/js/mission-highlight-video.js's pickMimeType()).
+    $extensionByMime = ['video/webm' => 'webm', 'video/mp4' => 'mp4'];
+    if (!isset($extensionByMime[$mime])) {
         echo json_encode(['ok' => false, 'error' => t('video.invalid_type')]);
         exit;
     }
@@ -148,7 +152,7 @@ if ($action === 'upload') {
     // beside these files, same as mission-photo.php's uploads/mission-photos/.
     $destDir = __DIR__ . '/uploads/mission-highlight-videos/';
     ensurePrivateUploadDir($destDir);
-    $storedName = 'mhvideo_' . $missionId . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.webm';
+    $storedName = 'mhvideo_' . $missionId . '_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $extensionByMime[$mime];
     if (!move_uploaded_file($file['tmp_name'], $destDir . $storedName)) {
         echo json_encode(['ok' => false, 'error' => t('video.save_failed')]);
         exit;

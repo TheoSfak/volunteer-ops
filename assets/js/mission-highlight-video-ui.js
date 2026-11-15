@@ -167,7 +167,13 @@
         form.append('orientation', orientation);
         form.append('music_track_id', musicTrackId || '');
         form.append('csrf_token', ctx.csrf);
-        form.append('video', blob, 'highlight.webm');
+        // blob.type reflects whatever pickMimeType() actually recorded with
+        // (MP4 where the browser's MediaRecorder supports it, else WebM) -
+        // the upload endpoint tells them apart by the file's real content
+        // (finfo), not this name, but the extension still has to match for
+        // players/OSes that go by it.
+        const ext = blob.type.indexOf('mp4') !== -1 ? 'mp4' : 'webm';
+        form.append('video', blob, 'highlight.' + ext);
         const res = await fetch(endpoint, {method: 'POST', body: form}).then(r => r.json());
         if (!res.ok) throw new Error(res.error || 'upload failed');
         return res;
