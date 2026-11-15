@@ -95,15 +95,19 @@ function triageProtocols(): array {
                 // person can walk and still be bleeding out (v3.376.0).
                 'walk'       => ['yes' => 'walk_bleeding', 'no' => 'breathing'],
                 'walk_bleeding' => ['yes' => ['red', 'major_bleeding'], 'no' => ['green', 'walks'], 'legacy_no' => true],
-                'breathing'  => ['yes' => 'rr_over_30', 'no' => 'airway'],
-                'airway'     => ['yes' => ['red', 'breathes_after_airway'], 'no' => ['black', 'apneic']],
-                'rr_over_30' => ['yes' => ['red', 'rr_over_30'], 'no' => 'bleeding'],
-                // Added v3.371.0. START has no step for bleeding, and a
-                // casualty who breathes normally, obeys and bleeds out would
-                // come out yellow. «Yes» is red; the question tells the
+                // Breathing normally does not rule out bleeding to death, so
+                // the bleeding check comes right after breathing — before the
+                // respiratory-rate count — the same place "stop the bleed
+                // first" puts it. Moved here in v3.498.0 (was after
+                // rr_over_30, added v3.371.0); the colour for every answer
+                // combination is unchanged, a casualty with both only reaches
+                // the tree sooner. «Yes» is red; the question tells the
                 // rescuer to stop the bleeding NOW, before moving on.
                 // `legacy_no`: see triageEvaluate().
-                'bleeding'   => ['yes' => ['red', 'major_bleeding'], 'no' => 'perfusion', 'legacy_no' => true],
+                'breathing'  => ['yes' => 'bleeding', 'no' => 'airway'],
+                'airway'     => ['yes' => ['red', 'breathes_after_airway'], 'no' => ['black', 'apneic']],
+                'bleeding'   => ['yes' => ['red', 'major_bleeding'], 'no' => 'rr_over_30', 'legacy_no' => true],
+                'rr_over_30' => ['yes' => ['red', 'rr_over_30'], 'no' => 'perfusion'],
                 // Radial pulse absent, OR capillary refill over 2 seconds.
                 'perfusion'  => ['yes' => ['red', 'poor_perfusion'], 'no' => 'obeys'],
                 'obeys'      => ['yes' => ['yellow', 'obeys'], 'no' => ['red', 'no_obey']],
@@ -118,14 +122,15 @@ function triageProtocols(): array {
             'nodes' => [
                 'walk'           => ['yes' => 'walk_bleeding', 'no' => 'breathing'],
                 'walk_bleeding'  => ['yes' => ['red', 'major_bleeding'], 'no' => ['green', 'walks'], 'legacy_no' => true],
-                'breathing'      => ['yes' => 'rr_child', 'no' => 'airway'],
+                // Same reordering as START's tree, v3.498.0: bleeding checked
+                // right after breathing, before the respiratory-rate band.
+                'breathing'      => ['yes' => 'bleeding', 'no' => 'airway'],
                 'airway'         => ['yes' => ['red', 'breathes_after_airway'], 'no' => 'pulse_apneic'],
                 'pulse_apneic'   => ['yes' => 'rescue_breaths', 'no' => ['black', 'apneic_no_pulse']],
                 'rescue_breaths' => ['yes' => ['red', 'breathes_after_rescue'], 'no' => ['black', 'apneic']],
+                'bleeding'       => ['yes' => ['red', 'major_bleeding'], 'no' => 'rr_child', 'legacy_no' => true],
                 // Breathing under 15 or over 45 a minute.
-                'rr_child'       => ['yes' => ['red', 'rr_child'], 'no' => 'bleeding'],
-                // Added v3.371.0, same step as in START.
-                'bleeding'       => ['yes' => ['red', 'major_bleeding'], 'no' => 'pulse', 'legacy_no' => true],
+                'rr_child'       => ['yes' => ['red', 'rr_child'], 'no' => 'pulse'],
                 'pulse'          => ['yes' => 'avpu', 'no' => ['red', 'no_pulse']],
                 // AVPU: Alert, responds to Voice, or localises Pain appropriately.
                 'avpu'           => ['yes' => ['yellow', 'avpu_ok'], 'no' => ['red', 'avpu']],

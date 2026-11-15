@@ -24,13 +24,15 @@ const TRIAGE_PROTOCOLS = {
             // The server takes an old offline {walk: true} as «no» (legacy_no).
             walk:       {yes: 'walk_bleeding', no: 'breathing'},
             walk_bleeding: {yes: ['red', 'major_bleeding'], no: ['green', 'walks']},
-            breathing:  {yes: 'rr_over_30', no: 'airway'},
-            airway:     {yes: ['red', 'breathes_after_airway'], no: ['black', 'apneic']},
-            rr_over_30: {yes: ['red', 'rr_over_30'], no: 'bleeding'},
-            // Added v3.371.0. The server accepts an old offline assessment
+            // Bleeding is checked right after breathing, before the
+            // respiratory-rate band (v3.498.0, was after rr_over_30) — "stop
+            // the bleed first". The server accepts an old offline assessment
             // without this answer as «no» (legacy_no in functions-triage.php);
             // the phone always asks.
-            bleeding:   {yes: ['red', 'major_bleeding'], no: 'perfusion'},
+            breathing:  {yes: 'bleeding', no: 'airway'},
+            airway:     {yes: ['red', 'breathes_after_airway'], no: ['black', 'apneic']},
+            bleeding:   {yes: ['red', 'major_bleeding'], no: 'rr_over_30'},
+            rr_over_30: {yes: ['red', 'rr_over_30'], no: 'perfusion'},
             perfusion:  {yes: ['red', 'poor_perfusion'], no: 'obeys'},
             obeys:      {yes: ['yellow', 'obeys'], no: ['red', 'no_obey']},
         },
@@ -41,12 +43,14 @@ const TRIAGE_PROTOCOLS = {
         nodes: {
             walk:           {yes: 'walk_bleeding', no: 'breathing'},
             walk_bleeding:  {yes: ['red', 'major_bleeding'], no: ['green', 'walks']},
-            breathing:      {yes: 'rr_child', no: 'airway'},
+            // Same reordering as START, v3.498.0: bleeding before the
+            // respiratory-rate band.
+            breathing:      {yes: 'bleeding', no: 'airway'},
             airway:         {yes: ['red', 'breathes_after_airway'], no: 'pulse_apneic'},
             pulse_apneic:   {yes: 'rescue_breaths', no: ['black', 'apneic_no_pulse']},
             rescue_breaths: {yes: ['red', 'breathes_after_rescue'], no: ['black', 'apneic']},
-            rr_child:       {yes: ['red', 'rr_child'], no: 'bleeding'},
-            bleeding:       {yes: ['red', 'major_bleeding'], no: 'pulse'},
+            bleeding:       {yes: ['red', 'major_bleeding'], no: 'rr_child'},
+            rr_child:       {yes: ['red', 'rr_child'], no: 'pulse'},
             pulse:          {yes: 'avpu', no: ['red', 'no_pulse']},
             avpu:           {yes: ['yellow', 'avpu_ok'], no: ['red', 'avpu']},
         },
