@@ -156,9 +156,9 @@
 <p>Παράδειγμα: ένας ενήλικας που δεν περπατά, αναπνέει κανονικά, δεν αιμορραγεί, έχει καλή αιμάτωση και εκτελεί εντολές βγαίνει <span class="pill y">Κίτρινο</span>.</p>
 <div class="shots">
   <figure><img src="screenshots/triage/v03-q-perpatai.jpg" alt="Περπατάει;"><figcaption><b>Βήμα 1.</b> «Περπατάει;» Αν ΝΑΙ, ρωτά και για αιμορραγία πριν βγάλει πράσινο.</figcaption></figure>
-  <figure><img src="screenshots/triage/v04-q-anapnei.jpg" alt="Αναπνέει;"><figcaption><b>Βήμα 2.</b> «Αναπνέει;» Αν ΟΧΙ, πηγαίνει στη διάνοιξη αεραγωγού (ενότητα 6).</figcaption></figure>
-  <figure><img src="screenshots/triage/v05-q-anapnoes.jpg" alt="Αναπνοές πάνω από 30"><figcaption><b>Βήμα 3.</b> «Αναπνοές πάνω από 30 το λεπτό;» Μετρήστε 15″ και πολλαπλασιάστε επί 4.</figcaption></figure>
-  <figure><img src="screenshots/triage/v06-q-aimorragia.jpg" alt="Έντονη αιμορραγία"><figcaption><b>Βήμα 4.</b> «Έντονη αιμορραγία που δεν σταματά;» Αν ΝΑΙ, <b>σταματήστε την πρώτα</b> (άμεση πίεση ή τουρνικέ) και μετά πατήστε ΝΑΙ. Το αποτέλεσμα είναι κόκκινο.</figcaption></figure>
+  <figure><img src="screenshots/triage/v04-q-anapnei.jpg" alt="Αναπνέει;"><figcaption><b>Βήμα 2.</b> «Αναπνέει;» Αν ΟΧΙ, πηγαίνει στη διάνοιξη αεραγωγού (ενότητα 6). Αν ΝΑΙ, ρωτά πρώτα για αιμορραγία.</figcaption></figure>
+  <figure><img src="screenshots/triage/v06-q-aimorragia.jpg" alt="Έντονη αιμορραγία"><figcaption><b>Βήμα 3.</b> «Έντονη αιμορραγία που δεν σταματά;» Αν ΝΑΙ, <b>σταματήστε την πρώτα</b> (άμεση πίεση ή τουρνικέ) και μετά πατήστε ΝΑΙ. Το αποτέλεσμα είναι κόκκινο. Ρωτιέται πριν τις αναπνοές, ώστε μια έντονη αιμορραγία να βγάζει κόκκινο το συντομότερο.</figcaption></figure>
+  <figure><img src="screenshots/triage/v05-q-anapnoes.jpg" alt="Αναπνοές πάνω από 30"><figcaption><b>Βήμα 4.</b> «Αναπνοές πάνω από 30 το λεπτό;» Μετρήστε 15″ και πολλαπλασιάστε επί 4.</figcaption></figure>
   <figure><img src="screenshots/triage/v07-q-aimatosi.jpg" alt="Αιμάτωση"><figcaption><b>Βήμα 5.</b> «Λείπει ο κερκιδικός σφυγμός ή η επαναπλήρωση αργεί πάνω από 2″;» Πιέστε το νύχι και αφήστε.</figcaption></figure>
   <figure><img src="screenshots/triage/v08-q-entoles.jpg" alt="Εκτελεί εντολές"><figcaption><b>Βήμα 6.</b> «Εκτελεί απλές εντολές;» π.χ. «Σφίξε το χέρι μου». ΝΑΙ δίνει κίτρινο, ΟΧΙ κόκκινο.</figcaption></figure>
   <figure><img src="screenshots/triage/v09-apotelesma-kitrino.jpg" alt="Αποτέλεσμα"><figcaption><b>Αποτέλεσμα.</b> Η οθόνη παίρνει το χρώμα και λέει γιατί (εδώ: «Εκτελεί εντολές»). Από κάτω ζητά τον αριθμό κάρτας.</figcaption></figure>
@@ -363,10 +363,10 @@
   <tr><th>Ερώτηση</th><th style="width:24%">ΝΑΙ</th><th style="width:24%">ΟΧΙ</th></tr>
   <tr><td>Περπατάει;</td><td>→ αιμορραγία (πεζός)</td><td>→ Αναπνέει;</td></tr>
   <tr><td>Έντονη αιμορραγία που δεν σταματά; (πεζός)</td><td><span class="pill r">Κόκκινο</span></td><td><span class="pill g">Πράσινο</span></td></tr>
-  <tr><td>Αναπνέει;</td><td>→ αναπνοές &gt;30</td><td>→ διάνοιξη αεραγωγού</td></tr>
+  <tr><td>Αναπνέει;</td><td>→ αιμορραγία</td><td>→ διάνοιξη αεραγωγού</td></tr>
   <tr><td>Κάνε διάνοιξη αεραγωγού. Αναπνέει τώρα;</td><td><span class="pill r">Κόκκινο</span></td><td><span class="pill b">Μαύρο</span></td></tr>
-  <tr><td>Αναπνοές πάνω από 30 το λεπτό;</td><td><span class="pill r">Κόκκινο</span></td><td>→ αιμορραγία</td></tr>
-  <tr><td>Έντονη αιμορραγία που δεν σταματά;</td><td><span class="pill r">Κόκκινο</span></td><td>→ αιμάτωση</td></tr>
+  <tr><td>Έντονη αιμορραγία που δεν σταματά;</td><td><span class="pill r">Κόκκινο</span></td><td>→ αναπνοές &gt;30</td></tr>
+  <tr><td>Αναπνοές πάνω από 30 το λεπτό;</td><td><span class="pill r">Κόκκινο</span></td><td>→ αιμάτωση</td></tr>
   <tr><td>Λείπει ο κερκιδικός σφυγμός ή η επαναπλήρωση αργεί πάνω από 2″;</td><td><span class="pill r">Κόκκινο</span></td><td>→ εντολές</td></tr>
   <tr><td>Εκτελεί απλές εντολές;</td><td><span class="pill y">Κίτρινο</span></td><td><span class="pill r">Κόκκινο</span></td></tr>
 </table>
@@ -375,11 +375,11 @@
   <tr><th>Ερώτηση</th><th style="width:24%">ΝΑΙ</th><th style="width:24%">ΟΧΙ</th></tr>
   <tr><td>Περπατάει; (βρέφος που δεν περπατά ακόμα: ΟΧΙ)</td><td>→ αιμορραγία (πεζός)</td><td>→ Αναπνέει;</td></tr>
   <tr><td>Έντονη αιμορραγία που δεν σταματά; (πεζός)</td><td><span class="pill r">Κόκκινο</span></td><td><span class="pill g">Πράσινο</span></td></tr>
-  <tr><td>Αναπνέει;</td><td>→ αναπνοές</td><td>→ διάνοιξη αεραγωγού</td></tr>
+  <tr><td>Αναπνέει;</td><td>→ αιμορραγία</td><td>→ διάνοιξη αεραγωγού</td></tr>
   <tr><td>Κάνε διάνοιξη αεραγωγού. Αναπνέει τώρα;</td><td><span class="pill r">Κόκκινο</span></td><td>→ σφυγμός</td></tr>
   <tr><td>Ψηλαφάται περιφερικός σφυγμός; (άπνοια)</td><td>→ 5 εμφυσήσεις: αναπνέει τώρα; ΝΑΙ <span class="pill r">Κόκκινο</span>, ΟΧΙ <span class="pill b">Μαύρο</span></td><td><span class="pill b">Μαύρο</span></td></tr>
-  <tr><td>Αναπνοές κάτω από 15 ή πάνω από 45 το λεπτό;</td><td><span class="pill r">Κόκκινο</span></td><td>→ αιμορραγία</td></tr>
-  <tr><td>Έντονη αιμορραγία που δεν σταματά;</td><td><span class="pill r">Κόκκινο</span></td><td>→ σφυγμός</td></tr>
+  <tr><td>Έντονη αιμορραγία που δεν σταματά;</td><td><span class="pill r">Κόκκινο</span></td><td>→ αναπνοές</td></tr>
+  <tr><td>Αναπνοές κάτω από 15 ή πάνω από 45 το λεπτό;</td><td><span class="pill r">Κόκκινο</span></td><td>→ σφυγμός</td></tr>
   <tr><td>Ψηλαφάται περιφερικός σφυγμός;</td><td>→ εγρήγορση</td><td><span class="pill r">Κόκκινο</span></td></tr>
   <tr><td>Είναι σε εγρήγορση, αντιδρά στη φωνή ή εντοπίζει τον πόνο;</td><td><span class="pill y">Κίτρινο</span></td><td><span class="pill r">Κόκκινο</span></td></tr>
 </table>
