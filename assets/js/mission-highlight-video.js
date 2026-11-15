@@ -1,11 +1,12 @@
 /**
- * Mission highlight video — client-side renderer (v3.494.0).
+ * Mission highlight video — client-side renderer (v3.495.0).
  *
  * Renders a short (20-40s) highlight reel entirely in the admin's browser:
  * a big opening title card (mission name + date, 3-4s), a music-backed
- * slideshow of admin-picked photos/videos with a persistent lower-third
- * (mission name + date, always on screen), and a closing card (team logo +
- * mission name + the org's own tagline, 5s). The team's own logo (Settings
+ * slideshow of admin-picked photos/videos (crossfading into each other) with
+ * a persistent lower-third (mission name + date, always on screen), and a
+ * closing card (team logo + mission name + the org's own tagline, 5s). The
+ * team's own logo (Settings
  * > app_logo) also stays in the corner through the title card and slideshow.
  * No ffmpeg/exec on the server - production hosting has no shell access (see
  * memory: epidrasis.iloveweb.gr has no file/shell access for the user). The
@@ -27,6 +28,7 @@
 
     const TITLE_SCREEN_MS = 3500; // opening card: mission name + date, big letters (3-4s)
     const OUTRO_MS = 5000;  // closing card: team logo + mission name, fading to black
+    const TRANSITION_MS = 500; // crossfade between consecutive slideshow items
     const MIN_ITEM_MS = 1200;
     const MIN_TOTAL_MS = 20000;
     const MAX_TOTAL_MS = 40000;
@@ -360,6 +362,10 @@
                 const startTime = performance.now();
                 let lastItemIndex = -1;
                 let itemStartTime = 0;
+                // Capped relative to the slot itself: with many items perItemMs can
+                // shrink down near MIN_ITEM_MS, and a fixed 500ms crossfade would
+                // then eat most of a short slot's actual viewing time.
+                const transitionMs = Math.min(TRANSITION_MS, timing.perItemMs * 0.3);
 
                 function frame(now) {
                     if (stopped) return;
@@ -384,7 +390,10 @@
                             lastItemIndex = index;
                             itemStartTime = now;
                             const el = mediaElements[index];
-                            if (el && el.tagName === 'VIDEO') { el.currentTime = 0; el.play().catch(() => {}); }
+                            // paused-check: a video already playing here was pre-started by
+                            // the previous item's crossfade-in below, and restarting it from
+                            // 0 again right as it becomes "current" would visibly jump/restart it.
+                            if (el && el.tagName === 'VIDEO' && el.paused) { el.currentTime = 0; el.play().catch(() => {}); }
                         }
                         const el = mediaElements[index];
                         const progress = Math.min(1, itemElapsed / timing.perItemMs);
@@ -392,6 +401,23 @@
                         if (el) {
                             if (el.tagName === 'VIDEO' && el.ended) { el.currentTime = 0; el.play().catch(() => {}); }
                             drawKenBurns(ctx, el, canvasW, canvasH, progress, direction);
+                        }
+                        // Crossfade into the next item over the slot's last `transitionMs`,
+                        // rather than a hard cut - a static (progress 0) frame of the next
+                        // item fading in on top keeps this simple and robust.
+                        const nextIndex = index + 1;
+                        const remainingMs = timing.perItemMs - itemElapsed;
+                        if (nextIndex < media.length && remainingMs < transitionMs) {
+                            const nextEl = mediaElements[nextIndex];
+                            if (nextEl) {
+                                if (nextEl.tagName === 'VIDEO' && nextEl.paused) { nextEl.currentTime = 0; nextEl.play().catch(() => {}); }
+                                const fadeAlpha = 1 - Math.max(0, remainingMs) / transitionMs;
+                                const nextDirection = nextIndex % 2 === 0 ? 1 : -1;
+                                ctx.save();
+                                ctx.globalAlpha = fadeAlpha;
+                                drawKenBurns(ctx, nextEl, canvasW, canvasH, 0, nextDirection);
+                                ctx.restore();
+                            }
                         }
                         drawBottomBanner(ctx, canvasW, canvasH, loc.title || '', formatMissionDate(loc.start_datetime));
                         drawCornerLogo(ctx, canvasW, canvasH, logoImg);
