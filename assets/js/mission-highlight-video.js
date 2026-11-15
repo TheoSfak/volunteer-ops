@@ -1,54 +1,35 @@
 /**
- * Mission highlight video — client-side renderer (v3.491.0).
+ * Mission highlight video — client-side renderer (v3.493.0).
  *
  * Renders a short (20-40s) highlight reel entirely in the admin's browser:
- * a big opening title card (mission name + date), a quick real-satellite
- * zoom onto the mission's pin, a music-backed slideshow of admin-picked
- * photos/videos, and a closing card (team logo + mission name + the org's
- * own tagline). The team's own logo (Settings > app_logo) also stays in the
- * corner for the whole clip. No ffmpeg/exec on the server - production
- * hosting has no shell access (see memory: epidrasis.iloveweb.gr has no
- * file/shell access for the user). The finished .webm Blob is handed to
- * mission-highlight-video.php to store.
+ * a big opening title card (mission name + date), a music-backed slideshow
+ * of admin-picked photos/videos, and a closing card (team logo + mission
+ * name + the org's own tagline). The team's own logo (Settings > app_logo)
+ * also stays in the corner for the whole clip. No ffmpeg/exec on the server
+ * - production hosting has no shell access (see memory: epidrasis.iloveweb.gr
+ * has no file/shell access for the user). The finished .webm Blob is handed
+ * to mission-highlight-video.php to store.
  *
- * Tile math/zoom: draws ONE Esri World_Imagery tile directly (same tile
- * server as assets/js/esri-imagery.js), loaded as <img crossorigin=
- * "anonymous"> - the M3 spike (canvas + captureStream + MediaRecorder, a
- * stricter consumer than esri-imagery.js's own getImageData() call) proved
- * this does NOT taint the canvas, no same-origin tile-proxy is needed.
- *
- * v3.491.0 dropped the original multi-zoom-level "whole Earth down to the
- * pin" cascade (crossfading through z2..z16, a different source tile per
- * level): its crop math placed the pin's own pixel position as the crop
- * centre WITHOUT clamping it inside the tile's 0..256 bounds, so whenever
- * the point sat left/above the tile's centre (about half the time, and
- * always true at the lowest zoom bands) the source rectangle spilled past
- * the tile's edge; drawImage does not stretch to cover that shortfall, it
- * just paints a narrower slice, leaving the uncovered destination edge as
- * flat background colour - a real-world "shows black" rather than the
- * hoped-for seamless zoom. Rather than fetch neighbouring tiles to patch
- * that, the fix is simpler: one single tile at PIN_ZOOM, Ken-Burns-zoomed
- * into the pin with the same clamped-crop approach the photo/video
- * slideshow already uses (which never spills), so the mission's real
- * location is visible immediately and correctly from the first frame.
+ * v3.490.0-v3.492.0 opened with a zoom from a world view (or later, a single
+ * local tile) onto the mission's pin, fetching Esri World_Imagery tiles
+ * directly. Dropped in v3.493.0: it broke twice in a row for reasons this
+ * app's own code could reproduce locally but production could not (a
+ * clamping bug, then a second report even after that fix) - most likely
+ * Esri's free tile service treating epidrasis.iloveweb.gr differently than
+ * localhost (rate-limiting or referrer-based blocking neither this code nor
+ * local testing can see). Rather than keep chasing an external dependency
+ * this feature doesn't strictly need, the opening title card now leads
+ * straight into the slideshow.
  */
 (function (root) {
     'use strict';
 
-    const TILE_SIZE = 256;
-    const ESRI_IMAGERY_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-    // A single, reliably-covered "local area" zoom level - not esri-imagery.js's
-    // full grey-tile-detection range, just one level inside its documented
-    // worst case (imagery can be as shallow as z17 in some places).
-    const PIN_ZOOM = 15;
-
-    const TITLE_SCREEN_MS = 2200; // opening card: mission name + date, big letters, before the zoom starts
-    const PHASE1_MS = 6000;  // world-view zoom + pin drop
+    const TITLE_SCREEN_MS = 2200; // opening card: mission name + date, big letters
     const OUTRO_MS = 3000;  // closing card: team logo + mission name, fading to black
     const MIN_ITEM_MS = 1200;
     const MIN_TOTAL_MS = 20000;
     const MAX_TOTAL_MS = 40000;
-    // Corner logo footprint (phases 0-2) and outro logo footprint, both as a
+    // Corner logo footprint (title card + slideshow) and outro logo footprint, both as a
     // fraction of canvas size - kept in one place since both draw functions
     // need them and the aspect ratio must stay the uploaded file's own.
     const CORNER_LOGO_MAX_W = 0.16, CORNER_LOGO_MAX_H = 0.14, CORNER_LOGO_PAD = 0.03;
@@ -62,29 +43,10 @@
     // zoomed in. Biasing toward the upper third fixes the common case.
     const FACE_BIAS_Y = 0.38;
 
-    function esriTileUrl(z, x, y) {
-        return ESRI_IMAGERY_URL.replace('{z}', z).replace('{y}', y).replace('{x}', x);
-    }
-
-    /** Standard Web Mercator slippy-map tile containing (lat, lng) at integer zoom z, plus the point's pixel offset inside that 256px tile. */
-    function latLngToTile(lat, lng, z) {
-        const n = Math.pow(2, z);
-        const latRad = lat * Math.PI / 180;
-        const x = (lng + 180) / 360 * n;
-        const y = (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n;
-        const tileX = Math.floor(x);
-        const tileY = Math.floor(y);
-        return {
-            z, x: tileX, y: tileY,
-            fx: (x - tileX) * TILE_SIZE,
-            fy: (y - tileY) * TILE_SIZE,
-        };
-    }
-
     /** Total render duration and the per-slideshow-item slice, given how many media items were picked. */
     function computeTiming(selectedCount) {
         const n = Math.max(1, selectedCount);
-        const overhead = TITLE_SCREEN_MS + PHASE1_MS + OUTRO_MS;
+        const overhead = TITLE_SCREEN_MS + OUTRO_MS;
         const total = Math.max(MIN_TOTAL_MS, Math.min(MAX_TOTAL_MS, overhead + n * 3000));
         const slideshowMs = total - overhead;
         const perItemMs = Math.max(MIN_ITEM_MS, slideshowMs / n);
@@ -127,62 +89,14 @@
         });
     }
 
-    /**
-     * Zooms from the whole 256x256 tile down to a tight crop centred on the
-     * pin's own pixel position (fx, fy) inside it. `progress` 0..1. Unlike
-     * the old multi-level cascade this replaced, (cx, cy) is clamped to stay
-     * `half` away from every edge, so the crop square can never spill past
-     * the tile's own bounds - the actual cause of the old "shows black" bug
-     * (drawImage doesn't stretch to cover a source rect that runs off the
-     * image, it just paints a narrower slice of the destination).
-     */
-    function drawPinZoom(ctx, img, fx, fy, canvasW, canvasH, progress) {
-        const startCrop = TILE_SIZE, endCrop = TILE_SIZE * 0.3;
-        const cropSize = startCrop - (startCrop - endCrop) * easeOutCubic(Math.min(1, progress));
-        const half = cropSize / 2;
-        const cx = Math.max(half, Math.min(TILE_SIZE - half, fx));
-        const cy = Math.max(half, Math.min(TILE_SIZE - half, fy));
-        const sx = cx - half, sy = cy - half;
-        const scale = Math.max(canvasW, canvasH) / cropSize;
-        const destW = cropSize * scale, destH = cropSize * scale;
-        const destX = (canvasW - destW) / 2, destY = (canvasH - destH) / 2;
-        ctx.drawImage(img, sx, sy, cropSize, cropSize, destX, destY, destW, destH);
-    }
-
     function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
-    function easeOutBack(t) {
-        const c1 = 1.70158, c3 = c1 + 1;
-        return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
-    }
-
-    function drawPinDrop(ctx, canvasW, canvasH, progress) {
-        // progress 0..1 over the drop animation, eased for a small bounce landing.
-        const eased = easeOutBack(Math.min(1, progress));
-        const dropHeight = canvasH * 0.4;
-        const x = canvasW / 2;
-        const y = canvasH / 2 - (1 - eased) * dropHeight;
-        const r = Math.min(canvasW, canvasH) * 0.02;
-        ctx.save();
-        ctx.fillStyle = '#dc2626';
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = Math.max(2, r * 0.25);
-        ctx.beginPath();
-        ctx.arc(x, y - r, r, 0, Math.PI * 2);
-        ctx.moveTo(x, y - r);
-        ctx.lineTo(x - r * 0.8, y + r * 1.6);
-        ctx.lineTo(x + r * 0.8, y + r * 1.6);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-        ctx.restore();
-    }
 
     /**
      * Opening card (phase 0): big mission name + date, centered, on a dark
      * backdrop - "big letters at the beginning" rather than a small banner
      * mid-slideshow. `progress` is 0..1 over TITLE_SCREEN_MS; the text fades
      * and rises in over the first ~25%, holds, then fades out over the last
-     * ~25% so it doesn't just cut into the zoom.
+     * ~25% so it doesn't just cut into the slideshow.
      */
     function drawOpeningTitle(ctx, canvasW, canvasH, missionTitle, dateLabel, progress) {
         ctx.save();
@@ -218,7 +132,7 @@
         ctx.restore();
     }
 
-    /** Persistent corner brand mark (phases 0-2): the team's own logo, drawn at its native aspect ratio with no background chip so its own transparency (if any) stays intact. */
+    /** Persistent corner brand mark (title card + slideshow, not the outro which gets its own centered logo): the team's own logo, drawn at its native aspect ratio with no background chip so its own transparency (if any) stays intact. */
     function drawCornerLogo(ctx, canvasW, canvasH, logoImg) {
         if (!logoImg) return;
         const srcW = logoImg.naturalWidth || logoImg.width || 1;
@@ -243,7 +157,7 @@
     }
 
     /**
-     * Outro (phase 3): fades the last slide to dark, then brings in the
+     * Outro (phase 2): fades the last slide to dark, then brings in the
      * team's own logo big and centered with the mission name underneath and
      * the org's own tagline (Settings > app_description) under that, holding
      * before a final fade to black - a proper close rather than the old
@@ -319,7 +233,7 @@
      *
      * @param {Object} opts
      * @param {string} opts.orientation 'landscape' (1280x720) or 'portrait' (720x1280)
-     * @param {{lat:number,lng:number,title:string,start_datetime:?string}} opts.missionLocation
+     * @param {{title:string,start_datetime:?string}} opts.missionLocation
      * @param {Array<{url:string,type:'photo'|'video'}>} opts.selectedMedia same-origin URLs (mission-photo-view.php)
      * @param {string} opts.musicTrackUrl same-origin or public URL to the chosen track's mp3
      * @param {?string} [opts.teamLogoUrl] same-origin URL to the org's app_logo setting (uploads/logos/...); omitted/null draws no logo
@@ -344,7 +258,6 @@
             const media = opts.selectedMedia || [];
             const timing = computeTiming(media.length);
             const loc = opts.missionLocation || {};
-            const hasPin = typeof loc.lat === 'number' && typeof loc.lng === 'number';
 
             let stopped = false;
             let visibilityHandler = null;
@@ -354,15 +267,7 @@
             const fail = (err) => { if (stopped) return; stopped = true; cleanup(); reject(err); };
 
             Promise.resolve().then(async () => {
-                // ── Preload: the one pin-area tile, media elements, music ──────
-                let pinTile = null;
-                if (hasPin) {
-                    const t = latLngToTile(loc.lat, loc.lng, PIN_ZOOM);
-                    pinTile = await loadImage(esriTileUrl(t.z, t.x, t.y), 'anonymous')
-                        .then(img => ({img, fx: t.fx, fy: t.fy}))
-                        .catch(() => null);
-                }
-
+                // ── Preload: media elements, music, logo ───────────────────────
                 const mediaElements = await Promise.all(media.map(m =>
                     (m.type === 'video' ? loadVideo(m.url) : loadImage(m.url)).catch(() => null)
                 ));
@@ -435,28 +340,15 @@
                     ctx.fillStyle = '#0b1220';
                     ctx.fillRect(0, 0, canvasW, canvasH);
 
-                    const slideshowStart = TITLE_SCREEN_MS + PHASE1_MS;
-                    const slideshowEnd = slideshowStart + timing.perItemMs * media.length;
+                    const slideshowEnd = TITLE_SCREEN_MS + timing.perItemMs * media.length;
 
                     if (elapsed < TITLE_SCREEN_MS) {
                         // ── Phase 0: opening title card (big letters) ──
                         drawOpeningTitle(ctx, canvasW, canvasH, loc.title || '', formatMissionDate(loc.start_datetime), elapsed / TITLE_SCREEN_MS);
                         drawCornerLogo(ctx, canvasW, canvasH, logoImg);
-                    } else if (elapsed < slideshowStart) {
-                        // ── Phase 1: real satellite zoom onto the pin, then it drops ──
-                        const phase1Elapsed = elapsed - TITLE_SCREEN_MS;
-                        const zoomMs = PHASE1_MS * 0.75;
-                        const dropMs = PHASE1_MS - zoomMs;
-                        if (pinTile) {
-                            drawPinZoom(ctx, pinTile.img, pinTile.fx, pinTile.fy, canvasW, canvasH, phase1Elapsed / zoomMs);
-                        }
-                        if (phase1Elapsed > zoomMs) {
-                            drawPinDrop(ctx, canvasW, canvasH, (phase1Elapsed - zoomMs) / dropMs);
-                        }
-                        drawCornerLogo(ctx, canvasW, canvasH, logoImg);
                     } else if (elapsed < slideshowEnd) {
-                        // ── Phase 2: slideshow ──
-                        const phase2Elapsed = elapsed - slideshowStart;
+                        // ── Phase 1: slideshow ──
+                        const phase2Elapsed = elapsed - TITLE_SCREEN_MS;
                         const index = Math.min(media.length - 1, Math.floor(phase2Elapsed / timing.perItemMs));
                         const itemElapsed = phase2Elapsed - index * timing.perItemMs;
                         if (index !== lastItemIndex) {
@@ -474,7 +366,7 @@
                         }
                         drawCornerLogo(ctx, canvasW, canvasH, logoImg);
                     } else {
-                        // ── Phase 3: outro (its own big, centered logo - no corner mark here) ──
+                        // ── Phase 2: outro (its own big, centered logo - no corner mark here) ──
                         const outroElapsed = elapsed - slideshowEnd;
                         drawOutro(ctx, canvasW, canvasH, Math.min(1, outroElapsed / OUTRO_MS), logoImg, loc.title || '', opts.orgTagline || '');
                     }
@@ -505,8 +397,8 @@
 
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = {
-            latLngToTile, computeTiming, kenBurnsTransform, formatMissionDate,
-            PIN_ZOOM, MIN_TOTAL_MS, MAX_TOTAL_MS, MIN_ITEM_MS,
+            computeTiming, kenBurnsTransform, formatMissionDate,
+            MIN_TOTAL_MS, MAX_TOTAL_MS, MIN_ITEM_MS,
         };
     }
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -2,43 +2,20 @@
 //
 // assets/js/mission-highlight-video.js: the client-side renderer for the
 // mission highlight video feature. Only the pure, canvas-free pieces are
-// checked here (tile math, timing budget, Ken Burns transform, date
-// formatting) - the actual canvas/MediaRecorder painting needs a real
-// browser and was verified by the M3 spike instead.
+// checked here (timing budget, Ken Burns transform, date formatting) - the
+// actual canvas/MediaRecorder painting needs a real browser.
+//
+// v3.493.0 dropped the Esri satellite-tile zoom phase entirely (broke twice
+// in production for reasons untraceable from here - see the file's own
+// docblock), taking the tile-math tests (latLngToTile, PIN_ZOOM) with it.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-    latLngToTile, computeTiming, kenBurnsTransform, formatMissionDate,
-    PIN_ZOOM, MIN_TOTAL_MS, MAX_TOTAL_MS, MIN_ITEM_MS,
+    computeTiming, kenBurnsTransform, formatMissionDate,
+    MIN_TOTAL_MS, MAX_TOTAL_MS, MIN_ITEM_MS,
 } = require('../../assets/js/mission-highlight-video.js');
-
-test('latLngToTile matches the standard slippy-map formula at zoom 0 (whole world, one tile)', () => {
-    const t = latLngToTile(0, 0, 0);
-    assert.equal(t.z, 0);
-    assert.equal(t.x, 0);
-    assert.equal(t.y, 0);
-    // (0,0) is exactly the centre of the single z0 tile.
-    assert.ok(Math.abs(t.fx - 128) < 0.01);
-    assert.ok(Math.abs(t.fy - 128) < 0.01);
-});
-
-test('latLngToTile: a known reference point (Heraklion) lands in a sane tile range at a normal zoom', () => {
-    const t = latLngToTile(35.3387, 25.1442, 14);
-    assert.equal(t.z, 14);
-    // At z14 there are 2^14 = 16384 tiles per axis.
-    assert.ok(t.x > 0 && t.x < 16384);
-    assert.ok(t.y > 0 && t.y < 16384);
-    assert.ok(t.fx >= 0 && t.fx < 256);
-    assert.ok(t.fy >= 0 && t.fy < 256);
-});
-
-test('latLngToTile: moving east increases the tile x at a fixed zoom', () => {
-    const west = latLngToTile(35.0, 24.0, 12);
-    const east = latLngToTile(35.0, 26.0, 12);
-    assert.ok(east.x >= west.x);
-});
 
 test('computeTiming: total duration stays within the 20-40s band while the per-item minimum allows it', () => {
     for (const n of [1, 2, 5, 10]) {
@@ -98,9 +75,3 @@ test('formatMissionDate: empty/invalid input is the empty string, never "Invalid
     assert.equal(formatMissionDate('not-a-date'), '');
 });
 
-test('PIN_ZOOM stays within Esri\'s documented worst-case coverage depth', () => {
-    // esri-imagery.js: real imagery can be as shallow as z17 in some places.
-    // Staying at 15 keeps this feature one level inside that everywhere.
-    assert.ok(PIN_ZOOM < 17);
-    assert.ok(PIN_ZOOM > 0);
-});
