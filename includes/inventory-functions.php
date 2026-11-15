@@ -88,7 +88,7 @@ function inventoryTablesExist() {
  */
 function requireInventoryTables() {
     if (!inventoryTablesExist()) {
-        setFlash('error', 'Οι πίνακες αποθέματος δεν έχουν δημιουργηθεί. Εκτελέστε πρώτα το <a href="migrate_v3.php">migrate_v3.php</a>.');
+        setFlash('error', 'Οι πίνακες αποθέματος δεν έχουν δημιουργηθεί σε αυτήν την εγκατάσταση. Επικοινωνήστε με τον διαχειριστή συστήματος.');
         redirect('dashboard.php');
     }
 }

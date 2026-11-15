@@ -64,15 +64,25 @@ your change stores, exposes, or retains.
 
 ## Database changes
 
-Schema changes need a migration in `sql/migrations/` that runs cleanly against an
-existing installation. Do not modify `schema.sql` alone — existing deployments will
-never see it.
+Schema changes need a new entry in the `$migrations` array in `includes/migrations.php`
+(bump `DB_SCHEMA_VERSION` in `config.php` to match) — that is the only migration path
+that actually runs automatically against both production deployments, on every
+request, regardless of how the deploy happened. Do not modify `schema.sql` alone —
+existing deployments will never see it; `schema.sql`/`inventory_schema.sql` only run
+once, at fresh install, so update them too for new installs to stay in sync, but
+`includes/migrations.php` is what carries the change to everyone already running the
+app. Do not add a migration under `sql/migrations/` — that folder is only picked up by
+`update.php`'s separate GitHub-release updater, which a plain `git pull` deploy never
+runs; relying on it has already caused tables (`weather_cache`, `fire_hotspot_cache`)
+to silently go missing on some deployments.
 
 ## Testing your change
 
-There is no automated test suite covering most of the application. Before opening a
-pull request, exercise the affected screens manually against a local installation
-and say in the description what you tested and in which roles.
+PHPUnit tests live in `tests/` and run in CI (`.github/workflows/ci.yml`) — add
+coverage there for anything in `includes/migrations.php` or other pure/near-pure
+logic. Most page-level UI still has no automated coverage, so also exercise the
+affected screens manually against a local installation and say in the pull request
+description what you tested and in which roles.
 
 ## Questions
 

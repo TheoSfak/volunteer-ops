@@ -15,7 +15,7 @@ requireRole([ROLE_SYSTEM_ADMIN]);
 
 // Check inventory tables exist
 if (!inventoryTablesExist()) {
-    echo "<h2>❌ Οι πίνακες αποθέματος δεν υπάρχουν. Τρέξτε πρώτα το <a href='migrate_v3.php'>migrate_v3.php</a></h2>";
+    echo "<h2>❌ Οι πίνακες αποθέματος δεν υπάρχουν σε αυτήν την εγκατάσταση.</h2>";
     exit;
 }
 
