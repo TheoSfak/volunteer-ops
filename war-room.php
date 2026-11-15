@@ -6779,6 +6779,9 @@ window.HV_CONTEXT = {
     missionLocation: <?= json_encode(['lat' => $mission['latitude'] ? (float) $mission['latitude'] : null, 'lng' => $mission['longitude'] ? (float) $mission['longitude'] : null, 'title' => $mission['title'], 'start_datetime' => $mission['start_datetime']], JSON_UNESCAPED_UNICODE) ?>,
     csrf: <?= json_encode(csrfToken()) ?>,
     canGenerate: <?= json_encode(isSystemAdmin()) ?>,
+    // Same app_logo setting/file the header and print views already use (see
+    // includes/header.php) - drawn as a persistent corner mark + outro logo.
+    teamLogoUrl: <?= (!empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLogo)) ? json_encode('uploads/logos/' . $appLogo, JSON_UNESCAPED_UNICODE) : 'null' ?>,
 };
 </script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/mission-highlight-video.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/mission-highlight-video.js') ?>"></script>

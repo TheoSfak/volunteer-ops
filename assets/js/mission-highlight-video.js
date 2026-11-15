@@ -2,9 +2,11 @@
  * Mission highlight video — client-side renderer (v3.490.0).
  *
  * Renders a short (20-40s) highlight reel entirely in the admin's browser:
- * a satellite zoom from a world view down to the mission's pin, then a
- * music-backed slideshow of admin-picked photos/videos with a title card.
- * No ffmpeg/exec on the server - production hosting has no shell access
+ * a big opening title card (mission name + date), a satellite zoom from a
+ * world view down to the mission's pin, a music-backed slideshow of
+ * admin-picked photos/videos, and a closing card (team logo + mission name).
+ * The team's own logo (Settings > app_logo) also stays in the corner for
+ * the whole clip. No ffmpeg/exec on the server - production hosting has no shell access
  * (see memory: epidrasis.iloveweb.gr has no file/shell access for the user).
  * The finished .webm Blob is handed to mission-highlight-video.php to store.
  *
@@ -33,12 +35,17 @@
     const START_ZOOM = 2;
     const END_ZOOM = 16;
 
+    const TITLE_SCREEN_MS = 2200; // opening card: mission name + date, big letters, before the zoom starts
     const PHASE1_MS = 6000;  // world-view zoom + pin drop
-    const PHASE3_MS = 2500;  // outro
+    const OUTRO_MS = 3000;  // closing card: team logo + mission name, fading to black
     const MIN_ITEM_MS = 1200;
     const MIN_TOTAL_MS = 20000;
     const MAX_TOTAL_MS = 40000;
-    const TITLE_CARD_MS = 2500; // how long the mission name/date overlay shows at the start of phase 2
+    // Corner logo footprint (phases 0-2) and outro logo footprint, both as a
+    // fraction of canvas size - kept in one place since both draw functions
+    // need them and the aspect ratio must stay the uploaded file's own.
+    const CORNER_LOGO_MAX_W = 0.16, CORNER_LOGO_MAX_H = 0.14, CORNER_LOGO_PAD = 0.03;
+    const OUTRO_LOGO_MAX_W = 0.22, OUTRO_LOGO_MAX_H = 0.22;
 
     function esriTileUrl(z, x, y) {
         return ESRI_IMAGERY_URL.replace('{z}', z).replace('{y}', y).replace('{x}', x);
@@ -62,10 +69,11 @@
     /** Total render duration and the per-slideshow-item slice, given how many media items were picked. */
     function computeTiming(selectedCount) {
         const n = Math.max(1, selectedCount);
-        const total = Math.max(MIN_TOTAL_MS, Math.min(MAX_TOTAL_MS, PHASE1_MS + PHASE3_MS + n * 3000));
-        const slideshowMs = total - PHASE1_MS - PHASE3_MS;
+        const overhead = TITLE_SCREEN_MS + PHASE1_MS + OUTRO_MS;
+        const total = Math.max(MIN_TOTAL_MS, Math.min(MAX_TOTAL_MS, overhead + n * 3000));
+        const slideshowMs = total - overhead;
         const perItemMs = Math.max(MIN_ITEM_MS, slideshowMs / n);
-        return {totalMs: Math.round(PHASE1_MS + perItemMs * n + PHASE3_MS), perItemMs, tooMany: perItemMs <= MIN_ITEM_MS && n > 1 && (slideshowMs / n) < MIN_ITEM_MS};
+        return {totalMs: Math.round(overhead + perItemMs * n), perItemMs, tooMany: perItemMs <= MIN_ITEM_MS && n > 1 && (slideshowMs / n) < MIN_ITEM_MS};
     }
 
     function isMissionHighlightVideoSupported() {
@@ -147,28 +155,106 @@
         ctx.restore();
     }
 
-    function drawTitleCard(ctx, canvasW, canvasH, missionTitle, dateLabel, alpha) {
+    /**
+     * Opening card (phase 0): big mission name + date, centered, on a dark
+     * backdrop - "big letters at the beginning" rather than a small banner
+     * mid-slideshow. `progress` is 0..1 over TITLE_SCREEN_MS; the text fades
+     * and rises in over the first ~25%, holds, then fades out over the last
+     * ~25% so it doesn't just cut into the zoom.
+     */
+    function drawOpeningTitle(ctx, canvasW, canvasH, missionTitle, dateLabel, progress) {
         ctx.save();
-        ctx.globalAlpha = alpha;
-        const bannerH = canvasH * 0.22;
-        const grad = ctx.createLinearGradient(0, canvasH - bannerH, 0, canvasH);
-        grad.addColorStop(0, 'rgba(0,0,0,0)');
-        grad.addColorStop(1, 'rgba(0,0,0,0.75)');
-        ctx.fillStyle = grad;
-        ctx.fillRect(0, canvasH - bannerH, canvasW, bannerH);
+        ctx.fillStyle = '#0b1220';
+        ctx.fillRect(0, 0, canvasW, canvasH);
+        const vignette = ctx.createRadialGradient(canvasW / 2, canvasH / 2, canvasH * 0.2, canvasW / 2, canvasH / 2, canvasH * 0.75);
+        vignette.addColorStop(0, 'rgba(255,255,255,0.05)');
+        vignette.addColorStop(1, 'rgba(0,0,0,0.35)');
+        ctx.fillStyle = vignette;
+        ctx.fillRect(0, 0, canvasW, canvasH);
 
+        const fadeIn = Math.min(1, progress / 0.25);
+        const fadeOut = progress > 0.75 ? Math.max(0, (1 - progress) / 0.25) : 1;
+        const alpha = Math.min(fadeIn, fadeOut);
+        const rise = (1 - easeOutCubic(fadeIn)) * canvasH * 0.04;
+
+        ctx.globalAlpha = alpha;
         ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
         ctx.textBaseline = 'alphabetic';
-        const titleSize = Math.round(canvasW * 0.045);
+        ctx.shadowColor = 'rgba(0,0,0,0.85)';
+        ctx.shadowBlur = 10;
+        const titleSize = Math.round(canvasW * 0.085);
         ctx.font = 'bold ' + titleSize + 'px sans-serif';
+        ctx.fillText(missionTitle, canvasW / 2, canvasH / 2 + rise, canvasW * 0.92);
+
+        if (dateLabel) {
+            const dateSize = Math.round(canvasW * 0.034);
+            ctx.font = dateSize + 'px sans-serif';
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+            ctx.fillText(dateLabel, canvasW / 2, canvasH / 2 + rise + titleSize * 1.15, canvasW * 0.92);
+        }
+        ctx.restore();
+    }
+
+    /** Persistent corner brand mark (phases 0-2): the team's own logo, drawn at its native aspect ratio with no background chip so its own transparency (if any) stays intact. */
+    function drawCornerLogo(ctx, canvasW, canvasH, logoImg) {
+        if (!logoImg) return;
+        const srcW = logoImg.naturalWidth || logoImg.width || 1;
+        const srcH = logoImg.naturalHeight || logoImg.height || 1;
+        let w = canvasW * CORNER_LOGO_MAX_W, h = w * (srcH / srcW);
+        const maxH = canvasH * CORNER_LOGO_MAX_H;
+        if (h > maxH) { h = maxH; w = h * (srcW / srcH); }
+        const pad = canvasW * CORNER_LOGO_PAD;
+        ctx.save();
+        ctx.shadowColor = 'rgba(0,0,0,0.55)';
+        ctx.shadowBlur = 8;
+        ctx.drawImage(logoImg, canvasW - pad - w, pad, w, h);
+        ctx.restore();
+    }
+
+    /**
+     * Outro (phase 3): fades the last slide to dark, then brings in the
+     * team's own logo big and centered with the mission name underneath and
+     * a small wordmark, holding before a final fade to black - a proper
+     * close rather than the old abrupt cut to a flat colour. `progress` is
+     * 0..1 over OUTRO_MS.
+     */
+    function drawOutro(ctx, canvasW, canvasH, progress, logoImg, missionTitle) {
+        const bgAlpha = Math.min(1, progress / 0.45);
+        ctx.save();
+        ctx.globalAlpha = bgAlpha;
+        ctx.fillStyle = '#05080e';
+        ctx.fillRect(0, 0, canvasW, canvasH);
+        ctx.restore();
+
+        let contentAlpha;
+        if (progress < 0.35) contentAlpha = 0;
+        else if (progress > 0.85) contentAlpha = Math.max(0, (1 - progress) / 0.15);
+        else contentAlpha = Math.min(1, (progress - 0.35) / 0.2);
+        if (contentAlpha <= 0) return;
+
+        ctx.save();
+        ctx.globalAlpha = contentAlpha;
+        let blockBottom = canvasH * 0.42;
+        if (logoImg) {
+            const srcW = logoImg.naturalWidth || logoImg.width || 1;
+            const srcH = logoImg.naturalHeight || logoImg.height || 1;
+            let w = canvasW * OUTRO_LOGO_MAX_W, h = w * (srcH / srcW);
+            const maxH = canvasH * OUTRO_LOGO_MAX_H;
+            if (h > maxH) { h = maxH; w = h * (srcW / srcH); }
+            const cy = canvasH * 0.4;
+            ctx.drawImage(logoImg, (canvasW - w) / 2, cy - h / 2, w, h);
+            blockBottom = cy + h / 2;
+        }
+        ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
         ctx.shadowColor = 'rgba(0,0,0,0.8)';
-        ctx.shadowBlur = 6;
-        ctx.fillText(missionTitle, canvasW / 2, canvasH - bannerH * 0.45, canvasW * 0.9);
-
-        const dateSize = Math.round(canvasW * 0.028);
-        ctx.font = dateSize + 'px sans-serif';
-        ctx.fillText(dateLabel, canvasW / 2, canvasH - bannerH * 0.18, canvasW * 0.9);
+        ctx.shadowBlur = 8;
+        ctx.font = 'bold ' + Math.round(canvasW * 0.042) + 'px sans-serif';
+        ctx.fillText(missionTitle || '', canvasW / 2, blockBottom + canvasH * 0.09, canvasW * 0.88);
+        ctx.font = Math.round(canvasW * 0.022) + 'px sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.fillText('VolunteerOps', canvasW / 2, blockBottom + canvasH * 0.15, canvasW * 0.88);
         ctx.restore();
     }
 
@@ -204,6 +290,7 @@
      * @param {{lat:number,lng:number,title:string,start_datetime:?string}} opts.missionLocation
      * @param {Array<{url:string,type:'photo'|'video'}>} opts.selectedMedia same-origin URLs (mission-photo-view.php)
      * @param {string} opts.musicTrackUrl same-origin or public URL to the chosen track's mp3
+     * @param {?string} [opts.teamLogoUrl] same-origin URL to the org's app_logo setting (uploads/logos/...); omitted/null draws no logo
      * @param {(fraction:number)=>void} [opts.onProgress]
      * @param {AbortSignal} [opts.signal] abort the render (e.g. the modal was closed)
      */
@@ -252,6 +339,8 @@
                 const mediaElements = await Promise.all(media.map(m =>
                     (m.type === 'video' ? loadVideo(m.url) : loadImage(m.url)).catch(() => null)
                 ));
+
+                const logoImg = opts.teamLogoUrl ? await loadImage(opts.teamLogoUrl).catch(() => null) : null;
 
                 const audioCtx = new (root.AudioContext || root.webkitAudioContext)();
                 const musicEl = document.createElement('audio');
@@ -319,12 +408,20 @@
                     ctx.fillStyle = '#0b1220';
                     ctx.fillRect(0, 0, canvasW, canvasH);
 
-                    if (elapsed < PHASE1_MS) {
+                    const slideshowStart = TITLE_SCREEN_MS + PHASE1_MS;
+                    const slideshowEnd = slideshowStart + timing.perItemMs * media.length;
+
+                    if (elapsed < TITLE_SCREEN_MS) {
+                        // ── Phase 0: opening title card (big letters) ──
+                        drawOpeningTitle(ctx, canvasW, canvasH, loc.title || '', formatMissionDate(loc.start_datetime), elapsed / TITLE_SCREEN_MS);
+                        drawCornerLogo(ctx, canvasW, canvasH, logoImg);
+                    } else if (elapsed < slideshowStart) {
                         // ── Phase 1: world-view zoom into the pin, then it drops ──
+                        const phase1Elapsed = elapsed - TITLE_SCREEN_MS;
                         const zoomMs = PHASE1_MS * 0.75;
                         const dropMs = PHASE1_MS - zoomMs;
                         if (hasPin && tiles.length) {
-                            const zt = Math.min(1, elapsed / zoomMs);
+                            const zt = Math.min(1, phase1Elapsed / zoomMs);
                             const vz = START_ZOOM + easeOutCubic(zt) * (END_ZOOM - START_ZOOM);
                             const zInt = Math.min(END_ZOOM - 1, Math.floor(vz));
                             const bandT = vz - zInt;
@@ -337,12 +434,13 @@
                                 drawCover(ctx, next.img, next.fx, next.fy, TILE_SIZE, canvasW, canvasH, fadeAlpha);
                             }
                         }
-                        if (elapsed > zoomMs) {
-                            drawPinDrop(ctx, canvasW, canvasH, (elapsed - zoomMs) / dropMs);
+                        if (phase1Elapsed > zoomMs) {
+                            drawPinDrop(ctx, canvasW, canvasH, (phase1Elapsed - zoomMs) / dropMs);
                         }
-                    } else if (elapsed < PHASE1_MS + timing.perItemMs * media.length) {
+                        drawCornerLogo(ctx, canvasW, canvasH, logoImg);
+                    } else if (elapsed < slideshowEnd) {
                         // ── Phase 2: slideshow ──
-                        const phase2Elapsed = elapsed - PHASE1_MS;
+                        const phase2Elapsed = elapsed - slideshowStart;
                         const index = Math.min(media.length - 1, Math.floor(phase2Elapsed / timing.perItemMs));
                         const itemElapsed = phase2Elapsed - index * timing.perItemMs;
                         if (index !== lastItemIndex) {
@@ -358,19 +456,11 @@
                             if (el.tagName === 'VIDEO' && el.ended) { el.currentTime = 0; el.play().catch(() => {}); }
                             drawKenBurns(ctx, el, canvasW, canvasH, progress, direction);
                         }
-                        if (phase2Elapsed < TITLE_CARD_MS) {
-                            const alpha = phase2Elapsed > TITLE_CARD_MS - 400 ? Math.max(0, (TITLE_CARD_MS - phase2Elapsed) / 400) : 1;
-                            drawTitleCard(ctx, canvasW, canvasH, loc.title || '', formatMissionDate(loc.start_datetime), alpha);
-                        }
+                        drawCornerLogo(ctx, canvasW, canvasH, logoImg);
                     } else {
-                        // ── Phase 3: outro ──
-                        const outroElapsed = elapsed - (PHASE1_MS + timing.perItemMs * media.length);
-                        const alpha = Math.min(1, outroElapsed / 600);
-                        ctx.save();
-                        ctx.globalAlpha = alpha;
-                        ctx.fillStyle = '#0b1220';
-                        ctx.fillRect(0, 0, canvasW, canvasH);
-                        ctx.restore();
+                        // ── Phase 3: outro (its own big, centered logo - no corner mark here) ──
+                        const outroElapsed = elapsed - slideshowEnd;
+                        drawOutro(ctx, canvasW, canvasH, Math.min(1, outroElapsed / OUTRO_MS), logoImg, loc.title || '');
                     }
 
                     if (elapsed >= timing.totalMs) {
