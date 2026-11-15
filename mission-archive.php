@@ -219,6 +219,12 @@ $archive = [
     'dispatches' => $dispatches, 'areas' => $areas, 'sectors' => $sectors,
     'routes' => $routes, 'incidents' => $incidents, 'mapPoints' => $mapPoints,
     'media' => $mediaForMap,
+    'missionLocation' => [
+        'lat' => $mission['latitude'] ? (float) $mission['latitude'] : null,
+        'lng' => $mission['longitude'] ? (float) $mission['longitude'] : null,
+        'title' => $mission['title'],
+        'start_datetime' => $mission['start_datetime'],
+    ],
 ];
 $jsKeys = [
     'archive.loading', 'archive.load_failed', 'archive.no_trails', 'archive.timeline_empty', 'archive.speed',
@@ -345,6 +351,9 @@ include __DIR__ . '/includes/header.php';
                 <i class="bi bi-file-earmark-zip me-1"></i><?= h(t('media.download_all_btn')) ?>
             </a>
             <?php endif; ?>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="highlightVideoBtn" data-bs-toggle="modal" data-bs-target="#highlightVideoModal" title="<?= isSystemAdmin() ? h(t('video.generate_title')) : h(t('video.view_title')) ?>">
+                <i class="bi bi-film me-1"></i><?= isSystemAdmin() ? h(t('video.generate_btn')) : h(t('video.view_btn')) ?>
+            </button>
         </div>
         <?php if ($videoRetentionDays > 0): ?>
             <p class="small text-muted mb-2"><i class="bi bi-info-circle me-1"></i><?= h(t('archive.media_retention', ['days' => $videoRetentionDays])) ?></p>
@@ -692,5 +701,20 @@ include __DIR__ . '/includes/header.php';
     if (mediaModalEl) mediaModalEl.addEventListener('hidden.bs.modal', () => { mediaBody.innerHTML = ''; });
 })();
 </script>
+
+<?php include __DIR__ . '/includes/highlight-video-modal.php'; ?>
+<script>
+// Not ARCHIVE.missionId/.missionLocation: ARCHIVE is declared inside the page's
+// own (function(){...})() block above and is not a global, so it is not
+// reachable from this later, separate <script> tag.
+window.HV_CONTEXT = {
+    missionId: <?= (int) $missionId ?>,
+    missionLocation: <?= json_encode($archive['missionLocation'], JSON_UNESCAPED_UNICODE) ?>,
+    csrf: <?= json_encode(csrfToken()) ?>,
+    canGenerate: <?= json_encode(isSystemAdmin()) ?>,
+};
+</script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/mission-highlight-video.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/mission-highlight-video.js') ?>"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/mission-highlight-video-ui.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/mission-highlight-video-ui.js') ?>"></script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>

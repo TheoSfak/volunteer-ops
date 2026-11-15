@@ -29,3 +29,13 @@ if ($mediaPurge['days'] === 0) {
     echo "Deleted {$mediaPurge['deleted']} video file(s), {$mediaPurge['already_gone']} already missing, {$mediaPurge['failed']} could not be removed.\n";
 }
 echo "\n";
+
+$highlightPurge = purgeExpiredMissionHighlightVideos();
+
+if ($highlightPurge['days'] === 0) {
+    echo "Mission highlight video retention: off (mission_highlight_video_retention_days = 0)\n";
+} else {
+    echo "Mission highlight video retention: {$highlightPurge['days']} days after generation\n";
+    echo "Deleted {$highlightPurge['deleted']} highlight video(s), {$highlightPurge['already_gone']} already missing, {$highlightPurge['failed']} could not be removed.\n";
+}
+echo "\n";

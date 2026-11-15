@@ -5313,6 +5313,11 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                     <i class="bi bi-file-earmark-zip me-1"></i><?= t('media.download_all_btn') ?>
                 </a>
                 <?php endif; ?>
+                <?php if ($canManageWarRoom): ?>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="highlightVideoBtn" data-bs-toggle="modal" data-bs-target="#highlightVideoModal" title="<?= isSystemAdmin() ? t('video.generate_title') : t('video.view_title') ?>">
+                    <i class="bi bi-film me-1"></i><?= isSystemAdmin() ? t('video.generate_btn') : t('video.view_btn') ?>
+                </button>
+                <?php endif; ?>
             </div>
             <div class="card-body d-flex flex-column" style="height:520px;">
                 <?php if ($isApprovedParticipant): ?>
@@ -5958,6 +5963,9 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 </div>
 
 <?php if ($canManageWarRoom): ?>
+<?php if ($canManageWarRoom): ?>
+<?php include __DIR__ . '/includes/highlight-video-modal.php'; ?>
+<?php endif; ?>
 <div class="modal fade" id="reportModal" tabindex="-1">
     <div class="modal-dialog modal-xl modal-dialog-scrollable">
         <div class="modal-content">
@@ -6759,6 +6767,23 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 <?php if ($canManageWarRoom && isSystemAdmin()): ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-scenario.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-scenario.js') ?>"></script>
 <?php endif; ?>
+<?php if ($canManageWarRoom): ?>
+<script>
+// Plain PHP values here, not WR_BOOT.missionLocation/WR_MISSION_ID: this tag
+// sits BEFORE WR_BOOT is defined further down the page (see
+// tests/WarRoomExternalJsTest.php's exact-adjacency check on the few lines
+// right after WR_BOOT's own closing script tag, which a tag placed there
+// would break), so those globals do not exist yet at this point.
+window.HV_CONTEXT = {
+    missionId: <?= (int) $missionId ?>,
+    missionLocation: <?= json_encode(['lat' => $mission['latitude'] ? (float) $mission['latitude'] : null, 'lng' => $mission['longitude'] ? (float) $mission['longitude'] : null, 'title' => $mission['title'], 'start_datetime' => $mission['start_datetime']], JSON_UNESCAPED_UNICODE) ?>,
+    csrf: <?= json_encode(csrfToken()) ?>,
+    canGenerate: <?= json_encode(isSystemAdmin()) ?>,
+};
+</script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/mission-highlight-video.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/mission-highlight-video.js') ?>"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/mission-highlight-video-ui.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/mission-highlight-video-ui.js') ?>"></script>
+<?php endif; ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/triage.js?v=<?= APP_VERSION ?>"></script>
 <?php if ($consoleView): ?>
 <?php /* defer: it reads the page's own state (the poll's arrays, the render
@@ -6828,7 +6853,7 @@ const WR_BOOT = {
     maxPingAccuracyM: <?= (int) getSetting('war_room_max_ping_accuracy_m', '50') ?>,
     appName: <?= json_encode(getSetting('app_name', 'VolunteerOps')) ?>,
     gridMaxCells: <?= gridMaxCells() ?>,
-    missionLocation: <?= json_encode(['lat' => $mission['latitude'] ? (float)$mission['latitude'] : null, 'lng' => $mission['longitude'] ? (float)$mission['longitude'] : null, 'title' => $mission['title']]) ?>,
+    missionLocation: <?= json_encode(['lat' => $mission['latitude'] ? (float)$mission['latitude'] : null, 'lng' => $mission['longitude'] ? (float)$mission['longitude'] : null, 'title' => $mission['title'], 'start_datetime' => $mission['start_datetime']]) ?>,
     pins: <?= json_encode($pins) ?>,
     k9Handlers: <?= json_encode(k9Handlers(), JSON_UNESCAPED_UNICODE) ?>,
     teamCaptains: <?= json_encode(teamCaptains(), JSON_UNESCAPED_UNICODE) ?>,

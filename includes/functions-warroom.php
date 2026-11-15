@@ -2482,6 +2482,91 @@ function purgeExpiredMissionVideos(?string $dir = null, int $limit = 200, ?int $
     return $result;
 }
 
+/** How long a generated mission highlight video is kept before the daily sweep deletes it. 0 = off. */
+function missionHighlightVideoRetentionDays(): int {
+    return max(0, min(3650, (int) getSetting('mission_highlight_video_retention_days', '30')));
+}
+
+/**
+ * Retention sweep for mission highlight videos, run from the daily cron
+ * (cron_media_purge.php): once missionHighlightVideoRetentionDays() days have
+ * passed since a video was generated, its FILE and ROW are both deleted.
+ *
+ * Unlike purgeExpiredMissionVideos() (raw field videos), there is no gallery
+ * value in keeping a dead row around here — one video per mission, replaced
+ * on every regenerate — so this deletes outright rather than flagging.
+ *
+ * @param string|null $dir  where the files live; tests pass a temp directory
+ * @param int|null    $days retention override; null = the setting. 0 = off.
+ * @return array{days:int, deleted:int, already_gone:int, failed:int}
+ */
+function purgeExpiredMissionHighlightVideos(?string $dir = null, int $limit = 200, ?int $days = null): array {
+    $days   = $days ?? missionHighlightVideoRetentionDays();
+    $result = ['days' => $days, 'deleted' => 0, 'already_gone' => 0, 'failed' => 0];
+    if ($days === 0) {
+        return $result;
+    }
+    $dir = rtrim($dir ?? (__DIR__ . '/../uploads/mission-highlight-videos'), '/\\') . '/';
+
+    $rows = dbFetchAll(
+        "SELECT id, stored_name FROM mission_highlight_videos
+         WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)
+         ORDER BY id LIMIT ?",
+        [$days, max(1, $limit)]
+    );
+    foreach ($rows as $row) {
+        // basename(): the column is written by the app, but a path that is
+        // ever anything else must not be able to leave this directory.
+        $name = basename((string) $row['stored_name']);
+        $path = $dir . $name;
+        if ($name === '' || !is_file($path)) {
+            $result['already_gone']++;
+        } elseif (@unlink($path)) {
+            $result['deleted']++;
+        } else {
+            $result['failed']++;
+            continue;
+        }
+        dbExecute("DELETE FROM mission_highlight_videos WHERE id = ?", [(int) $row['id']]);
+    }
+    return $result;
+}
+
+/**
+ * Replaces this mission's highlight video with a newly generated one: deletes
+ * the previous file (if any) and row, then inserts the new row. The UNIQUE KEY
+ * on mission_id makes "one per mission" structural, not just a convention this
+ * function happens to follow.
+ */
+function saveMissionHighlightVideo(int $missionId, int $createdBy, string $storedName, string $orientation, ?string $musicTrackId): int {
+    $dir = __DIR__ . '/../uploads/mission-highlight-videos/';
+    $old = dbFetchOne("SELECT stored_name FROM mission_highlight_videos WHERE mission_id = ?", [$missionId]);
+    if ($old) {
+        $oldPath = $dir . basename((string) $old['stored_name']);
+        if (is_file($oldPath)) {
+            @unlink($oldPath);
+        }
+        dbExecute("DELETE FROM mission_highlight_videos WHERE mission_id = ?", [$missionId]);
+    }
+    return (int) dbInsert(
+        "INSERT INTO mission_highlight_videos (mission_id, stored_name, orientation, music_track_id, created_by)
+         VALUES (?, ?, ?, ?, ?)",
+        [$missionId, $storedName, $orientation, $musicTrackId, $createdBy]
+    );
+}
+
+/** The current highlight video row for a mission, with the creator's name, or null if none exists yet. */
+function loadMissionHighlightVideo(int $missionId): ?array {
+    $row = dbFetchOne(
+        "SELECT v.id, v.stored_name, v.orientation, v.music_track_id, v.created_at, u.name AS created_by_name
+         FROM mission_highlight_videos v
+         LEFT JOIN users u ON u.id = v.created_by
+         WHERE v.mission_id = ?",
+        [$missionId]
+    );
+    return $row ?: null;
+}
+
 /**
  * Every photo and video of a mission for the archive (command staff), oldest
  * first — all of them, unlike loadMissionPhotosForUser()'s newest-30 live

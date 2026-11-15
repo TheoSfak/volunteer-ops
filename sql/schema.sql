@@ -2300,6 +2300,22 @@ CREATE TABLE IF NOT EXISTS `mission_team_equipment` (
     FOREIGN KEY (`set_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- MISSION HIGHLIGHT VIDEO: one admin-generated, client-rendered highlight reel
+-- per mission (regenerating replaces it - see UNIQUE KEY). Purged outright
+-- (row + file) after retention, no file_purged_at flag - no gallery value here.
+CREATE TABLE IF NOT EXISTS `mission_highlight_videos` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `stored_name` VARCHAR(255) NOT NULL,
+    `orientation` ENUM('landscape','portrait') NOT NULL DEFAULT 'landscape',
+    `music_track_id` VARCHAR(50) NULL,
+    `created_by` INT UNSIGNED NULL,
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `uniq_mission` (`mission_id`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- =============================================
 -- ACTION ROOM PARTICIPANTS (who takes part with GPS + orders)
 -- A row here means the volunteer takes part in the Action Room: their position

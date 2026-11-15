@@ -11,8 +11,8 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.489.0');
-define('DB_SCHEMA_VERSION', 217);
+define('APP_VERSION', '3.490.0');
+define('DB_SCHEMA_VERSION', 218);
 
 // Android APK versionName, matching mobile-app/android/app/build.gradle.
 // The download filename embeds this on purpose: the APK used to live at a
@@ -100,6 +100,10 @@ if (DEBUG_MODE) {
 // Upload settings
 define('UPLOAD_MAX_SIZE', 10 * 1024 * 1024); // 10MB
 define('VIDEO_MAX_SIZE', 25 * 1024 * 1024); // 25MB
+// Client-rendered mission highlight video (War Room/archive, system-admin only).
+// Kept well under a typical shared-host post_max_size: the renderer targets a
+// bitrate that keeps a 20-40s clip under this on its own, this is just the floor.
+define('HIGHLIGHT_VIDEO_MAX_SIZE', 15 * 1024 * 1024); // 15MB
 define('UPLOAD_PATH', __DIR__ . '/uploads/');
 define('ALLOWED_EXTENSIONS', ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png']);
 

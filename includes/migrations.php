@@ -8382,6 +8382,31 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 218,
+            'description' => "Mission highlight video (War Room/archive, system-admin only): a client-rendered " .
+                "highlight reel (satellite zoom to the mission pin, then a music-backed slideshow of admin-picked " .
+                "photos/videos) generated entirely in the admin's browser - no ffmpeg/exec on the server - and " .
+                "uploaded as a finished .webm. New mission_highlight_videos table, one row per mission (regenerating " .
+                "replaces it, enforced by the UNIQUE KEY). No file_purged_at flag like mission_photos' video retention: " .
+                "a purged highlight video has no gallery value, so purgeExpiredMissionHighlightVideos() deletes the " .
+                "row outright. Re-running this is harmless (CREATE TABLE IF NOT EXISTS).",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS `mission_highlight_videos` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `mission_id` INT UNSIGNED NOT NULL,
+                    `stored_name` VARCHAR(255) NOT NULL,
+                    `orientation` ENUM('landscape','portrait') NOT NULL DEFAULT 'landscape',
+                    `music_track_id` VARCHAR(50) NULL,
+                    `created_by` INT UNSIGNED NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY `uniq_mission` (`mission_id`),
+                    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

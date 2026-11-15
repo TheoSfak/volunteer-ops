@@ -1,0 +1,12 @@
+[
+    {"id": "epic-intro", "title": "Epic Intro", "filename": "01-epic-intro.mp3", "mood": "Επικό intro για το globe zoom"},
+    {"id": "emotional-slideshow", "title": "Emotional Slideshow", "filename": "02-emotional-slideshow.mp3", "mood": "Συγκινητικό, για slideshow"},
+    {"id": "uplifting-piano", "title": "Uplifting Piano", "filename": "03-uplifting-piano.mp3", "mood": "Ζεστό, ανθρώπινο πιάνο"},
+    {"id": "triumphant-finale", "title": "Triumphant Finale", "filename": "04-triumphant-finale.mp3", "mood": "Νικηφόρο φινάλε"},
+    {"id": "ambient-space-zoom", "title": "Ambient Space Zoom", "filename": "05-ambient-space-zoom.mp3", "mood": "Ατμοσφαιρικό, καλό για το ζουμ στον χάρτη"},
+    {"id": "hopeful-documentary", "title": "Hopeful Documentary", "filename": "06-hopeful-documentary.mp3", "mood": "Ήρεμο, ύφος ρεπορτάζ"},
+    {"id": "heroic-adventure", "title": "Heroic Adventure", "filename": "07-heroic-adventure.mp3", "mood": "Δυναμικό, ομαδικό πνεύμα"},
+    {"id": "warm-acoustic", "title": "Warm Acoustic", "filename": "08-warm-acoustic.mp3", "mood": "Ήπιο, ανθρώπινο, λιγότερο δραματικό"},
+    {"id": "driving-percussion", "title": "Driving Percussion", "filename": "09-driving-percussion.mp3", "mood": "Ενέργεια, ρυθμός"},
+    {"id": "inspiring-journey", "title": "Inspiring Journey", "filename": "10-inspiring-journey.mp3", "mood": "Ταξίδι, αποστολή"}
+]
