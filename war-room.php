@@ -8974,7 +8974,20 @@ const ANNOTATION_COLOR = '#e60000';
 // deselects it and returns the map to normal pan/click behavior.
 let activeTool = null; // null | 'freehand' | 'arrow' | 'text' | 'erase'
 let freehandPoints = [], freehandPreviewLayer = null;
+// Index into freehandPoints marking the start of the straight segment
+// currently being rubber-banded while the Alt key is held (null when not in
+// that mode) — see appendFreehandPoint() further down, near the rest of the
+// freehand-drawing code. Read straight off each mouse/touch event's own
+// altKey flag (not a window keydown/keyup flag) so it can never get stuck on
+// if focus leaves the window mid-gesture.
+let freehandStraightAnchor = null;
 let arrowStart = null, arrowStartMarker = null;
+// A dragged annotation is pulled out of annotationLayer (see renderAnnotations
+// below) for the duration of the gesture and shown via annotationDrawLayer
+// instead, exactly like the in-progress freehand/arrow previews — so a poll
+// tick landing mid-drag can't rebuild it back at its old position underneath
+// the live preview.
+let draggingAnnotationId = null;
 // Search-sector "Add Building" — a one-shot click-to-place mode set by the
 // sector popup's own button (not part of the annotationToolbar/activeTool
 // state machine above, since it needs a sectorId carried through to the
@@ -9660,18 +9673,24 @@ function renderAnnotations(items) {
     annotationLayer.clearLayers();
     const canErase = !!document.getElementById('annotationToolbar');
     items.forEach(item => {
-        let layer = null;
+        // Shown via the drag preview in annotationDrawLayer instead, for as
+        // long as this item is the one being dragged.
+        if (draggingAnnotationId !== null && String(item.id) === String(draggingAnnotationId)) return;
+        let layer = null, dragLayers = [];
         if (item.type === 'freehand') {
             layer = L.polyline(item.geo, {color: ANNOTATION_COLOR, weight: 6, pane: 'annotationPane'}).addTo(annotationLayer);
+            dragLayers = [layer];
         } else if (item.type === 'arrow') {
             const [p1, p2] = item.geo;
-            L.polyline(item.geo, {color: ANNOTATION_COLOR, weight: 5, pane: 'annotationPane'}).addTo(annotationLayer);
+            const line = L.polyline(item.geo, {color: ANNOTATION_COLOR, weight: 5, pane: 'annotationPane'}).addTo(annotationLayer);
             const brng = bearing(L.latLng(p1[0], p1[1]), L.latLng(p2[0], p2[1]));
             const headIcon = L.divIcon({className:'', html:`<div class="wr-anno-arrowhead" style="transform:rotate(${brng}deg);border-bottom-color:${ANNOTATION_COLOR}"></div>`, iconSize:[16,16], iconAnchor:[8,8]});
             layer = L.marker(p2, {icon: headIcon, pane: 'annotationPane'}).addTo(annotationLayer);
+            dragLayers = [line, layer];
         } else if (item.type === 'text') {
             const icon = L.divIcon({className:'', html:`<span class="wr-anno-text-label" style="background:${ANNOTATION_COLOR}">${escapeHtml(item.label)}</span>`, iconAnchor:[0, 12]});
             layer = L.marker([item.geo.lat, item.geo.lng], {icon, pane: 'annotationPane'}).addTo(annotationLayer);
+            dragLayers = [layer];
         }
         if (layer && canErase) {
             layer.on('click', () => {
@@ -9682,8 +9701,82 @@ function renderAnnotations(items) {
                     if (result.ok) renderAnnotations(annotations = annotations.filter(a => String(a.id) !== String(item.id)));
                 });
             });
+            // Draggable: grab any part of the shape (the stroke, or the
+            // arrowhead) and move the whole annotation, only while no tool
+            // is selected — a selected tool's own click/erase behavior above
+            // takes priority over picking the shape up.
+            dragLayers.forEach(dl => dl.on('mousedown', e => startAnnotationDrag(e, item)));
         }
     });
+}
+// Drag-to-reposition for an existing annotation: on mousedown over one of
+// its layers (while no drawing/erase tool is selected), rubber-bands the
+// whole shape by the same pixel delta the mouse has moved from its start
+// point, then persists the new geo with a 'move' POST on release — mirrors
+// how the freehand/arrow tools themselves build and submit a new shape, just
+// translating an existing one instead of sampling a new one.
+function startAnnotationDrag(e, item) {
+    if (activeTool !== null) return;
+    L.DomEvent.stop(e);
+    map.dragging.disable();
+    map.doubleClickZoom.disable();
+    draggingAnnotationId = item.id;
+    renderAnnotations(annotations);
+
+    const origGeo = item.type === 'text' ? [item.geo.lat, item.geo.lng] : item.geo.map(pt => [pt[0], pt[1]]);
+    const startPoint = e.containerPoint;
+    let lastGeo = origGeo, moved = false;
+
+    function preview(geo) {
+        annotationDrawLayer.clearLayers();
+        if (item.type === 'freehand') {
+            L.polyline(geo, {color: ANNOTATION_COLOR, weight: 6, opacity: 0.7, pane: 'annotationPane'}).addTo(annotationDrawLayer);
+        } else if (item.type === 'arrow') {
+            const [p1, p2] = geo;
+            L.polyline(geo, {color: ANNOTATION_COLOR, weight: 5, opacity: 0.7, pane: 'annotationPane'}).addTo(annotationDrawLayer);
+            const brng = bearing(L.latLng(p1[0], p1[1]), L.latLng(p2[0], p2[1]));
+            const headIcon = L.divIcon({className:'', html:`<div class="wr-anno-arrowhead" style="transform:rotate(${brng}deg);border-bottom-color:${ANNOTATION_COLOR}"></div>`, iconSize:[16,16], iconAnchor:[8,8]});
+            L.marker(p2, {icon: headIcon, pane: 'annotationPane'}).addTo(annotationDrawLayer);
+        } else {
+            const icon = L.divIcon({className:'', html:`<span class="wr-anno-text-label" style="background:${ANNOTATION_COLOR};opacity:.7">${escapeHtml(item.label)}</span>`, iconAnchor:[0, 12]});
+            L.marker(geo, {icon, pane: 'annotationPane'}).addTo(annotationDrawLayer);
+        }
+    }
+    preview(origGeo);
+
+    function onMove(ev) {
+        moved = true;
+        const dx = ev.containerPoint.x - startPoint.x;
+        const dy = ev.containerPoint.y - startPoint.y;
+        const shift = ll => { const p = map.latLngToContainerPoint(L.latLng(ll)); return map.containerPointToLatLng([p.x + dx, p.y + dy]); };
+        lastGeo = item.type === 'text'
+            ? (() => { const r = shift(origGeo); return [r.lat, r.lng]; })()
+            : origGeo.map(pt => { const r = shift(pt); return [r.lat, r.lng]; });
+        preview(lastGeo);
+    }
+    function onUp() {
+        map.off('mousemove', onMove);
+        map.off('mouseup', onUp);
+        map.dragging.enable();
+        map.doubleClickZoom.enable();
+        annotationDrawLayer.clearLayers();
+        draggingAnnotationId = null;
+        if (!moved) { renderAnnotations(annotations); return; }
+        persistAnnotationMove(item, item.type === 'text' ? {lat: lastGeo[0], lng: lastGeo[1]} : lastGeo);
+    }
+    map.on('mousemove', onMove);
+    map.on('mouseup', onUp);
+}
+function persistAnnotationMove(item, geo) {
+    const data = new URLSearchParams({csrf_token: csrfToken, action: 'move', mission_id: String(WR_MISSION_ID), id: item.id, geo: JSON.stringify(geo)});
+    fetch('mission-annotation.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+        if (result.ok) {
+            item.geo = (result.annotation && result.annotation.geo) ? result.annotation.geo : geo;
+        } else {
+            alert(result.error || t('common.failed'));
+        }
+        renderAnnotations(annotations);
+    }).catch(() => renderAnnotations(annotations));
 }
 // Bare block, not a stray brace: this was the body of `if (!fieldMode) {`.
 // Field Mode is gone, so the condition is, but the braces stay because they
@@ -11242,10 +11335,30 @@ function touchToLatLng(touch) {
 }
 function startFreehand(latlng, containerPoint) {
     freehandPoints = [[latlng.lat, latlng.lng]];
+    freehandStraightAnchor = null;
     freehandPreviewLayer = L.polyline(freehandPoints, {color: ANNOTATION_COLOR, weight: 6, pane: 'annotationPane'}).addTo(annotationDrawLayer);
     return containerPoint;
 }
-function appendFreehandPoint(latlng, lastPx, currentPx) {
+// While Alt is held (per the triggering event's own altKey, so it tracks
+// cleanly even if the key was already down before this stroke started),
+// don't sample free-flowing points at all — just rubber-band a straight
+// segment from the last committed point (frozen as the anchor the moment
+// Alt first goes down) out to wherever the cursor is now, overwriting that
+// same trailing point on every move instead of growing the array. Releasing
+// Alt leaves that straight segment's endpoint committed and drops back into
+// normal distance-sampled freehand from there.
+function appendFreehandPoint(latlng, lastPx, currentPx, straight) {
+    if (straight) {
+        if (freehandStraightAnchor === null) {
+            freehandStraightAnchor = freehandPoints.length - 1;
+            freehandPoints.push([latlng.lat, latlng.lng]);
+        } else {
+            freehandPoints[freehandPoints.length - 1] = [latlng.lat, latlng.lng];
+        }
+        if (freehandPreviewLayer) freehandPreviewLayer.setLatLngs(freehandPoints);
+        return currentPx;
+    }
+    freehandStraightAnchor = null;
     if (lastPx.distanceTo(currentPx) < 7) return lastPx;
     freehandPoints.push([latlng.lat, latlng.lng]);
     if (freehandPreviewLayer && freehandPoints.length < 500) freehandPreviewLayer.setLatLngs(freehandPoints);
@@ -11255,11 +11368,12 @@ function finishFreehand() {
     annotationDrawLayer.clearLayers();
     if (freehandPoints.length >= 2) submitAnnotation('freehand', freehandPoints, null);
     freehandPoints = [];
+    freehandStraightAnchor = null;
 }
 map.on('mousedown', e => {
     if (activeTool !== 'freehand') return;
     let lastPx = startFreehand(e.latlng, e.containerPoint);
-    const onMove = ev => { lastPx = appendFreehandPoint(ev.latlng, lastPx, ev.containerPoint); };
+    const onMove = ev => { lastPx = appendFreehandPoint(ev.latlng, lastPx, ev.containerPoint, !!(ev.originalEvent && ev.originalEvent.altKey)); };
     const onUp = () => { map.off('mousemove', onMove); document.removeEventListener('mouseup', onUp); finishFreehand(); };
     map.on('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
@@ -11273,7 +11387,7 @@ document.getElementById('warRoomMap').addEventListener('touchstart', e => {
         if (!ev.touches.length) return;
         ev.preventDefault();
         const moveLatLng = touchToLatLng(ev.touches[0]);
-        lastPx = appendFreehandPoint(moveLatLng, lastPx, map.latLngToContainerPoint(moveLatLng));
+        lastPx = appendFreehandPoint(moveLatLng, lastPx, map.latLngToContainerPoint(moveLatLng), !!ev.altKey);
     };
     const onEnd = () => { document.getElementById('warRoomMap').removeEventListener('touchmove', onMove); document.removeEventListener('touchend', onEnd); finishFreehand(); };
     document.getElementById('warRoomMap').addEventListener('touchmove', onMove, {passive: false});
