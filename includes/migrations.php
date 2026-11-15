@@ -8407,6 +8407,57 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 219,
+            'description' => "Two command-only share-link features, same idiom as briefing_token/visitor_join_token " .
+                "(a random token column + a read-time status check, no separate expired-vs-revoked distinction shown " .
+                "to the public side): mission_locate_links (a one-use consent link sent to a caller/missing person's " .
+                "own phone so its browser geolocation drops a pin on the mission map - locate.php) and " .
+                "mission_board_links (a read-only, non-interactive big-font mirror of the live map + team roster for " .
+                "a second screen or a liaising authority - board-view.php). Both rows track who opened them " .
+                "(last_viewed_at/update_count) because an unauthenticated public link to live positions is the kind " .
+                "of thing that needs that accountability, not because it's used for anything automatic.",
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS `mission_locate_links` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `mission_id` INT UNSIGNED NOT NULL,
+                    `token` CHAR(64) NOT NULL,
+                    `label` VARCHAR(120) NULL,
+                    `created_by` INT UNSIGNED NULL,
+                    `created_at` DATETIME NOT NULL,
+                    `expires_at` DATETIME NULL COMMENT 'NULL = until the mission closes',
+                    `revoked_at` DATETIME NULL,
+                    `consented_at` DATETIME NULL,
+                    `last_lat` DECIMAL(10, 8) NULL,
+                    `last_lng` DECIMAL(11, 8) NULL,
+                    `last_accuracy_m` SMALLINT UNSIGNED NULL,
+                    `last_updated_at` DATETIME NULL,
+                    `update_count` INT UNSIGNED NOT NULL DEFAULT 0,
+                    UNIQUE KEY `uniq_locate_token` (`token`),
+                    INDEX `idx_locate_links_mission` (`mission_id`),
+                    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+                dbExecute("CREATE TABLE IF NOT EXISTS `mission_board_links` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `mission_id` INT UNSIGNED NOT NULL,
+                    `token` CHAR(64) NOT NULL,
+                    `label` VARCHAR(120) NULL,
+                    `created_by` INT UNSIGNED NULL,
+                    `created_at` DATETIME NOT NULL,
+                    `expires_at` DATETIME NULL COMMENT 'NULL = until the mission closes',
+                    `revoked_at` DATETIME NULL,
+                    `last_viewed_at` DATETIME NULL,
+                    `view_count` INT UNSIGNED NOT NULL DEFAULT 0,
+                    UNIQUE KEY `uniq_board_token` (`token`),
+                    INDEX `idx_board_links_mission` (`mission_id`),
+                    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

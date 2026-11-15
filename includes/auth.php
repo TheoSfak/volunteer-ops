@@ -150,6 +150,15 @@ define('WAR_ROOM_ACTION_SCRIPTS', [
     // partner-org guest or a mission visitor - the same two account types every other
     // self-service endpoint on this list already had to be added for.
     'mission-team-equipment.php',
+    // mission-locate-link.php / mission-board-link.php (the «Σύνδεσμοι» share
+    // links - a missing person's own-phone locate consent, and the read-only
+    // «Οθόνη τοίχου» kiosk mirror - v3.499.0) are command-staff-only actions
+    // called from the same long-open tab; the endpoints enforce
+    // canManageActionRoom() themselves regardless of how they're reached.
+    // locate.php and board-view.php (the PUBLIC pages the links open) are
+    // deliberately NOT on this list: they're reached by an anonymous phone
+    // with no session at all, not from an open war-room.php tab.
+    'mission-locate-link.php', 'mission-board-link.php',
 ]);
 
 // Pages (not AJAX) a partner-org guest AND a mission visitor may open, on top

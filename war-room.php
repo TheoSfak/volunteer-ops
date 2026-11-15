@@ -4349,6 +4349,15 @@ include __DIR__ . '/includes/header.php';
                         </ul>
                     </div>
                     <?php endif; ?>
+                    <?php if ($canManageWarRoom): ?>
+                    <!-- Share links (v3.499.0): a one-use consent link for a
+                         missing person/caller's own phone (locate.php), and a
+                         read-only «Οθόνη τοίχου» kiosk mirror (board-view.php)
+                         for a second screen or a liaising authority. -->
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#wrLinksModal" title="<?= t('links.btn') ?>">
+                        <i class="bi bi-link-45deg"></i><span class="d-none d-md-inline ms-1"><?= t('links.btn') ?></span>
+                    </button>
+                    <?php endif; ?>
                     <?php if ($searchRingsOn && $canManageWarRoom): ?>
                     <!-- One tap to hide / bring back the search rings. Starts
                          hidden (d-none): renderSearchRingsLayer() shows it only
@@ -4801,6 +4810,177 @@ include __DIR__ . '/includes/header.php';
         </div>
     </div>
 </div>
+<?php endif; ?>
+
+<?php if ($canManageWarRoom): ?>
+<!-- Share links (v3.499.0): a one-use consent link for a missing
+     person/caller's own phone (locate.php), and a read-only «Οθόνη τοίχου»
+     kiosk mirror (board-view.php) for a second screen or a liaising
+     authority. Deliberately placed OUTSIDE the $isApprovedParticipant
+     wrapper the voice-report card above sits in: command staff managing a
+     mission are not necessarily themselves an approved participant/team
+     member of it, and this whole block (including its map-marker poll) must
+     render for every $canManageWarRoom viewer regardless. -->
+<div class="modal fade" id="wrLinksModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-link-45deg me-1"></i><?= t('links.title') ?></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="<?= t('common.close') ?>"></button>
+      </div>
+      <div class="modal-body">
+        <ul class="nav nav-tabs mb-3" role="tablist">
+          <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#wrLinksLocatePane" type="button"><i class="bi bi-geo-alt me-1"></i><?= t('links.locate_tab') ?></button></li>
+          <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#wrLinksBoardPane" type="button"><i class="bi bi-display me-1"></i><?= t('links.board_tab') ?></button></li>
+        </ul>
+        <div class="tab-content">
+          <div class="tab-pane fade show active" id="wrLinksLocatePane">
+            <p class="small text-muted"><?= t('links.locate_intro') ?></p>
+            <form id="wrLocateLinkCreateForm" class="d-flex gap-2 mb-3">
+              <input type="text" class="form-control form-control-sm" id="wrLocateLinkLabel" maxlength="120" placeholder="<?= t('links.label_placeholder') ?>">
+              <select class="form-select form-select-sm" id="wrLocateLinkDuration" style="max-width:170px;">
+                <option value=""><?= t('links.duration_until_close') ?></option>
+                <option value="4"><?= t('links.duration_4h') ?></option>
+                <option value="24"><?= t('links.duration_24h') ?></option>
+              </select>
+              <button type="submit" class="btn btn-sm btn-primary flex-shrink-0"><?= t('links.create_btn') ?></button>
+            </form>
+            <div id="wrLocateLinkList" class="small"></div>
+          </div>
+          <div class="tab-pane fade" id="wrLinksBoardPane">
+            <p class="small text-muted"><?= t('links.board_intro') ?></p>
+            <form id="wrBoardLinkCreateForm" class="d-flex gap-2 mb-3">
+              <input type="text" class="form-control form-control-sm" id="wrBoardLinkLabel" maxlength="120" placeholder="<?= t('links.label_placeholder') ?>">
+              <select class="form-select form-select-sm" id="wrBoardLinkDuration" style="max-width:170px;">
+                <option value=""><?= t('links.duration_until_close') ?></option>
+                <option value="4"><?= t('links.duration_4h') ?></option>
+                <option value="24"><?= t('links.duration_24h') ?></option>
+              </select>
+              <button type="submit" class="btn btn-sm btn-primary flex-shrink-0"><?= t('links.create_btn') ?></button>
+            </form>
+            <div id="wrBoardLinkList" class="small"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+(function() {
+    const modal = document.getElementById('wrLinksModal');
+    if (!modal) return;
+
+    function statusBadge(status) {
+        const statusMap = { active: ['success', <?= json_encode(t('links.status_active')) ?>],
+                      expired: ['secondary', <?= json_encode(t('links.status_expired')) ?>],
+                      revoked: ['secondary', <?= json_encode(t('links.status_revoked')) ?>] };
+        const [cls, label] = statusMap[status] || statusMap.expired;
+        return '<span class="badge bg-' + cls + '-subtle text-' + cls + '-emphasis">' + label + '</span>';
+    }
+
+    function escapeHtml(s) {
+        return String(s).replace(/[&<>"']/g, function(c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; });
+    }
+
+    function renderLinkList(container, links, kind, revokeLabel, copyLabel) {
+        if (!links.length) {
+            container.innerHTML = '<div class="text-muted"><?= t('links.empty') ?></div>';
+            return;
+        }
+        container.innerHTML = links.map(function(l) {
+            const url = l.url;
+            const revokeBtn = l.status === 'active'
+                ? '<button type="button" class="btn btn-sm btn-outline-danger wr-link-revoke" data-id="' + l.id + '">' + revokeLabel + '</button>'
+                : '';
+            const extra = kind === 'locate'
+                ? (l.last_updated_at ? '<div class="text-muted" style="font-size:11px;">' + escapeHtml(l.last_lat.toFixed(5)) + ', ' + escapeHtml(l.last_lng.toFixed(5)) + '</div>' : '<div class="text-muted" style="font-size:11px;"><?= t('links.no_position_yet') ?></div>')
+                : '<div class="text-muted" style="font-size:11px;"><?= t('links.views_label') ?> ' + l.view_count + '</div>';
+            return '<div class="border rounded p-2 mb-2 d-flex justify-content-between align-items-start gap-2">' +
+                '<div class="flex-grow-1 min-width-0">' +
+                    '<div class="fw-semibold">' + (l.label ? escapeHtml(l.label) : '<?= t('links.no_label') ?>') + ' ' + statusBadge(l.status) + '</div>' +
+                    (l.status === 'active' ? '<div class="input-group input-group-sm mt-1" style="max-width:360px;"><input type="text" class="form-control" value="' + escapeHtml(url) + '" readonly onclick="this.select()"><button type="button" class="btn btn-outline-secondary wr-link-copy" data-url="' + escapeHtml(url) + '">' + copyLabel + '</button></div>' : '') +
+                    extra +
+                '</div>' +
+                revokeBtn +
+            '</div>';
+        }).join('');
+    }
+
+    function loadLinks(file, container, kind) {
+        const url = file + '?action=list&mission_id=' + WR_MISSION_ID;
+        fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+            if (data.ok) renderLinkList(container, data.links, kind, <?= json_encode(t('links.revoke_btn')) ?>, <?= json_encode(t('links.copy_btn')) ?>);
+        });
+    }
+
+    function refreshBoth() {
+        loadLinks('mission-locate-link.php', document.getElementById('wrLocateLinkList'), 'locate');
+        loadLinks('mission-board-link.php', document.getElementById('wrBoardLinkList'), 'board');
+    }
+
+    modal.addEventListener('shown.bs.modal', refreshBoth);
+
+    modal.addEventListener('click', function(e) {
+        const copyBtn = e.target.closest('.wr-link-copy');
+        if (copyBtn) { navigator.clipboard.writeText(copyBtn.dataset.url); return; }
+        const revokeBtn = e.target.closest('.wr-link-revoke');
+        if (revokeBtn) {
+            if (!confirm(<?= json_encode(t('links.revoke_confirm')) ?>)) return;
+            const isLocate = !!revokeBtn.closest('#wrLinksLocatePane');
+            const file = isLocate ? 'mission-locate-link.php' : 'mission-board-link.php';
+            const data = new URLSearchParams({ csrf_token: csrfToken, action: 'revoke', mission_id: String(WR_MISSION_ID), link_id: revokeBtn.dataset.id });
+            fetch(file, { method: 'POST', body: data }).then(function() { refreshBoth(); if (isLocate) refreshLocatePositions(); });
+        }
+    });
+
+    function wireCreateForm(formId, file, labelId, durationId) {
+        document.getElementById(formId).addEventListener('submit', function(e) {
+            e.preventDefault();
+            const label = document.getElementById(labelId).value.trim();
+            const duration = document.getElementById(durationId).value;
+            const data = new URLSearchParams({ csrf_token: csrfToken, action: 'create', mission_id: String(WR_MISSION_ID), label: label, duration_hours: duration });
+            fetch(file, { method: 'POST', body: data }).then(function(r) { return r.json(); }).then(function(resp) {
+                if (resp.ok) {
+                    document.getElementById(labelId).value = '';
+                    refreshBoth();
+                    navigator.clipboard.writeText(resp.url).catch(function() {});
+                }
+            });
+        });
+    }
+    wireCreateForm('wrLocateLinkCreateForm', 'mission-locate-link.php', 'wrLocateLinkLabel', 'wrLocateLinkDuration');
+    wireCreateForm('wrBoardLinkCreateForm', 'mission-board-link.php', 'wrBoardLinkLabel', 'wrBoardLinkDuration');
+
+    // Live locate-link positions on the main map: its own slow poll (15s),
+    // kept separate from the 5s war-room.php poll on purpose - this channel
+    // is rarely used and privacy-sensitive (an unauthenticated phone's live
+    // position), not worth threading into that already-large payload.
+    let locateMarkers = {};
+    window.refreshLocatePositions = function() {
+        if (typeof map === 'undefined' || !map) return;
+        fetch('mission-locate-link.php?action=positions&mission_id=' + WR_MISSION_ID).then(function(r) { return r.json(); }).then(function(data) {
+            if (!data.ok) return;
+            const seen = {};
+            data.positions.forEach(function(p) {
+                seen[p.id] = true;
+                const html = '<div style="width:18px;height:18px;border-radius:50%;background:#e8590c;border:2px solid #fff;box-shadow:0 0 0 2px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;"><i class="bi bi-person-fill" style="color:#fff;font-size:10px;"></i></div>';
+                const icon = L.divIcon({ className: '', html: html, iconSize: [18, 18] });
+                const popup = (p.label ? escapeHtml(p.label) : <?= json_encode(t('links.locate_marker_label')) ?>);
+                if (!locateMarkers[p.id]) {
+                    locateMarkers[p.id] = L.marker([p.lat, p.lng], { icon: icon, zIndexOffset: 500 }).addTo(map).bindPopup(popup);
+                } else {
+                    locateMarkers[p.id].setLatLng([p.lat, p.lng]);
+                }
+            });
+            Object.keys(locateMarkers).forEach(function(id) {
+                if (!seen[id]) { map.removeLayer(locateMarkers[id]); delete locateMarkers[id]; }
+            });
+        });
+    };
+    setInterval(window.refreshLocatePositions, 15000);
+    setTimeout(window.refreshLocatePositions, 3000);
+})();
+</script>
 <?php endif; ?>
 
 <?php if ($canManageWarRoom || $isApprovedParticipant): ?>

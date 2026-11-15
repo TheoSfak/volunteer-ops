@@ -3490,6 +3490,51 @@ CREATE TABLE IF NOT EXISTS `mission_map_points` (
     FOREIGN KEY (`updated_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- LOCATE LINK (v3.499.0): a one-use consent link for a missing person/caller's
+-- own phone (locate.php) - its browser geolocation drops a pin on the mission
+-- map. Same token-on-a-row idiom as missions.visitor_join_token /
+-- mission_teams.briefing_token: the token IS the access control.
+CREATE TABLE IF NOT EXISTS `mission_locate_links` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `token` CHAR(64) NOT NULL,
+    `label` VARCHAR(120) NULL,
+    `created_by` INT UNSIGNED NULL,
+    `created_at` DATETIME NOT NULL,
+    `expires_at` DATETIME NULL COMMENT 'NULL = until the mission closes',
+    `revoked_at` DATETIME NULL,
+    `consented_at` DATETIME NULL,
+    `last_lat` DECIMAL(10, 8) NULL,
+    `last_lng` DECIMAL(11, 8) NULL,
+    `last_accuracy_m` SMALLINT UNSIGNED NULL,
+    `last_updated_at` DATETIME NULL,
+    `update_count` INT UNSIGNED NOT NULL DEFAULT 0,
+    UNIQUE KEY `uniq_locate_token` (`token`),
+    INDEX `idx_locate_links_mission` (`mission_id`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- BOARD VIEW LINK (v3.499.0): a read-only, non-interactive big-font mirror of
+-- the live map + team roster (board-view.php) for a second screen or a
+-- liaising authority. Same token idiom as mission_locate_links above.
+CREATE TABLE IF NOT EXISTS `mission_board_links` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `token` CHAR(64) NOT NULL,
+    `label` VARCHAR(120) NULL,
+    `created_by` INT UNSIGNED NULL,
+    `created_at` DATETIME NOT NULL,
+    `expires_at` DATETIME NULL COMMENT 'NULL = until the mission closes',
+    `revoked_at` DATETIME NULL,
+    `last_viewed_at` DATETIME NULL,
+    `view_count` INT UNSIGNED NOT NULL DEFAULT 0,
+    UNIQUE KEY `uniq_board_token` (`token`),
+    INDEX `idx_board_links_mission` (`mission_id`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- MAP POINTS ASSIGNED TO TEAMS (v3.364.0). A point sent to a team is an ordinary
 -- dispatch (so notice, popup, steps and the command staff's alerts all come from
 -- the dispatch code) linked back to its point; the point's history is the list

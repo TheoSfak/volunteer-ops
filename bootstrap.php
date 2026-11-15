@@ -26,6 +26,8 @@ require_once __DIR__ . '/includes/functions-coverage-heat.php';
 require_once __DIR__ . '/includes/functions-team-arcs.php';
 require_once __DIR__ . '/includes/functions-scenario.php';
 require_once __DIR__ . '/includes/functions-mission-teams.php';
+require_once __DIR__ . '/includes/functions-locate-links.php';
+require_once __DIR__ . '/includes/functions-board-links.php';
 require_once __DIR__ . '/includes/auth.php';
 require_once __DIR__ . '/includes/i18n.php';
 require_once __DIR__ . '/includes/permissions.php';
