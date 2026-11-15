@@ -6782,6 +6782,8 @@ window.HV_CONTEXT = {
     // Same app_logo setting/file the header and print views already use (see
     // includes/header.php) - drawn as a persistent corner mark + outro logo.
     teamLogoUrl: <?= (!empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLogo)) ? json_encode('uploads/logos/' . $appLogo, JSON_UNESCAPED_UNICODE) : 'null' ?>,
+    // Same default-tagline localization fallback as includes/header.php's sidebar.
+    orgTagline: <?= json_encode((!empty($appDescription) && $appDescription === 'Σύστημα Διαχείρισης Εθελοντών') ? localizedLabel('gui.app_description', $appDescription) : ($appDescription ?? ''), JSON_UNESCAPED_UNICODE) ?>,
 };
 </script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/mission-highlight-video.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/mission-highlight-video.js') ?>"></script>

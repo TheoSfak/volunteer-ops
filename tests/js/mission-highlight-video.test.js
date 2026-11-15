@@ -11,7 +11,7 @@ const assert = require('node:assert/strict');
 
 const {
     latLngToTile, computeTiming, kenBurnsTransform, formatMissionDate,
-    START_ZOOM, END_ZOOM, MIN_TOTAL_MS, MAX_TOTAL_MS, MIN_ITEM_MS,
+    PIN_ZOOM, MIN_TOTAL_MS, MAX_TOTAL_MS, MIN_ITEM_MS,
 } = require('../../assets/js/mission-highlight-video.js');
 
 test('latLngToTile matches the standard slippy-map formula at zoom 0 (whole world, one tile)', () => {
@@ -98,9 +98,9 @@ test('formatMissionDate: empty/invalid input is the empty string, never "Invalid
     assert.equal(formatMissionDate('not-a-date'), '');
 });
 
-test('zoom band stays within Esri\'s documented worst-case coverage depth', () => {
+test('PIN_ZOOM stays within Esri\'s documented worst-case coverage depth', () => {
     // esri-imagery.js: real imagery can be as shallow as z17 in some places.
-    // Staying at 16 keeps this feature one level inside that everywhere.
-    assert.ok(END_ZOOM < 17);
-    assert.ok(START_ZOOM < END_ZOOM);
+    // Staying at 15 keeps this feature one level inside that everywhere.
+    assert.ok(PIN_ZOOM < 17);
+    assert.ok(PIN_ZOOM > 0);
 });

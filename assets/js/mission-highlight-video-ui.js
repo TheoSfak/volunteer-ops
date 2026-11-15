@@ -5,7 +5,7 @@
  * assets/js/mission-highlight-video.js's renderMissionHighlightVideo(). Only
  * loaded for anyone with $canManageWarRoom (see that gate around this
  * <script> include in war-room.php and mission-archive.php), which also
- * defines window.HV_CONTEXT = {missionId, missionLocation, csrf, canGenerate, teamLogoUrl}.
+ * defines window.HV_CONTEXT = {missionId, missionLocation, csrf, canGenerate, teamLogoUrl, orgTagline}.
  *
  * No JS-side translation lookup: every string this file shows is already
  * rendered server-side by t() into the modal's own markup
@@ -196,6 +196,7 @@
                 selectedMedia: media,
                 musicTrackUrl: track ? track.url : null,
                 teamLogoUrl: ctx.teamLogoUrl || null,
+                orgTagline: ctx.orgTagline || null,
                 onProgress: (fraction) => {
                     const pct = Math.round(fraction * 100);
                     $('hvProgressBar').style.width = pct + '%';

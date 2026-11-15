@@ -1,39 +1,46 @@
 /**
- * Mission highlight video — client-side renderer (v3.490.0).
+ * Mission highlight video — client-side renderer (v3.491.0).
  *
  * Renders a short (20-40s) highlight reel entirely in the admin's browser:
- * a big opening title card (mission name + date), a satellite zoom from a
- * world view down to the mission's pin, a music-backed slideshow of
- * admin-picked photos/videos, and a closing card (team logo + mission name).
- * The team's own logo (Settings > app_logo) also stays in the corner for
- * the whole clip. No ffmpeg/exec on the server - production hosting has no shell access
- * (see memory: epidrasis.iloveweb.gr has no file/shell access for the user).
- * The finished .webm Blob is handed to mission-highlight-video.php to store.
+ * a big opening title card (mission name + date), a quick real-satellite
+ * zoom onto the mission's pin, a music-backed slideshow of admin-picked
+ * photos/videos, and a closing card (team logo + mission name + the org's
+ * own tagline). The team's own logo (Settings > app_logo) also stays in the
+ * corner for the whole clip. No ffmpeg/exec on the server - production
+ * hosting has no shell access (see memory: epidrasis.iloveweb.gr has no
+ * file/shell access for the user). The finished .webm Blob is handed to
+ * mission-highlight-video.php to store.
  *
- * Tile math/zoom: draws Esri World_Imagery tiles directly (same tile server
- * as assets/js/esri-imagery.js), loaded as <img crossorigin="anonymous">.
- * The M3 spike (canvas + captureStream + MediaRecorder, a stricter consumer
- * than esri-imagery.js's own getImageData() call) proved this does NOT taint
- * the canvas - no same-origin tile-proxy is needed. Rather than Leaflet's
- * full multi-tile-per-level rendering, each zoom level uses ONE source tile
- * (the one containing the mission's lat/lng), progressively cropped tighter
- * around that point and scaled to cover the canvas as the virtual zoom
- * advances through that level's band, crossfading into the next level's tile
- * at the band's end - a deliberate simplification for a short creative clip,
- * not a mapping tool.
+ * Tile math/zoom: draws ONE Esri World_Imagery tile directly (same tile
+ * server as assets/js/esri-imagery.js), loaded as <img crossorigin=
+ * "anonymous"> - the M3 spike (canvas + captureStream + MediaRecorder, a
+ * stricter consumer than esri-imagery.js's own getImageData() call) proved
+ * this does NOT taint the canvas, no same-origin tile-proxy is needed.
  *
- * Capped at zoom 16 (not higher): esri-imagery.js's own docblock states real
- * Esri imagery can be as shallow as z17 in some places, so 16 stays one level
- * inside that worst case everywhere without needing that module's full
- * grey-tile-detection machinery here too.
+ * v3.491.0 dropped the original multi-zoom-level "whole Earth down to the
+ * pin" cascade (crossfading through z2..z16, a different source tile per
+ * level): its crop math placed the pin's own pixel position as the crop
+ * centre WITHOUT clamping it inside the tile's 0..256 bounds, so whenever
+ * the point sat left/above the tile's centre (about half the time, and
+ * always true at the lowest zoom bands) the source rectangle spilled past
+ * the tile's edge; drawImage does not stretch to cover that shortfall, it
+ * just paints a narrower slice, leaving the uncovered destination edge as
+ * flat background colour - a real-world "shows black" rather than the
+ * hoped-for seamless zoom. Rather than fetch neighbouring tiles to patch
+ * that, the fix is simpler: one single tile at PIN_ZOOM, Ken-Burns-zoomed
+ * into the pin with the same clamped-crop approach the photo/video
+ * slideshow already uses (which never spills), so the mission's real
+ * location is visible immediately and correctly from the first frame.
  */
 (function (root) {
     'use strict';
 
     const TILE_SIZE = 256;
     const ESRI_IMAGERY_URL = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-    const START_ZOOM = 2;
-    const END_ZOOM = 16;
+    // A single, reliably-covered "local area" zoom level - not esri-imagery.js's
+    // full grey-tile-detection range, just one level inside its documented
+    // worst case (imagery can be as shallow as z17 in some places).
+    const PIN_ZOOM = 15;
 
     const TITLE_SCREEN_MS = 2200; // opening card: mission name + date, big letters, before the zoom starts
     const PHASE1_MS = 6000;  // world-view zoom + pin drop
@@ -46,6 +53,14 @@
     // need them and the aspect ratio must stay the uploaded file's own.
     const CORNER_LOGO_MAX_W = 0.16, CORNER_LOGO_MAX_H = 0.14, CORNER_LOGO_PAD = 0.03;
     const OUTRO_LOGO_MAX_W = 0.22, OUTRO_LOGO_MAX_H = 0.22;
+    // Ken Burns vertical crop centre, as a fraction of the source photo/video
+    // height. There is no face-detection API on desktop Chrome (Shape
+    // Detection's FaceDetector never shipped outside Android/ChromeOS), so
+    // this is a cheap heuristic rather than real face tracking: rescue-op
+    // photos are overwhelmingly people standing/walking, and a dead-centre
+    // crop (0.5) keeps cropping heads off in favour of legs/ground once
+    // zoomed in. Biasing toward the upper third fixes the common case.
+    const FACE_BIAS_Y = 0.38;
 
     function esriTileUrl(z, x, y) {
         return ESRI_IMAGERY_URL.replace('{z}', z).replace('{y}', y).replace('{x}', x);
@@ -112,19 +127,26 @@
         });
     }
 
-    /** `cover`-style draw: square `cropSize`x`cropSize` region of `img` centered on (cx, cy), scaled to fill the whole canvas. */
-    function drawCover(ctx, img, cx, cy, cropSize, canvasW, canvasH, alpha) {
+    /**
+     * Zooms from the whole 256x256 tile down to a tight crop centred on the
+     * pin's own pixel position (fx, fy) inside it. `progress` 0..1. Unlike
+     * the old multi-level cascade this replaced, (cx, cy) is clamped to stay
+     * `half` away from every edge, so the crop square can never spill past
+     * the tile's own bounds - the actual cause of the old "shows black" bug
+     * (drawImage doesn't stretch to cover a source rect that runs off the
+     * image, it just paints a narrower slice of the destination).
+     */
+    function drawPinZoom(ctx, img, fx, fy, canvasW, canvasH, progress) {
+        const startCrop = TILE_SIZE, endCrop = TILE_SIZE * 0.3;
+        const cropSize = startCrop - (startCrop - endCrop) * easeOutCubic(Math.min(1, progress));
         const half = cropSize / 2;
+        const cx = Math.max(half, Math.min(TILE_SIZE - half, fx));
+        const cy = Math.max(half, Math.min(TILE_SIZE - half, fy));
         const sx = cx - half, sy = cy - half;
         const scale = Math.max(canvasW, canvasH) / cropSize;
         const destW = cropSize * scale, destH = cropSize * scale;
         const destX = (canvasW - destW) / 2, destY = (canvasH - destH) / 2;
-        const prevAlpha = ctx.globalAlpha;
-        ctx.globalAlpha = alpha;
-        // Source rect may spill past the tile's own edges near the border of
-        // the world/tile - drawImage clamps that for us (it just draws less).
         ctx.drawImage(img, sx, sy, cropSize, cropSize, destX, destY, destW, destH);
-        ctx.globalAlpha = prevAlpha;
     }
 
     function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
@@ -212,14 +234,22 @@
         ctx.restore();
     }
 
+    /** Shrinks `text` to fit `maxWidth` on one line (current ctx.font), adding an ellipsis - never wraps, since the outro has room for exactly one subtitle line under the mission name. */
+    function fitSingleLine(ctx, text, maxWidth) {
+        let t = String(text || '');
+        if (!t || ctx.measureText(t).width <= maxWidth) return t;
+        while (t.length > 1 && ctx.measureText(t + '…').width > maxWidth) t = t.slice(0, -1);
+        return t + '…';
+    }
+
     /**
      * Outro (phase 3): fades the last slide to dark, then brings in the
      * team's own logo big and centered with the mission name underneath and
-     * a small wordmark, holding before a final fade to black - a proper
-     * close rather than the old abrupt cut to a flat colour. `progress` is
-     * 0..1 over OUTRO_MS.
+     * the org's own tagline (Settings > app_description) under that, holding
+     * before a final fade to black - a proper close rather than the old
+     * abrupt cut to a flat colour. `progress` is 0..1 over OUTRO_MS.
      */
-    function drawOutro(ctx, canvasW, canvasH, progress, logoImg, missionTitle) {
+    function drawOutro(ctx, canvasW, canvasH, progress, logoImg, missionTitle, orgTagline) {
         const bgAlpha = Math.min(1, progress / 0.45);
         ctx.save();
         ctx.globalAlpha = bgAlpha;
@@ -252,9 +282,11 @@
         ctx.shadowBlur = 8;
         ctx.font = 'bold ' + Math.round(canvasW * 0.042) + 'px sans-serif';
         ctx.fillText(missionTitle || '', canvasW / 2, blockBottom + canvasH * 0.09, canvasW * 0.88);
-        ctx.font = Math.round(canvasW * 0.022) + 'px sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.7)';
-        ctx.fillText('VolunteerOps', canvasW / 2, blockBottom + canvasH * 0.15, canvasW * 0.88);
+        if (orgTagline) {
+            ctx.font = Math.round(canvasW * 0.022) + 'px sans-serif';
+            ctx.fillStyle = 'rgba(255,255,255,0.7)';
+            ctx.fillText(fitSingleLine(ctx, orgTagline, canvasW * 0.8), canvasW / 2, blockBottom + canvasH * 0.15, canvasW * 0.88);
+        }
         ctx.restore();
     }
 
@@ -276,7 +308,7 @@
         if (srcAspect > dstAspect) { cropH = srcH; cropW = srcH * dstAspect; } else { cropW = srcW; cropH = srcW / dstAspect; }
         cropW /= scale; cropH /= scale;
         const cx = srcW / 2 + panX * srcW;
-        const cy = srcH / 2;
+        const cy = srcH * FACE_BIAS_Y;
         const sx = Math.max(0, Math.min(srcW - cropW, cx - cropW / 2));
         const sy = Math.max(0, Math.min(srcH - cropH, cy - cropH / 2));
         ctx.drawImage(source, sx, sy, cropW, cropH, 0, 0, canvasW, canvasH);
@@ -291,6 +323,7 @@
      * @param {Array<{url:string,type:'photo'|'video'}>} opts.selectedMedia same-origin URLs (mission-photo-view.php)
      * @param {string} opts.musicTrackUrl same-origin or public URL to the chosen track's mp3
      * @param {?string} [opts.teamLogoUrl] same-origin URL to the org's app_logo setting (uploads/logos/...); omitted/null draws no logo
+     * @param {?string} [opts.orgTagline] the org's app_description setting, shown under the mission name in the outro
      * @param {(fraction:number)=>void} [opts.onProgress]
      * @param {AbortSignal} [opts.signal] abort the render (e.g. the modal was closed)
      */
@@ -321,19 +354,13 @@
             const fail = (err) => { if (stopped) return; stopped = true; cleanup(); reject(err); };
 
             Promise.resolve().then(async () => {
-                // ── Preload: tile pyramid, media elements, music ──────────────
-                let tiles = [];
+                // ── Preload: the one pin-area tile, media elements, music ──────
+                let pinTile = null;
                 if (hasPin) {
-                    const tilePromises = [];
-                    for (let z = START_ZOOM; z <= END_ZOOM; z++) {
-                        const t = latLngToTile(loc.lat, loc.lng, z);
-                        tilePromises.push(
-                            loadImage(esriTileUrl(t.z, t.x, t.y), 'anonymous')
-                                .then(img => ({z, img, fx: t.fx, fy: t.fy}))
-                                .catch(() => null)
-                        );
-                    }
-                    tiles = (await Promise.all(tilePromises)).filter(Boolean);
+                    const t = latLngToTile(loc.lat, loc.lng, PIN_ZOOM);
+                    pinTile = await loadImage(esriTileUrl(t.z, t.x, t.y), 'anonymous')
+                        .then(img => ({img, fx: t.fx, fy: t.fy}))
+                        .catch(() => null);
                 }
 
                 const mediaElements = await Promise.all(media.map(m =>
@@ -416,23 +443,12 @@
                         drawOpeningTitle(ctx, canvasW, canvasH, loc.title || '', formatMissionDate(loc.start_datetime), elapsed / TITLE_SCREEN_MS);
                         drawCornerLogo(ctx, canvasW, canvasH, logoImg);
                     } else if (elapsed < slideshowStart) {
-                        // ── Phase 1: world-view zoom into the pin, then it drops ──
+                        // ── Phase 1: real satellite zoom onto the pin, then it drops ──
                         const phase1Elapsed = elapsed - TITLE_SCREEN_MS;
                         const zoomMs = PHASE1_MS * 0.75;
                         const dropMs = PHASE1_MS - zoomMs;
-                        if (hasPin && tiles.length) {
-                            const zt = Math.min(1, phase1Elapsed / zoomMs);
-                            const vz = START_ZOOM + easeOutCubic(zt) * (END_ZOOM - START_ZOOM);
-                            const zInt = Math.min(END_ZOOM - 1, Math.floor(vz));
-                            const bandT = vz - zInt;
-                            const cur = tiles.find(t => t.z === zInt) || tiles[0];
-                            const next = tiles.find(t => t.z === zInt + 1);
-                            const cropSize = TILE_SIZE / Math.pow(2, bandT);
-                            drawCover(ctx, cur.img, cur.fx, cur.fy, cropSize, canvasW, canvasH, 1);
-                            if (next && bandT > 0.8) {
-                                const fadeAlpha = (bandT - 0.8) / 0.2;
-                                drawCover(ctx, next.img, next.fx, next.fy, TILE_SIZE, canvasW, canvasH, fadeAlpha);
-                            }
+                        if (pinTile) {
+                            drawPinZoom(ctx, pinTile.img, pinTile.fx, pinTile.fy, canvasW, canvasH, phase1Elapsed / zoomMs);
                         }
                         if (phase1Elapsed > zoomMs) {
                             drawPinDrop(ctx, canvasW, canvasH, (phase1Elapsed - zoomMs) / dropMs);
@@ -460,7 +476,7 @@
                     } else {
                         // ── Phase 3: outro (its own big, centered logo - no corner mark here) ──
                         const outroElapsed = elapsed - slideshowEnd;
-                        drawOutro(ctx, canvasW, canvasH, Math.min(1, outroElapsed / OUTRO_MS), logoImg, loc.title || '');
+                        drawOutro(ctx, canvasW, canvasH, Math.min(1, outroElapsed / OUTRO_MS), logoImg, loc.title || '', opts.orgTagline || '');
                     }
 
                     if (elapsed >= timing.totalMs) {
@@ -490,7 +506,7 @@
     if (typeof module !== 'undefined' && module.exports) {
         module.exports = {
             latLngToTile, computeTiming, kenBurnsTransform, formatMissionDate,
-            START_ZOOM, END_ZOOM, MIN_TOTAL_MS, MAX_TOTAL_MS, MIN_ITEM_MS,
+            PIN_ZOOM, MIN_TOTAL_MS, MAX_TOTAL_MS, MIN_ITEM_MS,
         };
     }
 })(typeof window !== 'undefined' ? window : globalThis);
