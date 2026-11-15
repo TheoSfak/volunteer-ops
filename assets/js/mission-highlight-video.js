@@ -1,14 +1,15 @@
 /**
- * Mission highlight video — client-side renderer (v3.493.0).
+ * Mission highlight video — client-side renderer (v3.494.0).
  *
  * Renders a short (20-40s) highlight reel entirely in the admin's browser:
- * a big opening title card (mission name + date), a music-backed slideshow
- * of admin-picked photos/videos, and a closing card (team logo + mission
- * name + the org's own tagline). The team's own logo (Settings > app_logo)
- * also stays in the corner for the whole clip. No ffmpeg/exec on the server
- * - production hosting has no shell access (see memory: epidrasis.iloveweb.gr
- * has no file/shell access for the user). The finished .webm Blob is handed
- * to mission-highlight-video.php to store.
+ * a big opening title card (mission name + date, 3-4s), a music-backed
+ * slideshow of admin-picked photos/videos with a persistent lower-third
+ * (mission name + date, always on screen), and a closing card (team logo +
+ * mission name + the org's own tagline, 5s). The team's own logo (Settings
+ * > app_logo) also stays in the corner through the title card and slideshow.
+ * No ffmpeg/exec on the server - production hosting has no shell access (see
+ * memory: epidrasis.iloveweb.gr has no file/shell access for the user). The
+ * finished .webm Blob is handed to mission-highlight-video.php to store.
  *
  * v3.490.0-v3.492.0 opened with a zoom from a world view (or later, a single
  * local tile) onto the mission's pin, fetching Esri World_Imagery tiles
@@ -24,8 +25,8 @@
 (function (root) {
     'use strict';
 
-    const TITLE_SCREEN_MS = 2200; // opening card: mission name + date, big letters
-    const OUTRO_MS = 3000;  // closing card: team logo + mission name, fading to black
+    const TITLE_SCREEN_MS = 3500; // opening card: mission name + date, big letters (3-4s)
+    const OUTRO_MS = 5000;  // closing card: team logo + mission name, fading to black
     const MIN_ITEM_MS = 1200;
     const MIN_TOTAL_MS = 20000;
     const MAX_TOTAL_MS = 40000;
@@ -145,6 +146,34 @@
         ctx.shadowColor = 'rgba(0,0,0,0.55)';
         ctx.shadowBlur = 8;
         ctx.drawImage(logoImg, canvasW - pad - w, pad, w, h);
+        ctx.restore();
+    }
+
+    /** Persistent lower-third (slideshow only - the title card and outro already show this big and centered): a dark gradient strip with the mission name and date, always on screen while photos/videos play. */
+    function drawBottomBanner(ctx, canvasW, canvasH, missionTitle, dateLabel) {
+        ctx.save();
+        const bannerH = canvasH * 0.16;
+        const grad = ctx.createLinearGradient(0, canvasH - bannerH, 0, canvasH);
+        grad.addColorStop(0, 'rgba(0,0,0,0)');
+        grad.addColorStop(1, 'rgba(0,0,0,0.72)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, canvasH - bannerH, canvasW, bannerH);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'alphabetic';
+        ctx.shadowColor = 'rgba(0,0,0,0.8)';
+        ctx.shadowBlur = 6;
+        const titleSize = Math.round(canvasW * 0.034);
+        ctx.font = 'bold ' + titleSize + 'px sans-serif';
+        ctx.fillText(fitSingleLine(ctx, missionTitle, canvasW * 0.92), canvasW / 2, canvasH - bannerH * 0.42, canvasW * 0.92);
+
+        if (dateLabel) {
+            const dateSize = Math.round(canvasW * 0.022);
+            ctx.font = dateSize + 'px sans-serif';
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+            ctx.fillText(dateLabel, canvasW / 2, canvasH - bannerH * 0.14, canvasW * 0.92);
+        }
         ctx.restore();
     }
 
@@ -364,6 +393,7 @@
                             if (el.tagName === 'VIDEO' && el.ended) { el.currentTime = 0; el.play().catch(() => {}); }
                             drawKenBurns(ctx, el, canvasW, canvasH, progress, direction);
                         }
+                        drawBottomBanner(ctx, canvasW, canvasH, loc.title || '', formatMissionDate(loc.start_datetime));
                         drawCornerLogo(ctx, canvasW, canvasH, logoImg);
                     } else {
                         // ── Phase 2: outro (its own big, centered logo - no corner mark here) ──
