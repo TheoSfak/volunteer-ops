@@ -181,18 +181,20 @@ if (isPost()) {
             
         case 'resend_email':
             if ($canManageMissions && $mission['status'] === STATUS_OPEN) {
-                // is_external = 0 keeps this reminder to our own people. It
-                // also drops the single-mission QR visitors layered on top of
-                // that flag, whose synthesized @mission-visitor.invalid address
-                // (visitor-join.php) can only ever hard-fail an SMTP send.
-                $allUsers = dbFetchAll(
-                    "SELECT id, name, email FROM users WHERE is_active = 1 AND deleted_at IS NULL AND is_external = 0"
-                );
+                // Same audience rules as when the mission first went live
+                // (includes/mission-notify-fields.php, read by the shared
+                // getMissionNotifyRecipients()): All / by Role / by Volunteer
+                // Type / by Position, always excluding guests and mission
+                // visitors. A reminder that ignored the original targeting
+                // would reach people the admin deliberately left out the
+                // first time.
+                $audience   = getMissionNotifyRecipients($_POST);
+                $recipients = $audience['volunteers'];
                 $missionUrl = rtrim(BASE_URL, '/') . '/mission-view.php?id=' . $id;
                 $appName = getSetting('app_name', 'VolunteerOps');
                 $sent = 0;
-                
-                $userIds = array_column($allUsers, 'id');
+
+                $userIds = array_column($recipients, 'id');
                 if (!empty($userIds)) {
                     sendBulkNotifications(
                         $userIds,
@@ -203,8 +205,8 @@ if (isPost()) {
                         ['url' => 'mission-view.php?id=' . $id]
                     );
                 }
-                
-                foreach ($allUsers as $v) {
+
+                foreach ($recipients as $v) {
                     if (!empty($v['email'])) {
                         sendNotificationEmail('mission_reminder', $v['email'], [
                             'user_name'           => $v['name'],
@@ -217,7 +219,7 @@ if (isPost()) {
                     }
                 }
                 logAudit('resend_mission_email', 'missions', $id);
-                setFlash('success', 'Στάλθηκε υπενθύμιση σε ' . $sent . ' χρήστες.');
+                setFlash('success', 'Στάλθηκε υπενθύμιση σε ' . $sent . ' χρήστες (' . $audience['label'] . ').');
             }
             break;
 
@@ -1137,6 +1139,9 @@ include __DIR__ . '/includes/header.php';
                         <form method="post">
                             <?= csrfField() ?>
                             <input type="hidden" name="action" value="resend_email">
+
+                            <?php $missionNotifyShowToggle = false; include __DIR__ . '/includes/mission-notify-fields.php'; ?>
+
                             <button type="submit" class="btn btn-outline-primary w-100">
                                 <i class="bi bi-envelope-arrow-up me-1"></i>Επαναποστολή Email
                             </button>

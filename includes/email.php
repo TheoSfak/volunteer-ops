@@ -714,22 +714,19 @@ function sendBulkNotifications(array $userIds, string $title, string $message, s
 }
 
 /**
- * Send the "Νέα Αποστολή" blast for a mission that has just gone live, to the
- * audience picked in includes/mission-notify-fields.php.
+ * Resolve the audience picked in includes/mission-notify-fields.php (All /
+ * by Role / by Volunteer Type / by Position) into the matching user rows
+ * plus a human-readable label.
  *
- * There are two ways a mission goes live — mission-view.php's Δημοσίευση
- * action on a DRAFT, and mission-form.php saving one straight as Ανοιχτή —
- * and this is the single implementation both call. The caller owns only the
- * decision to notify and the wording of its own flash message; the audience
- * rules, the in-app notification and the email loop live here.
+ * Shared by sendMissionOpenedNotifications() below and mission-view.php's
+ * resend_email action, so the targeting rules — and the guest/visitor
+ * exclusion in particular — can never drift between "mission opened" and
+ * "resend" the way two hand-rolled copies eventually would.
  *
- * The caller passes $post rather than this reading $_POST directly so the
- * field-name contract stays visible at both call sites.
- *
- * @param  array $post     the submitted form data (notify_target, notify_roles[], ...)
- * @return array{sent:int, failed:int, lastError:string, label:string, recipients:int}
+ * @param  array $post the submitted form data (notify_target, notify_roles[], ...)
+ * @return array{volunteers:array, label:string}
  */
-function sendMissionOpenedNotifications(int $missionId, array $mission, array $post): array {
+function getMissionNotifyRecipients(array $post): array {
     $notifyTarget = $post['notify_target'] ?? 'all';
     // is_external = 0 excludes guest/partner-org accounts and the
     // single-mission QR visitors layered on that same flag: a new mission of
@@ -772,8 +769,6 @@ function sendMissionOpenedNotifications(int $missionId, array $mission, array $p
         "SELECT id, name, email FROM users WHERE $whereFilter",
         $filterParams
     );
-    $missionUrl = rtrim(BASE_URL, '/') . '/mission-view.php?id=' . $missionId;
-    $appName = getSetting('app_name', 'VolunteerOps');
 
     // Human-readable audience, for the caller's flash message
     $targetLabel = 'όλους τους χρήστες';
@@ -791,6 +786,32 @@ function sendMissionOpenedNotifications(int $missionId, array $mission, array $p
         );
         $targetLabel = implode(', ', array_column($posRows, 'name'));
     }
+
+    return ['volunteers' => $volunteers, 'label' => $targetLabel];
+}
+
+/**
+ * Send the "Νέα Αποστολή" blast for a mission that has just gone live, to the
+ * audience picked in includes/mission-notify-fields.php.
+ *
+ * There are two ways a mission goes live — mission-view.php's Δημοσίευση
+ * action on a DRAFT, and mission-form.php saving one straight as Ανοιχτή —
+ * and this is the single implementation both call. The caller owns only the
+ * decision to notify and the wording of its own flash message; the audience
+ * rules, the in-app notification and the email loop live here.
+ *
+ * The caller passes $post rather than this reading $_POST directly so the
+ * field-name contract stays visible at both call sites.
+ *
+ * @param  array $post     the submitted form data (notify_target, notify_roles[], ...)
+ * @return array{sent:int, failed:int, lastError:string, label:string, recipients:int}
+ */
+function sendMissionOpenedNotifications(int $missionId, array $mission, array $post): array {
+    $audience   = getMissionNotifyRecipients($post);
+    $volunteers = $audience['volunteers'];
+    $targetLabel = $audience['label'];
+    $missionUrl = rtrim(BASE_URL, '/') . '/mission-view.php?id=' . $missionId;
+    $appName = getSetting('app_name', 'VolunteerOps');
 
     $userIds = array_column($volunteers, 'id');
     if (!empty($userIds)) {

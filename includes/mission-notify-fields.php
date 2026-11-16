@@ -2,23 +2,35 @@
 /**
  * VolunteerOps - Mission notification recipient picker (shared form partial)
  *
- * Rendered by BOTH ways a mission ever goes live: mission-view.php's
+ * Rendered by both ways a mission ever goes live — mission-view.php's
  * "Δημοσίευση" panel (publishing an existing DRAFT) and mission-form.php's
- * "Κατάσταση" card (creating — or saving — a mission straight as Ανοιχτή).
- * Both post the same field names and both are read back by the single
- * sendMissionOpenedNotifications() in includes/email.php, so this markup and
- * that reader are the whole contract. Don't hand-roll a third copy of these
- * inputs: the reason this partial exists is that the two pages drifted apart
- * once already, and only one of them had the guest/visitor exclusion.
+ * "Κατάσταση" card (creating — or saving — a mission straight as Ανοιχτή) —
+ * and by mission-view.php's "Επαναποστολή Email" reminder on an OPEN mission.
+ * All three post the same field names, read back by the single
+ * getMissionNotifyRecipients() in includes/email.php (used directly by resend,
+ * and via sendMissionOpenedNotifications() by the two "went live" paths), so
+ * this markup and that reader are the whole contract. Don't hand-roll another
+ * copy of these inputs: the reason this partial exists is that the pages
+ * drifted apart once already, and only one of them had the guest/visitor
+ * exclusion.
  *
  * Element ids are fixed, so include this at most once per page.
  *
- * Optional caller variable, set before the include:
- *   $missionNotifyChecked  bool  initial state of the master checkbox (default true)
+ * Optional caller variables, set before the include:
+ *   $missionNotifyChecked    bool  initial state of the master checkbox (default true)
+ *   $missionNotifyShowToggle bool  render the "Αποστολή ειδοποίησης Email" master
+ *                                  checkbox at all (default true). Set false when
+ *                                  sending is not optional for the caller's action
+ *                                  (e.g. mission-view.php's "Επαναποστολή Email" button
+ *                                  IS the send decision) — the targeting panel then
+ *                                  always renders, with no toggle to hide it behind.
  */
 
 if (!isset($missionNotifyChecked)) {
     $missionNotifyChecked = true;
+}
+if (!isset($missionNotifyShowToggle)) {
+    $missionNotifyShowToggle = true;
 }
 
 // Queried here rather than by each caller: a partial that silently renders an
@@ -28,6 +40,7 @@ $missionNotifyPositions = dbFetchAll(
     "SELECT id, name FROM volunteer_positions WHERE is_active = 1 ORDER BY name"
 );
 ?>
+<?php if ($missionNotifyShowToggle): ?>
 <!-- Notify toggle -->
 <div class="form-check mb-2">
     <input class="form-check-input" type="checkbox" name="notify_volunteers"
@@ -37,9 +50,10 @@ $missionNotifyPositions = dbFetchAll(
         <i class="bi bi-envelope me-1"></i>Αποστολή ειδοποίησης Email
     </label>
 </div>
+<?php endif; ?>
 
-<!-- Targeting panel (visible when checked) -->
-<div id="notifyPanel" class="border rounded p-2 mb-3 bg-light small"<?= $missionNotifyChecked ? '' : ' style="display:none;"' ?>>
+<!-- Targeting panel (visible when checked, or always when there is no toggle) -->
+<div id="notifyPanel" class="border rounded p-2 mb-3 bg-light small"<?= ($missionNotifyShowToggle && !$missionNotifyChecked) ? ' style="display:none;"' : '' ?>>
     <div class="mb-2 text-muted fw-semibold">Παραλήπτες:</div>
 
     <!-- All -->
