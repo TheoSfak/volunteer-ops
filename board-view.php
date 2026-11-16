@@ -39,6 +39,10 @@ if ($link && get('ajax') === '1') {
         'teams' => $teams,
         'gps_on' => $gpsOn,
         'gps_total' => max($gpsOn, $gpsTotal),
+        'sectors' => loadBoardViewSectors($missionId),
+        'restricted_areas' => loadBoardViewRestrictedAreas($missionId),
+        'incidents' => loadBoardViewIncidents($missionId),
+        'poi' => loadBoardViewPoi($missionId),
         'server_time' => date('H:i:s'),
     ]);
     exit;
@@ -58,6 +62,7 @@ if ($link) {
     <title><?= $link ? 'Πίνακας · ' . h($mission['title'] ?? '') : 'Μη έγκυρος σύνδεσμος' ?></title>
 <?php if ($link): ?>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha384-sHL9NAb7lN7rfvG5lfHpm643Xkcjzp4jFvuavGOndn6pjVqS6ny56CAt3nsEVT4H" crossorigin="anonymous">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" integrity="sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+" crossorigin="anonymous">
 <?php endif; ?>
     <style>
         :root { --bv-panel: #121a24; --bv-ink: #e7edf5; --bv-sub: #8fa3bb; --bv-border: #223047; }
@@ -79,6 +84,10 @@ if ($link) {
         .bv-team.tone-none .gps { color: #5a6b80; }
         .bv-pin-dot { width: 16px; height: 16px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 2px rgba(0,0,0,.4); }
         .bv-pin-dot.stale { opacity: .55; }
+        .bv-mark { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 2px rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; }
+        .bv-legend { display: flex; gap: 14px; font-size: clamp(11px, 1.1vw, 13px); color: var(--bv-sub); flex-shrink: 0; }
+        .bv-legend span { white-space: nowrap; }
+        .bv-legend b { color: var(--bv-ink); }
         .bv-invalid { display: flex; align-items: center; justify-content: center; height: 100vh; text-align: center; padding: 24px; }
         .bv-invalid h1 { font-size: 1.3rem; }
         .bv-invalid p { color: var(--bv-sub); font-size: 14px; }
@@ -97,6 +106,7 @@ if ($link) {
     <div class="bv-wrap">
         <div class="bv-head">
             <div class="bv-title"><?= h($mission['title'] ?? '') ?></div>
+            <div class="bv-legend" id="bvLegend"></div>
             <div class="bv-stats">
                 <div>GPS <b id="bvGpsCount">0/0</b></div>
                 <div id="bvClock">--:--:--</div>
@@ -118,6 +128,10 @@ if ($link) {
 
         let markers = {};
         let fitted = false;
+        const sectorLayer = L.layerGroup().addTo(map);
+        const restrictedLayer = L.layerGroup().addTo(map);
+        let incidentMarkers = {};
+        let poiMarkers = {};
 
         function teamToneColor(tone) {
             return tone === 'none' ? '#5a6b80' : (tone === 'warn' ? '#f5b942' : '#39d98a');
@@ -158,6 +172,78 @@ if ($link) {
             }
         }
 
+        const SECTOR_COLORS = { not_started: '#5a6b80', assigned: '#f5b942', in_progress: '#39a0ff', completed: '#39d98a', needs_recheck: '#e8590c' };
+        function renderSectors(sectors) {
+            sectorLayer.clearLayers();
+            sectors.forEach(function(s) {
+                if (!s.geo || s.geo.length < 3) return;
+                const color = s.team_color_bg || SECTOR_COLORS[s.status] || '#5a6b80';
+                const poly = L.polygon(s.geo, { color: color, weight: 2, fillColor: color, fillOpacity: 0.12 });
+                poly.bindPopup(s.team_label + ' · ' + s.status_label);
+                sectorLayer.addLayer(poly);
+            });
+        }
+
+        const RESTRICTED_COLORS = { danger: '#dc3545', cliff: '#e8590c', forbidden: '#adb5bd' };
+        function renderRestrictedAreas(areas) {
+            restrictedLayer.clearLayers();
+            areas.forEach(function(a) {
+                if (!a.geo || a.geo.length < 2) return;
+                const color = RESTRICTED_COLORS[a.kind] || '#dc3545';
+                const shape = a.shape === 'line'
+                    ? L.polyline(a.geo, { color: color, weight: 4 })
+                    : L.polygon(a.geo, { color: color, weight: 2, fillColor: color, fillOpacity: 0.25 });
+                shape.bindPopup(a.label || a.kind);
+                restrictedLayer.addLayer(shape);
+            });
+        }
+
+        const SEVERITY_COLORS = { low: '#6c757d', medium: '#0dcaf0', high: '#f59e0b', critical: '#dc3545' };
+        function renderIncidents(incidents) {
+            const seen = {};
+            incidents.forEach(function(i) {
+                const key = 'i' + i.id;
+                seen[key] = true;
+                const color = SEVERITY_COLORS[i.severity] || '#6c757d';
+                if (!incidentMarkers[key]) {
+                    const icon = L.divIcon({ className: '', html: '<div class="bv-mark" style="background:' + color + '"><i class="bi bi-heart-pulse-fill"></i></div>', iconSize: [22, 22] });
+                    incidentMarkers[key] = L.marker([i.lat, i.lng], { icon: icon, zIndexOffset: 400 }).addTo(map);
+                } else {
+                    incidentMarkers[key].setLatLng([i.lat, i.lng]);
+                }
+                incidentMarkers[key].bindPopup(i.type_label);
+            });
+            Object.keys(incidentMarkers).forEach(function(key) {
+                if (!seen[key]) { map.removeLayer(incidentMarkers[key]); delete incidentMarkers[key]; }
+            });
+        }
+
+        function renderPoi(pois) {
+            const seen = {};
+            pois.forEach(function(p) {
+                const key = 'p' + p.id;
+                seen[key] = true;
+                const color = p.checked ? '#6c757d' : '#0d6efd';
+                if (!poiMarkers[key]) {
+                    const icon = L.divIcon({ className: '', html: '<div class="bv-mark" style="background:' + color + '"><i class="bi bi-search"></i></div>', iconSize: [22, 22] });
+                    poiMarkers[key] = L.marker([p.lat, p.lng], { icon: icon, zIndexOffset: 300 }).addTo(map);
+                } else {
+                    poiMarkers[key].setLatLng([p.lat, p.lng]);
+                }
+            });
+            Object.keys(poiMarkers).forEach(function(key) {
+                if (!seen[key]) { map.removeLayer(poiMarkers[key]); delete poiMarkers[key]; }
+            });
+        }
+
+        function renderLegend(data) {
+            const parts = ['<span><b>' + data.sectors.length + '</b> τομείς</span>'];
+            if (data.incidents.length) parts.push('<span style="color:#f59e0b"><b>' + data.incidents.length + '</b> αναφορές</span>');
+            if (data.poi.length) parts.push('<span><b>' + data.poi.length + '</b> σημεία ενδιαφέροντος</span>');
+            if (data.restricted_areas.length) parts.push('<span style="color:#dc3545"><b>' + data.restricted_areas.length + '</b> ζώνες κινδύνου</span>');
+            document.getElementById('bvLegend').innerHTML = parts.join('');
+        }
+
         function poll() {
             fetch('board-view.php?token=' + encodeURIComponent(token) + '&ajax=1')
                 .then(function(r) { return r.json(); })
@@ -167,6 +253,11 @@ if ($link) {
                     document.getElementById('bvClock').textContent = data.server_time;
                     renderTeams(data.teams);
                     renderPins(data.pins);
+                    renderSectors(data.sectors);
+                    renderRestrictedAreas(data.restricted_areas);
+                    renderIncidents(data.incidents);
+                    renderPoi(data.poi);
+                    renderLegend(data);
                 })
                 .catch(function() {});
         }

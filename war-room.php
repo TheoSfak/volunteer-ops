@@ -4354,7 +4354,7 @@ include __DIR__ . '/includes/header.php';
                          missing person/caller's own phone (locate.php), and a
                          read-only «Οθόνη τοίχου» kiosk mirror (board-view.php)
                          for a second screen or a liaising authority. -->
-                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#wrLinksModal" title="<?= t('links.btn') ?>">
+                    <button type="button" id="wrLinksBtn" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#wrLinksModal" title="<?= t('links.btn') ?>">
                         <i class="bi bi-link-45deg"></i><span class="d-none d-md-inline ms-1"><?= t('links.btn') ?></span>
                     </button>
                     <?php endif; ?>

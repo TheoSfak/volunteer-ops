@@ -154,6 +154,96 @@ function loadBoardViewPins(int $missionId): array {
 }
 
 /**
+ * Search sectors for the kiosk map. Reuses war-room.php's own
+ * loadMissionSectorsForUser() (deliberately universal-visibility, no masking
+ * - see that function's docblock) rather than re-querying, trimmed to only
+ * what a read-only wall screen draws: the polygon, its status and which
+ * team it's assigned to. Drops every staff name (status_updated_by_name,
+ * acknowledged_by_name) and the per-building urban checklist, neither of
+ * which a shared screen needs.
+ */
+function loadBoardViewSectors(int $missionId): array {
+    $sectors = loadMissionSectorsForUser($missionId, 0, false, false);
+    return array_map(static function (array $s) {
+        return [
+            'id'            => $s['id'],
+            'geo'           => $s['geo'],
+            'status'        => $s['status'],
+            'status_label'  => $s['status_label'],
+            'team_label'    => $s['team_label'],
+            'team_color_bg' => $s['team_color_bg'],
+        ];
+    }, $sectors);
+}
+
+/**
+ * Hazard/danger-zone polygons for the kiosk map. loadMissionRestrictedAreasForUser()
+ * carries nothing personal to begin with, so this is a thin pass-through -
+ * kept as its own function anyway so every board-view data source goes
+ * through functions-board-links.php, not a direct call to a war-room.php helper.
+ */
+function loadBoardViewRestrictedAreas(int $missionId): array {
+    $areas = loadMissionRestrictedAreasForUser($missionId);
+    return array_map(static function (array $a) {
+        return [
+            'id'    => $a['id'],
+            'label' => $a['label'],
+            'kind'  => $a['kind'],
+            'shape' => $a['shape'],
+            'geo'   => $a['geo'],
+        ];
+    }, $areas);
+}
+
+/**
+ * Unresolved incident reports for the kiosk map. Calls
+ * loadUnresolvedIncidentsForMission() with $unmasked=false and no viewer (the
+ * same view a non-dispatched participant gets: patient_name/phone already
+ * masked, notes already stripped) and then drops MORE than that function
+ * does for its logged-in audience: estimated_age, gender_label and every
+ * reporter/team name, none of which this public screen should show at all.
+ * No location, no pin - filtered out, matching renderIncidentLayer()'s own
+ * null check in war-room.php.
+ */
+function loadBoardViewIncidents(int $missionId): array {
+    $incidents = loadUnresolvedIncidentsForMission($missionId, false, null);
+    $out = [];
+    foreach ($incidents as $i) {
+        if ($i['lat'] === null || $i['lng'] === null) {
+            continue;
+        }
+        $out[] = [
+            'id'         => $i['id'],
+            'lat'        => $i['lat'],
+            'lng'        => $i['lng'],
+            'severity'   => $i['severity'],
+            'type_label' => $i['type_label'],
+        ];
+    }
+    return $out;
+}
+
+/**
+ * Points of interest for the kiosk map. loadPointsOfInterestForMission() has
+ * NO masking at all for its logged-in audience (see its own docblock) -
+ * reporter names and free-text photo notes flow straight through, which is
+ * fine for an approved participant but not for an unauthenticated public
+ * screen. Trimmed here to the pin and its checked state only: no reporter
+ * names, no photos, no notes.
+ */
+function loadBoardViewPoi(int $missionId): array {
+    $pois = loadPointsOfInterestForMission($missionId);
+    return array_map(static function (array $p) {
+        return [
+            'id'      => $p['id'],
+            'lat'     => $p['lat'],
+            'lng'     => $p['lng'],
+            'checked' => $p['checked_at'] !== null,
+        ];
+    }, $pois);
+}
+
+/**
  * One card per team: colour, how many of its members currently have a pin
  * (vs. its total roster), and a traffic-light tone from the worst pin in it.
  * Deliberately no "current order" text - that needs the same order-target

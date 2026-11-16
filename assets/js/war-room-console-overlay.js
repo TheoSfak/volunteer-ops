@@ -1105,6 +1105,9 @@ if (typeof module !== 'undefined' && module.exports) {
             if (back) { const was = back.className; back.className = 'bi bi-house-fill'; undo.push(() => { back.className = was; }); }
         }
         take($('#mapFullscreenToggle'), tools);
+        // The share-links button (v3.499.0) is a command-only, infrequent
+        // action like the ones already in this panel - not on the rail.
+        take($('#wrLinksBtn'), tools);
         if (canHover) tools.appendChild(ptrBtn);
         bindPointer();
         // The heat layer's button goes first in the pair (the last group of the map tools column), so the command post and the map points keep their places.
