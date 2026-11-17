@@ -1004,6 +1004,8 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
                         <?php endif; ?>
                         <div class="vp-info-label"><i class="bi bi-hash me-1"></i>Α.Μ.Κ.Α.</div>
                         <div class="vp-info-value"><?= h($volunteer['amka'] ?: '-') ?></div>
+                        <div class="vp-info-label"><i class="bi bi-cake2 me-1"></i>Ημερομηνία Γέννησης</div>
+                        <div class="vp-info-value"><?= h(formatDate($volunteer['date_of_birth'])) ?></div>
                         <div class="vp-info-label"><i class="bi bi-car-front me-1"></i>Άδεια Οδήγησης / Όχημα</div>
                         <div class="vp-info-value"><?= h($volunteer['driving_license'] ?: '-') ?> <?= $volunteer['vehicle_plate'] ? '/ ' . h($volunteer['vehicle_plate']) : '' ?></div>
                     </div>

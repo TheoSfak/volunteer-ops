@@ -8458,6 +8458,18 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 220,
+            'description' => 'Optional date of birth for users, same admin-only idiom as id_card/afm/amka — ' .
+                'nothing required it before now.',
+            'up' => function () {
+                $cols = dbFetchAll("SHOW COLUMNS FROM users LIKE 'date_of_birth'");
+                if (empty($cols)) {
+                    dbExecute("ALTER TABLE users ADD COLUMN date_of_birth DATE NULL AFTER amka");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

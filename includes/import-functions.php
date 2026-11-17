@@ -167,6 +167,9 @@ function importVolunteersFromCsv(array $rows, bool $dryRun = false): array {
         $idCard           = _col($row, 'Ταυτότητα');
         $afm              = _col($row, 'ΑΦΜ');
         $amka             = _col($row, 'ΑΜΚΑ');
+        $dobRaw           = _col($row, 'Ημερομηνία Γέννησης');
+        $dob              = $dobRaw ? DateTime::createFromFormat('Y-m-d', $dobRaw) : false;
+        $dateOfBirth      = ($dob && $dob->format('Y-m-d') === $dobRaw) ? $dobRaw : null;
         $drivingLicense   = _col($row, 'Δίπλωμα Οδήγησης');
         $vehiclePlate     = _col($row, 'Πινακίδα Οχήματος');
         $pantsSize        = _col($row, 'Παντελόνι');
@@ -205,13 +208,13 @@ function importVolunteersFromCsv(array $rows, bool $dryRun = false): array {
             $userId = dbInsert(
                 "INSERT INTO users
                     (name, email, phone, password, role, volunteer_type, department_id,
-                     id_card, afm, amka, driving_license, vehicle_plate,
+                     id_card, afm, amka, date_of_birth, driving_license, vehicle_plate,
                      pants_size, shirt_size, blouse_size, fleece_size,
                      registry_epidrasis, registry_ggpp,
                      is_active, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())",
                 [$name, $email, $phone, $hashedPassword, $role, $volunteerType, $deptId,
-                 $idCard, $afm, $amka, $drivingLicense, $vehiclePlate,
+                 $idCard, $afm, $amka, $dateOfBirth, $drivingLicense, $vehiclePlate,
                  $pantsSize, $shirtSize, $blouseSize, $fleeceSize,
                  $regEpidrasis, $regGgpp]
             );

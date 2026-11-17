@@ -99,6 +99,7 @@ if (isPost()) {
         'id_card' => post('id_card') ?: null,
         'afm' => post('afm') ?: null,
         'amka' => post('amka') ?: null,
+        'date_of_birth' => post('date_of_birth') ?: null,
         'driving_license' => post('driving_license') ?: null,
         'vehicle_plate' => post('vehicle_plate') ?: null,
         'pants_size' => post('pants_size') ?: null,
@@ -174,6 +175,14 @@ if (isPost()) {
         }
     }
     
+    // Date of birth is optional, but if given it must be a real date, not in the future
+    if ($data['date_of_birth']) {
+        $dob = DateTime::createFromFormat('Y-m-d', $data['date_of_birth']);
+        if (!$dob || $dob->format('Y-m-d') !== $data['date_of_birth'] || $dob > new DateTime()) {
+            $errors[] = 'Μη έγκυρη ημερομηνία γέννησης.';
+        }
+    }
+
     // Only system admin can create other system admins
     if ($data['role'] === ROLE_SYSTEM_ADMIN && $currentUser['role'] !== ROLE_SYSTEM_ADMIN) {
         $errors[] = 'Δεν έχετε δικαίωμα για αυτόν τον ρόλο.';
@@ -207,7 +216,7 @@ if (isPost()) {
                 "UPDATE users SET
                  name = ?, email = ?, phone = ?, role = ?, custom_role_id = ?, department_id = ?, warehouse_id = ?, is_active = ?, is_external = ?, language = ?, guest_org_name = ?, guest_country = ?, volunteer_team_id = ?, guest_country_code = ?,
                  volunteer_type = ?, cohort_year = ?, position_id = ?,
-                 id_card = ?, afm = ?, amka = ?, driving_license = ?, vehicle_plate = ?,
+                 id_card = ?, afm = ?, amka = ?, date_of_birth = ?, driving_license = ?, vehicle_plate = ?,
                  pants_size = ?, shirt_size = ?, blouse_size = ?, fleece_size = ?,
                  registry_epidrasis = ?, registry_ggpp = ?,
                  is_dog_handler = ?, dog_name = ?, dog_training = ?, is_team_captain = ?, updated_at = NOW()
@@ -216,7 +225,7 @@ if (isPost()) {
                     $data['name'], $data['email'], $data['phone'],
                     $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'], $data['is_external'], $data['language'], $data['guest_org_name'], $data['guest_country'], $data['volunteer_team_id'], $data['guest_country_code'],
                     $volunteerType, $cohortYear, $data['position_id'],
-                    $data['id_card'], $data['afm'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
+                    $data['id_card'], $data['afm'], $data['amka'], $data['date_of_birth'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
                     $data['registry_epidrasis'], $data['registry_ggpp'],
                     $data['is_dog_handler'], $data['dog_name'], $data['dog_training'], $data['is_team_captain'], $id
@@ -240,14 +249,14 @@ if (isPost()) {
             $id = dbInsert(
                 "INSERT INTO users
                  (name, email, password, phone, role, custom_role_id, department_id, warehouse_id, is_active, is_external, language, guest_org_name, guest_country, volunteer_team_id, guest_country_code, volunteer_type, cohort_year, position_id,
-                  id_card, afm, amka, driving_license, vehicle_plate, pants_size, shirt_size, blouse_size, fleece_size,
+                  id_card, afm, amka, date_of_birth, driving_license, vehicle_plate, pants_size, shirt_size, blouse_size, fleece_size,
                   registry_epidrasis, registry_ggpp, is_dog_handler, dog_name, dog_training, is_team_captain, total_points, created_at, updated_at)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NOW(), NOW())",
                 [
                     $data['name'], $data['email'], password_hash($password, PASSWORD_DEFAULT),
                     $data['phone'], $data['role'], $data['custom_role_id'], $data['department_id'], $data['warehouse_id'], $data['is_active'], $data['is_external'], $data['language'], $data['guest_org_name'], $data['guest_country'], $data['volunteer_team_id'], $data['guest_country_code'],
                     $volunteerType, $cohortYear, $data['position_id'],
-                    $data['id_card'], $data['afm'], $data['amka'], $data['driving_license'], $data['vehicle_plate'],
+                    $data['id_card'], $data['afm'], $data['amka'], $data['date_of_birth'], $data['driving_license'], $data['vehicle_plate'],
                     $data['pants_size'], $data['shirt_size'], $data['blouse_size'], $data['fleece_size'],
                     $data['registry_epidrasis'], $data['registry_ggpp'],
                     $data['is_dog_handler'], $data['dog_name'], $data['dog_training'], $data['is_team_captain']
@@ -331,6 +340,7 @@ $form = $volunteer ?: [
     'id_card' => '',
     'afm' => '',
     'amka' => '',
+    'date_of_birth' => '',
     'driving_license' => '',
     'vehicle_plate' => '',
     'pants_size' => '',
@@ -630,8 +640,13 @@ include __DIR__ . '/includes/header.php';
                     <label class="form-label">Α.Μ.Κ.Α.</label>
                     <input type="text" class="form-control" name="amka" value="<?= h($form['amka'] ?? '') ?>" placeholder="11 ψηφία" maxlength="11">
                 </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Ημερομηνία Γέννησης</label>
+                    <input type="date" class="form-control" name="date_of_birth" value="<?= h($form['date_of_birth'] ?? '') ?>" max="<?= date('Y-m-d') ?>" style="max-width: 220px;">
+                    <small class="text-muted">Προαιρετικό.</small>
+                </div>
             </div>
-            
+
             <div class="row">
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Άδεια Οδήγησης</label>

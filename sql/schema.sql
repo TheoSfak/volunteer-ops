@@ -80,6 +80,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     `id_card` VARCHAR(20) NULL,
     `afm` VARCHAR(20) NULL,
     `amka` VARCHAR(11) NULL,
+    `date_of_birth` DATE NULL COMMENT 'Optional — not collected for every user',
     `driving_license` VARCHAR(30) NULL,
     `vehicle_plate` VARCHAR(20) NULL,
     `pants_size` VARCHAR(10) NULL,

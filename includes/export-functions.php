@@ -192,6 +192,7 @@ function exportVolunteersToCsv($filters = []) {
                 u.id_card,
                 u.afm,
                 u.amka,
+                u.date_of_birth,
                 u.driving_license,
                 u.vehicle_plate,
                 u.pants_size,
@@ -259,7 +260,7 @@ function exportVolunteersToCsv($filters = []) {
     $vtypes = ['VOLUNTEER' => 'VOLUNTEER', 'TRAINEE_RESCUER' => 'TRAINEE_RESCUER', 'RESCUER' => 'RESCUER'];
 
     fputcsvSafe($out, [
-        'ID', 'Όνομα', 'Ομάδα/Φορέας', 'Email', 'Τηλέφωνο', 'Ταυτότητα', 'ΑΦΜ', 'ΑΜΚΑ',
+        'ID', 'Όνομα', 'Ομάδα/Φορέας', 'Email', 'Τηλέφωνο', 'Ταυτότητα', 'ΑΦΜ', 'ΑΜΚΑ', 'Ημερομηνία Γέννησης',
         'Δίπλωμα Οδήγησης', 'Πινακίδα Οχήματος',
         'Παντελόνι', 'Χιτώνιο', 'Μπλούζα', 'Fleece',
         'Μητρώο Επίδρασης', 'Μητρώο ΓΓΠΠ',
@@ -285,6 +286,7 @@ function exportVolunteersToCsv($filters = []) {
             $v['id_card'],
             $v['afm'],
             $v['amka'],
+            $v['date_of_birth'],
             $v['driving_license'],
             $v['vehicle_plate'],
             $v['pants_size'],
