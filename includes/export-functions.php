@@ -25,7 +25,12 @@ function exportMissionsToCsv($filters = []) {
         $where[] = 'm.department_id = ?';
         $params[] = $filters['department_id'];
     }
-    
+
+    if (!empty($filters['branch_id'])) {
+        $where[] = 'm.branch_id = ?';
+        $params[] = $filters['branch_id'];
+    }
+
     if (!empty($filters['mission_type'])) {
         $where[] = 'm.mission_type_id = ?';
         $params[] = (int) $filters['mission_type'];
@@ -53,6 +58,7 @@ function exportMissionsToCsv($filters = []) {
                 m.description,
                 mt.name AS type_name,
                 d.name AS department,
+                br.name AS branch,
                 m.location,
                 m.start_datetime,
                 m.end_datetime,
@@ -64,6 +70,7 @@ function exportMissionsToCsv($filters = []) {
                  WHERE s.mission_id = m.id AND pr.status = 'APPROVED') AS volunteer_count
             FROM missions m
             LEFT JOIN departments d ON m.department_id = d.id
+            LEFT JOIN departments br ON m.branch_id = br.id
             LEFT JOIN mission_types mt ON m.mission_type_id = mt.id
             LEFT JOIN users u ON m.responsible_user_id = u.id
             WHERE " . implode(' AND ', $where) . "
@@ -92,7 +99,8 @@ function exportMissionsToCsv($filters = []) {
         'Τίτλος',
         'Περιγραφή',
         'Τύπος',
-        'Τμήμα',
+        'Σώμα',
+        'Παράρτημα',
         'Τοποθεσία',
         'Έναρξη',
         'Λήξη',
@@ -111,6 +119,7 @@ function exportMissionsToCsv($filters = []) {
             $mission['description'],
             $mission['type_name'] ?? '',
             $mission['department'],
+            $mission['branch'] ?? '',
             $mission['location'],
             formatDateTime($mission['start_datetime']),
             formatDateTime($mission['end_datetime']),

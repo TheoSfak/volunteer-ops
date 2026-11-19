@@ -8497,6 +8497,23 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 222,
+            'description' => 'Missions get an optional branch_id (geographic Παράρτημα, e.g. Ηράκλειο/Μάλια), ' .
+                'separate from the existing department_id (functional Σώμα). Lets the mission list/form filter ' .
+                'by branch without touching the Σώμα filter — the two are independent axes on the same ' .
+                '`departments` table, split by has_inventory.',
+            'up' => function () {
+                $cols = dbFetchAll("SHOW COLUMNS FROM missions LIKE 'branch_id'");
+                if (empty($cols)) {
+                    dbExecute("ALTER TABLE missions
+                        ADD COLUMN branch_id INT UNSIGNED NULL AFTER department_id,
+                        ADD INDEX idx_branch (branch_id),
+                        ADD CONSTRAINT fk_missions_branch FOREIGN KEY (branch_id) REFERENCES departments(id) ON DELETE SET NULL");
+                }
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

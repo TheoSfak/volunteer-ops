@@ -11,7 +11,12 @@ $isEdit = !empty($id);
 $pageTitle = $isEdit ? 'Επεξεργασία Αποστολής' : 'Νέα Αποστολή';
 
 $user = getCurrentUser();
-$departments = dbFetchAll("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
+// Σώματα (functional, e.g. Διασωστών) and Παραρτήματα (geographic branches,
+// e.g. Ηράκλειο/Μάλια) are both rows of `departments`, split by has_inventory
+// — kept as two separate dropdowns/columns so a mission's Σώμα and Παράρτημα
+// are picked independently instead of from one mixed list.
+$departments = dbFetchAll("SELECT id, name FROM departments WHERE (has_inventory = 0 OR has_inventory IS NULL) AND is_active = 1 ORDER BY name");
+$branches = dbFetchAll("SELECT id, name FROM departments WHERE has_inventory = 1 AND is_active = 1 ORDER BY name");
 $missionTypes = dbFetchAll("SELECT id, name, color, icon FROM mission_types WHERE is_active = 1 ORDER BY sort_order");
 $operationalDefaultTypeIds = array_map('intval', array_column(
     dbFetchAll("SELECT id FROM mission_types WHERE name IN ('Υγειονομική', 'Διασωστική')"),
@@ -51,6 +56,7 @@ if (isPost()) {
         'description' => post('description'),
         'mission_type_id' => (int)post('mission_type_id', 1),
         'department_id' => post('department_id') ?: null,
+        'branch_id' => post('branch_id') ?: null,
         'location' => post('location'),
         'location_details' => post('location_details'),
         'latitude' => post('latitude') ?: null,
@@ -104,13 +110,13 @@ if (isPost()) {
                 db()->beginTransaction();
                 try {
                     $sql = "UPDATE missions SET
-                            title = ?, description = ?, mission_type_id = ?, department_id = ?,
+                            title = ?, description = ?, mission_type_id = ?, department_id = ?, branch_id = ?,
                             location = ?, location_details = ?, latitude = ?, longitude = ?,
                             start_datetime = ?, end_datetime = ?, requirements = ?, notes = ?,
                             is_urgent = ?, is_special_mission = ?, is_locked = ?, show_in_ops = ?, status = ?, responsible_user_id = ?, updated_at = NOW()
                             WHERE id = ?";
                     dbExecute($sql, [
-                        $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'],
+                        $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'], $data['branch_id'],
                         $data['location'], $data['location_details'], $data['latitude'], $data['longitude'],
                         $data['start_datetime'], $data['end_datetime'], $data['requirements'], $data['notes'],
                         $data['is_urgent'], $data['is_special_mission'], $data['is_locked'], $data['show_in_ops'], $data['status'], $data['responsible_user_id'], $id
@@ -264,12 +270,12 @@ if (isPost()) {
                         $instEnd   = $instanceDate . ' ' . $endTime;
                         $missionId = dbInsert(
                             "INSERT INTO missions
-                             (title, description, mission_type_id, department_id, location, location_details,
+                             (title, description, mission_type_id, department_id, branch_id, location, location_details,
                               latitude, longitude, start_datetime, end_datetime, requirements, notes,
                               is_urgent, is_special_mission, is_locked, show_in_ops, status, responsible_user_id, created_by, recurrence_id, recurrence_instance_date, created_at, updated_at)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
                             [
-                                $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'],
+                                $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'], $data['branch_id'],
                                 $data['location'], $data['location_details'], $data['latitude'], $data['longitude'],
                                 $instStart, $instEnd, $data['requirements'], $data['notes'],
                                 $data['is_urgent'], $data['is_special_mission'], $data['is_locked'], $data['show_in_ops'], STATUS_OPEN, $data['responsible_user_id'], $user['id'],
@@ -296,12 +302,12 @@ if (isPost()) {
                 } else {
                     // ── SINGLE MISSION ───────────────────────────────────────────────
                     $sql = "INSERT INTO missions
-                            (title, description, mission_type_id, department_id, location, location_details,
+                            (title, description, mission_type_id, department_id, branch_id, location, location_details,
                              latitude, longitude, start_datetime, end_datetime, requirements, notes,
                              is_urgent, is_special_mission, is_locked, show_in_ops, status, responsible_user_id, created_by, created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
                     $newId = dbInsert($sql, [
-                        $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'],
+                        $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'], $data['branch_id'],
                         $data['location'], $data['location_details'], $data['latitude'], $data['longitude'],
                         $data['start_datetime'], $data['end_datetime'], $data['requirements'], $data['notes'],
                         $data['is_urgent'], $data['is_special_mission'], $data['is_locked'], $data['show_in_ops'], $data['status'], $data['responsible_user_id'], $user['id']
@@ -424,12 +430,23 @@ include __DIR__ . '/includes/header.php';
                             </select>
                         </div>
                         <div class="col-md-6 mb-3">
-                            <label for="department_id" class="form-label">Τμήμα</label>
+                            <label for="department_id" class="form-label">Σώμα</label>
                             <select class="form-select" id="department_id" name="department_id">
                                 <option value="">-- Επιλέξτε --</option>
                                 <?php foreach ($departments as $dept): ?>
                                     <option value="<?= $dept['id'] ?>" <?= ($mission['department_id'] ?? post('department_id')) == $dept['id'] ? 'selected' : '' ?>>
                                         <?= h($dept['name']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="branch_id" class="form-label">Παράρτημα</label>
+                            <select class="form-select" id="branch_id" name="branch_id">
+                                <option value="">-- Όλα (κοινή αποστολή) --</option>
+                                <?php foreach ($branches as $br): ?>
+                                    <option value="<?= $br['id'] ?>" <?= ($mission['branch_id'] ?? post('branch_id')) == $br['id'] ? 'selected' : '' ?>>
+                                        <?= h($br['name']) ?>
                                     </option>
                                 <?php endforeach; ?>
                             </select>

@@ -19,15 +19,16 @@ if (isPost() && post('action') === 'duplicate' && isAdmin()) {
     if ($src) {
         $newId = dbInsert(
             "INSERT INTO missions
-             (title, description, mission_type_id, department_id, location, location_details,
+             (title, description, mission_type_id, department_id, branch_id, location, location_details,
               latitude, longitude, start_datetime, end_datetime, requirements, notes,
               is_urgent, status, responsible_user_id, created_by, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
             [
                 t('missions_page.duplicate_prefix', ['title' => $src['title']]),
                 $src['description'],
                 $src['mission_type_id'],
                 $src['department_id'],
+                $src['branch_id'],
                 $src['location'],
                 $src['location_details'],
                 $src['latitude'],
@@ -59,6 +60,7 @@ if (!isAdmin() && $status !== STATUS_OPEN) {
 }
 
 $department = get('department');
+$branch = get('branch');
 $missionType = (int)get('mission_type', 0);
 $search = get('search');
 $page = max(1, (int)get('page', 1));
@@ -86,6 +88,11 @@ if ($status) {
 if ($department) {
     $where[] = 'm.department_id = ?';
     $params[] = $department;
+}
+
+if ($branch) {
+    $where[] = 'm.branch_id = ?';
+    $params[] = $branch;
 }
 
 if ($search) {
@@ -131,7 +138,7 @@ $pagination = paginate($total, $page, $perPage);
 
 // Fetch missions
 $missions = dbFetchAll(
-    "SELECT m.*, d.name as department_name, u.name as creator_name,
+    "SELECT m.*, d.name as department_name, br.name as branch_name, u.name as creator_name,
             mt.name as type_name, mt.color as type_color, mt.icon as type_icon,
             m.recurrence_id,
             COUNT(DISTINCT sh.id) as shift_count,
@@ -139,6 +146,7 @@ $missions = dbFetchAll(
             (SELECT COALESCE(SUM(s2.max_volunteers), 0) FROM shifts s2 WHERE s2.mission_id = m.id) as max_volunteers
      FROM missions m
      LEFT JOIN departments d ON m.department_id = d.id
+     LEFT JOIN departments br ON m.branch_id = br.id
      LEFT JOIN users u ON m.created_by = u.id
      LEFT JOIN mission_types mt ON m.mission_type_id = mt.id
      LEFT JOIN shifts sh ON sh.mission_id = m.id
@@ -150,8 +158,10 @@ $missions = dbFetchAll(
     $params
 );
 
-// Get departments for filter
-$departments = dbFetchAll("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
+// Get departments (Σώματα) and branches (Παραρτήματα) for the filters — two
+// independent axes on the same `departments` table, split by has_inventory.
+$departments = dbFetchAll("SELECT id, name FROM departments WHERE (has_inventory = 0 OR has_inventory IS NULL) AND is_active = 1 ORDER BY name");
+$branches = dbFetchAll("SELECT id, name FROM departments WHERE has_inventory = 1 AND is_active = 1 ORDER BY name");
 
 // Get mission types for filter (TEP hidden from regular volunteers)
 $tepMissionTypeId = getTepMissionTypeId();
@@ -227,7 +237,7 @@ include __DIR__ . '/includes/header.php';
     </h1>
     <?php if (isAdmin()): ?>
         <div class="d-flex flex-wrap gap-2">
-            <a href="exports/export-missions.php?status=<?= h($status) ?>&department_id=<?= h($department) ?>&search=<?= h($search) ?>&mission_type=<?= h($missionType) ?>"
+            <a href="exports/export-missions.php?status=<?= h($status) ?>&department_id=<?= h($department) ?>&branch_id=<?= h($branch) ?>&search=<?= h($search) ?>&mission_type=<?= h($missionType) ?>"
                class="btn btn-outline-success">
                 <i class="bi bi-download me-1"></i><?= t('missions_page.export_csv') ?>
             </a>
@@ -281,6 +291,16 @@ include __DIR__ . '/includes/header.php';
                 </select>
             </div>
             <div class="col-md-2">
+                <select class="form-select form-select-sm" name="branch">
+                    <option value=""><?= t('missions_page.all_branches') ?></option>
+                    <?php foreach ($branches as $br): ?>
+                        <option value="<?= $br['id'] ?>" <?= $branch == $br['id'] ? 'selected' : '' ?>>
+                            <?= h($br['name']) ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-2">
                 <button type="submit" class="btn btn-outline-primary w-100">
                     <i class="bi bi-search me-1"></i><?= t('missions_page.filter_btn') ?>
                 </button>
@@ -306,6 +326,7 @@ include __DIR__ . '/includes/header.php';
                             <th><?= t('missions_page.col_title') ?></th>
                             <th><?= t('missions_page.col_type') ?></th>
                             <th><?= t('missions_page.col_department') ?></th>
+                            <th><?= t('missions_page.col_branch') ?></th>
                             <th><?= t('missions_page.col_date') ?></th>
                             <th><?= t('missions_page.col_shifts') ?></th>
                             <th><?= t('missions_page.col_volunteers') ?></th>
@@ -349,6 +370,7 @@ include __DIR__ . '/includes/header.php';
                                     <?php endif; ?>
                                 </td>
                                 <td style="max-width:100px;font-size:.82rem;word-break:break-word;"><?= h($mission['department_name'] ?? '-') ?></td>
+                                <td style="max-width:100px;font-size:.82rem;word-break:break-word;"><?= h($mission['branch_name'] ?? '-') ?></td>
                                 <td class="text-nowrap" style="font-size:.82rem;">
                                     <span class="text-muted"><?= formatDayShort($mission['start_datetime']) ?></span>
                                     <?= formatDate($mission['start_datetime']) ?>
@@ -468,6 +490,9 @@ include __DIR__ . '/includes/header.php';
                                 <?php if (!empty($mission['department_name'])): ?>
                                     <span class="badge bg-light text-dark border"><?= h($mission['department_name']) ?></span>
                                 <?php endif; ?>
+                                <?php if (!empty($mission['branch_name'])): ?>
+                                    <span class="badge bg-light text-dark border"><i class="bi bi-geo-alt me-1"></i><?= h($mission['branch_name']) ?></span>
+                                <?php endif; ?>
                             </div>
                             
                             <div class="mobile-card-row">
@@ -544,7 +569,7 @@ include __DIR__ . '/includes/header.php';
     
     <?php if ($pagination['total_pages'] > 1): ?>
         <div class="card-footer">
-            <?= paginationLinks($pagination, '?status=' . urlencode($status) . '&department=' . urlencode($department) . '&search=' . urlencode($search) . '&') ?>
+            <?= paginationLinks($pagination, '?status=' . urlencode($status) . '&department=' . urlencode($department) . '&branch=' . urlencode($branch) . '&search=' . urlencode($search) . '&') ?>
         </div>
     <?php endif; ?>
 </div>

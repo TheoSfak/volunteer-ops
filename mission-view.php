@@ -12,10 +12,11 @@ if (!$id) {
 }
 
 $mission = dbFetchOne(
-    "SELECT m.*, d.name as department_name, u.name as creator_name, r.name as responsible_name,
+    "SELECT m.*, d.name as department_name, br.name as branch_name, u.name as creator_name, r.name as responsible_name,
             mt.name as type_name, mt.color as type_color, mt.icon as type_icon
      FROM missions m
      LEFT JOIN departments d ON m.department_id = d.id
+     LEFT JOIN departments br ON m.branch_id = br.id
      LEFT JOIN users u ON m.created_by = u.id
      LEFT JOIN users r ON m.responsible_user_id = r.id
      LEFT JOIN mission_types mt ON m.mission_type_id = mt.id
@@ -766,11 +767,23 @@ include __DIR__ . '/includes/header.php';
                         <div class="d-flex align-items-start gap-2 p-2 rounded-2 h-100" style="background:#f8faff;border:1px solid #dbeafe">
                             <div class="text-primary mt-1" style="font-size:1.1rem"><i class="bi bi-building-fill"></i></div>
                             <div>
-                                <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing:.05em;font-size:.72rem">Τμήμα</div>
+                                <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing:.05em;font-size:.72rem">Σώμα</div>
                                 <div class="fw-semibold text-dark" style="font-size:.9rem"><?= h($mission['department_name'] ?? '-') ?></div>
                             </div>
                         </div>
                     </div>
+                    <?php if (!empty($mission['branch_name'])): ?>
+                    <!-- Branch -->
+                    <div class="col-sm-6">
+                        <div class="d-flex align-items-start gap-2 p-2 rounded-2 h-100" style="background:#f8faff;border:1px solid #dbeafe">
+                            <div class="text-primary mt-1" style="font-size:1.1rem"><i class="bi bi-geo-alt-fill"></i></div>
+                            <div>
+                                <div class="text-muted small fw-semibold text-uppercase" style="letter-spacing:.05em;font-size:.72rem">Παράρτημα</div>
+                                <div class="fw-semibold text-dark" style="font-size:.9rem"><?= h($mission['branch_name']) ?></div>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endif; ?>
                     <!-- Type -->
                     <div class="col-sm-6">
                         <div class="d-flex align-items-start gap-2 p-2 rounded-2 h-100" style="background:#f8faff;border:1px solid #dbeafe">

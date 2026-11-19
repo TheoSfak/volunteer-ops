@@ -7,6 +7,7 @@ requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
 $filters = [
     'status'        => get('status'),
     'department_id' => get('department_id'),
+    'branch_id'     => get('branch_id'),
     'mission_type'  => get('mission_type'),
     'search'        => get('search'),
     'start_date'    => get('start_date'),

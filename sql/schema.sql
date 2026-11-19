@@ -241,7 +241,8 @@ INSERT INTO `mission_types` (`id`, `name`, `description`, `color`, `icon`, `sort
 -- =============================================
 CREATE TABLE IF NOT EXISTS `missions` (
     `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    `department_id` INT UNSIGNED NULL,
+    `department_id` INT UNSIGNED NULL COMMENT 'Functional Σώμα (departments.has_inventory=0), e.g. Διασωστών',
+    `branch_id` INT UNSIGNED NULL COMMENT 'Geographic Παράρτημα (departments.has_inventory=1), e.g. Ηράκλειο/Μάλια — independent of department_id',
     `title` VARCHAR(255) NOT NULL,
     `description` TEXT NULL,
     `type` ENUM('VOLUNTEER', 'MEDICAL') DEFAULT 'VOLUNTEER',
@@ -276,6 +277,7 @@ CREATE TABLE IF NOT EXISTS `missions` (
     `recurrence_instance_date` DATE NULL,
     `visitor_join_token` VARCHAR(64) NULL COMMENT 'Lazily-generated QR/link secret for self-serve Mission Visitor registration — NULL means visitor registration is off for this mission',
     FOREIGN KEY (`department_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`branch_id`) REFERENCES `departments`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`mission_type_id`) REFERENCES `mission_types`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`responsible_user_id`) REFERENCES `users`(`id`) ON DELETE SET NULL,
@@ -283,6 +285,7 @@ CREATE TABLE IF NOT EXISTS `missions` (
     INDEX `idx_missions_status` (`status`),
     INDEX `idx_missions_start` (`start_datetime`),
     INDEX `idx_missions_recurrence` (`recurrence_id`),
+    INDEX `idx_branch` (`branch_id`),
     UNIQUE KEY `uq_missions_visitor_join_token` (`visitor_join_token`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
