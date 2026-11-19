@@ -8470,6 +8470,33 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 221,
+            'description' => 'Automatic PAR (Personnel Accountability Report) / dead-man\'s switch: a command-only ' .
+                'toggle + interval in minutes (set in the console\'s Προετοιμασία panel), and a per-participant ' .
+                '«Είμαστε ΟΚ» check-in timestamp used while the mission is live to ask each Action Room participant ' .
+                'again once their last confirmation is older than the interval. Visual-only (red/stale on the ' .
+                'console) — never an escalation.',
+            'up' => function () {
+                $cols = dbFetchAll("SHOW COLUMNS FROM missions LIKE 'par_enabled'");
+                if (empty($cols)) {
+                    dbExecute("ALTER TABLE missions
+                        ADD COLUMN par_enabled TINYINT(1) NOT NULL DEFAULT 0 AFTER is_locked,
+                        ADD COLUMN par_interval_minutes SMALLINT UNSIGNED NULL DEFAULT 30 AFTER par_enabled");
+                }
+                dbExecute("CREATE TABLE IF NOT EXISTS `mission_par_checkins` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `mission_id` INT UNSIGNED NOT NULL,
+                    `user_id` INT UNSIGNED NOT NULL,
+                    `last_ok_at` DATETIME NOT NULL,
+                    `last_prompted_at` DATETIME NULL,
+                    UNIQUE KEY `uniq_par_mission_user` (`mission_id`, `user_id`),
+                    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

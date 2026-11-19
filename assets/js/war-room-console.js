@@ -187,15 +187,18 @@ function wrcContactOf(members, silentOf) {
 
 /**
  * The one thing worth a badge on a team's avatar, worst first:
- * {sos, needsHelp, blocked, orders} -> {kind, tone, text} or null.
+ * {sos, needsHelp, blocked, orders, parOverdue} -> {kind, tone, text} or null.
  *   sos / help   someone on the team needs help now
  *   blocked      the team said «Δεν μπορώ», or stands at a locked route point
+ *   par          at least one member's automatic PAR check-in is overdue — visual only,
+ *                never outranks anything that is actually an emergency or a blocker
  *   more         it has more than one order running
  */
 function wrcTeamBadge(f) {
     if (f.sos > 0) return {kind: 'sos', tone: 'bad', text: '!'};
     if (f.needsHelp > 0) return {kind: 'help', tone: 'bad', text: '!'};
     if (f.blocked > 0) return {kind: 'blocked', tone: 'warn', text: '!'};
+    if (f.parOverdue > 0) return {kind: 'par', tone: 'warn', text: '⏱'};
     if (f.orders > 1) return {kind: 'more', tone: 'info', text: '+' + (f.orders - 1)};
     return null;
 }
@@ -452,6 +455,10 @@ if (typeof module !== 'undefined' && module.exports) {
         stale: null,               // pingStaleness from the last poll
         live: {},                  // participantLive from the last poll
         online: [],
+        // Automatic PAR (v3.501.0) — see WR_PAR_AT_LOAD / loadParStatusForMission().
+        parEnabled: (typeof WR_PAR_AT_LOAD !== 'undefined' && WR_PAR_AT_LOAD) ? !!WR_PAR_AT_LOAD.enabled : false,
+        parIntervalMinutes: (typeof WR_PAR_AT_LOAD !== 'undefined' && WR_PAR_AT_LOAD && WR_PAR_AT_LOAD.intervalMinutes) ? Number(WR_PAR_AT_LOAD.intervalMinutes) : 30,
+        parOverdue: new Set((typeof WR_PAR_AT_LOAD !== 'undefined' && WR_PAR_AT_LOAD && WR_PAR_AT_LOAD.overdueUserIds) ? WR_PAR_AT_LOAD.overdueUserIds.map(Number) : []),
         // 'sections2': the first version of this list also took what the phase presets opened,
         // and Σχέδιο now starts closed - so an old list is not carried over.
         sections: new Set((load('sections2', '') || '').split(',').filter(Boolean)),
@@ -464,6 +471,21 @@ if (typeof module !== 'undefined' && module.exports) {
     root.innerHTML = `
         <div class="wrc-left">
             <section class="wrc-sec wrc-phase-panel" id="wrcPhasePanel"></section>
+            <section class="wrc-sec wrc-par-settings" id="wrcParSettings">
+                <header class="wrc-sec-h"><i class="bi bi-person-check-fill"></i><span class="wrc-h">${esc(t('console.par_title'))}</span></header>
+                <div class="wrc-par-body">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="wrcParEnabled">
+                        <label class="form-check-label" for="wrcParEnabled">${esc(t('console.par_enable'))}</label>
+                    </div>
+                    <div class="wrc-par-interval">
+                        <label for="wrcParInterval">${esc(t('console.par_interval_label'))}</label>
+                        <input type="number" class="form-control form-control-sm" id="wrcParInterval" min="5" max="180" step="5">
+                        <span>${esc(t('console.par_minutes'))}</span>
+                    </div>
+                    <div class="wrc-par-hint">${esc(t('console.par_hint'))}</div>
+                </div>
+            </section>
             <section class="wrc-sec wrc-queue" id="wrcQueue">
                 <header class="wrc-sec-h"><i class="bi bi-bell-fill"></i><span class="wrc-h">${esc(t('console.queue_title'))}</span><span class="wrc-cnt" id="wrcQueueCnt">0</span></header>
                 <div class="wrc-queue-body" id="wrcQueueBody"></div>
@@ -1223,13 +1245,14 @@ if (typeof module !== 'undefined' && module.exports) {
                 needsHelp: members.filter(m => (state.live[String(m.user_id)] || {}).field_status === 'needs_help').length,
                 blocked: items.filter(i => i.tone === 'bad').length,
                 orders: items.length,
+                parOverdue: state.parEnabled ? members.filter(m => state.parOverdue.has(Number(m.user_id))).length : 0,
             }),
         };
     }
 
     const RING_R = 16;
     const RING_C = 2 * Math.PI * RING_R;
-    const BADGE_TITLES = {sos: 'console.badge_sos', help: 'console.badge_help', blocked: 'console.badge_blocked'};
+    const BADGE_TITLES = {sos: 'console.badge_sos', help: 'console.badge_help', blocked: 'console.badge_blocked', par: 'console.badge_par'};
     function avatarHtml(team, vm) {
         const [bg, fg] = teamBadgeColorsJs(team.color);
         const mark = Number(team.team_number) > 0 ? String(Number(team.team_number)) : String(team.label || '?').trim().charAt(0).toUpperCase();
@@ -1957,6 +1980,12 @@ if (typeof module !== 'undefined' && module.exports) {
             if (data.pingStaleness) state.stale = data.pingStaleness;
             if (data.participantLive) state.live = data.participantLive;
             if (data.onlinePresence) state.online = data.onlinePresence;
+            // Automatic PAR: 'par' is sent as null whenever it's off, so this also
+            // clears a stale overdue set the moment someone turns it back off.
+            state.parEnabled = !!(data.par && data.par.enabled);
+            state.parIntervalMinutes = (data.par && Number(data.par.intervalMinutes)) || 30;
+            state.parOverdue = new Set(((data.par && data.par.overdueUserIds) || []).map(Number));
+            syncParSettingsUI();
             if (Array.isArray(data.ackTracker)) state.ack = data.ackTracker;
             // An empty mission sends [] (a PHP list); a busy one an object of rooms.
             if (data.chatRooms !== undefined && data.chatRooms !== null) state.chatRooms = Array.isArray(data.chatRooms) ? {} : data.chatRooms;
@@ -1986,6 +2015,43 @@ if (typeof module !== 'undefined' && module.exports) {
     });
     // A new team made while the page is open.
     document.addEventListener('wr-teams-updated', e => { if (e.detail && Array.isArray(e.detail.teams)) { setTeams(e.detail.teams); teamsSig = ''; refresh(); } });
+
+    // ── Automatic PAR («Προετοιμασία» panel): the checkbox + interval only,
+    // never re-rendered by renderPhase() (it lives outside #wrcPhasePanel so a
+    // readiness-row refresh never clobbers mid-edit), hidden outside the prep
+    // phase by CSS (#wrConsole[data-phase] on .wrc-par-settings). ──
+    const parEnabledEl = $('#wrcParEnabled', root);
+    const parIntervalEl = $('#wrcParInterval', root);
+    function syncParSettingsUI() {
+        if (!parEnabledEl || !parIntervalEl || document.activeElement === parIntervalEl) return;
+        parEnabledEl.checked = !!state.parEnabled;
+        parIntervalEl.value = String(state.parIntervalMinutes || 30);
+        parIntervalEl.disabled = !state.parEnabled;
+    }
+    function saveParSettings(enabled, minutes) {
+        const body = new URLSearchParams({csrf_token: csrfToken, mission_id: MISSION_ID, action: 'save_settings', enabled: enabled ? '1' : '0', interval_minutes: String(minutes)});
+        fetch('mission-par.php', {method: 'POST', body, credentials: 'same-origin'}).then(r => r.json()).then(res => {
+            if (res && res.ok) {
+                state.parEnabled = !!res.enabled;
+                state.parIntervalMinutes = Number(res.interval_minutes) || 30;
+            } else {
+                toast((res && res.error) || t('common.failed'), 'bad');
+            }
+            syncParSettingsUI();
+        }).catch(() => { toast(t('common.send_failed'), 'bad'); syncParSettingsUI(); });
+    }
+    if (parEnabledEl && parIntervalEl) {
+        parEnabledEl.addEventListener('change', () => {
+            parIntervalEl.disabled = !parEnabledEl.checked;
+            saveParSettings(parEnabledEl.checked, Number(parIntervalEl.value) || 30);
+        });
+        parIntervalEl.addEventListener('change', () => {
+            const minutes = Math.min(180, Math.max(5, Number(parIntervalEl.value) || 30));
+            parIntervalEl.value = String(minutes);
+            if (parEnabledEl.checked) saveParSettings(true, minutes);
+        });
+    }
+    syncParSettingsUI();
 
     // ── go ───────────────────────────────────────────────────────────────────
     setTeams(typeof WR_TEAMS_AT_LOAD !== 'undefined' ? WR_TEAMS_AT_LOAD : []);

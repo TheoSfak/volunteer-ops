@@ -304,6 +304,16 @@ body.wr-console-view .wrc-mapslot #mapCard.wr-menu-open .card-header { position:
 
 .wrc-phase-panel { display: none; flex: none; }
 .wrc[data-phase="prep"] .wrc-phase-panel, .wrc[data-phase="close"] .wrc-phase-panel { display: flex; }
+/* Automatic PAR's checkbox + interval (v3.501.0): the Προετοιμασία panel only — set up
+   before going live, same spot as the rest of the readiness checklist. */
+.wrc-par-settings { display: none; flex: none; }
+.wrc[data-phase="prep"] .wrc-par-settings { display: flex; flex-direction: column; }
+.wrc-par-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+.wrc-par-interval { display: flex; align-items: center; gap: 6px; font-size: .82rem; }
+.wrc-par-interval input[type="number"] { width: 70px; }
+.wrc-par-interval input[disabled] { opacity: .5; }
+.wrc-par-hint { font-size: .74rem; color: #55637a; }
+html[data-bs-theme="dark"] .wrc-par-hint { color: var(--wrc-mut); }
 /* Nothing is being sent while preparing or closing: the map takes the room, and an empty queue goes. */
 .wrc[data-phase="prep"] .wrc-composer, .wrc[data-phase="close"] .wrc-composer { display: none; }
 .wrc[data-phase="prep"][data-q="0"] .wrc-queue, .wrc[data-phase="close"][data-q="0"] .wrc-queue { display: none; }

@@ -154,6 +154,13 @@ test('wrcTeamBadge shows the worst thing only, and nothing for a quiet team', ()
     assert.equal(wrcTeamBadge({sos: 1, needsHelp: 2, blocked: 1, orders: 3}).kind, 'sos');
 });
 
+test('wrcTeamBadge: an overdue automatic PAR check-in shows, but never outranks an emergency or a blocker', () => {
+    assert.deepEqual(wrcTeamBadge({sos: 0, needsHelp: 0, blocked: 0, orders: 0, parOverdue: 1}), {kind: 'par', tone: 'warn', text: '⏱'});
+    assert.deepEqual(wrcTeamBadge({sos: 0, needsHelp: 0, blocked: 0, orders: 3, parOverdue: 2}), {kind: 'par', tone: 'warn', text: '⏱'});
+    assert.equal(wrcTeamBadge({sos: 0, needsHelp: 0, blocked: 1, orders: 0, parOverdue: 1}).kind, 'blocked');
+    assert.equal(wrcTeamBadge({sos: 1, needsHelp: 0, blocked: 0, orders: 0, parOverdue: 1}).kind, 'sos');
+});
+
 // ── the phases ───────────────────────────────────────────────────────────────
 
 test('wrcNormalizePhase falls back to live for anything it does not know', () => {

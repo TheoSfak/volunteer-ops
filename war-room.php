@@ -1519,6 +1519,10 @@ if (get('ajax') === '1') {
         'gpsSig' => $gpsParticipationSig,
         // See $rosterSig. Null for everybody but command staff.
         'rosterSig' => $rosterSig,
+        // Automatic PAR (v3.501.0): null while off, otherwise the interval and
+        // which participants' last «Είμαστε ΟΚ» is now overdue. Command staff
+        // only — the console's team badges are the only thing that reads it.
+        'par' => $canManageWarRoom ? loadParStatusForMission($missionId) : null,
     ];
 
     // Don't re-send 51KB that the client already has.
@@ -7102,6 +7106,7 @@ const WR_BOOT = {
     snapshotMission: <?= json_encode(['id' => $missionId, 'title' => $mission['title'], 'location' => $mission['location'] ?? ''], JSON_UNESCAPED_UNICODE) ?>,
     gpsParticipationSig: <?= json_encode($gpsParticipationSig) ?>,
     rosterSig: <?= json_encode($rosterSig) ?>,
+    parAtLoad: <?= json_encode($canManageWarRoom ? loadParStatusForMission($missionId) : null) ?>,
     rosterPersonIds: <?= json_encode($canManageWarRoom ? array_values(array_map('intval', array_keys($distinctApprovedById))) : []) ?>,
     chatHeadsAtLoad: <?= json_encode((object) $chatHeadsAtLoad) ?>,
 };
@@ -16062,6 +16067,8 @@ const OP_TEAM_STORE = 'wrOpTeamSeen_' + WR_MISSION_ID;
 // Who is on which team as of this page load — the poll only sends teams with
 // its first full payload, and the team notice has to be possible before then.
 const WR_TEAMS_AT_LOAD = WR_BOOT.wrTeamsAtLoad;
+// Automatic PAR, as of this page load — see loadParStatusForMission() in functions-warroom.php.
+const WR_PAR_AT_LOAD = WR_BOOT.parAtLoad;
 // How long a banner may wait for its order to appear in the page state before
 // it is drawn as an ordinary ticker line instead — so it is never lost.
 const OP_PENDING_MS = 20000;
@@ -16343,6 +16350,19 @@ function opModelFromNotice(key, b) {
             hint: '', speakText: '',
             target: spot ? {kind: 'point', lat: spot.lat, lng: spot.lng, nav: spot} : null,
             card: null, cardLabel: '',
+        };
+    }
+    // Automatic PAR (v3.501.0): this person's last «Είμαστε ΟΚ» has gone stale.
+    // No target, no card — the one button IS the answer (opGoAction() below
+    // gives it 'par_ok' instead of the generic «Κατάλαβα»).
+    if (b.popup.info === 'mission_par_checkin') {
+        return {
+            key: key, kind: 'info', id: 0, type: 'par_checkin',
+            cat: 'info', icon: 'bi-person-check-fill',
+            title: t('popup.type.par_checkin'),
+            text: b.message, meta: '',
+            acked: false, outstanding: true, steps: [t('popup.step.seen')], step: 0, stepTimes: {},
+            hint: '', speakText: '', target: null, card: null, cardLabel: '',
         };
     }
     // The incident this person's team was sent to has been closed by command
@@ -16709,6 +16729,8 @@ function opGoAction(m) {
     if (m.type === 'unlock_request' && m.unlockOpen) return ['unlock', 'bi-unlock-fill', t('route.unlock.btn')];
     // «Ολοκλήρωση Τομέα» itself, for someone who walked out of their sector.
     if (m.type === 'sector_exit' && m.advanceStatus) return ['advance', 'bi-check2-circle', m.advanceLabel];
+    // «Είμαστε ΟΚ» (v3.501.0): the one button is the answer itself, not «Κατάλαβα».
+    if (m.type === 'par_checkin') return ['par_ok', 'bi-emoji-smile', t('popup.btn.par_ok')];
     if (m.kind === 'info' || m.kind === 'team') return ['dismiss', 'bi-check2', t('popup.btn.got_it')];
     if (m.kind === 'arrive') return ['arrived', 'bi-geo-alt-fill', t('popup.btn.arrived')];
     switch (m.type) {
@@ -17176,6 +17198,21 @@ function opConfirmArrival(m, btn) {
     refreshMyOrdersCard();
 }
 
+// «Είμαστε ΟΚ» (v3.501.0): resets this person's own PAR clock on the server;
+// the notice itself just goes away — nothing else on the page depends on it.
+function postParCheckin(btn) {
+    if (btn) btn.disabled = true;
+    const data = new URLSearchParams({csrf_token: csrfToken, mission_id: String(WR_MISSION_ID), action: 'checkin'});
+    return fetch('mission-par.php', {method: 'POST', body: data}).then(r => r.json()).then(result => {
+        if (!result || !result.ok) { if (btn) btn.disabled = false; alert((result && result.error) || t('common.failed')); }
+        return result;
+    }).catch(e => actionRequestFailed(btn, e));
+}
+function opConfirmParOk(m, btn) {
+    postParCheckin(btn);
+    opInfo.delete(m.key);
+}
+
 // opts.warn: a failure, not a confirmation — amber instead of green, and long
 // enough (opts.ms) to be read in full.
 function opToast(text, opts) {
@@ -17331,6 +17368,7 @@ function opAct(op, m, btn) {
     if (op === 'compass') { arrowOpen(m); return; }
     if (op === 'ar') { arOpen(m); return; }
     if (op === 'arrived') { opConfirmArrival(m, btn); opToast(t('popup.arrived_toast')); return; }
+    if (op === 'par_ok') { opConfirmParOk(m, btn); opToast(t('popup.par_ok_toast')); return; }
     // The team steps record the receipt themselves, server-side.
     const ack = (!m.acked && !['complete', 'arrive', 'depart', 'dcomplete'].includes(op)) ? opAcknowledge(m, btn) : null;
     switch (op) {

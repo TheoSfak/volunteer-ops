@@ -258,6 +258,8 @@ CREATE TABLE IF NOT EXISTS `missions` (
     `is_urgent` TINYINT(1) DEFAULT 0,
     `is_special_mission` TINYINT(1) NOT NULL DEFAULT 0,
     `is_locked` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'When set, only missions_manage admins can add volunteers (manual_add_volunteer) — self-serve apply is blocked on mission-view.php and shift-view.php',
+    `par_enabled` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Automatic PAR (Personnel Accountability Report) dead-man''s switch, set in the console''s Προετοιμασία panel',
+    `par_interval_minutes` SMALLINT UNSIGNED NULL DEFAULT 30 COMMENT 'How often (minutes) each Action Room participant is asked to confirm «Είμαστε ΟΚ» while par_enabled',
     `rv_point_label` VARCHAR(255) NULL,
     `radio_channel` VARCHAR(100) NULL,
     `coverage_percentage` INT DEFAULT 0,
@@ -3534,6 +3536,21 @@ CREATE TABLE IF NOT EXISTS `mission_board_links` (
     INDEX `idx_board_links_mission` (`mission_id`),
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- PAR CHECK-INS (v3.501.0, migration 221): one row per Action Room participant
+-- per mission, holding the moment they last confirmed «Είμαστε ΟΚ» (dead-man's
+-- switch). last_prompted_at guards against asking again on every single GPS
+-- ping once a check-in is already due and unanswered.
+CREATE TABLE IF NOT EXISTS `mission_par_checkins` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `last_ok_at` DATETIME NOT NULL,
+    `last_prompted_at` DATETIME NULL,
+    UNIQUE KEY `uniq_par_mission_user` (`mission_id`, `user_id`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- MAP POINTS ASSIGNED TO TEAMS (v3.364.0). A point sent to a team is an ordinary

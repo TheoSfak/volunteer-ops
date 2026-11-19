@@ -1809,6 +1809,15 @@ return [
         'popup.type.sector_exit' => 'Βγήκες από τον τομέα',
         'popup.btn.sector_exit_back' => 'Γυρνάω πίσω στον τομέα',
 
+        // Αυτόματο PAR (Personnel Accountability Report) — dead-man's switch
+        // (checkParDue(), v3.501.0). Κάθε συμμετέχοντας στο Action Room
+        // απαντά μόνος του, κάθε Χ λεπτά όσο έχει ενεργό GPS.
+        'par.title' => '🟢 Είμαστε ΟΚ;',
+        'par.message' => 'Πέρασε αρκετή ώρα από την τελευταία επιβεβαίωση. Πάτα «Είμαστε ΟΚ» για να ξέρει το Κέντρο ότι είσαι καλά.',
+        'popup.type.par_checkin' => 'Είμαστε ΟΚ;',
+        'popup.btn.par_ok' => 'ΕΙΜΑΣΤΕ ΟΚ',
+        'popup.par_ok_toast' => 'Στάλθηκε.',
+
         // mission-chat.php
         'chat.no_room_access' => 'Δεν έχετε πρόσβαση σε αυτό το chat.',
         'chat.empty_message' => 'Το μήνυμα δεν μπορεί να είναι κενό.',
@@ -3177,6 +3186,7 @@ return [
         'console.badge_sos' => 'Ανοιχτό SOS στην ομάδα',
         'console.badge_help' => 'Μέλος ζητά βοήθεια',
         'console.badge_blocked' => 'Η ομάδα δεν μπορεί να συνεχίσει',
+        'console.badge_par' => 'Κάποιο μέλος δεν έχει επιβεβαιώσει «Είμαστε ΟΚ» έγκαιρα',
         'console.badge_more' => 'Ακόμη εντολές: {n}',
         'console.contact_ok' => 'Όλοι έχουν στίγμα',
         'console.contact_warn' => '{n} από {total} χωρίς στίγμα',
@@ -3190,6 +3200,12 @@ return [
         'console.phase_close_hint' => 'Τι μένει ανοιχτό πριν κλείσει',
         'console.panel_prep' => 'Ετοιμότητα',
         'console.panel_close' => 'Πριν το κλείσιμο',
+        // Αυτόματο PAR: checkbox + λεπτά στο πλαίσιο της «Ετοιμότητας» (v3.501.0).
+        'console.par_title' => 'Αυτόματο PAR',
+        'console.par_enable' => 'Ενεργοποίηση αυτόματου PAR (dead-man\'s switch)',
+        'console.par_interval_label' => 'Ρωτά κάθε',
+        'console.par_minutes' => 'λεπτά',
+        'console.par_hint' => 'Κάθε μέλος με ενεργό GPS θα βλέπει ανά τακτά διαστήματα το μήνυμα «Είμαστε ΟΚ» και θα πατά το κουμπί για να το επιβεβαιώσει. Όποιος δεν απαντήσει εμφανίζεται με ένδειξη στην κονσόλα — χωρίς καμία άλλη ενέργεια.',
         'console.chk_teams_ok' => 'Ομάδες: {n}',
         'console.chk_teams_bad' => 'Δεν υπάρχουν ομάδες',
         'console.chk_unteamed_ok' => 'Όλοι έχουν μπει σε ομάδα',
@@ -5499,6 +5515,15 @@ return [
         'popup.type.sector_exit' => 'You left the sector',
         'popup.btn.sector_exit_back' => "I'm going back to the sector",
 
+        // Automatic PAR (Personnel Accountability Report) — dead-man's switch
+        // (checkParDue(), v3.501.0). Every Action Room participant answers for
+        // themselves, every X minutes, for as long as their GPS is on.
+        'par.title' => '🟢 Are we OK?',
+        'par.message' => "It's been a while since your last check-in. Press «We're OK» to let Command know you're well.",
+        'popup.type.par_checkin' => 'Are we OK?',
+        'popup.btn.par_ok' => "WE'RE OK",
+        'popup.par_ok_toast' => 'Sent.',
+
         'chat.no_room_access' => 'You do not have access to this chat.',
         'chat.empty_message' => 'The message cannot be empty.',
         'chat.message_not_found' => 'The message was not found.',
@@ -6848,6 +6873,7 @@ return [
         'console.badge_sos' => 'Open SOS on this team',
         'console.badge_help' => 'A member needs help',
         'console.badge_blocked' => 'The team cannot continue',
+        'console.badge_par' => 'A member has not confirmed «We\'re OK» in time',
         'console.badge_more' => 'More orders: {n}',
         'console.contact_ok' => 'Everyone is reporting a position',
         'console.contact_warn' => '{n} of {total} with no position',
@@ -6861,6 +6887,12 @@ return [
         'console.phase_close_hint' => 'What is still open before it closes',
         'console.panel_prep' => 'Readiness',
         'console.panel_close' => 'Before closing',
+        // Automatic PAR: checkbox + minutes in the «Readiness» panel (v3.501.0).
+        'console.par_title' => 'Automatic PAR',
+        'console.par_enable' => "Turn on automatic PAR (dead-man's switch)",
+        'console.par_interval_label' => 'Ask every',
+        'console.par_minutes' => 'minutes',
+        'console.par_hint' => "Every member with GPS on will see the «We're OK» message at that interval and press the button to confirm it. Anyone who does not answer shows a mark on the console — nothing else happens.",
         'console.chk_teams_ok' => 'Teams: {n}',
         'console.chk_teams_bad' => 'There are no teams',
         'console.chk_unteamed_ok' => 'Everyone is in a team',

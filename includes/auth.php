@@ -159,6 +159,13 @@ define('WAR_ROOM_ACTION_SCRIPTS', [
     // deliberately NOT on this list: they're reached by an anonymous phone
     // with no session at all, not from an open war-room.php tab.
     'mission-locate-link.php', 'mission-board-link.php',
+    // mission-par.php (automatic PAR / dead-man's switch, v3.501.0) is called
+    // from the same long-open tab: command staff save the checkbox+interval,
+    // but every Action Room participant (partner-org guests and mission
+    // visitors included) presses «Είμαστε ΟΚ» on their own check-in — same
+    // mixed shape as mission-team-equipment.php above, each action's own
+    // permission enforced inside the endpoint.
+    'mission-par.php',
 ]);
 
 // Pages (not AJAX) a partner-org guest AND a mission visitor may open, on top

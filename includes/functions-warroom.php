@@ -7423,6 +7423,16 @@ function recordVolunteerPing(array $user, int $shiftId, float $lat, float $lng, 
         // Non-critical — the ping itself already succeeded.
     }
 
+    // Automatic PAR (v3.501.0): a GPS ping is the natural, already-recurring
+    // moment to check whether this person's last «Είμαστε ΟΚ» has gone stale —
+    // no separate timer or cron needed. Off whenever the mission has not
+    // turned it on, and just as best-effort as the two checks above.
+    try {
+        checkParDue((int) $pr['mission_id'], $userId);
+    } catch (Throwable $e) {
+        // Non-critical — the ping itself already succeeded.
+    }
+
     // The Συντονιστικό, when it follows this device (v3.347.0): the pin moves
     // with the fix, and a stop somewhere new is announced once. From the
     // smoothed estimate, like «Έφτασες;» above, and just as best-effort.
@@ -7898,6 +7908,101 @@ function notifySectorExit(int $missionId, int $userId, array $sector): void {
             ]
         );
     }
+}
+
+/**
+ * Automatic PAR (Personnel Accountability Report) — the dead-man's switch
+ * (v3.501.0). Called on every accepted GPS ping, same best-effort treatment as
+ * checkArrivalPrompts()/checkSectorExitWarnings() above. Every Action Room
+ * participant answers for themselves (not just the team leader): once their
+ * last «Είμαστε ΟΚ» is older than the mission's par_interval_minutes, they are
+ * asked again, exactly once per overdue stint — never nagged on every single
+ * ping. A participant seen here for the first time since PAR was enabled gets
+ * their clock started now, not asked immediately.
+ */
+function checkParDue(int $missionId, int $userId): void {
+    $mission = dbFetchOne("SELECT par_enabled, par_interval_minutes FROM missions WHERE id = ?", [$missionId]);
+    if (!$mission || empty($mission['par_enabled'])) {
+        return;
+    }
+    $intervalMinutes = max(5, (int) ($mission['par_interval_minutes'] ?? 30));
+    $row = dbFetchOne(
+        "SELECT last_ok_at, last_prompted_at FROM mission_par_checkins WHERE mission_id = ? AND user_id = ?",
+        [$missionId, $userId]
+    );
+    if (!$row) {
+        dbExecute(
+            "INSERT INTO mission_par_checkins (mission_id, user_id, last_ok_at) VALUES (?, ?, NOW())
+             ON DUPLICATE KEY UPDATE mission_id = mission_id",
+            [$missionId, $userId]
+        );
+        return;
+    }
+    $dueAt = strtotime((string) $row['last_ok_at']) + $intervalMinutes * 60;
+    if (time() < $dueAt) {
+        return;
+    }
+    // Already asked since the last confirmation: wait for an answer, don't nag.
+    if ($row['last_prompted_at'] !== null && strtotime((string) $row['last_prompted_at']) >= strtotime((string) $row['last_ok_at'])) {
+        return;
+    }
+    $won = dbExecute(
+        "UPDATE mission_par_checkins SET last_prompted_at = NOW()
+          WHERE mission_id = ? AND user_id = ? AND (last_prompted_at IS NULL OR last_prompted_at < last_ok_at)",
+        [$missionId, $userId]
+    );
+    if ($won > 0) {
+        notifyParCheckinDue($missionId, $userId);
+    }
+}
+
+/**
+ * The «Είμαστε ΟΚ» question itself: an order-class popup (notificationPopupRef's
+ * generic popupInfo branch), one giant button, no map/target. Same channel as
+ * every other order-class alert (loud on the Android app too).
+ */
+function notifyParCheckinDue(int $missionId, int $userId): void {
+    $lang = getUserLanguage($userId);
+    $url = rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId;
+    sendNotification(
+        $userId,
+        t('par.title', [], $lang),
+        t('par.message', [], $lang),
+        'warning', '',
+        [
+            'url' => $url,
+            'tag' => 'par-checkin-' . $missionId,
+            'bannerMission' => $missionId,
+            'popupInfo' => 'mission_par_checkin',
+        ]
+    );
+}
+
+/**
+ * For the console (command staff only): null while PAR is off for this
+ * mission, otherwise the interval and which Action Room participants' last
+ * «Είμαστε ΟΚ» is now overdue — visual only, nothing here escalates anything.
+ * A participant with no check-in row yet (hasn't pinged since PAR was turned
+ * on) is not overdue: their clock has not started.
+ */
+function loadParStatusForMission(int $missionId): ?array {
+    $mission = dbFetchOne("SELECT par_enabled, par_interval_minutes FROM missions WHERE id = ?", [$missionId]);
+    if (!$mission || empty($mission['par_enabled'])) {
+        return null;
+    }
+    $intervalMinutes = max(5, (int) ($mission['par_interval_minutes'] ?? 30));
+    $overdue = dbFetchAll(
+        "SELECT arp.user_id
+           FROM mission_action_room_participants arp
+           JOIN mission_par_checkins c ON c.mission_id = arp.mission_id AND c.user_id = arp.user_id
+          WHERE arp.mission_id = ? AND c.last_ok_at <= NOW() - INTERVAL ? MINUTE",
+        [$missionId, $intervalMinutes]
+    );
+    return [
+        'enabled' => true,
+        'intervalMinutes' => $intervalMinutes,
+        'overdueUserIds' => array_map(fn($r) => (int) $r['user_id'], $overdue),
+    ];
 }
 
 /**
