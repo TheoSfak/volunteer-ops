@@ -86,7 +86,11 @@ $missionNotifyPositions = dbFetchAll(
         </div>
         <div class="form-check form-check-sm">
             <input class="form-check-input" type="checkbox" name="notify_roles[]" value="DEPARTMENT_ADMIN" id="roleDeptAdmin">
-            <label class="form-check-label" for="roleDeptAdmin">Διαχ. Τμήματος</label>
+            <label class="form-check-label" for="roleDeptAdmin">Διαχ. Σώματος</label>
+        </div>
+        <div class="form-check form-check-sm">
+            <input class="form-check-input" type="checkbox" name="notify_roles[]" value="BRANCH_ADMIN" id="roleBranchAdmin">
+            <label class="form-check-label" for="roleBranchAdmin">Διαχ. Παραρτήματος</label>
         </div>
         <div class="form-check form-check-sm">
             <input class="form-check-input" type="checkbox" name="notify_roles[]" value="SYSTEM_ADMIN" id="roleSysAdmin">

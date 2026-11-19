@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     `registry_epidrasis` VARCHAR(50) NULL,
     `registry_ggpp` VARCHAR(50) NULL,
     `profile_photo` VARCHAR(255) NULL DEFAULT NULL,
-    `role` ENUM('SYSTEM_ADMIN', 'DEPARTMENT_ADMIN', 'SHIFT_LEADER', 'VOLUNTEER') DEFAULT 'VOLUNTEER',
+    `role` ENUM('SYSTEM_ADMIN', 'DEPARTMENT_ADMIN', 'BRANCH_ADMIN', 'SHIFT_LEADER', 'VOLUNTEER') DEFAULT 'VOLUNTEER',
     `volunteer_type` ENUM('TRAINEE_RESCUER','RESCUER') NOT NULL DEFAULT 'RESCUER',
     `is_dog_handler` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Handles a search dog — drives the 🐕 badge next to this user''s name app-wide',
     `dog_name` VARCHAR(100) NULL COMMENT 'Search dog''s name; NULL unless is_dog_handler = 1',

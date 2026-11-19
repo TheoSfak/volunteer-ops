@@ -113,10 +113,14 @@ if (!canSeeTep()) {
     $params[] = $user['id'];
 }
 
-// Department admin can only see their department
+// Department admin can only see their department (Σώμα); branch admin, only
+// their own branch (Παράρτημα) — independent axes.
 if ($user['role'] === ROLE_DEPARTMENT_ADMIN && $user['department_id']) {
     $where[] = 'm.department_id = ?';
     $params[] = $user['department_id'];
+} elseif ($user['role'] === ROLE_BRANCH_ADMIN && $user['warehouse_id']) {
+    $where[] = 'm.branch_id = ?';
+    $params[] = $user['warehouse_id'];
 }
 
 // External/guest accounts (partner rescue teams) only see mission(s) they're an approved participant of

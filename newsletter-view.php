@@ -164,7 +164,8 @@ $filterRoles   = !empty($nl['filter_roles']) ? json_decode($nl['filter_roles'], 
 $roleLabels    = [
     ROLE_VOLUNTEER        => 'Εθελοντές',
     ROLE_SHIFT_LEADER     => 'Αρχηγοί Βάρδιας',
-    ROLE_DEPARTMENT_ADMIN => 'Διαχ. Τμήματος',
+    ROLE_DEPARTMENT_ADMIN => 'Διαχ. Σώματος',
+    ROLE_BRANCH_ADMIN     => 'Διαχ. Παραρτήματος',
     ROLE_SYSTEM_ADMIN     => 'Διαχ. Συστήματος',
 ];
 $rolesDisplay  = empty($filterRoles) ? 'Όλοι' : implode(', ', array_map(fn($r) => $roleLabels[$r] ?? $r, $filterRoles));

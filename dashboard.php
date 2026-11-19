@@ -87,6 +87,9 @@ if (isPost() && post('action') === 'bulk_complete_overdue') {
     if ($user['role'] === ROLE_DEPARTMENT_ADMIN && $user['department_id']) {
         $deptSql = ' AND m.department_id = ?';
         $bulkParams[] = $user['department_id'];
+    } elseif ($user['role'] === ROLE_BRANCH_ADMIN && $user['warehouse_id']) {
+        $deptSql = ' AND m.branch_id = ?';
+        $bulkParams[] = $user['warehouse_id'];
     }
 
     $bulkMissions = dbFetchAll(
@@ -214,10 +217,13 @@ if (isAdmin()) {
     // Admin statistics
     $departmentFilter = '';
     $params = [];
-    
+
     if ($user['role'] === ROLE_DEPARTMENT_ADMIN && $user['department_id']) {
         $departmentFilter = 'AND m.department_id = ?';
         $params = [$user['department_id']];
+    } elseif ($user['role'] === ROLE_BRANCH_ADMIN && $user['warehouse_id']) {
+        $departmentFilter = 'AND m.branch_id = ?';
+        $params = [$user['warehouse_id']];
     }
     
     $stats = [
@@ -917,7 +923,10 @@ $swapOutgoing = shiftSwapOutgoingRequests((int) $user['id']);
 // περιμένουν την τελική έγκριση. Μέχρι τώρα φαίνονταν μόνο μέσα στη σελίδα
 // της βάρδιας — έπρεπε να ξέρεις ποια βάρδια να ανοίξεις για να τα βρεις.
 $swapAwaitingMe = isAdmin()
-    ? shiftSwapAwaitingAdmin($user['role'] === ROLE_DEPARTMENT_ADMIN ? (int) $user['department_id'] : null)
+    ? shiftSwapAwaitingAdmin(
+        $user['role'] === ROLE_DEPARTMENT_ADMIN ? (int) $user['department_id'] : null,
+        $user['role'] === ROLE_BRANCH_ADMIN ? (int) $user['warehouse_id'] : null
+      )
     : [];
 ?>
 <?php if ($swapIncoming || $swapOutgoing || $swapAwaitingMe): ?>

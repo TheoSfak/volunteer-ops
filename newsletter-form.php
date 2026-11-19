@@ -23,7 +23,8 @@ $departments  = dbFetchAll("SELECT id, name FROM departments ORDER BY name");
 $allRoles     = [
     ROLE_VOLUNTEER          => 'Εθελοντές',
     ROLE_SHIFT_LEADER       => 'Αρχηγοί Βάρδιας',
-    ROLE_DEPARTMENT_ADMIN   => 'Διαχειριστές Τμήματος',
+    ROLE_DEPARTMENT_ADMIN   => 'Διαχειριστές Σώματος',
+    ROLE_BRANCH_ADMIN       => 'Διαχειριστές Παραρτήματος',
     ROLE_SYSTEM_ADMIN       => 'Διαχειριστές Συστήματος',
 ];
 $nlTemplates = dbFetchAll("SELECT id, name, is_default FROM newsletter_templates ORDER BY is_default DESC, id ASC, name ASC");

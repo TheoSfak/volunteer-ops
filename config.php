@@ -11,8 +11,8 @@ if (!defined('VOLUNTEEROPS')) {
 
 // Application
 define('APP_NAME', 'VolunteerOps');
-define('APP_VERSION', '3.502.0');
-define('DB_SCHEMA_VERSION', 222);
+define('APP_VERSION', '3.503.0');
+define('DB_SCHEMA_VERSION', 223);
 
 // Android APK versionName, matching mobile-app/android/app/build.gradle.
 // The download filename embeds this on purpose: the APK used to live at a
@@ -164,6 +164,10 @@ define('MEDICAL_MULTIPLIER', 2.0);
 // User roles
 define('ROLE_SYSTEM_ADMIN', 'SYSTEM_ADMIN');
 define('ROLE_DEPARTMENT_ADMIN', 'DEPARTMENT_ADMIN');
+// Scoped to the admin's own branch/Παράρτημα (users.warehouse_id) — the
+// geographic axis — the same way ROLE_DEPARTMENT_ADMIN is scoped to their own
+// Σώμα (users.department_id), the functional axis. Independent of each other.
+define('ROLE_BRANCH_ADMIN', 'BRANCH_ADMIN');
 define('ROLE_SHIFT_LEADER', 'SHIFT_LEADER');
 define('ROLE_VOLUNTEER', 'VOLUNTEER');
 
@@ -245,7 +249,8 @@ define('VTYPE_RESCUER', 'RESCUER');
 // Greek labels (using define for PHP 7+ array constant support)
 define('ROLE_LABELS', [
     ROLE_SYSTEM_ADMIN => 'Διαχειριστής Συστήματος',
-    ROLE_DEPARTMENT_ADMIN => 'Διαχειριστής Τμήματος',
+    ROLE_DEPARTMENT_ADMIN => 'Διαχειριστής Σώματος',
+    ROLE_BRANCH_ADMIN => 'Διαχειριστής Παραρτήματος',
     ROLE_SHIFT_LEADER => 'Αρχηγός Βάρδιας',
     ROLE_VOLUNTEER => 'Εθελοντής',
 ]);

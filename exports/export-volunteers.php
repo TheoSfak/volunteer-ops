@@ -1,7 +1,7 @@
 <?php
 require_once __DIR__ . '/../bootstrap.php';
 require_once __DIR__ . '/../includes/export-functions.php';
-requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+requireRole([ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN, ROLE_BRANCH_ADMIN]);
 
 // Mirrors volunteers.php's filters exactly, so the export always matches
 // whatever tab/filters are currently on screen instead of the whole table.
@@ -20,10 +20,13 @@ $filters = [
     'sort' => get('sort', 'name') === 'team' ? 'team' : 'name',
 ];
 
-// Department admins can only export their own department
+// Department admins can only export their own department (Σώμα); branch
+// admins, only their own branch (Παράρτημα)
 $currentUser = getCurrentUser();
 if ($currentUser['role'] === ROLE_DEPARTMENT_ADMIN) {
     $filters['department_id'] = $currentUser['department_id'];
+} elseif ($currentUser['role'] === ROLE_BRANCH_ADMIN) {
+    $filters['warehouse_id'] = $currentUser['warehouse_id'];
 }
 
 exportVolunteersToCsv($filters);

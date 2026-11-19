@@ -16,7 +16,12 @@ $user = getCurrentUser();
 // — kept as two separate dropdowns/columns so a mission's Σώμα and Παράρτημα
 // are picked independently instead of from one mixed list.
 $departments = dbFetchAll("SELECT id, name FROM departments WHERE (has_inventory = 0 OR has_inventory IS NULL) AND is_active = 1 ORDER BY name");
-$branches = dbFetchAll("SELECT id, name FROM departments WHERE has_inventory = 1 AND is_active = 1 ORDER BY name");
+// Branch admins can only tag missions with their own branch
+if ($user['role'] === ROLE_BRANCH_ADMIN && $user['warehouse_id']) {
+    $branches = dbFetchAll("SELECT id, name FROM departments WHERE has_inventory = 1 AND is_active = 1 AND id = ? ORDER BY name", [$user['warehouse_id']]);
+} else {
+    $branches = dbFetchAll("SELECT id, name FROM departments WHERE has_inventory = 1 AND is_active = 1 ORDER BY name");
+}
 $missionTypes = dbFetchAll("SELECT id, name, color, icon FROM mission_types WHERE is_active = 1 ORDER BY sort_order");
 $operationalDefaultTypeIds = array_map('intval', array_column(
     dbFetchAll("SELECT id FROM mission_types WHERE name IN ('Υγειονομική', 'Διασωστική')"),
@@ -28,8 +33,8 @@ $operationalDefaultTypeIds = array_map('intval', array_column(
 // mission's responsible person — that grants full Action Room admin powers
 // (canManageActionRoom() in functions.php), which would defeat the point of
 // locking guests down to a single mission's Action Room in the first place.
-$allVolunteers = dbFetchAll("SELECT id, name, role FROM users WHERE is_active = 1 AND is_external = 0 AND role IN (?, ?, ?, ?) ORDER BY name",
-    [ROLE_VOLUNTEER, ROLE_SHIFT_LEADER, ROLE_DEPARTMENT_ADMIN, ROLE_SYSTEM_ADMIN]);
+$allVolunteers = dbFetchAll("SELECT id, name, role FROM users WHERE is_active = 1 AND is_external = 0 AND role IN (?, ?, ?, ?, ?) ORDER BY name",
+    [ROLE_VOLUNTEER, ROLE_SHIFT_LEADER, ROLE_DEPARTMENT_ADMIN, ROLE_BRANCH_ADMIN, ROLE_SYSTEM_ADMIN]);
 
 $mission = null;
 if ($isEdit) {
@@ -39,8 +44,12 @@ if ($isEdit) {
         redirect('missions.php');
     }
     
-    // Check permission
+    // Check permission (Σώμα for department admins, Παράρτημα for branch admins — independent axes)
     if ($user['role'] === ROLE_DEPARTMENT_ADMIN && $mission['department_id'] != $user['department_id']) {
+        setFlash('error', 'Δεν έχετε δικαίωμα επεξεργασίας αυτής της αποστολής.');
+        redirect('missions.php');
+    }
+    if ($user['role'] === ROLE_BRANCH_ADMIN && $mission['branch_id'] != $user['warehouse_id']) {
         setFlash('error', 'Δεν έχετε δικαίωμα επεξεργασίας αυτής της αποστολής.');
         redirect('missions.php');
     }
@@ -72,7 +81,12 @@ if (isPost()) {
         'status' => post('status') ?: STATUS_DRAFT,
         'responsible_user_id' => post('responsible_user_id') ?: null,
     ];
-    
+
+    // Branch admins can only tag their own branch, regardless of what was posted
+    if ($user['role'] === ROLE_BRANCH_ADMIN && $user['warehouse_id']) {
+        $data['branch_id'] = $user['warehouse_id'];
+    }
+
     // Validation
     if (empty($data['title'])) $errors[] = 'Ο τίτλος είναι υποχρεωτικός.';
     if (empty($data['location'])) $errors[] = 'Η τοποθεσία είναι υποχρεωτική.';

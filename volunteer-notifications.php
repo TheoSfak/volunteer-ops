@@ -42,13 +42,17 @@ const NOTIF_CRITICAL_CODES = [
 
 $search = trim((string) get('search', ''));
 
-// Same department scoping volunteers.php applies: a department admin sees only
-// their own people, a system admin sees everyone.
+// Same department/branch scoping volunteers.php applies: a department admin
+// sees only their own people, a branch admin only their own branch, a system
+// admin sees everyone.
 $scopeWhere  = ['u.deleted_at IS NULL'];
 $scopeParams = [];
 if ($user['role'] === ROLE_DEPARTMENT_ADMIN) {
     $scopeWhere[]  = 'u.department_id = ?';
     $scopeParams[] = $user['department_id'];
+} elseif ($user['role'] === ROLE_BRANCH_ADMIN) {
+    $scopeWhere[]  = 'u.warehouse_id = ?';
+    $scopeParams[] = $user['warehouse_id'];
 }
 if ($search !== '') {
     $scopeWhere[]  = '(u.name LIKE ? OR u.email LIKE ? OR u.phone LIKE ?)';

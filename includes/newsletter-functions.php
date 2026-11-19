@@ -67,7 +67,8 @@ function buildRecipientQuery(array $roles, int $deptId, bool $countOnly = false)
 function replaceNewsletterTags(string $text, array $user, string $unsubscribeToken): string {
     $roleLabels = [
         ROLE_SYSTEM_ADMIN      => 'Διαχειριστής Συστήματος',
-        ROLE_DEPARTMENT_ADMIN  => 'Διαχειριστής Τμήματος',
+        ROLE_DEPARTMENT_ADMIN  => 'Διαχειριστής Σώματος',
+        ROLE_BRANCH_ADMIN      => 'Διαχειριστής Παραρτήματος',
         ROLE_SHIFT_LEADER      => 'Αρχηγός Βάρδιας',
         ROLE_VOLUNTEER         => 'Εθελοντής',
     ];

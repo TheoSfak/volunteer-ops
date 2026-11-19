@@ -3665,7 +3665,7 @@ function canManageActionRoom(?int $responsibleUserId, int $userId): bool {
  * a session.
  */
 function isActionRoomAdminRole(?string $role): bool {
-    return in_array($role, [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN], true);
+    return in_array($role, [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN, ROLE_BRANCH_ADMIN], true);
 }
 
 /**
@@ -4123,7 +4123,7 @@ function teamRenameDecision($submitted, string $currentCodename, array $otherTea
  * not retrofitted into those four.
  */
 function getMissionCommandStaffIds(int $missionId, ?int $responsibleUserId, int $excludeUserId = 0): array {
-    $admins = dbFetchAll("SELECT id FROM users WHERE role IN (?, ?) AND is_active = 1", [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN]);
+    $admins = dbFetchAll("SELECT id FROM users WHERE role IN (?, ?, ?) AND is_active = 1", [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN, ROLE_BRANCH_ADMIN]);
     $leaders = dbFetchAll(
         "SELECT DISTINCT u.id FROM users u
          JOIN participation_requests pr ON pr.volunteer_id = u.id
@@ -4178,12 +4178,12 @@ function filterActionRoomManagers(array $userIds, ?int $responsibleUserId): arra
             "SELECT u.id FROM users u
              WHERE u.id IN ($placeholders)
                AND (u.is_external IS NULL OR u.is_external = 0)
-               AND u.role IN (?, ?)
+               AND u.role IN (?, ?, ?)
                AND (u.role = ?
                     OR u.id = ?
                     OR EXISTS (SELECT 1 FROM custom_role_permissions p
                                WHERE p.role_id = u.custom_role_id AND p.page_slug = 'missions_manage'))",
-            array_merge($userIds, [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN, ROLE_SYSTEM_ADMIN, (int) $responsibleUserId])
+            array_merge($userIds, [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN, ROLE_BRANCH_ADMIN, ROLE_SYSTEM_ADMIN, (int) $responsibleUserId])
         );
     } catch (Throwable $e) {
         // Same defensive stance hasPagePermission() takes around this table.
@@ -13442,12 +13442,16 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
  * $departmentId=null means "every department" (reports.php's own
  * $departmentId is '' for "all" — callers pass null, not '').
  */
-function computeWarRoomTypeAggregates(string $startDate, string $endDate, ?int $departmentId = null): array {
+function computeWarRoomTypeAggregates(string $startDate, string $endDate, ?int $departmentId = null, ?int $branchId = null): array {
     $where = "m.deleted_at IS NULL AND m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 DAY";
     $params = [$startDate, $endDate];
     if ($departmentId) {
         $where .= " AND m.department_id = ?";
         $params[] = $departmentId;
+    }
+    if ($branchId) {
+        $where .= " AND m.branch_id = ?";
+        $params[] = $branchId;
     }
 
     $forgottenThresholdMinutes = MISSION_SCORE_FORGOTTEN_MINUTES;

@@ -263,6 +263,7 @@ function exportVolunteersToCsv($filters = []) {
     $roleLabels = [
         ROLE_SYSTEM_ADMIN    => 'SYSTEM_ADMIN',
         ROLE_DEPARTMENT_ADMIN => 'DEPARTMENT_ADMIN',
+        ROLE_BRANCH_ADMIN    => 'BRANCH_ADMIN',
         ROLE_SHIFT_LEADER    => 'SHIFT_LEADER',
         ROLE_VOLUNTEER       => 'VOLUNTEER',
     ];
@@ -361,8 +362,13 @@ function exportParticipationsToCsv($filters = []) {
         $where[] = 'm.department_id = ?';
         $params[] = $filters['department_id'];
     }
-    
-    $sql = "SELECT 
+
+    if (!empty($filters['branch_id'])) {
+        $where[] = 'm.branch_id = ?';
+        $params[] = $filters['branch_id'];
+    }
+
+    $sql = "SELECT
                 pr.id,
                 u.name AS volunteer_name,
                 u.email AS volunteer_email,
@@ -434,12 +440,15 @@ function exportParticipationsToCsv($filters = []) {
 /**
  * Export statistics to CSV
  */
-function exportStatisticsToCsv($period = 'monthly', $deptId = null) {
+function exportStatisticsToCsv($period = 'monthly', $deptId = null, $branchId = null) {
     $deptWhere = '';
     $deptParams = [];
     if ($deptId) {
         $deptWhere = ' AND m.department_id = ?';
         $deptParams = [$deptId];
+    } elseif ($branchId) {
+        $deptWhere = ' AND m.branch_id = ?';
+        $deptParams = [$branchId];
     }
     if ($period === 'monthly') {
         $sql = "SELECT 

@@ -599,7 +599,7 @@ function isAdmin() {
     if (isPreviewMode()) return false;
     $user = getCurrentUser();
     if (!$user) return false;
-    if (in_array($user['role'], [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN])) return true;
+    if (in_array($user['role'], [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN, ROLE_BRANCH_ADMIN])) return true;
     return !empty($user['custom_role_id']);
 }
 
@@ -855,7 +855,7 @@ function restoreRememberedLogin(): bool {
     }
     // Maintenance mode lets admins in only — refuse without forgetting the
     // device, so it signs straight back in once maintenance is over.
-    if (getSetting('maintenance_mode', '0') && !in_array($row['role'], [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN], true)) {
+    if (getSetting('maintenance_mode', '0') && !in_array($row['role'], [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN, ROLE_BRANCH_ADMIN], true)) {
         return false;
     }
 

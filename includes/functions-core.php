@@ -253,6 +253,7 @@ function roleBadge($role) {
     $colors = [
         ROLE_SYSTEM_ADMIN     => 'danger',
         ROLE_DEPARTMENT_ADMIN => 'warning',
+        ROLE_BRANCH_ADMIN     => 'warning',
         ROLE_SHIFT_LEADER     => 'info',
         ROLE_VOLUNTEER        => 'primary',
     ];

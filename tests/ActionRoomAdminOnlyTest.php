@@ -60,6 +60,7 @@ final class ActionRoomAdminOnlyTest extends TestCase
     {
         $this->assertTrue(isActionRoomAdminRole(ROLE_SYSTEM_ADMIN));
         $this->assertTrue(isActionRoomAdminRole(ROLE_DEPARTMENT_ADMIN));
+        $this->assertTrue(isActionRoomAdminRole(ROLE_BRANCH_ADMIN));
         $this->assertFalse(isActionRoomAdminRole(ROLE_SHIFT_LEADER));
         $this->assertFalse(isActionRoomAdminRole(ROLE_VOLUNTEER));
         $this->assertFalse(isActionRoomAdminRole(null));
@@ -159,7 +160,7 @@ final class ActionRoomAdminOnlyTest extends TestCase
         $start = strpos($src, 'function filterActionRoomManagers(');
         $this->assertNotFalse($start);
         $body = substr($src, $start, 2600);
-        $this->assertStringContainsString('AND u.role IN (?, ?)', $body);
+        $this->assertStringContainsString('AND u.role IN (?, ?, ?)', $body);
         $this->assertStringNotContainsString('$allowed[] = (int) $responsibleUserId;', $body,
             'appending the responsible user after the query would re-admit a volunteer-account Υπεύθυνος');
     }

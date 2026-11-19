@@ -26,7 +26,7 @@ if (isPost()) {
             // Maintenance mode: block non-admin logins
             $loggedUser = getCurrentUser();
             if (getSetting('maintenance_mode', '0') && $loggedUser
-                && !in_array($loggedUser['role'], [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN])) {
+                && !in_array($loggedUser['role'], [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN, ROLE_BRANCH_ADMIN])) {
                 logout();
                 $error = 'Το σύστημα βρίσκεται σε συντήρηση. Παρακαλώ δοκιμάστε αργότερα.';
             } else {

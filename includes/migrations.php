@@ -8514,6 +8514,18 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 223,
+            'description' => 'New BRANCH_ADMIN role: scoped to the admin\'s own branch/Παράρτημα ' .
+                '(users.warehouse_id), the geographic axis — same idea as the existing DEPARTMENT_ADMIN, which ' .
+                'is scoped to their own Σώμα (users.department_id), the functional axis.',
+            'up' => function () {
+                dbExecute("ALTER TABLE users MODIFY COLUMN role
+                    ENUM('SYSTEM_ADMIN', 'DEPARTMENT_ADMIN', 'BRANCH_ADMIN', 'SHIFT_LEADER', 'VOLUNTEER')
+                    DEFAULT 'VOLUNTEER'");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

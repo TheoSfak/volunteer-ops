@@ -24,8 +24,8 @@ if (!$id || !in_array($action, ['approve', 'reject'])) {
 }
 
 $request = dbFetchOne(
-    "SELECT pr.*, u.name as volunteer_name, u.email as volunteer_email, 
-            s.start_time, s.end_time, m.title as mission_title, m.department_id, m.location
+    "SELECT pr.*, u.name as volunteer_name, u.email as volunteer_email,
+            s.start_time, s.end_time, m.title as mission_title, m.department_id, m.branch_id, m.location
      FROM participation_requests pr
      JOIN users u ON pr.volunteer_id = u.id
      JOIN shifts s ON pr.shift_id = s.id
@@ -39,10 +39,16 @@ if (!$request) {
     redirect('dashboard.php');
 }
 
-// Check department access for department admins
+// Check department/branch access for department/branch admins
 $currentUser = getCurrentUser();
 if ($currentUser['role'] === ROLE_DEPARTMENT_ADMIN && $currentUser['department_id']) {
     if ($request['department_id'] != $currentUser['department_id']) {
+        setFlash('error', 'Δεν έχετε δικαίωμα πρόσβασης σε αυτή την αίτηση.');
+        redirect('dashboard.php');
+    }
+}
+if ($currentUser['role'] === ROLE_BRANCH_ADMIN && $currentUser['warehouse_id']) {
+    if ($request['branch_id'] != $currentUser['warehouse_id']) {
         setFlash('error', 'Δεν έχετε δικαίωμα πρόσβασης σε αυτή την αίτηση.');
         redirect('dashboard.php');
     }

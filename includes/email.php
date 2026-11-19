@@ -741,7 +741,7 @@ function getMissionNotifyRecipients(array $post): array {
     $roles = $vtypes = $positions = [];
 
     if ($notifyTarget === 'roles' && !empty($post['notify_roles'])) {
-        $allowedRoles = [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN, ROLE_SHIFT_LEADER, ROLE_VOLUNTEER];
+        $allowedRoles = [ROLE_SYSTEM_ADMIN, ROLE_DEPARTMENT_ADMIN, ROLE_BRANCH_ADMIN, ROLE_SHIFT_LEADER, ROLE_VOLUNTEER];
         $roles = array_values(array_filter((array)$post['notify_roles'], fn($r) => in_array($r, $allowedRoles)));
         if (!empty($roles)) {
             $placeholders  = implode(',', array_fill(0, count($roles), '?'));

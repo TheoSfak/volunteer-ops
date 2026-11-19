@@ -61,12 +61,15 @@ if ($period === '1m') {
     $generate = false;
 }
 
-// Department filter for dept admins
+// Department/branch filter for dept/branch admins
 $deptFilter = '';
 $deptParams = [];
 if ($currentUser['role'] === ROLE_DEPARTMENT_ADMIN && !empty($currentUser['department_id'])) {
     $deptFilter = ' AND m.department_id = ?';
     $deptParams = [$currentUser['department_id']];
+} elseif ($currentUser['role'] === ROLE_BRANCH_ADMIN && !empty($currentUser['warehouse_id'])) {
+    $deptFilter = ' AND m.branch_id = ?';
+    $deptParams = [$currentUser['warehouse_id']];
 }
 
 $appName = getSetting('app_name', APP_NAME);

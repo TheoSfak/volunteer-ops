@@ -23,26 +23,36 @@ $activeTab   = get('tab', 'overview');
 $startDate   = get('start_date', date('Y') . '-01-01');
 $endDate     = get('end_date', date('Y-m-d'));
 $departmentId = get('department_id', '');
+$branchId    = get('branch_id', '');
 $cohortYear  = get('cohort_year', '');
 
 if ($user['role'] === ROLE_DEPARTMENT_ADMIN) {
     $departmentId = $user['department_id'];
+} elseif ($user['role'] === ROLE_BRANCH_ADMIN) {
+    $branchId = $user['warehouse_id'];
 }
 
-$departments = dbFetchAll("SELECT id, name FROM departments WHERE is_active = 1 ORDER BY name");
+$departments = dbFetchAll("SELECT id, name FROM departments WHERE (has_inventory = 0 OR has_inventory IS NULL) AND is_active = 1 ORDER BY name");
+$branches    = dbFetchAll("SELECT id, name FROM departments WHERE has_inventory = 1 AND is_active = 1 ORDER BY name");
 $cohortYears = safeFetchAll("SELECT DISTINCT cohort_year FROM users WHERE cohort_year IS NOT NULL AND cohort_year > 0 ORDER BY cohort_year DESC");
 
 // Filter query string for tab links
 $fp = http_build_query(array_filter([
     'start_date' => $startDate, 'end_date' => $endDate,
-    'department_id' => $departmentId, 'cohort_year' => $cohortYear,
+    'department_id' => $departmentId, 'branch_id' => $branchId, 'cohort_year' => $cohortYear,
 ]));
 function tabUrl($tab) { global $fp; return "reports.php?tab=$tab" . ($fp ? "&$fp" : ""); }
 
 // --- COMMON WHERE CLAUSES ---
+// Σώμα (department_id) and Παράρτημα (branch_id) are independent axes — a
+// Σώμα-scoped department admin and a Παράρτημα-scoped branch admin each get
+// their own filter column (missions: department_id/branch_id; users below:
+// department_id/warehouse_id), never both at once in practice since a user
+// has only one role, but nothing stops a system admin combining both filters.
 $mWhere = "m.deleted_at IS NULL AND m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 DAY";
 $mParams = [$startDate, $endDate];
 if ($departmentId) { $mWhere .= " AND m.department_id = ?"; $mParams[] = $departmentId; }
+if ($branchId) { $mWhere .= " AND m.branch_id = ?"; $mParams[] = $branchId; }
 
 // Action Room tab: immediately-prior period of equal length, computed once
 // here (not inside the tab switch below) since the CSV export block runs
@@ -83,7 +93,11 @@ if (get('export') === 'csv') {
             } else {
                 fputcsvSafe($out, ['Εθελοντής', 'Τμήμα', 'Ώρες', 'Βάρδιες']);
             }
-            $rows = safeFetchAll("SELECT u.name, d.name as dept, COALESCE(SUM(pr.actual_hours),0) as hours, COUNT(DISTINCT CASE WHEN pr.attended=1 THEN pr.id END) as shifts, u.total_points FROM users u LEFT JOIN departments d ON u.department_id=d.id LEFT JOIN participation_requests pr ON pr.volunteer_id=u.id AND pr.attended=1 WHERE u.deleted_at IS NULL AND u.role IN ('VOLUNTEER','SHIFT_LEADER') " . ($departmentId ? "AND u.department_id=?" : "") . " GROUP BY u.id ORDER BY hours DESC LIMIT 100", $departmentId ? [$departmentId] : []);
+            $csvUWhere = "u.deleted_at IS NULL AND u.role IN ('VOLUNTEER','SHIFT_LEADER')";
+            $csvUParams = [];
+            if ($departmentId) { $csvUWhere .= " AND u.department_id=?"; $csvUParams[] = $departmentId; }
+            if ($branchId) { $csvUWhere .= " AND u.warehouse_id=?"; $csvUParams[] = $branchId; }
+            $rows = safeFetchAll("SELECT u.name, d.name as dept, COALESCE(SUM(pr.actual_hours),0) as hours, COUNT(DISTINCT CASE WHEN pr.attended=1 THEN pr.id END) as shifts, u.total_points FROM users u LEFT JOIN departments d ON u.department_id=d.id LEFT JOIN participation_requests pr ON pr.volunteer_id=u.id AND pr.attended=1 WHERE $csvUWhere GROUP BY u.id ORDER BY hours DESC LIMIT 100", $csvUParams);
             foreach ($rows as $r) {
                 if (getSetting('points_enabled', '1') === '1') {
                     fputcsvSafe($out, [$r['name'], $r['dept'], $r['hours'], $r['shifts'], $r['total_points']]);
@@ -113,9 +127,10 @@ if (get('export') === 'csv') {
         case 'warroom':
             fputcsvSafe($out, ['Τύπος Αποστολής', 'Περίοδος', 'Πλήθος Αποστολών', 'Συνολική Βαθμολογία', 'Ταχύτητα Απόκρισης', 'Ολοκλήρωση Εντολών', 'Διαχείριση Ελλείψεων', 'Στελέχωση/Κάλυψη', 'Απολογισμός Debrief']);
             $wrDeptId = $departmentId !== '' ? (int) $departmentId : null;
+            $wrBranchId = $branchId !== '' ? (int) $branchId : null;
             $wrPeriods = [
-                "Τρέχουσα ($startDate έως $endDate)" => computeWarRoomTypeAggregates($startDate, $endDate, $wrDeptId),
-                "Προηγούμενη ($prevStartDate έως $prevEndDate)" => computeWarRoomTypeAggregates($prevStartDate, $prevEndDate, $wrDeptId),
+                "Τρέχουσα ($startDate έως $endDate)" => computeWarRoomTypeAggregates($startDate, $endDate, $wrDeptId, $wrBranchId),
+                "Προηγούμενη ($prevStartDate έως $prevEndDate)" => computeWarRoomTypeAggregates($prevStartDate, $prevEndDate, $wrDeptId, $wrBranchId),
             ];
             foreach ($wrPeriods as $wrLabel => $wrData) {
                 foreach ($wrData as $wrType) {
@@ -245,6 +260,7 @@ case 'volunteers':
     $uWhere = "u.deleted_at IS NULL";
     $uParams = [];
     if ($departmentId) { $uWhere .= " AND u.department_id=?"; $uParams[] = $departmentId; }
+    if ($branchId)     { $uWhere .= " AND u.warehouse_id=?";  $uParams[] = $branchId; }
     if ($cohortYear)   { $uWhere .= " AND u.cohort_year=?";   $uParams[] = $cohortYear; }
 
     $kpi['total']    = dbFetchValue("SELECT COUNT(*) FROM users u WHERE $uWhere AND u.role != 'SYSTEM_ADMIN'", $uParams);
@@ -265,13 +281,17 @@ case 'volunteers':
          WHERE $uWhere AND u.role != 'SYSTEM_ADMIN' GROUP BY d.id, d.name ORDER BY cnt DESC", $uParams);
 
     // Registrations per month (last 12 months)
+    $regsParams = [];
+    $regsFilter = '';
+    if ($departmentId) { $regsFilter .= ' AND u.department_id=?'; $regsParams[] = $departmentId; }
+    if ($branchId)     { $regsFilter .= ' AND u.warehouse_id=?';  $regsParams[] = $branchId; }
     $chartData['regsMonthly'] = safeFetchAll(
         "SELECT DATE_FORMAT(u.created_at,'%Y-%m') as month, COUNT(*) as cnt
          FROM users u WHERE u.deleted_at IS NULL AND u.role != 'SYSTEM_ADMIN'
          AND u.created_at >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
-         " . ($departmentId ? "AND u.department_id=?" : "") . "
+         $regsFilter
          GROUP BY month ORDER BY month",
-        $departmentId ? [$departmentId] : []);
+        $regsParams);
 
     // Top 15 volunteers
     $tableData['top'] = safeFetchAll(
@@ -476,8 +496,9 @@ case 'system':
 // ===== TAB 9: ACTION ROOM =====
 case 'warroom':
     $wrDeptId = $departmentId !== '' ? (int) $departmentId : null;
-    $wrCurrent  = computeWarRoomTypeAggregates($startDate, $endDate, $wrDeptId);
-    $wrPrevious = computeWarRoomTypeAggregates($prevStartDate, $prevEndDate, $wrDeptId);
+    $wrBranchId = $branchId !== '' ? (int) $branchId : null;
+    $wrCurrent  = computeWarRoomTypeAggregates($startDate, $endDate, $wrDeptId, $wrBranchId);
+    $wrPrevious = computeWarRoomTypeAggregates($prevStartDate, $prevEndDate, $wrDeptId, $wrBranchId);
 
     $kpi['wr_missions_current']  = array_sum(array_column($wrCurrent, 'mission_count'));
     $kpi['wr_missions_previous'] = array_sum(array_column($wrPrevious, 'mission_count'));
@@ -554,11 +575,20 @@ $greekMonths = ['Ιαν','Φεβ','Μαρ','Απρ','Μάι','Ιούν','Ιού�
             <input type="date" name="end_date" class="form-control form-control-sm" value="<?= h($endDate) ?>">
         </div>
         <div class="col-md-2">
-            <label class="form-label small mb-1">Τμήμα</label>
+            <label class="form-label small mb-1">Σώμα</label>
             <select name="department_id" class="form-select form-select-sm" <?= $user['role'] === ROLE_DEPARTMENT_ADMIN ? 'disabled' : '' ?>>
                 <option value="">Όλα</option>
                 <?php foreach ($departments as $d): ?>
                 <option value="<?= $d['id'] ?>" <?= $departmentId == $d['id'] ? 'selected' : '' ?>><?= h($d['name']) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <div class="col-md-2">
+            <label class="form-label small mb-1">Παράρτημα</label>
+            <select name="branch_id" class="form-select form-select-sm" <?= $user['role'] === ROLE_BRANCH_ADMIN ? 'disabled' : '' ?>>
+                <option value="">Όλα</option>
+                <?php foreach ($branches as $br): ?>
+                <option value="<?= $br['id'] ?>" <?= $branchId == $br['id'] ? 'selected' : '' ?>><?= h($br['name']) ?></option>
                 <?php endforeach; ?>
             </select>
         </div>

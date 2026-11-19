@@ -127,12 +127,15 @@ function shiftSwapRespond(int $swapId, array $responder, string $response): arra
  *
  * @param int|null $departmentId περιορισμός σε ένα τμήμα (department admin)
  */
-function shiftSwapAwaitingAdmin(?int $departmentId = null): array {
+function shiftSwapAwaitingAdmin(?int $departmentId = null, ?int $branchId = null): array {
     $params = [SWAP_ACCEPTED, STATUS_COMPLETED];
     $departmentFilter = '';
     if ($departmentId) {
         $departmentFilter = 'AND m.department_id = ?';
         $params[] = $departmentId;
+    } elseif ($branchId) {
+        $departmentFilter = 'AND m.branch_id = ?';
+        $params[] = $branchId;
     }
 
     return dbFetchAll(

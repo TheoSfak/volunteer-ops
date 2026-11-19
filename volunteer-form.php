@@ -17,9 +17,15 @@ if ($id) {
         setFlash('error', 'Ο εθελοντής δεν βρέθηκε.');
         redirect('volunteers.php');
     }
-    // Department admins can only edit users in their own department
-    if ($currentUser['role'] === ROLE_DEPARTMENT_ADMIN && 
+    // Department admins can only edit users in their own department (Σώμα);
+    // branch admins, in their own branch (Παράρτημα) — independent axes.
+    if ($currentUser['role'] === ROLE_DEPARTMENT_ADMIN &&
         $volunteer['department_id'] != $currentUser['department_id']) {
+        setFlash('error', 'Δεν έχετε δικαίωμα επεξεργασίας αυτού του εθελοντή.');
+        redirect('volunteers.php');
+    }
+    if ($currentUser['role'] === ROLE_BRANCH_ADMIN &&
+        $volunteer['warehouse_id'] != $currentUser['warehouse_id']) {
         setFlash('error', 'Δεν έχετε δικαίωμα επεξεργασίας αυτού του εθελοντή.');
         redirect('volunteers.php');
     }
@@ -188,9 +194,13 @@ if (isPost()) {
         $errors[] = 'Δεν έχετε δικαίωμα για αυτόν τον ρόλο.';
     }
     
-    // Dept admin can only assign their department
+    // Dept admin can only assign their department (Σώμα); branch admin, only
+    // their own branch (Παράρτημα) — independent axes.
     if ($currentUser['role'] === ROLE_DEPARTMENT_ADMIN && $data['department_id'] != $currentUser['department_id']) {
         $data['department_id'] = $currentUser['department_id'];
+    }
+    if ($currentUser['role'] === ROLE_BRANCH_ADMIN && $data['warehouse_id'] != $currentUser['warehouse_id']) {
+        $data['warehouse_id'] = $currentUser['warehouse_id'];
     }
     
     // Password for new users — use raw $_POST to preserve whitespace
@@ -515,6 +525,10 @@ include __DIR__ . '/includes/header.php';
                     <select class="form-select" name="warehouse_id">
                         <option value="">- Χωρίς παράρτημα -</option>
                         <?php foreach ($warehouses as $wh): ?>
+                            <?php
+                            // Branch admins see only their own branch
+                            if ($currentUser['role'] === ROLE_BRANCH_ADMIN && $wh['id'] != $currentUser['warehouse_id']) continue;
+                            ?>
                             <option value="<?= $wh['id'] ?>" <?= ($form['warehouse_id'] ?? '') == $wh['id'] ? 'selected' : '' ?>>
                                 <?= h($wh['name']) ?>
                             </option>

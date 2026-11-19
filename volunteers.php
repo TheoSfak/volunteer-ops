@@ -99,10 +99,14 @@ if ($skillId) {
     array_unshift($params, $skillId);
 }
 
-// Dept admins see only their department
+// Dept admins see only their department (Σώμα); branch admins see only their
+// own branch (Παράρτημα) — independent axes, same scoping pattern.
 if ($user['role'] === ROLE_DEPARTMENT_ADMIN) {
     $where[] = "u.department_id = ?";
     $params[] = $user['department_id'];
+} elseif ($user['role'] === ROLE_BRANCH_ADMIN) {
+    $where[] = "u.warehouse_id = ?";
+    $params[] = $user['warehouse_id'];
 }
 
 $whereClause = implode(' AND ', $where);
@@ -195,7 +199,7 @@ if (isPost()) {
             $newRole = post('new_role');
             $targetUser = dbFetchOne("SELECT * FROM users WHERE id = ?", [$userId]);
             
-            if ($targetUser && in_array($newRole, [ROLE_VOLUNTEER, ROLE_SHIFT_LEADER, ROLE_DEPARTMENT_ADMIN, ROLE_SYSTEM_ADMIN])) {
+            if ($targetUser && in_array($newRole, [ROLE_VOLUNTEER, ROLE_SHIFT_LEADER, ROLE_DEPARTMENT_ADMIN, ROLE_BRANCH_ADMIN, ROLE_SYSTEM_ADMIN])) {
                 // Only system admin can create other system admins
                 if ($newRole === ROLE_SYSTEM_ADMIN && $user['role'] !== ROLE_SYSTEM_ADMIN) {
                     setFlash('error', 'Μόνο διαχειριστές συστήματος μπορούν να δημιουργήσουν άλλους.');
@@ -763,7 +767,7 @@ include __DIR__ . '/includes/header.php';
                                                 <select class="form-select" name="new_role" required>
                                                     <?php foreach (ROLE_LABELS as $r => $label): ?>
                                                         <?php if ($r !== ROLE_SYSTEM_ADMIN || $user['role'] === ROLE_SYSTEM_ADMIN): ?>
-                                                        <?php if (in_array($r, [ROLE_DEPARTMENT_ADMIN, ROLE_SHIFT_LEADER])) continue; ?>
+                                                        <?php if (in_array($r, [ROLE_DEPARTMENT_ADMIN, ROLE_BRANCH_ADMIN, ROLE_SHIFT_LEADER])) continue; ?>
                                                             <option value="<?= $r ?>" <?= $v['role'] === $r ? 'selected' : '' ?>>
                                                                 <?= $label ?>
                                                             </option>

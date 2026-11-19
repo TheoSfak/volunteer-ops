@@ -36,10 +36,13 @@ if ($departmentId) {
     $params[] = $departmentId;
 }
 
-// Dept admins see only their department
+// Dept admins see only their department (Σώμα); branch admins, their branch (Παράρτημα)
 if ($user['role'] === ROLE_DEPARTMENT_ADMIN) {
     $where[]  = "u.department_id = ?";
     $params[] = $user['department_id'];
+} elseif ($user['role'] === ROLE_BRANCH_ADMIN) {
+    $where[]  = "u.warehouse_id = ?";
+    $params[] = $user['warehouse_id'];
 }
 
 $whereClause = implode(' AND ', $where);
