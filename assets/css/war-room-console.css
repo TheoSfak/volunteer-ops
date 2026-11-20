@@ -33,6 +33,8 @@ body.wr-console-view .war-room-hero > div.d-flex:first-of-type { margin-bottom: 
 body.wr-console-view .war-room-hero > div.d-flex:first-of-type > div:first-child > .text-uppercase,
 body.wr-console-view .war-room-hero > div.d-flex:first-of-type > div:first-child > .small { display: none; }
 body.wr-console-view .war-room-hero h1 { font-size: 1.05rem; margin: 0 !important; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38vw; }
+/* The training badge (ASKHSH) is one long line: in the console header it must shrink to the title column and end in an ellipsis instead of running under the buttons beside it (the full text is in its title attribute). */
+body.wr-console-view .war-room-hero .wr-training-badge { display: block; width: fit-content; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 2px 0 0 !important; }
 /* The counters sit in the phase bar, on the page's own light ground. */
 .wrc-kpis { display: flex; flex-wrap: wrap; gap: 4px; flex: 0 1 auto; margin-left: auto; }
 .wrc-kpi { display: inline-flex; flex-direction: column; align-items: flex-start; padding: 0 8px; min-width: 52px; border-radius: 7px; border: 1px solid #cfd7e3; background: #fff; color: #1b2430; line-height: 1.15; cursor: pointer; }

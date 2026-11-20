@@ -305,4 +305,20 @@ final class TrainingMissionSourceTest extends TestCase
         $this->assertStringContainsString('mission_type=3', $html);
         $this->assertStringContainsString('page=2', $html);
     }
+
+    public function test_training_badge_shrinks_to_its_column_in_the_console_header(): void
+    {
+        // In the console header the title column is only 300px (170px on a laptop); the badge is one long
+        // line and used to run under the buttons beside it. It must shrink to its column and end in an
+        // ellipsis, with the full text in a tooltip.
+        $w = $this->src('war-room.php');
+        $this->assertStringContainsString('class="badge bg-warning text-dark mb-2 wr-training-badge"', $w);
+        $this->assertStringContainsString("title=\"<?= h(t('hero.training_badge')) ?>\"", $w);
+
+        $css = $this->src('assets/css/war-room-console.css');
+        $this->assertSame(1, preg_match('/\.wr-training-badge\s*\{([^}]*)\}/s', $css, $m), 'rule for .wr-training-badge missing');
+        foreach (['max-width: 100%', 'overflow: hidden', 'text-overflow: ellipsis', 'white-space: nowrap'] as $declaration) {
+            $this->assertStringContainsString($declaration, $m[1]);
+        }
+    }
 }
