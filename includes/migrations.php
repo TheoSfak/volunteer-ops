@@ -8560,6 +8560,11 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
                           (SELECT m.is_training FROM shifts s JOIN missions m ON m.id = s.mission_id WHERE s.id = NEW.shift_id),
                           0)
                 ");
+
+                // Repair participation rows created while an earlier attempt's CREATE TRIGGER was failing
+                // (the columns already existed then, so the app kept running). Reached only if the
+                // CREATE above succeeded: a failed one throws first and the version is not recorded.
+                dbExecute(trainingReconcileParticipationsSql());
             },
         ],
 

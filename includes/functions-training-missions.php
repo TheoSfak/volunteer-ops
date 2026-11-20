@@ -59,6 +59,23 @@ if (!function_exists('isTrainingMission')) {
         return isTrainingMission($mission) ? TRAINING_MISSION_PREFIX . ' ' : '';
     }
 
+    /**
+     * The reconciliation UPDATE migration 224 runs right after it creates the trigger:
+     * if CREATE TRIGGER failed on an earlier request (shared-host privilege), the
+     * columns already existed and the app kept running, so participation rows created
+     * in that gap carry is_training = 0 even for a drill. Idempotent. One shared
+     * string so the migration and its test execute exactly the same SQL.
+     * (Points already granted in the gap need manual reversal.)
+     */
+    function trainingReconcileParticipationsSql(): string
+    {
+        return "UPDATE participation_requests pr
+                JOIN shifts s ON s.id = pr.shift_id
+                JOIN missions m ON m.id = s.mission_id
+                SET pr.is_training = m.is_training
+                WHERE pr.is_training <> m.is_training";
+    }
+
     /** A small badge for lists and headers, '' for a real mission. */
     function trainingMissionBadgeHtml(array $mission): string
     {

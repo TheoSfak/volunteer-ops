@@ -122,6 +122,14 @@ final class FreshInstallTest extends TestCase
         $this->assertContains('trg_booking_return', $triggers);
     }
 
+    public function testTrainingMissionTriggerWasCreated(): void
+    {
+        // A fresh install must copy missions.is_training onto every new participation
+        // (trg_pr_set_training, also created by migration 224 on upgraded databases).
+        $triggers = self::$pdo->query('SHOW TRIGGERS')->fetchAll(PDO::FETCH_COLUMN, 0);
+        $this->assertContains('trg_pr_set_training', $triggers);
+    }
+
     private static function tableExists(string $table): bool
     {
         $stmt = self::$pdo->prepare(
