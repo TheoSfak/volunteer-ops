@@ -89,4 +89,19 @@ final class TrainingMissionSourceTest extends TestCase
         $this->assertSame(2, substr_count($e, 'WHERE m.is_training = 0'));
         $this->assertStringNotContainsString('pr.is_training', $e); // the volunteer export's participation count is unfiltered (drills keep their real headcount)
     }
+
+    public function test_personal_pages_exclude_training_from_totals_and_show_the_record(): void
+    {
+        foreach (['profile.php', 'volunteer-view.php'] as $file) {
+            $s = $this->src($file);
+            $this->assertGreaterThanOrEqual(3, substr_count($s, 'is_training = 0'), "{$file}: totals must filter training");
+            $this->assertStringContainsString('getVolunteerTrainingRecord(', $s, "{$file}: record missing");
+            $this->assertStringContainsString("includes/training-record-section.php", $s, "{$file}: card missing");
+        }
+
+        $r = $this->src('volunteer-report.php');
+        $this->assertGreaterThanOrEqual(2, substr_count($r, 'pr.is_training = 0'));
+        $this->assertStringContainsString('getVolunteerTrainingRecord(', $r);
+        $this->assertStringContainsString('Εκπαιδευτικές Ασκήσεις', $r);
+    }
 }
