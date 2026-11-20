@@ -472,12 +472,15 @@ function trainingCaseImport(string $json, int $userId): array {
  * Loads the starter cases shipped in includes/training-cases/*.json into the library, by slug. A new slug is inserted
  * as an unreviewed starter; an existing starter whose document differs from the file is updated and goes back to
  * unreviewed (the content changed, so the medical check no longer applies); anything else is left alone. Never touches
- * a case that is not a starter. Returns how many rows were inserted or updated. Cheap enough to call when the library
- * or the staging list opens.
+ * a case that is not a starter (a starter slug that collides with one is skipped and logged). A change to the document or
+ * to the title, type, difficulty, language or length counts as a change. Never unarchives a starter. Returns how many
+ * rows were inserted or updated. Cheap enough to call when the library or the staging list opens. $dir overrides the
+ * shipped includes/training-cases folder (used by the tests).
  */
-function trainingCaseSeedStarters(): int {
+function trainingCaseSeedStarters(?string $dir = null): int {
     $changed = 0;
-    foreach (glob(__DIR__ . '/training-cases/*.json') ?: [] as $file) {
+    $dir = $dir === null ? __DIR__ . '/training-cases' : rtrim($dir, '/\\');
+    foreach (glob($dir . '/*.json') ?: [] as $file) {
         $entry = json_decode((string) file_get_contents($file), true);
         $doc = is_array($entry) ? trainingCaseNormalize($entry['document'] ?? null) : null;
         $slug = is_array($entry) ? strtolower(trim((string) ($entry['slug'] ?? ''))) : '';
@@ -487,15 +490,28 @@ function trainingCaseSeedStarters(): int {
         }
         $meta = trainingCaseMeta($entry);
         $json = json_encode($doc, JSON_UNESCAPED_UNICODE);
-        $existing = dbFetchOne("SELECT id, is_starter, document FROM training_cases WHERE slug = ?", [$slug]);
+        $existing = dbFetchOne(
+            "SELECT id, is_starter, title, type_tag, difficulty, language, est_minutes, document FROM training_cases WHERE slug = ?",
+            [$slug]
+        );
         if (!$existing) {
-            dbInsert(
-                "INSERT INTO training_cases (slug, title, type_tag, difficulty, language, est_minutes, document, format_version, is_starter, reviewed)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0)",
-                [$slug, $doc['title'], $meta['type_tag'], $meta['difficulty'], $meta['language'], $meta['est_minutes'], $json, TRAINING_CASE_FORMAT_VERSION]
-            );
-            $changed++;
-        } elseif ((int) $existing['is_starter'] === 1 && $existing['document'] !== $json) {
+            // False means a concurrent request inserted the slug between the check and here; it seeded it, so move on.
+            if (trainingCaseInsertStarter($slug, $doc, $meta, $json)) {
+                $changed++;
+            }
+            continue;
+        }
+        if ((int) $existing['is_starter'] !== 1) {
+            error_log('[training-cases] starter ' . $slug . ' (' . basename($file) . ') skipped: the slug belongs to a case that is not a starter');
+            continue;
+        }
+        $differs = $existing['document'] !== $json
+            || $existing['title'] !== $doc['title']
+            || $existing['type_tag'] !== $meta['type_tag']
+            || (int) $existing['difficulty'] !== (int) $meta['difficulty']
+            || $existing['language'] !== $meta['language']
+            || (int) $existing['est_minutes'] !== (int) $meta['est_minutes'];
+        if ($differs) {
             dbExecute(
                 "UPDATE training_cases SET title = ?, type_tag = ?, difficulty = ?, language = ?, est_minutes = ?, document = ?,
                         format_version = ?, reviewed = 0, reviewed_by = NULL, reviewed_at = NULL WHERE id = ?",
@@ -505,6 +521,26 @@ function trainingCaseSeedStarters(): int {
         }
     }
     return $changed;
+}
+
+/**
+ * Inserts one starter row as an unreviewed starter. Returns false, without throwing, when the slug already exists
+ * (duplicate key: another request seeded it first); any other database error still propagates.
+ */
+function trainingCaseInsertStarter(string $slug, array $doc, array $meta, string $json): bool {
+    try {
+        dbInsert(
+            "INSERT INTO training_cases (slug, title, type_tag, difficulty, language, est_minutes, document, format_version, is_starter, reviewed)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0)",
+            [$slug, $doc['title'], $meta['type_tag'], $meta['difficulty'], $meta['language'], $meta['est_minutes'], $json, TRAINING_CASE_FORMAT_VERSION]
+        );
+        return true;
+    } catch (PDOException $e) {
+        if ((int) ($e->errorInfo[1] ?? 0) === 1062) {
+            return false;
+        }
+        throw $e;
+    }
 }
 
 /**
