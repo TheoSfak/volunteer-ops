@@ -1900,3 +1900,11 @@ Where execution diverged from the plan text above:
 - **Task 12:** the guard test dropped the `migrations.php` / `install.php` skip and added a `.superpowers` skip.
 - **Task 1:** also bumped the schema-version pin in `tests/ScenarioPageTest.php`.
 - **Task 4:** the test seeds the missing achievement rows inside its transaction.
+
+Final whole-branch review wave (fixes after the review):
+
+- **Action Room scorecard:** `computeWarRoomTypeAggregates()` (reports.php "Action Room" tab, warroom CSV) now filters `m.is_training = 0` in its shared `$where`, which every pillar query uses; a functional test seeds a real and a drill COMPLETED mission of one type. The `includes/functions-warroom.php` entry left the guard allow-list (the file filters on its own now).
+- **Notifications:** `cron_incomplete_missions.php` skips drills (`m.is_training = 0`). The "[ΑΣΚΗΣΗ]" prefix is now on the remaining participant messages in `shift-view.php`, `mission-view.php`, `includes/shift-swap-functions.php` and `shift-swap.php`, each through a `$missionLabel` built once; the assertions for `cron_shift_reminders.php` and `participation-action.php` were tightened.
+- **Migration 224:** after the trigger is created it runs an idempotent reconciliation UPDATE (`trainingReconcileParticipationsSql()`, kept in `includes/functions-training-missions.php` so tests can call it without loading `migrations.php`, which runs the migrations as a side effect). `FreshInstallTest` asserts `trg_pr_set_training` exists after loading `sql/schema.sql`.
+- **Minor:** `volunteer-view.php` shows certificate links only to `missions_manage` users. The missions-list pagination already keeps `training` and `mission_type` (`paginationLinks()` rebuilds from `$_GET`, ignoring its second argument), so only a test was added.
+- **Docs:** the spec now describes the failure mode as it is (exception reaches the runner, `migration_last_error`, retry, reconciliation), drops the calendar-feed contradiction, lists every notification site, the skipped cron broadcast and the Action Room scorecard.

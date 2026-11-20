@@ -66,15 +66,28 @@ for the complete list.
   from drills.
 
 **Mission-level aggregates.** Counts, totals and listings over missions filter `m.is_training = 0`: the
-dashboard and report mission counts, municipality and official reports, the public and ICS calendar feeds,
-statistics. The missions pages still show training missions (section 3).
+dashboard and report mission counts, municipality and official reports, statistics, and the Action Room
+scorecard (`computeWarRoomTypeAggregates()`, shown on the "Action Room" tab of `reports.php` and in the
+warroom CSV), whose shared `$where` carries `m.is_training = 0` so every pillar and the per-type mission
+count leave drills out. The missions pages still show training missions (section 3).
 
 **Outbound notifications.** Participant-facing notifications of a training mission carry the "[ΑΣΚΗΣΗ]"
-prefix: the "new mission" notification (its audience is picked by the admin in the form, so it IS the
-drill's invitation and is not suppressed), shift reminders, and participation approved/rejected. For
-approved/rejected and the reminder the marker is in the message body; their in-app titles do not contain
-the mission title. The calendar feeds are login-gated and show the user's own shifts, so a drill shift
-correctly appears in the volunteer's own calendar. Action Room notifications (31 call sites in
+prefix (`trainingTitlePrefix()`, built once as `$missionLabel` where a file sends several messages):
+- the "new mission" notification (its audience is picked by the admin in the form, so it IS the
+  drill's invitation and is not suppressed);
+- shift reminders (`cron_shift_reminders.php`);
+- participation approved/rejected, in both `participation-action.php` and `shift-view.php` (also the
+  re-activation, the bulk activate/cancel and the "shift deleted" messages there);
+- a volunteer added by an admin (`shift-view.php` add and mass add, `mission-view.php`), including the
+  calendar title in the e-mail;
+- mission cancelled or deleted, and the manual mission reminder (`mission-view.php`);
+- shift swap (`includes/shift-swap-functions.php`, `shift-swap.php`).
+For approved/rejected and the reminder the marker is in the message body; their in-app titles do not contain
+the mission title. The automated `mission_needs_volunteers` broadcast (`cron_incomplete_missions.php`, which
+mails and notifies every active volunteer about an open mission that is short of people) skips drills
+entirely (`m.is_training = 0`): a drill is recruited for through its own "new mission" notification, never
+by this cron. The calendar feeds are login-gated and show only the user's own shifts, so a drill shift
+appears in the volunteer's own calendar and is not filtered from them. Action Room notifications (31 call sites in
 `includes/functions-warroom.php`, no common choke point) are not prefixed in this sub-project; the Action
 Room shows the "ΑΣΚΗΣΗ" badge instead (text via the `t()` key `hero.training_badge`, Greek and English).
 Prefixing them is revisited with sub-projects 2 and 3.
@@ -125,11 +138,17 @@ training missions:
 ## 4. Errors, testing, scope
 
 **Failure modes.**
-- Trigger cannot be created (hosting permissions): the migration creates it inside try/catch and fails
-  loudly, and is not recorded as applied. It never falls back silently, because that would leave
-  `is_training` at 0 and leak. The alternative (setting the column in each insert site) is raised with the
-  owner, not done unilaterally. Whether the trigger exists on the Hostinger database is checked after
-  deployment (`SHOW TRIGGERS LIKE 'participation_requests'`).
+- Trigger cannot be created (hosting permissions): an exception from `CREATE TRIGGER` propagates to the
+  migration runner, which records `migration_last_error` and does not advance the schema version (visible in
+  `_dbcheck.php`). The migration is retried on later requests. Meanwhile the columns already exist and the
+  app keeps running, so participation rows created in that gap would carry `is_training = 0` even for a
+  drill. The migration therefore ends, after the trigger is created, with an idempotent reconciliation
+  `UPDATE` (`trainingReconcileParticipationsSql()`) that copies `missions.is_training` onto every
+  participation row that disagrees; it never runs if the `CREATE TRIGGER` threw. Points already granted
+  in the gap would need manual reversal. It never falls back silently to "no trigger". The alternative
+  (setting the column in each insert site) is raised with the owner, not done unilaterally. Whether the
+  trigger exists on the Hostinger database is checked after deployment
+  (`SHOW TRIGGERS LIKE 'participation_requests'`).
 - Tampered requests: the server ignores `is_training` on mission edit; training-only UI and endpoints
   re-check the stored flag, not the request.
 - Missing mission or shift: `COALESCE(..., 0)` treats it as a real row (existing behaviour).
@@ -142,8 +161,9 @@ training missions:
   rows, and the training record counts only them.
 - Trigger tests: a participation inserted through each path gets the right `is_training`, and editing a
   mission cannot flip it.
-- Notification tests: "[ΑΣΚΗΣΗ]" prefix on the participant-facing training mission messages; public
-  feeds and municipality outputs skip training missions.
+- Notification tests: "[ΑΣΚΗΣΗ]" prefix on the participant-facing training mission messages; the
+  `mission_needs_volunteers` cron skips drills; the municipality report and the Action Room scorecard
+  skip training missions.
 - Certificate tests: training wording and hours on the document and the verify page.
 
 **Delivery.** One migration, the schema update, the filters, the new profile and certificate pieces, the
