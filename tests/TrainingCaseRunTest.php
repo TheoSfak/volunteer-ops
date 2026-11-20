@@ -247,6 +247,189 @@ final class TrainingCaseRunTest extends TestCase
         $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND data LIKE '%case-%'", [$this->mate]));
     }
 
+    // ── Task 6 review findings ─────────────────────────────────────────────────────────────────────────────
+
+    private function runId(int $userId): int
+    {
+        return (int) dbFetchValue("SELECT id FROM mission_case_runs WHERE placement_id = ? AND user_id = ?", [$this->placementId, $userId]);
+    }
+
+    private function runCount(int $userId): int
+    {
+        return (int) dbFetchValue("SELECT COUNT(*) FROM mission_case_runs WHERE placement_id = ? AND user_id = ?", [$this->placementId, $userId]);
+    }
+
+    public function test_a_run_that_lags_behind_its_stored_answer_is_completed_by_the_next_call(): void
+    {
+        $this->arrive($this->teamId);
+        trainingCaseStartRun($this->placementId, $this->member);
+        $runId = $this->runId($this->member);
+        // The request died between the two writes: the answer is stored, the run still stands at the old step with no score.
+        dbExecute("INSERT INTO mission_case_answers (run_id, step_id, choice_id, rating) VALUES (?, 's1', 'a', 'best')", [$runId]);
+
+        $healed = trainingCaseAnswer($this->placementId, $this->member, 's1', 'a');
+        $this->assertTrue($healed['ok']);
+        $this->assertTrue($healed['duplicate'], 'the answer itself was already stored');
+        $this->assertSame('s2', $healed['next']);
+        $this->assertFalse($healed['finished']);
+        $this->assertSame(2, $healed['score_points']);
+        $this->assertSame(2, $healed['score_max']);
+        $run = dbFetchOne("SELECT * FROM mission_case_runs WHERE id = ?", [$runId]);
+        $this->assertSame('s2', $run['current_step']);
+        $this->assertSame(2, (int) $run['score_points']);
+        $this->assertSame(2, (int) $run['score_max']);
+
+        // A second call is a clean duplicate: nothing is scored twice, and the volunteer can go on.
+        $again = trainingCaseAnswer($this->placementId, $this->member, 's1', 'a');
+        $this->assertTrue($again['duplicate']);
+        $this->assertSame(2, $again['score_points']);
+        $this->assertSame(2, $again['score_max']);
+        $this->assertSame(1, (int) dbFetchValue("SELECT COUNT(*) FROM mission_case_answers WHERE run_id = ?", [$runId]));
+        $last = trainingCaseAnswer($this->placementId, $this->member, 's2', 'b');
+        $this->assertTrue($last['finished']);
+        $this->assertSame(4, $last['score_points']);
+        $this->assertSame(4, $last['score_max']);
+    }
+
+    public function test_a_lagging_last_step_finishes_the_run(): void
+    {
+        $this->arrive($this->teamId);
+        trainingCaseStartRun($this->placementId, $this->member);
+        $runId = $this->runId($this->member);
+        dbExecute("INSERT INTO mission_case_answers (run_id, step_id, choice_id, rating) VALUES (?, 's1', 'a', 'best'), (?, 's2', 'a', 'acceptable')", [$runId, $runId]);
+        dbExecute("UPDATE mission_case_runs SET current_step = 's2', score_points = 2, score_max = 2 WHERE id = ?", [$runId]);
+
+        $healed = trainingCaseAnswer($this->placementId, $this->member, 's2', 'b');
+        $this->assertTrue($healed['duplicate']);
+        $this->assertSame('a', $healed['choice_id'], 'the stored choice stands, not the caller\'s');
+        $this->assertTrue($healed['finished']);
+        $this->assertSame(3, $healed['score_points']);
+        $this->assertSame(4, $healed['score_max']);
+        $this->assertNotNull(dbFetchValue("SELECT finished_at FROM mission_case_runs WHERE id = ?", [$runId]));
+        $this->assertSame(3, trainingCaseAnswer($this->placementId, $this->member, 's2', 'a')['score_points'], 'and a repeat adds nothing');
+    }
+
+    public function test_a_bogus_step_or_choice_does_not_start_a_run(): void
+    {
+        $this->arrive($this->teamId);
+        $this->assertFalse(trainingCaseAnswer($this->placementId, $this->member, 'nope', 'a')['ok']);
+        $this->assertFalse(trainingCaseAnswer($this->placementId, $this->member, 's1', 'zzz')['ok']);
+        $this->assertFalse(trainingCaseAnswer($this->placementId, $this->member, 's2', 'a')['ok'], 'not the first step');
+        $this->assertSame(0, $this->runCount($this->member), 'no run, so the card stays «new»');
+        $this->assertSame('new', trainingCaseCardsForDispatches([$this->dispatchId], $this->member)[$this->dispatchId]['state']);
+        // A real first answer still starts the run.
+        $this->assertTrue(trainingCaseAnswer($this->placementId, $this->member, 's1', 'a')['ok']);
+        $this->assertSame(1, $this->runCount($this->member));
+    }
+
+    public function test_starting_a_run_is_idempotent_and_needs_the_team_to_have_arrived(): void
+    {
+        $early = trainingCaseStartRun($this->placementId, $this->member);
+        $this->assertFalse($early['ok']);
+        $this->assertSame(t('case.err_not_arrived'), $early['error']);
+        $this->assertSame(0, $this->runCount($this->member));
+
+        $this->arrive($this->teamId);
+        $first = trainingCaseStartRun($this->placementId, $this->member);
+        $this->assertTrue($first['ok']);
+        $this->assertSame('s1', $first['run']['current_step']);
+        $this->assertFalse($first['run']['finished']);
+        trainingCaseAnswer($this->placementId, $this->member, 's1', 'a');
+        $second = trainingCaseStartRun($this->placementId, $this->member);
+        $this->assertSame($first['run']['run_id'], $second['run']['run_id'], 'the same run comes back');
+        $this->assertSame('s2', $second['run']['current_step'], 'and starting again does not rewind it');
+        $this->assertSame(1, $this->runCount($this->member));
+    }
+
+    public function test_starting_a_run_is_refused_in_a_real_mission(): void
+    {
+        $this->arrive($this->teamId);
+        dbExecute("UPDATE missions SET is_training = 0 WHERE id = ?", [$this->drill['mission']]);
+        $res = trainingCaseStartRun($this->placementId, $this->member);
+        $this->assertFalse($res['ok']);
+        $this->assertSame(t('case.err_not_training'), $res['error']);
+        $this->assertSame(0, $this->runCount($this->member));
+    }
+
+    public function test_answering_is_refused_to_a_non_audience_user_before_arrival_and_in_a_real_mission(): void
+    {
+        // Before the team has arrived.
+        $res = trainingCaseAnswer($this->placementId, $this->member, 's1', 'a');
+        $this->assertFalse($res['ok']);
+        $this->assertSame(t('case.err_not_arrived'), $res['error']);
+
+        // Another team's volunteer, even once that team has "arrived" at an order that is not theirs.
+        $this->arrive($this->teamId);
+        $res = trainingCaseAnswer($this->placementId, $this->stranger, 's1', 'a');
+        $this->assertFalse($res['ok']);
+        $this->assertSame(t('case.err_not_audience'), $res['error']);
+
+        // A real mission.
+        dbExecute("UPDATE missions SET is_training = 0 WHERE id = ?", [$this->drill['mission']]);
+        $res = trainingCaseAnswer($this->placementId, $this->member, 's1', 'a');
+        $this->assertFalse($res['ok']);
+        $this->assertSame(t('case.err_not_training'), $res['error']);
+
+        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_case_runs WHERE placement_id = ?", [$this->placementId]));
+        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_case_answers"), 'nothing was stored');
+    }
+
+    public function test_the_dispatch_row_card_has_exactly_the_expected_keys(): void
+    {
+        $this->arrive($this->teamId);
+        trainingCaseAnswer($this->placementId, $this->member, 's1', 'a');
+        $rows = loadMissionDispatchesForUser($this->drill['mission'], $this->member, false, true);
+        $row = array_values(array_filter($rows, fn($r) => $r['id'] === $this->dispatchId))[0];
+        $keys = array_keys($row['case']);
+        sort($keys);
+        $expected = ['available', 'briefing', 'can_play', 'label', 'percent', 'placement_id', 'state', 'title'];
+        $this->assertSame($expected, $keys, 'no document, no ratings, no feedback ride on the poll');
+    }
+
+    public function test_the_overview_still_lists_a_volunteer_with_a_run_who_is_no_longer_approved(): void
+    {
+        $this->arrive($this->teamId);
+        trainingCaseAnswer($this->placementId, $this->member, 's1', 'a');
+        dbExecute("UPDATE participation_requests SET status = ? WHERE volunteer_id = ?", [PARTICIPATION_REJECTED, $this->member]);
+        $p = trainingCaseOverview($this->drill['mission'])['placements'][0];
+        $byUser = array_column($p['volunteers'], null, 'user_id');
+        $this->assertArrayHasKey($this->member, $byUser, 'their answers are in the counts, so they are in the rows');
+        $this->assertSame('running', $byUser[$this->member]['state']);
+        $this->assertCount(1, $byUser[$this->member]['answers']);
+        $this->assertArrayHasKey($this->mate, $byUser);
+        $this->assertCount(2, $p['volunteers'], 'and nobody is listed twice');
+    }
+
+    public function test_the_missing_tables_are_logged_once_not_on_every_poll(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'tcl');
+        $old = ini_set('error_log', $file);
+        try {
+            $this->assertTrue(trainingCaseLogOnce('test-key-' . $file, 'first'));
+            $this->assertFalse(trainingCaseLogOnce('test-key-' . $file, 'second'));
+            $this->assertTrue(trainingCaseLogOnce('test-key-other-' . $file, 'third'));
+            $log = (string) file_get_contents($file);
+            $this->assertStringContainsString('first', $log);
+            $this->assertStringNotContainsString('second', $log);
+        } finally {
+            ini_set('error_log', $old === false ? '' : $old);
+            @unlink($file);
+        }
+    }
+
+    public function test_the_arrival_notice_is_sent_after_command_is_told_of_the_arrival(): void
+    {
+        $src = str_replace("\r\n", "\n", (string) file_get_contents(dirname(__DIR__) . '/includes/functions-warroom.php'));
+        $start = strpos($src, 'function advanceMissionDispatch');
+        $this->assertNotFalse($start);
+        $body = substr($src, $start, 6000);
+        $command = strpos($body, 'notifyDispatchArrival(');
+        $team = strpos($body, 'trainingCaseNotifyArrival(');
+        $this->assertNotFalse($command);
+        $this->assertNotFalse($team);
+        $this->assertGreaterThan($command, $team, 'a slow teammate loop must not delay command\'s alert');
+    }
+
     // ── Task 5 review findings ─────────────────────────────────────────────────────────────────────────────
 
     public function test_no_placement_is_recorded_for_a_real_mission(): void

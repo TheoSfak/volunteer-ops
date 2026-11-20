@@ -139,10 +139,64 @@ function trainingCaseStartRun(int $placementId, int $userId): array {
 }
 
 /**
+ * Runs $work inside a transaction: its own when none is open, the caller's otherwise (a test runs every case inside
+ * one transaction that it rolls back). Anything thrown undoes the transaction this call opened and goes on up.
+ */
+function trainingCaseTransaction(callable $work) {
+    $pdo = db();
+    $ownTransaction = !$pdo->inTransaction();
+    if ($ownTransaction) {
+        $pdo->beginTransaction();
+    }
+    try {
+        $result = $work();
+        if ($ownTransaction && $pdo->inTransaction()) {
+            $pdo->commit();
+        }
+        return $result;
+    } catch (Throwable $e) {
+        if ($ownTransaction && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+}
+
+/**
+ * Brings a run up to date with the answers stored for it: the points from their stored ratings (best 2, acceptable 1,
+ * harmful 0), the maximum as 2 per answered step, and - from the snapshot's `next` of the LAST answered step - where
+ * the run stands or that it is finished. Used to finish the write a request that died after storing an answer never
+ * made. Returns the refreshed run row. Call it with the run row locked.
+ */
+function trainingCaseCatchUpRun(array $run, string $lastStepId, array $lastChoice): array {
+    $points = 0;
+    $answered = 0;
+    foreach (dbFetchAll("SELECT rating FROM mission_case_answers WHERE run_id = ?", [(int) $run['id']]) as $a) {
+        $points += trainingCaseRatingPoints((string) $a['rating']);
+        $answered++;
+    }
+    dbExecute(
+        "UPDATE mission_case_runs SET score_points = ?, score_max = ?, current_step = ?,
+                finished_at = " . ($lastChoice['next'] === null ? 'COALESCE(finished_at, NOW())' : 'NULL') . "
+         WHERE id = ?",
+        [$points, 2 * $answered, $lastChoice['next'] ?? $lastStepId, (int) $run['id']]
+    );
+    return dbFetchOne("SELECT * FROM mission_case_runs WHERE id = ?", [(int) $run['id']]);
+}
+
+/**
  * One decision. The rating, the feedback and the next step are read from the SNAPSHOT, never from the caller; the
  * score is added here. Idempotent: an answer to a step that already has one returns the stored result with
- * duplicate = true and changes nothing (a double tap, an offline replay). Only the run's current step can be
+ * duplicate = true and adds nothing (a double tap, an offline replay). Only the run's current step can be
  * answered, and a finished run takes nothing.
+ *
+ * The answer and the run's update are one transaction with the run row locked, so a request that dies cannot leave
+ * the answer without its score. Should one ever be left that way anyway (an older request, a failed commit), the
+ * next call for that step finishes the run's update from the stored answer instead of answering 'duplicate' and
+ * leaving the volunteer stuck on a step that can no longer be answered.
+ *
+ * A step or choice that is not in the snapshot, or a first answer that is not for the start step, is refused BEFORE
+ * any run is created: a bad request from an arrived volunteer must not turn their card to «running».
  */
 function trainingCaseAnswer(int $placementId, int $userId, string $stepId, string $choiceId, ?int $msTaken = null): array {
     $placement = trainingCasePlacement($placementId);
@@ -154,16 +208,17 @@ function trainingCaseAnswer(int $placementId, int $userId, string $stepId, strin
         return ['ok' => false, 'error' => t($gate)];
     }
     $doc = $placement['doc'];
-    dbExecute("INSERT IGNORE INTO mission_case_runs (placement_id, user_id, current_step) VALUES (?, ?, ?)", [$placementId, $userId, $doc['start']]);
-    $run = dbFetchOne("SELECT * FROM mission_case_runs WHERE placement_id = ? AND user_id = ?", [$placementId, $userId]);
-
     $step = $doc['steps'][$stepId] ?? null;
-    $choice = null;
-    foreach ($step['choices'] ?? [] as $candidate) {
-        if ($candidate['id'] === $choiceId) {
-            $choice = $candidate;
+    $choiceIn = function (?array $step, string $id): ?array {
+        foreach ($step['choices'] ?? [] as $candidate) {
+            if ($candidate['id'] === $id) {
+                return $candidate;
+            }
         }
-    }
+        return null;
+    };
+    $choice = $choiceIn($step, $choiceId);
+    $bad = ['ok' => false, 'error' => t('case.err_bad_answer')];
     $result = function (array $c, bool $duplicate, array $runRow) use ($stepId): array {
         return [
             'ok' => true, 'duplicate' => $duplicate, 'step_id' => $stepId, 'choice_id' => $c['id'], 'rating' => $c['rating'],
@@ -171,35 +226,66 @@ function trainingCaseAnswer(int $placementId, int $userId, string $stepId, strin
         ] + trainingCaseScoreFields($runRow);
     };
 
-    $stored = dbFetchOne("SELECT choice_id FROM mission_case_answers WHERE run_id = ? AND step_id = ?", [(int) $run['id'], $stepId]);
-    if ($stored) {
-        foreach ($step['choices'] ?? [] as $candidate) {
-            if ($candidate['id'] === $stored['choice_id']) {
-                return $result($candidate, true, $run);
+    return trainingCaseTransaction(function () use ($placementId, $userId, $stepId, $choiceId, $msTaken, $doc, $step, $choice, $choiceIn, $bad, $result) {
+        $runSql = "SELECT * FROM mission_case_runs WHERE placement_id = ? AND user_id = ? FOR UPDATE";
+        $run = dbFetchOne($runSql, [$placementId, $userId]);
+        if (!$run) {
+            // No run yet: only a valid first answer may create one.
+            if ($step === null || $choice === null || $stepId !== $doc['start']) {
+                return $bad;
+            }
+            dbExecute("INSERT IGNORE INTO mission_case_runs (placement_id, user_id, current_step) VALUES (?, ?, ?)", [$placementId, $userId, $doc['start']]);
+            $run = dbFetchOne($runSql, [$placementId, $userId]);
+        }
+
+        $stored = dbFetchOne("SELECT choice_id FROM mission_case_answers WHERE run_id = ? AND step_id = ?", [(int) $run['id'], $stepId]);
+        if ($stored) {
+            $storedChoice = $choiceIn($step, (string) $stored['choice_id']);
+            if ($storedChoice === null) {
+                return ['ok' => false, 'error' => t('case.err_gone')];
+            }
+            // The answer is there but the run still stands at its step: the update that should have followed it never ran.
+            if ($run['current_step'] === $stepId && $run['finished_at'] === null) {
+                $run = trainingCaseCatchUpRun($run, $stepId, $storedChoice);
+            }
+            return $result($storedChoice, true, $run);
+        }
+        if ($step === null || $choice === null || $run['finished_at'] !== null || $run['current_step'] !== $stepId) {
+            return $bad;
+        }
+        $inserted = dbExecute(
+            "INSERT IGNORE INTO mission_case_answers (run_id, step_id, choice_id, rating, ms_taken) VALUES (?, ?, ?, ?, ?)",
+            [(int) $run['id'], $stepId, $choiceId, $choice['rating'], $msTaken !== null ? max(0, min(3600000, $msTaken)) : null]
+        );
+        if ($inserted > 0) {
+            dbExecute(
+                "UPDATE mission_case_runs SET score_points = score_points + ?, score_max = score_max + 2, current_step = ?,
+                        finished_at = " . ($choice['next'] === null ? 'NOW()' : 'NULL') . "
+                 WHERE id = ?",
+                [trainingCaseRatingPoints($choice['rating']), $choice['next'] ?? $stepId, (int) $run['id']]
+            );
+        } else {
+            // Somebody else's answer for this step got in first: the STORED choice is the result, not this caller's.
+            $stored = dbFetchOne("SELECT choice_id FROM mission_case_answers WHERE run_id = ? AND step_id = ?", [(int) $run['id'], $stepId]);
+            $choice = $stored ? $choiceIn($step, (string) $stored['choice_id']) : null;
+            if ($choice === null) {
+                return ['ok' => false, 'error' => t('case.err_gone')];
             }
         }
-        return ['ok' => false, 'error' => t('case.err_gone')];
+        $run = dbFetchOne("SELECT * FROM mission_case_runs WHERE id = ?", [(int) $run['id']]);
+        return $result($choice, $inserted === 0, $run);
+    });
+}
+
+/** error_log()s $message the first time $key is seen in this process; returns whether it logged. */
+function trainingCaseLogOnce(string $key, string $message): bool {
+    static $seen = [];
+    if (isset($seen[$key])) {
+        return false;
     }
-    if ($step === null || $choice === null) {
-        return ['ok' => false, 'error' => t('case.err_bad_answer')];
-    }
-    if ($run['finished_at'] !== null || $run['current_step'] !== $stepId) {
-        return ['ok' => false, 'error' => t('case.err_bad_answer')];
-    }
-    $inserted = dbExecute(
-        "INSERT IGNORE INTO mission_case_answers (run_id, step_id, choice_id, rating, ms_taken) VALUES (?, ?, ?, ?, ?)",
-        [(int) $run['id'], $stepId, $choiceId, $choice['rating'], $msTaken !== null ? max(0, min(3600000, $msTaken)) : null]
-    );
-    if ($inserted > 0) {
-        dbExecute(
-            "UPDATE mission_case_runs SET score_points = score_points + ?, score_max = score_max + 2, current_step = ?,
-                    finished_at = " . ($choice['next'] === null ? 'NOW()' : 'NULL') . "
-             WHERE id = ?",
-            [trainingCaseRatingPoints($choice['rating']), $choice['next'] ?? $stepId, (int) $run['id']]
-        );
-    }
-    $run = dbFetchOne("SELECT * FROM mission_case_runs WHERE id = ?", [(int) $run['id']]);
-    return $result($choice, $inserted === 0, $run);
+    $seen[$key] = true;
+    error_log($message);
+    return true;
 }
 
 /**
@@ -222,7 +308,8 @@ function trainingCaseCardsForDispatches(array $dispatchIds, int $userId): array 
             array_merge([$userId], array_map('intval', $dispatchIds))
         );
     } catch (Throwable $e) {
-        error_log('[training-cases] cards: ' . $e->getMessage());
+        // The Action Room polls every few seconds: say so once per process, not on every poll.
+        trainingCaseLogOnce('cards', '[training-cases] cards: ' . $e->getMessage());
         return [];
     }
     $out = [];
@@ -282,13 +369,18 @@ function trainingCaseOverview(int $missionId): array {
     );
     foreach ($placements as $row) {
         $placement = trainingCasePlacementWithDoc($row);
+        // Who is listed: the approved participants in the audience, PLUS anyone who has a run of this placement even if
+        // they are no longer approved - their answers are in the per-step counts, so their row must be here too.
+        $teamed = $placement['team_id'] !== null;
         $people = dbFetchAll(
-            "SELECT DISTINCT u.id, u.name FROM participation_requests pr
-             JOIN shifts s ON s.id = pr.shift_id JOIN users u ON u.id = pr.volunteer_id
-             WHERE s.mission_id = ? AND pr.status = ?"
-            . ($placement['team_id'] !== null ? " AND EXISTS (SELECT 1 FROM mission_team_members m WHERE m.mission_id = s.mission_id AND m.team_id = " . (int) $placement['team_id'] . " AND m.user_id = u.id)" : "")
-            . " ORDER BY u.name",
-            [$missionId, PARTICIPATION_APPROVED]
+            "SELECT u.id, u.name FROM users u WHERE u.id IN (
+                 SELECT pr.volunteer_id FROM participation_requests pr JOIN shifts s ON s.id = pr.shift_id
+                 WHERE s.mission_id = ? AND pr.status = ?"
+            . ($teamed ? " AND EXISTS (SELECT 1 FROM mission_team_members m WHERE m.mission_id = s.mission_id AND m.team_id = ? AND m.user_id = pr.volunteer_id)" : "")
+            . "  UNION
+                 SELECT r.user_id FROM mission_case_runs r WHERE r.placement_id = ?
+             ) ORDER BY u.name",
+            array_merge([$missionId, PARTICIPATION_APPROVED], $teamed ? [(int) $placement['team_id']] : [], [(int) $placement['id']])
         );
         $runs = [];
         foreach (dbFetchAll("SELECT * FROM mission_case_runs WHERE placement_id = ?", [(int) $placement['id']]) as $run) {

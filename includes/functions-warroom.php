@@ -5066,11 +5066,6 @@ function advanceMissionDispatch(array $mission, int $dispatchId, int $userId, st
             'mission_id' => $missionId, 'team_id' => $myTeamId, 'user_id' => $userId,
         ] + receiptAuditExtra($userId, $via));
 
-        // A team that arrives at a training case opens it for every member (v3.505.0): the other on-duty members are told.
-        if ($step === 'arrive' && in_array('arrive', $recorded, true) && !$legacyArrived) {
-            trainingCaseNotifyArrival($missionId, $dispatchId, $myTeamId, $userId);
-        }
-
         // Only the step that was pressed is announced. A backfilled one is not
         // news: «Ολοκληρώθηκε» from a team that never pressed «Έφτασα» says
         // "done", not "arrived" and then "done".
@@ -5080,6 +5075,12 @@ function advanceMissionDispatch(array $mission, int $dispatchId, int $userId, st
             } else {
                 notifyDispatchStep($step, $missionId, $mission['title'], $responsibleUserId, $dispatch, $teamLabel, $userName, $userId, $note);
             }
+        }
+
+        // A team that arrives at a training case opens it for every member (v3.505.0): the other on-duty members are told.
+        // After command's own alert above, so a slow teammate loop cannot delay it; it never throws.
+        if ($step === 'arrive' && in_array('arrive', $recorded, true) && !$legacyArrived) {
+            trainingCaseNotifyArrival($missionId, $dispatchId, $myTeamId, $userId);
         }
     }
     return null;
