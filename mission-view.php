@@ -29,6 +29,8 @@ if (!$mission) {
     redirect('missions.php');
 }
 
+// Participant-facing messages (email, in-app) name a drill as such.
+$missionLabel = trainingTitlePrefix($mission) . $mission['title'];
 $pageTitle = $mission['title'];
 $user = getCurrentUser();
 
@@ -199,7 +201,7 @@ if (isPost()) {
                 if (!empty($userIds)) {
                     sendBulkNotifications(
                         $userIds,
-                        'Υπενθύμιση Αποστολής: ' . $mission['title'],
+                        'Υπενθύμιση Αποστολής: ' . $missionLabel,
                         'Η αποστολή είναι ακόμα ανοιχτή και αναζητά εθελοντές. Δείτε τις διαθέσιμες βάρδιες.',
                         'info',
                         '',
@@ -211,7 +213,7 @@ if (isPost()) {
                     if (!empty($v['email'])) {
                         sendNotificationEmail('mission_reminder', $v['email'], [
                             'user_name'           => $v['name'],
-                            'mission_title'       => $mission['title'],
+                            'mission_title'       => $missionLabel,
                             'mission_description' => $mission['description'] ?? '',
                             'mission_url'         => $missionUrl,
                             'app_name'            => $appName,
@@ -331,7 +333,7 @@ if (isPost()) {
                         if (!empty($userIds)) {
                             sendBulkNotifications(
                                 $userIds,
-                                'Ακύρωση Αποστολής: ' . $mission['title'],
+                                'Ακύρωση Αποστολής: ' . $missionLabel,
                                 'Η αποστολή ακυρώθηκε' . ($reason ? '. Λόγος: ' . $reason : '') . '. Οι αιτήσεις σας ακυρώθηκαν αυτόματα.',
                                 'warning',
                                 '',
@@ -346,7 +348,7 @@ if (isPost()) {
                             if (!empty($cp['email'])) {
                                 sendNotificationEmail('mission_canceled', $cp['email'], [
                                     'user_name'     => $cp['name'],
-                                    'mission_title' => $mission['title'],
+                                    'mission_title' => $missionLabel,
                                     'reason'        => $reason ?: 'Δεν δόθηκε αιτιολογία.',
                                 ]);
                             }
@@ -393,8 +395,8 @@ if (isPost()) {
                         if (!empty($notifiedUsers)) {
                             sendBulkNotifications(
                                 $notifiedUsers,
-                                'Διαγραφή Αποστολής: ' . $mission['title'],
-                                'Η αποστολή "' . $mission['title'] . '" διαγράφηκε. Όλες οι αιτήσεις σας ακυρώθηκαν αυτόματα.'
+                                'Διαγραφή Αποστολής: ' . $missionLabel,
+                                'Η αποστολή "' . $missionLabel . '" διαγράφηκε. Όλες οι αιτήσεις σας ακυρώθηκαν αυτόματα.'
                             );
                         }
                         
@@ -403,7 +405,7 @@ if (isPost()) {
                             if (!empty($participant['email'])) {
                                 sendNotificationEmail('mission_canceled', $participant['email'], [
                                     'user_name'     => $participant['name'],
-                                    'mission_title' => $mission['title'],
+                                    'mission_title' => $missionLabel,
                                     'reason'        => 'Η αποστολή διαγράφηκε από διαχειριστή.',
                                 ]);
                             }
@@ -515,22 +517,23 @@ if (isPost()) {
                             
                             // Get shift info with mission details
                             $shift = dbFetchOne(
-                                "SELECT s.*, m.title as mission_title, m.location 
+                                "SELECT s.*, m.title as mission_title, m.location, m.is_training 
                                  FROM shifts s 
                                  JOIN missions m ON s.mission_id = m.id 
                                  WHERE s.id = ?",
                                 [$shiftId]
                             );
                             
+                            $shiftLabel = trainingTitlePrefix($shift) . $shift['mission_title'];
                             // Send notification email
                             if ($volunteer && !empty($volunteer['email']) && isNotificationEnabled('admin_added_volunteer')) {
-                                $gcalLink = buildGcalLink($shift['mission_title'], $shift['start_time'], $shift['end_time'], $shift['location'] ?: '');
+                                $gcalLink = buildGcalLink($shiftLabel, $shift['start_time'], $shift['end_time'], $shift['location'] ?: '');
                                 sendNotificationEmail(
                                     'admin_added_volunteer',
                                     $volunteer['email'],
                                     [
                                         'user_name'     => $volunteer['name'],
-                                        'mission_title' => $shift['mission_title'],
+                                        'mission_title' => $shiftLabel,
                                         'shift_date'    => formatDateTime($shift['start_time'], 'd/m/Y'),
                                         'shift_time'    => formatDateTime($shift['start_time'], 'H:i') . ' - ' . formatDateTime($shift['end_time'], 'H:i'),
                                         'location'      => $shift['location'] ?: 'Θα ανακοινωθεί',
@@ -544,7 +547,7 @@ if (isPost()) {
                             sendNotification(
                                 $volunteerId,
                                 'Τοποθετήθηκατε σε βάρδια',
-                                'Ο διαχειριστής σας τοποθέτησε στη βάρδια: ' . $shift['mission_title'] . ' - ' . formatDateTime($shift['start_time']),
+                                'Ο διαχειριστής σας τοποθέτησε στη βάρδια: ' . $shiftLabel . ' - ' . formatDateTime($shift['start_time']),
                                 'success',
                                 '',
                                 ['url' => 'mission-view.php?id=' . $id]

@@ -202,9 +202,80 @@ final class TrainingMissionSourceTest extends TestCase
 
         $c = $this->src('cron_shift_reminders.php');
         $this->assertStringContainsString('m.is_training', $c);
-        $this->assertStringContainsString('trainingTitlePrefix(', $c);
+        $this->assertStringContainsString('$missionLabel = trainingTitlePrefix(', $c);
+        $this->assertStringContainsString("'mission_title' => \$missionLabel", $c);
 
         $p = $this->src('participation-action.php');
-        $this->assertStringContainsString('trainingTitlePrefix(', $p);
+        $this->assertStringContainsString('m.is_training', $p);
+        $this->assertStringContainsString('$missionLabel = trainingTitlePrefix(', $p);
+        $this->assertStringContainsString("'mission_title' => \$missionLabel", $p);
+    }
+
+    public function test_shift_view_notifications_carry_the_exercise_prefix(): void
+    {
+        $s = $this->src('shift-view.php');
+
+        // The shift row carries the flag and the label is built once.
+        $this->assertMatchesRegularExpression('/SELECT s\.\*, m\.title as mission_title,[^"]*m\.is_training/', $s);
+        $this->assertStringContainsString('$missionLabel = trainingTitlePrefix($shift) . $shift[\'mission_title\'];', $s);
+
+        // approve, reject, reactivate, add_volunteer, mass_add: every email variable uses the label.
+        $this->assertSame(0, preg_match_all("/'mission_title'\s*=>\s*\\\$shift\['mission_title'\]/", $s));
+        $this->assertGreaterThanOrEqual(5, preg_match_all("/'mission_title'\s*=>\s*\\\$missionLabel/", $s));
+
+        // The in-app messages and the calendar title too.
+        foreach ([
+            '\'Η αίτησή σας για τη βάρδια "\' . $missionLabel',
+            '\'Η αίτηση συμμετοχής σας στη βάρδια "\' . $missionLabel',
+            '\'Η συμμετοχή σας στη βάρδια "\' . $missionLabel',
+            '\'Η βάρδια στην αποστολή "\' . $missionLabel',
+            '\'Ο διαχειριστής σας τοποθέτησε στη βάρδια: \' . $missionLabel',
+            'buildGcalLink($missionLabel,',
+        ] as $needle) {
+            $this->assertStringContainsString($needle, $s, "shift-view.php must use the label in: {$needle}");
+        }
+        $this->assertSame(0, preg_match_all('/Η (?:αίτησή|αίτηση συμμετοχής|συμμετοχή) σας[^;\n]*\$shift\[\'mission_title\'\]/u', $s));
+        $this->assertSame(0, preg_match_all('/buildGcalLink\(\$shift\[\'mission_title\'\]/', $s));
+    }
+
+    public function test_mission_view_notifications_carry_the_exercise_prefix(): void
+    {
+        $s = $this->src('mission-view.php');
+
+        // $mission is m.*, so it carries is_training already.
+        $this->assertStringContainsString('$missionLabel = trainingTitlePrefix($mission) . $mission[\'title\'];', $s);
+        // reminder, cancel and delete: subject lines, bodies and the mission_canceled / mission_reminder emails.
+        $this->assertSame(0, preg_match_all("/'mission_title'\s*=>\s*\\\$mission\['title'\]/", $s));
+        $this->assertGreaterThanOrEqual(3, preg_match_all("/'mission_title'\s*=>\s*\\\$missionLabel/", $s));
+        $this->assertStringContainsString("'Ακύρωση Αποστολής: ' . \$missionLabel", $s);
+        $this->assertStringContainsString("'Διαγραφή Αποστολής: ' . \$missionLabel", $s);
+        $this->assertStringContainsString("'Υπενθύμιση Αποστολής: ' . \$missionLabel", $s);
+
+        // admin_added_volunteer reloads its own shift row: it must select the flag and prefix.
+        $this->assertMatchesRegularExpression('/SELECT s\.\*, m\.title as mission_title, m\.location, m\.is_training/', $s);
+        $this->assertStringContainsString('$shiftLabel = trainingTitlePrefix($shift) . $shift[\'mission_title\'];', $s);
+        $this->assertSame(0, preg_match_all("/'mission_title'\s*=>\s*\\\$shift\['mission_title'\]/", $s));
+        $this->assertStringContainsString("'Ο διαχειριστής σας τοποθέτησε στη βάρδια: ' . \$shiftLabel", $s);
+    }
+
+    public function test_shift_swap_notifications_carry_the_exercise_prefix(): void
+    {
+        $s = $this->src('includes/shift-swap-functions.php');
+
+        $this->assertGreaterThanOrEqual(2, preg_match_all('/\$missionLabel = trainingTitlePrefix\(\$swap\) \. \$swap\[\'mission_title\'\];/', $s));
+        $this->assertSame(0, preg_match_all("/'mission_title'\s*=>\s*\\\$swap\['mission_title'\]/", $s));
+        $this->assertSame(0, preg_match_all("/\. \\\$swap\['mission_title'\] \./", $s));
+        $this->assertGreaterThanOrEqual(3, preg_match_all("/\\\$missionLabel/", $s));
+
+        $r = $this->src('shift-swap.php');
+        $this->assertStringContainsString('m.is_training', $r);
+        $this->assertStringContainsString('$missionLabel = trainingTitlePrefix($participation) . $participation[\'mission_title\'];', $r);
+        $this->assertStringContainsString("'mission_title'  => \$missionLabel", $r);
+    }
+
+    public function test_the_needs_volunteers_cron_never_broadcasts_for_a_drill(): void
+    {
+        $s = $this->src('cron_incomplete_missions.php');
+        $this->assertMatchesRegularExpression('/FROM shifts s\s+INNER JOIN missions m.*?WHERE s\.start_time.*?m\.is_training = 0.*?GROUP BY s\.id/s', $s);
     }
 }

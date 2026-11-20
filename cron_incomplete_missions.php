@@ -27,6 +27,7 @@ $hoursBefore = (int)getSetting('resend_mission_hours_before', 48);
 $futureTime = date('Y-m-d H:i:s', strtotime("+{$hoursBefore} hours"));
 $now = date('Y-m-d H:i:s');
 
+// A drill (m.is_training = 1) never triggers this automated recruitment broadcast to every volunteer.
 $incompleteShifts = dbFetchAll(
     "SELECT s.*, m.title as mission_title, m.description as mission_description,
             COUNT(pr.id) as filled_spots,
@@ -36,6 +37,7 @@ $incompleteShifts = dbFetchAll(
      LEFT JOIN participation_requests pr ON s.id = pr.shift_id AND pr.status = ?
      WHERE s.start_time BETWEEN ? AND ? 
      AND m.status = '" . STATUS_OPEN . "'
+     AND m.is_training = 0
      GROUP BY s.id
      HAVING available_spots > 0",
     [PARTICIPATION_APPROVED, $now, $futureTime]

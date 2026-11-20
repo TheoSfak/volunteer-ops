@@ -74,6 +74,7 @@ function shiftSwapRespond(int $swapId, array $responder, string $response): arra
         return ['level' => 'error', 'message' => 'Δεν βρέθηκε το αίτημα αντικατάστασης.'];
     }
 
+    $missionLabel = trainingTitlePrefix($swap) . $swap['mission_title'];
     if ($response === 'accept') {
         dbExecute(
             "UPDATE shift_swap_requests SET status = ?, to_volunteer_responded_at = NOW(), updated_at = NOW() WHERE id = ?",
@@ -87,7 +88,7 @@ function shiftSwapRespond(int $swapId, array $responder, string $response): arra
                 sendNotificationEmail('shift_swap_accepted', $requester['email'], [
                     'user_name'        => $requester['name'],
                     'replacement_name' => $responder['name'],
-                    'mission_title'    => $swap['mission_title'],
+                    'mission_title'    => $missionLabel,
                     'shift_date'       => formatDateTime($swap['start_time'], 'd/m/Y'),
                     'shift_time'       => formatDateTime($swap['start_time'], 'H:i') . ' - ' . formatDateTime($swap['end_time'], 'H:i'),
                 ]);
@@ -95,7 +96,7 @@ function shiftSwapRespond(int $swapId, array $responder, string $response): arra
             sendNotification(
                 $swap['from_volunteer_id'],
                 'Αποδοχή Αντικατάστασης',
-                'Ο/Η ' . $responder['name'] . ' αποδέχτηκε το αίτημα αντικατάστασης για: ' . $swap['mission_title'] . '. Αναμένεται έγκριση διαχειριστή.'
+                'Ο/Η ' . $responder['name'] . ' αποδέχτηκε το αίτημα αντικατάστασης για: ' . $missionLabel . '. Αναμένεται έγκριση διαχειριστή.'
             );
         }
 
@@ -111,7 +112,7 @@ function shiftSwapRespond(int $swapId, array $responder, string $response): arra
     sendNotification(
         $swap['from_volunteer_id'],
         'Άρνηση Αντικατάστασης',
-        'Ο/Η ' . $responder['name'] . ' αρνήθηκε το αίτημα αντικατάστασης για: ' . $swap['mission_title'] . '. Μπορείτε να ζητήσετε άλλον εθελοντή.'
+        'Ο/Η ' . $responder['name'] . ' αρνήθηκε το αίτημα αντικατάστασης για: ' . $missionLabel . '. Μπορείτε να ζητήσετε άλλον εθελοντή.'
     );
 
     return ['level' => 'warning', 'message' => 'Αρνηθήκατε το αίτημα αντικατάστασης.'];
@@ -169,6 +170,7 @@ function shiftSwapAdminApprove(int $swapId, array $admin, ?int $requireShiftId =
     if (!$swap) {
         return ['level' => 'error', 'message' => 'Δεν βρέθηκε το αίτημα αντικατάστασης.'];
     }
+    $missionLabel = trainingTitlePrefix($swap) . $swap['mission_title'];
     if ($swap['mission_status'] === STATUS_COMPLETED) {
         return ['level' => 'error', 'message' => 'Η αποστολή είναι ολοκληρωμένη. Αλλάξτε πρώτα την κατάσταση σε «Κλειστή» για να κάνετε αλλαγές.'];
     }
@@ -211,7 +213,7 @@ function shiftSwapAdminApprove(int $swapId, array $admin, ?int $requireShiftId =
 
     $shiftUrl = 'shift-view.php?id=' . (int) $swap['shift_id'];
     $vars = [
-        'mission_title' => $swap['mission_title'],
+        'mission_title' => $missionLabel,
         'shift_date'    => formatDateTime($swap['start_time'], 'd/m/Y'),
         'shift_time'    => formatDateTime($swap['start_time'], 'H:i') . ' - ' . formatDateTime($swap['end_time'], 'H:i'),
     ];
@@ -226,7 +228,7 @@ function shiftSwapAdminApprove(int $swapId, array $admin, ?int $requireShiftId =
     sendNotification($swap['from_volunteer_id'], 'Αντικατάσταση Εγκρίθηκε',
         'Η αντικατάστασή σας από τον/την ' . $swap['to_volunteer_name'] . ' εγκρίθηκε από τον διαχειριστή.', 'success', '', ['url' => $shiftUrl]);
     sendNotification($swap['to_volunteer_id'], 'Εγκρίθηκε η Συμμετοχή σας',
-        'Εγκριθήκατε ως αντικατάσταση για τη βάρδια της αποστολής: ' . $swap['mission_title'] . '.', 'success', '', ['url' => $shiftUrl]);
+        'Εγκριθήκατε ως αντικατάσταση για τη βάρδια της αποστολής: ' . $missionLabel . '.', 'success', '', ['url' => $shiftUrl]);
 
     return ['level' => 'success', 'message' => 'Η αντικατάσταση εγκρίθηκε επιτυχώς.'];
 }
