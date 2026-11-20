@@ -406,6 +406,9 @@ function loadMissionScenario(int $missionId): array {
             'restricted_kind' => $isRestricted ? ($payload['kind'] ?? null) : null,
             'shape'        => $isRestricted ? ($payload['shape'] ?? null) : null,
             'travel_mode'  => $payload['travel_mode'] ?? null,
+            // A staged training case (v3.505.0): its title and the line the people receive; null for an ordinary order.
+            'case_title'   => !empty($payload['case']) && is_array($payload['case']) ? (string) ($payload['case']['title'] ?? '') : null,
+            'case_briefing' => !empty($payload['case']) && is_array($payload['case']) ? (string) ($payload['case']['briefing'] ?? '') : null,
             'area_id'      => $isSector ? ($areaId ?: null) : null,
             'area_label'   => $areaLabel,
             'area_missing' => $areaMissing,
@@ -834,9 +837,10 @@ function scenarioParseAudience(int $missionId, string $raw, bool $allowAll): ?ar
  * 'slot:<id>' for a slot of this scenario, or the word 'all' for every team - anything else is refused, an empty
  * team is NOT "all"), type ('point' or
  * 'polygon'), geo (JSON text), label, travel_mode. Checked by prepareMissionDispatch(), exactly as sending it
- * would be. A phase that has been played takes no more orders. ['ok' => true, 'id' => n] or ['ok' => false, 'error' => text].
+ * would be. A phase that has been played takes no more orders. $extraPayload is merged into the payload (a staged
+ * case's `case` block). ['ok' => true, 'id' => n] or ['ok' => false, 'error' => text].
  */
-function addScenarioDispatchItem(array $mission, int $phaseId, int $userId, array $input): array {
+function addScenarioDispatchItem(array $mission, int $phaseId, int $userId, array $input, array $extraPayload = []): array {
     $missionId = (int) $mission['id'];
     $phase = scenarioPhaseRow($missionId, $phaseId);
     if (!$phase) {
@@ -885,13 +889,63 @@ function addScenarioDispatchItem(array $mission, int $phaseId, int $userId, arra
         $payload['slot_id'] = (int) $slot['id'];
         $payload['slot_label'] = $slot['label'];
     }
+    if ($extraPayload) {
+        $payload += $extraPayload;
+    }
     $seq = 1 + (int) dbFetchValue("SELECT COALESCE(MAX(seq), 0) FROM mission_scenario_items WHERE phase_id = ?", [$phaseId]);
     $id = (int) dbInsert(
         "INSERT INTO mission_scenario_items (phase_id, mission_id, seq, kind, payload, slot_id, created_by, created_at) VALUES (?, ?, ?, 'dispatch', ?, ?, ?, NOW())",
-        [$phaseId, $missionId, $seq, json_encode($payload), $slot ? (int) $slot['id'] : null, $userId]
+        [$phaseId, $missionId, $seq, json_encode($payload, JSON_UNESCAPED_UNICODE), $slot ? (int) $slot['id'] : null, $userId]
     );
     logAudit('stage_scenario_item', 'mission_scenario_items', $id, null, ['mission_id' => $missionId, 'phase_id' => $phaseId, 'type' => $payload['type'], 'audience' => $audience, 'team_id' => $payload['team_id'], 'slot_id' => $payload['slot_id'] ?? null]);
     return ['ok' => true, 'id' => $id];
+}
+
+/**
+ * Stages a training case at a point: the same order «Στο σενάριο» writes for a point, plus a `case` block holding a
+ * SNAPSHOT of the library case (so a later library edit never changes a prepared drill). $input is the dispatch form
+ * (team_id, type, label, geo, travel_mode) plus case_id, case_mode ('chosen'|'random', only recorded), case_pool (the
+ * filter a random draw used, only recorded) and briefing (a short line the people receive with the order). Only in a
+ * training mission, only at a POINT, and only a case that exists and is not archived. An empty label becomes the neutral
+ * «Περιστατικό», which never gives the case away. ['ok' => true, 'id' => n] or ['ok' => false, 'error' => text].
+ */
+function addScenarioCaseItem(array $mission, int $phaseId, int $userId, array $input): array {
+    if (!isTrainingMission($mission)) {
+        return ['ok' => false, 'error' => t('case.err_not_training')];
+    }
+    if (($input['type'] ?? '') !== 'point') {
+        return ['ok' => false, 'error' => t('case.err_needs_point')];
+    }
+    $case = trainingCaseLoad((int) ($input['case_id'] ?? 0));
+    if (!$case || $case['archived_at'] !== null || trainingCaseValidate($case['doc'])) {
+        return ['ok' => false, 'error' => t('case.err_not_found')];
+    }
+    if (trim((string) ($input['label'] ?? '')) === '') {
+        $input['label'] = t('case.default_label');
+    }
+    $pool = is_array($input['case_pool'] ?? null) ? array_intersect_key($input['case_pool'], array_flip(['type', 'difficulty', 'language'])) : [];
+    return addScenarioDispatchItem($mission, $phaseId, $userId, $input, ['case' => [
+        'case_id'        => (int) $case['id'],
+        'format_version' => (int) $case['format_version'],
+        'title'          => $case['title'],
+        'draw_mode'      => ($input['case_mode'] ?? '') === 'random' ? 'random' : 'chosen',
+        'pool'           => $pool,
+        'briefing'       => trainingCasePlain($input['briefing'] ?? '', 300),
+        'document'       => $case['doc'],
+    ]]);
+}
+
+/** The library ids of the cases already staged in this mission's scenario (so a random draw prefers others). */
+function scenarioStagedCaseIds(int $missionId): array {
+    $ids = [];
+    foreach (dbFetchAll("SELECT payload FROM mission_scenario_items WHERE mission_id = ? AND kind = 'dispatch' AND payload LIKE '%\"case\":%'", [$missionId]) as $row) {
+        $payload = json_decode((string) $row['payload'], true);
+        $caseId = (int) ($payload['case']['case_id'] ?? 0);
+        if ($caseId > 0) {
+            $ids[$caseId] = true;
+        }
+    }
+    return array_map('intval', array_keys($ids));
 }
 
 /**
@@ -1810,6 +1864,15 @@ function scenarioSendItem(array $mission, array $item, int $userId, string $user
         } catch (Throwable $e) {
             error_log('[scenario] item ' . $itemId . ' failed: ' . $e->getMessage());
             $result = ['ok' => false, 'error' => t('scenario.item_failed_unexpected')];
+        }
+    }
+    // A staged TRAINING CASE rides on an ordinary point order (v3.505.0): once the order exists, record which case it carries.
+    if (($result['ok'] ?? false) && $kind === 'dispatch' && is_array($payload) && !empty($payload['case'])) {
+        try {
+            trainingCaseCreatePlacement((int) $mission['id'], $itemId, (int) $result['id'], $payload);
+        } catch (Throwable $e) {
+            // The order and the arrival still work; the volunteers just get no case. Command sees the log.
+            error_log('[scenario] recording the case of item ' . $itemId . ' failed: ' . $e->getMessage());
         }
     }
     if ($result['ok']) {
