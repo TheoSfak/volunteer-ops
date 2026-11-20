@@ -58,4 +58,17 @@ final class TrainingMissionSourceTest extends TestCase
         $s = $this->src('shift-view.php');
         $this->assertStringContainsString("if (getSetting('points_enabled', '1') === '1' && empty(\$pr['is_training'])) {", $s);
     }
+
+    public function test_dashboard_admin_filter_and_personal_stats_exclude_training(): void
+    {
+        $s = $this->src('dashboard.php');
+
+        // One shared filter feeds every admin query (missions_total, hours, volunteers, monthly chart...).
+        $this->assertStringContainsString("\$departmentFilter = 'AND m.is_training = 0';", $s);
+        $this->assertStringContainsString("\$departmentFilter = 'AND m.department_id = ? AND m.is_training = 0';", $s);
+        $this->assertStringContainsString("\$departmentFilter = 'AND m.branch_id = ? AND m.is_training = 0';", $s);
+
+        // Personal totals: hours, yearly attendance, TEP hours, shift count.
+        $this->assertGreaterThanOrEqual(3, substr_count($s, 'pr.attended = 1 AND pr.is_training = 0'));
+    }
 }

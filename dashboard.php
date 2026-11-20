@@ -216,14 +216,14 @@ if (isPost() && post('action') === 'bulk_complete_overdue') {
 // Get statistics based on role
 if (isAdmin()) {
     // Admin statistics
-    $departmentFilter = '';
+    $departmentFilter = 'AND m.is_training = 0';
     $params = [];
 
     if ($user['role'] === ROLE_DEPARTMENT_ADMIN && $user['department_id']) {
-        $departmentFilter = 'AND m.department_id = ?';
+        $departmentFilter = 'AND m.department_id = ? AND m.is_training = 0';
         $params = [$user['department_id']];
     } elseif ($user['role'] === ROLE_BRANCH_ADMIN && $user['warehouse_id']) {
-        $departmentFilter = 'AND m.branch_id = ?';
+        $departmentFilter = 'AND m.branch_id = ? AND m.is_training = 0';
         $params = [$user['warehouse_id']];
     }
     
@@ -400,7 +400,7 @@ if (isAdmin()) {
     );
     $stats = [
         'my_shifts' => dbFetchValue(
-            "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = ?",
+            "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = ? AND is_training = 0",
             [$user['id'], PARTICIPATION_APPROVED]
         ),
         'pending_requests' => dbFetchValue(
@@ -414,7 +414,7 @@ if (isAdmin()) {
             ), 0)
             FROM participation_requests pr
             JOIN shifts s ON pr.shift_id = s.id
-            WHERE pr.volunteer_id = ? AND pr.status = ? AND pr.attended = 1",
+            WHERE pr.volunteer_id = ? AND pr.status = ? AND pr.attended = 1 AND pr.is_training = 0",
             [$user['id'], PARTICIPATION_APPROVED]
         ),
         'total_points' => $user['total_points'] ?? 0,
@@ -462,7 +462,7 @@ if (isAdmin()) {
          FROM participation_requests pr
          JOIN shifts s ON pr.shift_id = s.id
          JOIN missions m ON s.mission_id = m.id
-         WHERE pr.volunteer_id = ? AND pr.attended = 1
+         WHERE pr.volunteer_id = ? AND pr.attended = 1 AND pr.is_training = 0
          AND YEAR(m.start_datetime) = ?
          AND m.mission_type_id IN ($attPlaceholders)",
         array_merge([$user['id'], $currentYear], $attTypeIds)
@@ -485,7 +485,7 @@ if (isAdmin()) {
             FROM participation_requests pr
             JOIN shifts s ON pr.shift_id = s.id
             JOIN missions m ON s.mission_id = m.id
-            WHERE pr.volunteer_id = ? AND pr.status = ? AND pr.attended = 1
+            WHERE pr.volunteer_id = ? AND pr.status = ? AND pr.attended = 1 AND pr.is_training = 0
               AND m.mission_type_id = ?",
             [$user['id'], PARTICIPATION_APPROVED, getTepMissionTypeId()]
         );
