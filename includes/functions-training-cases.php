@@ -22,16 +22,26 @@ const TRAINING_CASE_MAX_STEPS = 12;
 const TRAINING_CASE_MAX_FINDINGS = 12;
 const TRAINING_CASE_RATING_POINTS = ['best' => 2, 'acceptable' => 1, 'harmful' => 0];
 
-/** Plain text only: tags removed, runs of spaces collapsed (line breaks kept), cut to $max characters. */
+/**
+ * Plain text only: real tags and comments removed, runs of spaces collapsed (line breaks kept), cut to $max characters.
+ * A '<' that does not start a tag (for example '<90' or '<50') is kept literally: clinical thresholds are content.
+ * A tag starts with '<' then a letter, '/', '!' or '?'. Removal repeats until nothing changes, so '<<b>b>' cannot
+ * rebuild a tag. Non-scalar input (an array from JSON) reads as ''.
+ */
 function trainingCasePlain($value, int $max): string {
-    $text = trim(strip_tags((string) $value));
+    $text = is_scalar($value) ? (string) $value : '';
+    do {
+        $before = $text;
+        $text = (string) preg_replace('/<!--.*?-->|<[\/!?]?[a-z][^>]*>/is', '', $text);
+    } while ($text !== $before);
+    $text = trim($text);
     $text = (string) preg_replace('/[ \t]+/u', ' ', $text);
     return mb_substr($text, 0, $max);
 }
 
 /** A step or choice id: a lowercase letter then up to 23 letters, digits or underscores, else ''. */
 function trainingCaseId($value): string {
-    $id = strtolower(trim((string) $value));
+    $id = strtolower(trim(is_scalar($value) ? (string) $value : ''));
     return preg_match('/^[a-z][a-z0-9_]{0,23}$/', $id) ? $id : '';
 }
 
@@ -76,10 +86,11 @@ function trainingCaseNormalize($raw): ?array {
                 continue;
             }
             $next = $choice['next'] ?? null;
+            $rating = $choice['rating'] ?? '';
             $choices[] = [
                 'id'       => trainingCaseId($choice['id'] ?? ''),
                 'label'    => trainingCasePlain($choice['label'] ?? '', 200),
-                'rating'   => (string) ($choice['rating'] ?? ''),
+                'rating'   => is_scalar($rating) ? (string) $rating : '',
                 'feedback' => trainingCasePlain($choice['feedback'] ?? '', 600),
                 'next'     => ($next === null || $next === '') ? null : trainingCaseId($next),
             ];
@@ -206,11 +217,20 @@ function trainingCaseScorePercent(int $points, int $max): int {
     return $max > 0 ? (int) round(100 * $points / $max) : 0;
 }
 
-/** The ideal route through a valid case: from start, the first `best` choice of each step. [[stepId, choiceId], ...]. */
+/**
+ * The ideal route through a valid case: from start, the first `best` choice of each step. [[stepId, choiceId], ...].
+ * It stops at a step already on the path or after TRAINING_CASE_MAX_STEPS steps, so an unvalidated cyclic document
+ * cannot loop forever.
+ */
 function trainingCaseBestPath(array $doc): array {
     $path = [];
+    $seen = [];
     $stepId = $doc['start'];
     while ($stepId !== null && isset($doc['steps'][$stepId])) {
+        if (isset($seen[$stepId]) || count($path) >= TRAINING_CASE_MAX_STEPS) {
+            break;
+        }
+        $seen[$stepId] = true;
         $best = null;
         foreach ($doc['steps'][$stepId]['choices'] as $choice) {
             if ($choice['rating'] === 'best') {
