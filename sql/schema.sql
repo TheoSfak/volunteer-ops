@@ -259,6 +259,7 @@ CREATE TABLE IF NOT EXISTS `missions` (
     `is_urgent` TINYINT(1) DEFAULT 0,
     `is_special_mission` TINYINT(1) NOT NULL DEFAULT 0,
     `is_locked` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'When set, only missions_manage admins can add volunteers (manual_add_volunteer) — self-serve apply is blocked on mission-view.php and shift-view.php',
+    `is_training` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Training exercise: set at creation, never changed; isolated from real stats/points/reports',
     `par_enabled` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Automatic PAR (Personnel Accountability Report) dead-man''s switch, set in the console''s Προετοιμασία panel',
     `par_interval_minutes` SMALLINT UNSIGNED NULL DEFAULT 30 COMMENT 'How often (minutes) each Action Room participant is asked to confirm «Είμαστε ΟΚ» while par_enabled',
     `rv_point_label` VARCHAR(255) NULL,
@@ -375,6 +376,7 @@ CREATE TABLE IF NOT EXISTS `participation_requests` (
     `decided_at` TIMESTAMP NULL,
     `points_awarded` TINYINT(1) DEFAULT 0,
     `attended` TINYINT(1) DEFAULT 0,
+    `is_training` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Copied from missions.is_training by trg_pr_set_training',
     `actual_hours` DECIMAL(5, 2) NULL,
     `actual_start_time` TIME NULL,
     `actual_end_time` TIME NULL,
@@ -392,8 +394,17 @@ CREATE TABLE IF NOT EXISTS `participation_requests` (
     UNIQUE KEY `unique_participation` (`shift_id`, `volunteer_id`),
     INDEX `idx_participation_status` (`status`),
     INDEX `idx_participation_volunteer` (`volunteer_id`),
+    INDEX `idx_pr_training` (`volunteer_id`, `is_training`, `attended`),
     INDEX `idx_pr_vol_attended` (`volunteer_id`, `attended`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS `trg_pr_set_training`;
+CREATE TRIGGER `trg_pr_set_training`
+BEFORE INSERT ON `participation_requests`
+FOR EACH ROW
+  SET NEW.is_training = COALESCE(
+      (SELECT m.is_training FROM shifts s JOIN missions m ON m.id = s.mission_id WHERE s.id = NEW.shift_id),
+      0);
 
 -- =============================================
 -- VEHICLES TABLE (Fleet management, M1)
