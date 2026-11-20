@@ -230,7 +230,7 @@ if (isPost()) {
             "SELECT pr.*, s.start_time, s.end_time
              FROM participation_requests pr
              JOIN shifts s ON pr.shift_id = s.id
-             WHERE pr.shift_id = ? AND pr.status = ? AND pr.attended = 1 AND pr.points_awarded = 0",
+             WHERE pr.shift_id = ? AND pr.status = ? AND pr.attended = 1 AND pr.points_awarded = 0 AND pr.is_training = 0",
             [$shiftId, PARTICIPATION_APPROVED]
         );
         

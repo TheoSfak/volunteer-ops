@@ -281,7 +281,7 @@ if (isPost()) {
                     recordManualAttendance((int) $prId, (int) $id, (int) $user['id'], $actualHours);
 
                     // Award points
-                    if (getSetting('points_enabled', '1') === '1') {
+                    if (getSetting('points_enabled', '1') === '1' && empty($pr['is_training'])) {
                         $hours = $actualHours ?: calculateShiftHours($shift);
                         $points = calculatePoints($shift, $hours);
 

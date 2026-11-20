@@ -40,4 +40,22 @@ final class TrainingMissionSourceTest extends TestCase
         $this->assertMatchesRegularExpression('/INSERT INTO missions[^"]*is_training/s', $s);
         $this->assertStringContainsString("\$src['is_training']", $s);
     }
+
+    public function test_attendance_page_never_selects_training_rows_for_points(): void
+    {
+        $s = $this->src('attendance.php');
+        $this->assertStringContainsString('AND pr.attended = 1 AND pr.points_awarded = 0 AND pr.is_training = 0', $s);
+    }
+
+    public function test_dashboard_auto_award_skips_training_rows(): void
+    {
+        $s = $this->src('dashboard.php');
+        $this->assertMatchesRegularExpression('/AND pr\.points_awarded = 0\s+AND pr\.is_training = 0/', $s);
+    }
+
+    public function test_manual_attendance_in_shift_view_awards_no_points_for_training(): void
+    {
+        $s = $this->src('shift-view.php');
+        $this->assertStringContainsString("if (getSetting('points_enabled', '1') === '1' && empty(\$pr['is_training'])) {", $s);
+    }
 }

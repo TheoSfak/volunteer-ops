@@ -144,7 +144,8 @@ if (isPost() && post('action') === 'bulk_complete_overdue') {
                      WHERE s.mission_id = ?
                        AND pr.status = ?
                        AND pr.attended = 1
-                       AND pr.points_awarded = 0",
+                       AND pr.points_awarded = 0
+                       AND pr.is_training = 0",
                     [$missionId, PARTICIPATION_APPROVED]
                 );
 
