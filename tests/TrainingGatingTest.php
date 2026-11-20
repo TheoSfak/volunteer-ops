@@ -117,9 +117,7 @@ final class TrainingGatingTest extends TestCase
     public function test_the_admin_banner_is_one_include_used_by_the_dashboard_and_the_mission_form(): void
     {
         $banner = $this->src('includes/training-gate-banner.php');
-        $this->assertStringContainsString('migration_last_error', $banner);
         $this->assertStringContainsString("getSetting('migration_last_error', '')", $banner);
-        $this->assertStringContainsString('trainingMissionsAvailable()', $banner);
         $this->assertStringContainsString('alert alert-warning', $banner);
         $this->assertStringContainsString('trg_pr_set_training', $banner);
         $this->assertStringContainsString('mb_substr(', $banner);
@@ -134,11 +132,38 @@ final class TrainingGatingTest extends TestCase
         }
     }
 
-    public function test_the_banner_prints_nothing_when_everything_is_fine(): void
+    public function test_the_banner_shows_only_when_the_trigger_is_missing_and_reads_the_error_only_as_detail(): void
     {
-        if (!trainingMissionsAvailable() || trim((string) getSetting('migration_last_error', '')) !== '') {
-            $this->markTestSkipped('the test database has a recorded migration error');
+        $banner = $this->src('includes/training-gate-banner.php');
+
+        // The one show-condition is the gate itself. migration_last_error is never cleared by the
+        // runner, so it must not be a trigger of its own (it would show forever after any old failure).
+        // Top-level (column 0) ifs: the direct-access guard, then the gate.
+        $this->assertSame(2, preg_match_all('/^if\s*\((.*)\)\s*\{\s*$/m', $banner, $ifs), 'the direct-access guard and the gate are the only top-level ifs');
+        $this->assertSame('!trainingMissionsAvailable()', trim($ifs[1][1]));
+        $this->assertStringNotContainsString('||', substr($banner, 0, (int) strpos($banner, '?>')), 'no OR condition in the show logic');
+
+        // The recorded error is read once, inside that branch, as a detail line.
+        $this->assertSame(1, substr_count($banner, 'migration_last_error'));
+        $ifAt = strpos($banner, 'if (!trainingMissionsAvailable())');
+        $this->assertNotFalse($ifAt);
+        $this->assertGreaterThan($ifAt, strpos($banner, "getSetting('migration_last_error'"), 'the setting is read only after the gate says drills are unavailable');
+        $this->assertMatchesRegularExpression('/mb_substr\(\$[a-zA-Z]+,\s*0,\s*200\)/', $banner, 'truncated to 200 characters');
+
+        // The old wording presented a migration error as an independent reason.
+        $this->assertStringNotContainsString('ανέφερε σφάλμα μετάβασης', $banner);
+        $this->assertStringContainsString(
+            'Προσοχή: ο μηχανισμός απομόνωσης εκπαιδευτικών ασκήσεων (trigger trg_pr_set_training) δεν είναι ενεργός. Οι εκπαιδευτικές ασκήσεις είναι απενεργοποιημένες μέχρι να διορθωθεί.',
+            $banner
+        );
+    }
+
+    public function test_the_banner_prints_nothing_when_drills_are_available(): void
+    {
+        if (!trainingMissionsAvailable()) {
+            $this->markTestSkipped('the trigger is missing on the test database; the banner is meant to show');
         }
+        // Whatever migration_last_error holds (the runner never clears it), an available gate prints nothing.
         ob_start();
         include __DIR__ . '/../includes/training-gate-banner.php';
         $this->assertSame('', trim((string) ob_get_clean()));
