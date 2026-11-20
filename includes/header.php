@@ -1719,6 +1719,13 @@ if (isLoggedIn()) {
                 </a>
             </li>
             <?php endif; ?>
+            <?php if (isSystemAdmin()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'training-cases' || $currentPage === 'training-case-edit' ? 'active' : '' ?>" href="training-cases.php">
+                    <i class="bi bi-clipboard2-pulse"></i> Περιστατικά Εκπαίδευσης
+                </a>
+            </li>
+            <?php endif; ?>
             <?php if (isSystemAdmin() || hasPagePermission('skills_manage')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'skills' ? 'active' : '' ?>" href="skills.php">

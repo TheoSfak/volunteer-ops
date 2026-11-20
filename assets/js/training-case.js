@@ -156,15 +156,26 @@
         });
     }
 
+    /**
+     * What the overlay may do with the outside world. A try-out from the case editor ({preview: true, document}) plays the
+     * document it is given and records nothing: no answer is queued for the server, nothing is fetched, nothing is kept
+     * on the device. Only a real true previews (a truthy string does not).
+     */
+    function previewOptions(opts) {
+        const preview = !!opts && opts.preview === true;
+        return {enqueue: !preview, load: !preview};
+    }
+
     // ── The overlay (browser only) ─────────────────────────────────────────
     function open(opts) {
         const t = opts.t;
+        const mode = previewOptions(opts);
         // Per viewer and placement: runs are, and a phone may be shared (the old per-placement keys are simply not read).
         const keys = storageKeys(opts.userId, opts.placementId);
-        const read = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } };
-        const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage full: the server still has the answers */ } };
+        const read = k => { if (!mode.load) return null; try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } };
+        const write = (k, v) => { if (!mode.load) return; try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage full: the server still has the answers */ } };
 
-        let doc = read(keys.doc);
+        let doc = mode.load ? read(keys.doc) : opts.document;
         if (!validDoc(doc)) doc = null;
         let answers = (read(keys.answers) || []).filter(a => a && a.stepId && a.choiceId);
         let stepStart = Date.now();
@@ -303,8 +314,10 @@
             const ms = Date.now() - stepStart;
             answers = mergeAnswers(answers, [{stepId: stepId, choiceId: choiceId}]);
             write(keys.answers, answers);
-            opts.enqueue(answerQueueItem(opts.placementId, stepId, choiceId, ms));
-            if (typeof opts.flush === 'function') opts.flush();
+            if (mode.enqueue) {
+                opts.enqueue(answerQueueItem(opts.placementId, stepId, choiceId, ms));
+                if (typeof opts.flush === 'function') opts.flush();
+            }
             pendingOutcome = {stepId: stepId, choiceId: choiceId, outcome: out};
             render();
         }
@@ -338,8 +351,9 @@
         function renderUnavailable() {
             shownSignature = null;
             shell('<p class="text-danger fw-semibold">' + escapeHtml(t('case.err_gone')) + '</p>'
-                + '<button type="button" class="btn btn-primary btn-lg w-100" data-vc="retry">' + escapeHtml(t('case.retry')) + '</button>');
-            overlay.querySelector('[data-vc="retry"]').addEventListener('click', () => {
+                + (mode.load ? '<button type="button" class="btn btn-primary btn-lg w-100" data-vc="retry">' + escapeHtml(t('case.retry')) + '</button>' : ''));
+            const retryBtn = overlay.querySelector('[data-vc="retry"]');   // a try-out has nothing to fetch again: no button
+            if (retryBtn) retryBtn.addEventListener('click', () => {
                 shell('<p class="text-muted">' + escapeHtml(t('case.loading')) + '</p>');
                 load().then(render, renderUnavailable);
             });
@@ -379,7 +393,8 @@
             try { same = shownSignature !== null && doc !== null && viewSignature(doc, answers) === shownSignature; } catch (e) { same = false; }
             if (!same) render();
         };
-        if (doc) { render(); load().then(refreshIfChanged, () => {}); }
+        if (!mode.load) { if (doc) render(); else renderUnavailable(); }   // a try-out: the document in hand is the whole case
+        else if (doc) { render(); load().then(refreshIfChanged, () => {}); }
         else load().then(render, renderUnavailable);
         return {close: close};
     }
@@ -462,7 +477,7 @@
 
     const api = {
         escapeHtml, scoreLabel, choiceOutcome, runFromAnswers, bestPathLabels, mergeAnswers, withoutAnswer, answerQueueItem,
-        storageKeys, queueOutcome, replayCandidate, forgetLocalAnswer, validDoc, viewSignature, open,
+        storageKeys, queueOutcome, replayCandidate, forgetLocalAnswer, validDoc, viewSignature, previewOptions, open,
         renderOverview, caseOptionLabel, caseStageFields, formatSeconds,
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;

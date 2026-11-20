@@ -289,3 +289,10 @@ test('renderOverview gives each opening section a stable key, so a refresh can k
     assert.ok(html.includes('data-k="r4-9"'), 'the run of one volunteer');
     assert.ok(html.includes('data-k="s4"'), 'the per-step breakdown of one case');
 });
+
+test('previewOptions: a try-out neither queues answers nor loads from the server; a real run does both', () => {
+    assert.deepEqual(TC.previewOptions({preview: true}), {enqueue: false, load: false});
+    assert.deepEqual(TC.previewOptions({}), {enqueue: true, load: true});
+    assert.deepEqual(TC.previewOptions(null), {enqueue: true, load: true});
+    assert.deepEqual(TC.previewOptions({preview: 'yes'}), {enqueue: true, load: true}, 'only a real true previews');
+});

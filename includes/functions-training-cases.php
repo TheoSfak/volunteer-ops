@@ -252,6 +252,8 @@ function trainingCaseBestPath(array $doc): array {
 
 const TRAINING_CASE_TYPES = ['trauma', 'cardiac', 'respiratory', 'neuro', 'environmental', 'other'];
 const TRAINING_CASE_MAX_IMPORT_BYTES = 200000;
+/** The editor posts the whole document as one JSON field: a real case is far under this (the stored limit is 24000 bytes). */
+const TRAINING_CASE_MAX_EDITOR_BYTES = 100000;
 const TRAINING_CASE_PACK_FORMAT = 'volunteerops-training-cases';
 
 /** type, difficulty (1 to 3), language (el|en) and minutes (1 to 30), clamped to what the library allows. */
@@ -541,6 +543,64 @@ function trainingCaseInsertStarter(string $slug, array $doc, array $meta, string
         }
         throw $e;
     }
+}
+
+/**
+ * What the editor draws, from a document or from what an admin posted (raw, unvalidated JSON, already cut to
+ * TRAINING_CASE_MAX_EDITOR_BYTES by the caller). It never repairs and never strips: a refused save re-draws the form with
+ * what was typed, so the author can fix it. Every value is a string cut to the field's limit, the steps are a LIST with
+ * the start step first, and only what the page can draw is kept (at most 30 steps, 8 choices a step, 24 findings).
+ * Nothing here is trusted: the page prints it through h() and the editor script sets it with textContent.
+ * Returns ['title', 'story', 'closing', 'findings' => [...], 'steps' => [['id', 'prompt', 'hint', 'choices' => [...]]]].
+ */
+function trainingCaseEditorModel($raw): array {
+    $str = static function ($value, int $max): string {
+        return is_scalar($value) ? mb_substr((string) $value, 0, $max) : '';
+    };
+    $model = ['title' => '', 'story' => '', 'closing' => '', 'findings' => [], 'steps' => []];
+    if (!is_array($raw)) {
+        return $model;
+    }
+    $model['title'] = $str($raw['title'] ?? '', 160);
+    $model['story'] = $str($raw['story'] ?? '', 1500);
+    $model['closing'] = $str($raw['closing'] ?? '', 1500);
+    foreach (array_slice(is_array($raw['findings'] ?? null) ? array_values($raw['findings']) : [], 0, 24) as $finding) {
+        if (is_array($finding)) {
+            $model['findings'][] = [
+                'label' => $str($finding['label'] ?? '', 60), 'value' => $str($finding['value'] ?? '', 60), 'unit' => $str($finding['unit'] ?? '', 20),
+            ];
+        }
+    }
+    $steps = [];
+    foreach (is_array($raw['steps'] ?? null) ? $raw['steps'] : [] as $stepId => $step) {
+        $stepId = trainingCaseId($stepId);
+        if ($stepId === '' || !is_array($step) || isset($steps[$stepId])) {
+            continue;
+        }
+        $choices = [];
+        foreach (array_slice(is_array($step['choices'] ?? null) ? array_values($step['choices']) : [], 0, 8) as $choice) {
+            if (!is_array($choice)) {
+                continue;
+            }
+            $choices[] = [
+                'id'       => trainingCaseId($choice['id'] ?? ''),
+                'label'    => $str($choice['label'] ?? '', 200),
+                'rating'   => $str($choice['rating'] ?? '', 20),
+                'feedback' => $str($choice['feedback'] ?? '', 600),
+                'next'     => trainingCaseId($choice['next'] ?? ''),
+            ];
+        }
+        $steps[$stepId] = ['id' => $stepId, 'prompt' => $str($step['prompt'] ?? '', 400), 'hint' => $str($step['hint'] ?? '', 300), 'choices' => $choices];
+        if (count($steps) >= 30) {
+            break;
+        }
+    }
+    $start = trainingCaseId($raw['start'] ?? '');
+    if ($start !== '' && isset($steps[$start])) {
+        $steps = [$start => $steps[$start]] + $steps;
+    }
+    $model['steps'] = array_values($steps);
+    return $model;
 }
 
 /**
