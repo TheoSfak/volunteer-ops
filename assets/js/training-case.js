@@ -35,8 +35,10 @@
     function runFromAnswers(doc, answers) {
         let current = doc.start, points = 0, max = 0, finished = false;
         const byStep = {};
+        const visited = {};   // a document kept on the phone may loop: every step is walked at most once
         (answers || []).forEach(a => { if (!byStep[a.stepId]) byStep[a.stepId] = a; });
-        while (current && byStep[current]) {
+        while (current && byStep[current] && !visited[current]) {
+            visited[current] = true;
             const out = choiceOutcome(doc, current, byStep[current].choiceId);
             if (!out) break;
             points += POINTS[out.rating] || 0;
@@ -52,8 +54,10 @@
 
     function bestPathLabels(doc) {
         const out = [];
+        const visited = {};
         let current = doc.start;
-        while (current && doc.steps[current]) {
+        while (current && doc.steps[current] && !visited[current]) {
+            visited[current] = true;
             const best = doc.steps[current].choices.find(c => c.rating === 'best');
             if (!best) break;
             out.push({stepId: current, label: best.label});
@@ -82,25 +86,40 @@
         return {kind: 'case_answer', placementId: placementId, stepId: stepId, choiceId: choiceId, ms: ms || 0, at: Date.now()};
     }
 
-    function storageKeys(placementId) {
-        return {doc: 'wr_case_doc_' + placementId, answers: 'wr_case_answers_' + placementId};
+    /** Runs are per placement AND volunteer, so the phone's copies are too: on a shared phone B must not see A's answers. */
+    function storageKeys(userId, placementId) {
+        const suffix = userId + '_' + placementId;
+        return {doc: 'wr_case_doc_' + suffix, answers: 'wr_case_answers_' + suffix};
     }
 
     /**
      * What war-room.php's offline queue does with the server's reply to a queued answer: 'sent' (success, or a duplicate of
      * an answer that already landed), 'retry' (keep it queued) or 'drop' (the server explicitly refused it).
      *
-     * Retry covers everything that is not the server judging THIS answer: no signal (networkError), an expired login (the
-     * page passes null for a redirect to the login page), a stale page token, and the endpoint's own «cannot take anything
-     * now» errors - a mission that is closed or not found, a server error. Those say nothing about the answer and end by
-     * themselves; dropping the answer there would lose what the volunteer did. `retryableErrors` is those messages as the
-     * server words them (the page builds the list with t()).
+     * The default is RETRY: an answer is dropped only when the reply says ok:false AND carries the machine code 'refused'
+     * (training-case.php puts that code on every refusal of the answer itself: not valid now, not the audience, not arrived,
+     * not a drill...). No reply, no signal, an expired login (the page passes null), a stale page token, a closed mission
+     * ('mission_closed'), a server error ('server_error'), a missing placement ('not_found'), a reply with no code or one
+     * this page does not know (a newer or older server) all say nothing about THIS answer: dropping it would lose what the
+     * volunteer did, so it stays queued. The text of the error is never compared: it is translated.
      */
-    function queueOutcome(result, retryableErrors) {
-        if (!result || result.networkError || result.csrf) return 'retry';
+    function queueOutcome(result) {
+        if (!result || typeof result !== 'object' || result.networkError || result.csrf) return 'retry';
         if (result.ok) return 'sent';
-        if (result.error && (retryableErrors || []).indexOf(result.error) !== -1) return 'retry';
-        return 'drop';
+        return result.code === 'refused' ? 'drop' : 'retry';
+    }
+
+    /** What only this phone knows: the local answers for steps the server run does not report (server wins per step). */
+    function localOnlyAnswers(serverAnswers, localAnswers) {
+        const seen = {};
+        (serverAnswers || []).forEach(a => { seen[a.stepId] = true; });
+        return (localAnswers || []).filter(a => !seen[a.stepId]);
+    }
+
+    /** A cheap fingerprint of what the screen is built from: the case itself and where the run stands. */
+    function viewSignature(doc, answers) {
+        const run = runFromAnswers(doc, answers);
+        return JSON.stringify([doc, run.currentStep, run.finished]);
     }
 
     /**
@@ -118,22 +137,37 @@
     }
 
     /** Takes one step's answer out of the phone's own list (the server refused it: the volunteer can answer again). */
-    function forgetLocalAnswer(placementId, stepId) {
+    function forgetLocalAnswer(userId, placementId, stepId) {
         try {
-            const key = storageKeys(placementId).answers;
+            const key = storageKeys(userId, placementId).answers;
             const kept = withoutAnswer(JSON.parse(localStorage.getItem(key) || '[]'), stepId);
             localStorage.setItem(key, JSON.stringify(kept));
         } catch (e) { /* nothing kept, nothing to forget */ }
     }
 
+    /**
+     * The shape the player relies on, checked on everything read from localStorage or the network: a start step, every
+     * step an object with a non-empty list of choices, every choice an object with a string id and label. A document that
+     * fails is treated as missing (and fetched again) instead of throwing in the middle of a case.
+     */
     function validDoc(doc) {
-        return !!(doc && typeof doc === 'object' && doc.steps && typeof doc.steps === 'object' && doc.start && doc.steps[doc.start]);
+        if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return false;
+        // (An array is fine here: PHP encodes steps keyed "0", "1"... as a list, and steps[id] reads either.)
+        if (!doc.steps || typeof doc.steps !== 'object') return false;
+        if (!doc.start || !doc.steps[doc.start]) return false;
+        if (doc.findings != null && !Array.isArray(doc.findings)) return false;
+        return Object.keys(doc.steps).every(id => {
+            const step = doc.steps[id];
+            return !!step && typeof step === 'object' && Array.isArray(step.choices) && step.choices.length > 0
+                && step.choices.every(c => !!c && typeof c === 'object' && typeof c.id === 'string' && typeof c.label === 'string');
+        });
     }
 
     // ── The overlay (browser only) ─────────────────────────────────────────
     function open(opts) {
         const t = opts.t;
-        const keys = storageKeys(opts.placementId);
+        // Per viewer and placement: runs are, and a phone may be shared (the old per-placement keys are simply not read).
+        const keys = storageKeys(opts.userId, opts.placementId);
         const read = k => { try { return JSON.parse(localStorage.getItem(k) || 'null'); } catch (e) { return null; } };
         const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage full: the server still has the answers */ } };
 
@@ -144,20 +178,28 @@
         let pendingOutcome = null;   // {stepId, choiceId, outcome} shown, waiting for «Συνέχεια»
         let started = answers.length > 0;
         let sosTimer = null;
+        let shownSignature = null;   // what the screen was last built from (null: nothing usable on screen)
         const replayed = {};
+        const previousFocus = document.activeElement;
 
         const overlay = document.createElement('div');
         overlay.id = 'voCaseOverlay';
         overlay.setAttribute('role', 'dialog');
-        overlay.style.cssText = 'position:fixed;inset:0;z-index:2000;background:#fff;color:#212529;overflow-y:auto;-webkit-overflow-scrolling:touch;';
+        overlay.setAttribute('aria-modal', 'true');
+        overlay.setAttribute('aria-label', t('case.dialog_label'));
+        overlay.tabIndex = -1;
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:2000;background:#fff;color:#212529;overflow-y:auto;-webkit-overflow-scrolling:touch;outline:none;';
         document.body.appendChild(overlay);
         document.body.style.overflow = 'hidden';
+        try { overlay.focus({preventScroll: true}); } catch (e) { /* focus is a courtesy */ }
 
         function close() {
             if (sosTimer) clearTimeout(sosTimer);
             overlay.remove();
             document.body.style.overflow = '';
             if (typeof opts.onClose === 'function') opts.onClose();
+            // Back to where the volunteer was (if that control is still on the page).
+            try { if (previousFocus && typeof previousFocus.focus === 'function' && document.contains(previousFocus)) previousFocus.focus({preventScroll: true}); } catch (e) { /* a courtesy */ }
         }
 
         function setMessage(text) {
@@ -168,25 +210,35 @@
         }
 
         // SOS stays reachable (the overlay covers the page's own button): a real emergency beats the exercise. Held for a
-        // second like the page's own SOS, so a thumb on the way to an answer cannot call for help by accident.
+        // second like the page's own SOS, so a thumb on the way to an answer cannot call for help by accident. The same
+        // one-second hold works from the keyboard (hold Enter or Space; a plain press does nothing), so it is no easier to
+        // trigger by accident and needs no confirm dialog. opts.onSos() looks the page's real needs_help button up when it
+        // FIRES (the page may have redrawn since the overlay opened) and returns false when there is none.
         function bindSos(btn) {
+            const start = () => {
+                if (sosTimer) return;
+                sosTimer = setTimeout(() => {
+                    sosTimer = null;
+                    if (navigator.vibrate) navigator.vibrate([90, 60, 90]);
+                    setMessage(opts.onSos() === false ? t('common.failed') : t('tabs.sos_sent'));
+                }, SOS_HOLD_MS);
+            };
             const cancel = () => {
                 if (!sosTimer) return;
                 clearTimeout(sosTimer);
                 sosTimer = null;
                 setMessage(t('tabs.sos_hold_hint'));
             };
-            btn.addEventListener('pointerdown', e => {
-                e.preventDefault();
-                if (sosTimer) return;
-                sosTimer = setTimeout(() => {
-                    sosTimer = null;
-                    if (navigator.vibrate) navigator.vibrate([90, 60, 90]);
-                    opts.onSos();
-                    setMessage(t('tabs.sos_sent'));
-                }, SOS_HOLD_MS);
+            btn.addEventListener('pointerdown', e => { e.preventDefault(); start(); });
+            ['pointerup', 'pointerleave', 'pointercancel', 'blur'].forEach(ev => btn.addEventListener(ev, cancel));
+            btn.addEventListener('keydown', e => {
+                if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+                e.preventDefault();   // no synthetic click; the key repeat of a held key must not restart the timer
+                if (!e.repeat) start();
             });
-            ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => btn.addEventListener(ev, cancel));
+            btn.addEventListener('keyup', e => {
+                if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') cancel();
+            });
             btn.addEventListener('contextmenu', e => e.preventDefault());
         }
 
@@ -194,7 +246,7 @@
             overlay.innerHTML = '<div class="container py-3" style="max-width:640px;">'
                 + '<div class="alert alert-warning py-2 d-flex justify-content-between align-items-center mb-3 gap-2">'
                 + '<span><i class="bi bi-mortarboard-fill me-1"></i>' + escapeHtml(t('case.banner')) + '</span>'
-                + '<span class="d-flex gap-1 flex-shrink-0">' + (opts.onSos ? '<button type="button" class="btn btn-sm btn-danger" data-vc="sos" style="touch-action:none;user-select:none;">SOS</button>' : '')
+                + '<span class="d-flex gap-1 flex-shrink-0">' + (opts.onSos ? '<button type="button" class="btn btn-danger fw-bold" data-vc="sos" aria-label="' + escapeHtml(t('tabs.sos_hold_hint')) + '" style="touch-action:none;user-select:none;min-width:64px;min-height:44px;">SOS</button>' : '')
                 + '<button type="button" class="btn btn-sm btn-outline-dark" data-vc="stop">' + escapeHtml(t('case.stop')) + '</button></span></div>'
                 + '<div class="small fw-semibold text-danger mb-2 d-none" data-vc="msg" role="status"></div>'
                 + inner + '</div>';
@@ -214,13 +266,24 @@
             return '<span class="badge ' + cls + ' fs-6 mb-2">' + escapeHtml(t('case.rating.' + rating)) + '</span>';
         }
 
+        // Whatever the document turns out to hold, a throw while drawing it must end in «δεν είναι διαθέσιμο» with a retry,
+        // never in «Φόρτωση…» for ever (a kept document can be stale, truncated or from another version of the app).
         function render() {
             if (!doc) return;
+            try {
+                renderCurrent();
+                shownSignature = viewSignature(doc, answers);
+            } catch (e) {
+                renderUnavailable();
+            }
+        }
+
+        function renderCurrent() {
             const run = runFromAnswers(doc, answers);
             if (pendingOutcome) return renderFeedback();
             if (run.finished) return renderEnd(run);
             if (!started) return renderIntro();
-            if (!doc.steps[run.currentStep]) return renderUnavailable();
+            if (!doc.steps[run.currentStep]) throw new Error('step missing');   // render() shows «δεν είναι διαθέσιμο»
             return renderStep(run);
         }
 
@@ -280,6 +343,7 @@
         // «Το περιστατικό δεν είναι διαθέσιμο» with a retry: the placement is recorded just after the order, so a phone
         // that asks in the first seconds (or one with no signal and no copy yet) may simply be early.
         function renderUnavailable() {
+            shownSignature = null;
             shell('<p class="text-danger fw-semibold">' + escapeHtml(t('case.err_gone')) + '</p>'
                 + '<button type="button" class="btn btn-primary btn-lg w-100" data-vc="retry">' + escapeHtml(t('case.retry')) + '</button>');
             overlay.querySelector('[data-vc="retry"]').addEventListener('click', () => {
@@ -298,7 +362,8 @@
                 const run = res.run || null;
                 const serverAnswers = ((run && run.answers) || []).map(a => ({stepId: a.step_id, choiceId: a.choice_id}));
                 answers = mergeAnswers(serverAnswers, answers);
-                write(keys.answers, answers);
+                // Server wins: what the server run already reports is not kept on the phone any more, only what it lacks.
+                write(keys.answers, localOnlyAnswers(serverAnswers, answers));
                 if (answers.length) started = true;
                 // The server's run may lag behind an answer it already holds; replaying it lets the server catch up.
                 const again = replayCandidate(run, answers);
@@ -313,14 +378,21 @@
 
         shell('<p class="text-muted">' + escapeHtml(t('case.loading')) + '</p>');
         // A document kept from an earlier visit opens at once (and works with no signal); the server's copy refreshes it.
-        if (doc) { render(); load().then(render, () => {}); }
+        // The refresh must not swap the buttons under a thumb that is about to press one: it redraws only when the case or
+        // where the run stands actually changed since what is on screen.
+        const refreshIfChanged = () => {
+            let same = false;
+            try { same = shownSignature !== null && doc !== null && viewSignature(doc, answers) === shownSignature; } catch (e) { same = false; }
+            if (!same) render();
+        };
+        if (doc) { render(); load().then(refreshIfChanged, () => {}); }
         else load().then(render, renderUnavailable);
         return {close: close};
     }
 
     const api = {
         escapeHtml, scoreLabel, choiceOutcome, runFromAnswers, bestPathLabels, mergeAnswers, withoutAnswer, answerQueueItem,
-        storageKeys, queueOutcome, replayCandidate, forgetLocalAnswer, open,
+        storageKeys, queueOutcome, replayCandidate, forgetLocalAnswer, validDoc, localOnlyAnswers, viewSignature, open,
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.VoTrainingCase = api;

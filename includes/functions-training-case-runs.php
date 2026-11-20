@@ -125,11 +125,11 @@ function trainingCaseRunState(int $placementId, int $userId): ?array {
 function trainingCaseStartRun(int $placementId, int $userId): array {
     $placement = trainingCasePlacement($placementId);
     if (!$placement || !$placement['doc']) {
-        return ['ok' => false, 'error' => t('case.err_gone')];
+        return ['ok' => false, 'error' => t('case.err_gone'), 'code' => 'not_found'];
     }
     $gate = trainingCaseGate($placement, $userId, true);
     if ($gate !== null) {
-        return ['ok' => false, 'error' => t($gate)];
+        return ['ok' => false, 'error' => t($gate), 'code' => 'refused'];
     }
     dbExecute(
         "INSERT IGNORE INTO mission_case_runs (placement_id, user_id, current_step) VALUES (?, ?, ?)",
@@ -204,11 +204,11 @@ function trainingCaseCatchUpRun(array $run, string $lastStepId, array $lastChoic
 function trainingCaseAnswer(int $placementId, int $userId, string $stepId, string $choiceId, ?int $msTaken = null): array {
     $placement = trainingCasePlacement($placementId);
     if (!$placement || !$placement['doc']) {
-        return ['ok' => false, 'error' => t('case.err_gone')];
+        return ['ok' => false, 'error' => t('case.err_gone'), 'code' => 'not_found'];
     }
     $gate = trainingCaseGate($placement, $userId, true);
     if ($gate !== null) {
-        return ['ok' => false, 'error' => t($gate)];
+        return ['ok' => false, 'error' => t($gate), 'code' => 'refused'];
     }
     $doc = $placement['doc'];
     $step = $doc['steps'][$stepId] ?? null;
@@ -221,7 +221,9 @@ function trainingCaseAnswer(int $placementId, int $userId, string $stepId, strin
         return null;
     };
     $choice = $choiceIn($step, $choiceId);
-    $bad = ['ok' => false, 'error' => t('case.err_bad_answer')];
+    // Every refusal carries code 'refused': the phone's offline queue drops an answer only on that code (see queueOutcome()
+    // in assets/js/training-case.js); anything else it keeps and retries.
+    $bad = ['ok' => false, 'error' => t('case.err_bad_answer'), 'code' => 'refused'];
     $result = function (array $c, bool $duplicate, array $runRow) use ($stepId): array {
         return [
             'ok' => true, 'duplicate' => $duplicate, 'step_id' => $stepId, 'choice_id' => $c['id'], 'rating' => $c['rating'],
@@ -260,7 +262,7 @@ function trainingCaseAnswer(int $placementId, int $userId, string $stepId, strin
         if ($stored) {
             $storedChoice = $choiceIn($step, (string) $stored['choice_id']);
             if ($storedChoice === null) {
-                return ['ok' => false, 'error' => t('case.err_gone')];
+                return ['ok' => false, 'error' => t('case.err_gone'), 'code' => 'refused'];
             }
             // The answer is there but the run still stands at its step: the update that should have followed it never ran.
             if ($run['current_step'] === $stepId && $run['finished_at'] === null) {
@@ -287,7 +289,7 @@ function trainingCaseAnswer(int $placementId, int $userId, string $stepId, strin
             $stored = dbFetchOne("SELECT choice_id FROM mission_case_answers WHERE run_id = ? AND step_id = ?", [(int) $run['id'], $stepId]);
             $choice = $stored ? $choiceIn($step, (string) $stored['choice_id']) : null;
             if ($choice === null) {
-                return ['ok' => false, 'error' => t('case.err_gone')];
+                return ['ok' => false, 'error' => t('case.err_gone'), 'code' => 'refused'];
             }
         }
         $run = dbFetchOne("SELECT * FROM mission_case_runs WHERE id = ? FOR UPDATE", [(int) $run['id']]);

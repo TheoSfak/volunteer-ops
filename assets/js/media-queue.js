@@ -232,6 +232,28 @@
         return -1;
     }
 
+    // A training-case answer the server answered but cannot take now (closed mission, stale token, server error) is the
+    // fast lane's head and blocks everything behind it. Moving this placement's answers (in their own order: step N must
+    // reach the server before step N+1) behind the rest lets an SOS or an order go first. Returns the reordered queue, or
+    // null when nothing should change - and then the caller must NOT schedule a re-flush:
+    //   - only what the fast lane would actually send counts: files and positions have their own lanes (and a route
+    //     completion held for its own file cannot go), so a queued photo next to a stuck answer must not make the page
+    //     re-send the answer every 500 ms forever;
+    //   - another placement's answers do not count either (two stuck placements would swap places for ever);
+    //   - at most one deferral per `lastDeferredAt` window (the periodic 15 s tick): the caller passes when this answer
+    //     was last deferred, and inside the window the answer simply waits for the tick.
+    const CASE_DEFER_WINDOW_MS = 15000;
+    function caseAnswerDeferral(queue, placementId, lastDeferredAt, now) {
+        if (lastDeferredAt && now - lastDeferredAt < CASE_DEFER_WINDOW_MS) return null;
+        const isMine = q => q.kind === 'case_answer' && q.placementId === placementId;
+        const mine = queue.filter(isMine);
+        if (!mine.length) return null;
+        const others = queue.filter(q => !isMine(q));
+        if (nextQueueIndex(others.filter(q => q.kind !== 'case_answer'), 'fast') === -1) return null;
+        const reordered = others.concat(mine);
+        return reordered.every((q, i) => q === queue[i]) ? null : reordered;
+    }
+
     // ── IndexedDB ───────────────────────────────────────────────────────────
     // One connection, reopened if the browser drops it. Every call rejects
     // when IndexedDB is missing or refuses (private mode, a full disk): the
@@ -288,7 +310,7 @@
 
     const api = {
         MAX_COUNTED_TRIES, isIosDevice, newMediaId, mediaFileName, mediaKind, makeSpec, buildFormData,
-        classifyFailure, queuedMediaFor, countQueuedMedia, nextQueueIndex,
+        classifyFailure, queuedMediaFor, countQueuedMedia, nextQueueIndex, caseAnswerDeferral, CASE_DEFER_WINDOW_MS,
         PING_QUEUE_MAX_AGE_MS, PING_QUEUE_MAX, PING_BATCH_MAX, countQueuedPings, prunePings, collectPingBatch,
         put, get, remove, requestPersistence,
     };

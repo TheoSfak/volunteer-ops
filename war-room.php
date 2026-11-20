@@ -15555,14 +15555,15 @@ document.addEventListener('click', e => {
     const caseBtn = e.target.closest('.vo-case-open-btn');
     if (!caseBtn || !window.VoTrainingCase || document.getElementById('voCaseOverlay')) return;
     // The page's own SOS button (the volunteer's status row) sits under the overlay: the overlay's SOS forwards to it,
-    // so the offline queue, the badge and the poll reconciliation stay the one code path.
-    const realSos = document.querySelector('[onclick*="setFieldStatus"][onclick*="needs_help"]');
+    // so the offline queue, the badge and the poll reconciliation stay the one code path. The button is looked up when
+    // the SOS FIRES (the status row is redrawn by the poll, a node captured now may be gone by then); false = none.
+    const findRealSos = () => document.querySelector('[onclick*="setFieldStatus"][onclick*="needs_help"]');
     window.VoTrainingCase.open({
         placementId: Number(caseBtn.dataset.placement), missionId: WR_MISSION_ID, briefing: caseBtn.dataset.briefing || '',
-        t: t, enqueue: enqueueAction, flush: flushQueue,
+        userId: WR_MY_USER_ID, t: t, enqueue: enqueueAction, flush: flushQueue,
         isQueued: (placementId, stepId) => loadQueue().some(q => q.kind === 'case_answer' && q.placementId === placementId && q.stepId === stepId),
         onClose: () => { renderQueueStatus(); flushQueue(); refreshMyOrdersCard(); },
-        onSos: realSos ? () => realSos.click() : null,
+        onSos: findRealSos() ? () => { const sos = findRealSos(); if (sos) sos.click(); return !!sos; } : null,
     });
 });
 
@@ -17832,38 +17833,42 @@ function sendQueuedPings() {
 }
 
 // Moves this placement's queued case answers (in their own order: step N must reach the server before step N+1) behind
-// everything else in the queue. True when something else was waiting.
-function deferCaseAnswers(placementId) {
-    const queue = loadQueue();
-    const isMine = q => q.kind === 'case_answer' && q.placementId === placementId;
-    const others = queue.filter(q => !isMine(q));
-    if (!others.length) return false;
-    saveQueue(others.concat(queue.filter(isMine)));
+// the items the fast lane would actually send. True only when the queue changed, and then (and only then) the caller
+// schedules ONE re-flush. The decision is VoMediaQueue.caseAnswerDeferral(): files and positions (their own lanes) do not
+// count, so a queued photo next to a stuck answer cannot make the page re-send the answer every 500 ms; and an answer is
+// deferred at most once per 15 s tick (caseDeferredAt remembers when), after that it just waits for the periodic tick.
+const caseDeferredAt = {};
+function deferCaseAnswers(item) {
+    const key = item.placementId + ':' + item.stepId;
+    const reordered = VoMediaQueue.caseAnswerDeferral(loadQueue(), item.placementId, caseDeferredAt[key], Date.now());
+    if (!reordered) return false;
+    caseDeferredAt[key] = Date.now();
+    saveQueue(reordered);
     return true;
 }
 
 // A training case answer (v3.505.0): the server recomputes the rating and the score from its own copy; a replay that
 // already landed comes back as duplicate:true, which is success. What VoTrainingCase.queueOutcome() calls a retry
 // stays queued: no signal, a login redirect (the page's null, or a non-JSON reply, which postQueuedForm() reports as
-// a network error) and the endpoint's «cannot take anything now» errors (closed mission, stale token, server error).
-// Only an explicit refusal of the answer itself (err_bad_answer, err_not_audience, ...) drops it, with the notice the
-// queue shows for any refused item; the phone's own copy of that answer goes too, so the step can be answered again.
+// a network error) and every reply that is not an explicit refusal (closed mission, stale token, server error, a code
+// this page does not know). Only ok:false with code 'refused' (training-case.php's machine code for err_bad_answer,
+// err_not_audience, ...) drops it, with the notice the queue shows for any refused item; the phone's own copy of that
+// answer goes too, so the step can be answered again. The text of the error is never compared.
 function sendQueuedCaseAnswer(item) {
     if (!window.VoTrainingCase) return Promise.resolve({ok: false, networkError: true});
     return postQueuedForm('training-case.php', {
         mission_id: String(WR_MISSION_ID), action: 'answer', placement_id: String(item.placementId),
         step_id: item.stepId, choice_id: item.choiceId, ms_taken: String(item.ms || 0), queued: '1'
     }).then(result => {
-        const retryable = [t('common.mission_not_found_or_inactive'), t('common.invalid_request'), t('common.error')];
-        const verdict = VoTrainingCase.queueOutcome(result, retryable);
+        const verdict = VoTrainingCase.queueOutcome(result);
         if (verdict === 'retry') {
             if (result && result.networkError) return result;
             // The server answered but cannot take it now. The fast lane stops at a head it cannot send, and an SOS or an
             // order queued behind a case answer must not wait for the mission's case tables to recover.
-            if (result && deferCaseAnswers(item.placementId)) setTimeout(flushQueue, 500);
+            if (result && deferCaseAnswers(item)) setTimeout(flushQueue, 500);
             return null; // stays queued: wait for the next timer tick
         }
-        if (verdict === 'drop') VoTrainingCase.forgetLocalAnswer(item.placementId, item.stepId);
+        if (verdict === 'drop') VoTrainingCase.forgetLocalAnswer(WR_MY_USER_ID, item.placementId, item.stepId);
         return result;
     });
 }

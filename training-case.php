@@ -33,12 +33,12 @@ try {
         [$missionId]
     );
     if (!$mission || $mission['status'] !== STATUS_OPEN || empty($mission['show_in_ops'])) {
-        echo json_encode(['ok' => false, 'error' => t('common.mission_not_found_or_inactive')], TRAINING_CASE_JSON_FLAGS);
+        echo json_encode(['ok' => false, 'error' => t('common.mission_not_found_or_inactive'), 'code' => 'mission_closed'], TRAINING_CASE_JSON_FLAGS);
         exit;
     }
     // Cases exist only in drills.
     if (!isTrainingMission($missionId)) {
-        echo json_encode(['ok' => false, 'error' => t('case.err_not_training')], TRAINING_CASE_JSON_FLAGS);
+        echo json_encode(['ok' => false, 'error' => t('case.err_not_training'), 'code' => 'refused'], TRAINING_CASE_JSON_FLAGS);
         exit;
     }
 
@@ -47,7 +47,7 @@ try {
     // ── Command's overview ─────────────────────────────────────────────────────
     if ($action === 'overview') {
         if (!canManageActionRoom($mission['responsible_user_id'] ? (int) $mission['responsible_user_id'] : null, $userId)) {
-            echo json_encode(['ok' => false, 'error' => t('common.no_access_action_room')], TRAINING_CASE_JSON_FLAGS);
+            echo json_encode(['ok' => false, 'error' => t('common.no_access_action_room'), 'code' => 'refused'], TRAINING_CASE_JSON_FLAGS);
             exit;
         }
         echo json_encode(['ok' => true] + trainingCaseOverview($missionId), TRAINING_CASE_JSON_FLAGS);
@@ -57,14 +57,14 @@ try {
     // The CSRF check needs a token in the session: with none, hash_equals('', '') would let an empty token through.
     $sessionToken = $_SESSION['csrf_token'] ?? '';
     if (isPost() && (!is_string($sessionToken) || $sessionToken === '' || !isset($_POST['csrf_token']) || !hash_equals($sessionToken, (string) $_POST['csrf_token']))) {
-        echo json_encode(['ok' => false, 'error' => t('common.invalid_request')], TRAINING_CASE_JSON_FLAGS);
+        echo json_encode(['ok' => false, 'error' => t('common.invalid_request'), 'code' => 'bad_token'], TRAINING_CASE_JSON_FLAGS);
         exit;
     }
 
     $placementId = (int) (isPost() ? post('placement_id') : get('placement_id'));
     $placement = $placementId > 0 ? trainingCasePlacement($placementId) : null;
     if (!$placement || (int) $placement['mission_id'] !== $missionId) {
-        echo json_encode(['ok' => false, 'error' => t('case.err_gone')], TRAINING_CASE_JSON_FLAGS);
+        echo json_encode(['ok' => false, 'error' => t('case.err_gone'), 'code' => 'not_found'], TRAINING_CASE_JSON_FLAGS);
         exit;
     }
 
@@ -77,7 +77,7 @@ try {
     if ($action === 'load' && !isPost()) {
         $gate = trainingCaseGate($placement, $userId, false);
         if ($gate !== null) {
-            echo json_encode(['ok' => false, 'error' => t($gate)], TRAINING_CASE_JSON_FLAGS);
+            echo json_encode(['ok' => false, 'error' => t($gate), 'code' => 'refused'], TRAINING_CASE_JSON_FLAGS);
             exit;
         }
         echo json_encode([
@@ -107,7 +107,7 @@ try {
             } catch (PDOException $e) {
                 if (!trainingCaseIsLockError($e) || $attempt === 2) {
                     error_log('[training-cases] answer failed (attempt ' . $attempt . '): ' . $e->getMessage());
-                    $reply = ['ok' => false, 'error' => t('common.error')];
+                    $reply = ['ok' => false, 'error' => t('common.error'), 'code' => 'server_error'];
                 }
             }
         }
@@ -115,8 +115,8 @@ try {
         exit;
     }
 
-    echo json_encode(['ok' => false, 'error' => t('common.unknown_action')], TRAINING_CASE_JSON_FLAGS);
+    echo json_encode(['ok' => false, 'error' => t('common.unknown_action'), 'code' => 'bad_request'], TRAINING_CASE_JSON_FLAGS);
 } catch (Throwable $e) {
     error_log('[training-cases] ' . (string) ($action ?? '?') . ' failed: ' . $e->getMessage());
-    echo json_encode(['ok' => false, 'error' => t('common.error')], TRAINING_CASE_JSON_FLAGS);
+    echo json_encode(['ok' => false, 'error' => t('common.error'), 'code' => 'server_error'], TRAINING_CASE_JSON_FLAGS);
 }

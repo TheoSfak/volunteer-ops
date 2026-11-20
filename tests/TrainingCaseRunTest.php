@@ -374,6 +374,31 @@ final class TrainingCaseRunTest extends TestCase
         $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_case_answers"), 'nothing was stored');
     }
 
+    public function test_every_refusal_carries_a_machine_code_the_phone_can_act_on(): void
+    {
+        // The phone's offline queue drops an answer ONLY on code 'refused' (never by comparing translated text).
+        $early = trainingCaseStartRun($this->placementId, $this->member);
+        $this->assertSame('refused', $early['code'], 'the gate (not arrived yet)');
+        $res = trainingCaseAnswer($this->placementId, $this->member, 's1', 'a');
+        $this->assertSame('refused', $res['code'], 'the gate on an answer');
+        $this->assertSame(t('case.err_not_arrived'), $res['error'], 'the text is unchanged');
+
+        $this->arrive($this->teamId);
+        $this->assertSame('refused', trainingCaseAnswer($this->placementId, $this->stranger, 's1', 'a')['code'], 'not the audience');
+        $bad = trainingCaseAnswer($this->placementId, $this->member, 's2', 'a');
+        $this->assertFalse($bad['ok']);
+        $this->assertSame('refused', $bad['code'], 'an answer that is not valid now');
+        $this->assertSame('refused', trainingCaseAnswer($this->placementId, $this->member, 's1', 'zzz')['code'], 'an unknown choice');
+
+        $missing = trainingCaseAnswer(2147483000, $this->member, 's1', 'a');
+        $this->assertSame('not_found', $missing['code'], 'no such placement');
+        $this->assertSame('not_found', trainingCaseStartRun(2147483000, $this->member)['code']);
+
+        $ok = trainingCaseAnswer($this->placementId, $this->member, 's1', 'a');
+        $this->assertTrue($ok['ok']);
+        $this->assertArrayNotHasKey('code', $ok, 'a success carries no code');
+    }
+
     public function test_the_dispatch_row_card_has_exactly_the_expected_keys(): void
     {
         $this->arrive($this->teamId);

@@ -75,6 +75,25 @@ final class TrainingCaseEndpointSourceTest extends TestCase
         }
     }
 
+    public function test_every_error_reply_carries_a_machine_code(): void
+    {
+        // The phone's offline queue decides retry-vs-drop on this code, never on the translated text.
+        preg_match_all("/\\['ok' => false,[^\\]]*\\]/", $this->src, $replies);
+        $this->assertGreaterThanOrEqual(9, count($replies[0]), 'every error reply was found');
+        foreach ($replies[0] as $reply) {
+            $this->assertStringContainsString("'code' =>", $reply, $reply);
+        }
+        foreach (['mission_closed', 'bad_token', 'server_error', 'not_found', 'refused'] as $code) {
+            $this->assertStringContainsString("'code' => '$code'", $this->src, $code);
+        }
+        // Gate refusals on load are 'refused'; a mission that is closed or missing is not.
+        $this->assertMatchesRegularExpression("/mission_not_found_or_inactive'\\)[^\\]]*'code' => 'mission_closed'/", $this->src);
+        $this->assertMatchesRegularExpression("/invalid_request'\\)[^\\]]*'code' => 'bad_token'/", $this->src);
+        $this->assertMatchesRegularExpression("/t\\(\\\$gate\\)[^\\]]*'code' => 'refused'/", $this->src);
+        // A lock-error that exhausts the retry and the catch-all are server errors (retryable), not refusals.
+        $this->assertSame(2, substr_count($this->src, "t('common.error'), 'code' => 'server_error'"));
+    }
+
     public function test_the_overview_is_for_command_only(): void
     {
         $this->assertMatchesRegularExpression('/action === \'overview\'.*canManageActionRoom/s', $this->src);

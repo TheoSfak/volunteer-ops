@@ -38,11 +38,47 @@ final class TrainingCaseWarRoomSourceTest extends TestCase
         $start = strpos($this->page, 'function sendQueuedCaseAnswer(');
         $this->assertNotFalse($start);
         $branch = substr($this->page, $start, 1800);
-        $this->assertStringContainsString('VoTrainingCase.queueOutcome(', $branch);
+        $this->assertStringContainsString('VoTrainingCase.queueOutcome(result)', $branch);
         $this->assertStringContainsString("action: 'answer'", $branch);
-        $this->assertStringContainsString('common.mission_not_found_or_inactive', $branch);
-        $this->assertStringContainsString('forgetLocalAnswer(', $branch);
-        $this->assertStringContainsString('deferCaseAnswers(', $branch);
+        $this->assertStringContainsString('forgetLocalAnswer(WR_MY_USER_ID, item.placementId, item.stepId)', $branch);
+        $this->assertStringContainsString('deferCaseAnswers(item)', $branch);
+        // The retry-vs-drop decision rests on the endpoint's machine code, never on translated text.
+        $this->assertStringNotContainsString('mission_not_found_or_inactive', $branch);
+        $this->assertStringNotContainsString("t('common.", $branch);
+        $this->assertStringContainsString("code 'refused'", substr($this->page, $start - 900, 900));
+    }
+
+    public function test_deferring_a_stuck_answer_asks_the_queue_helper_and_is_rate_limited(): void
+    {
+        $start = strpos($this->page, 'function deferCaseAnswers(');
+        $this->assertNotFalse($start);
+        $fn = substr($this->page, $start, 700);
+        $this->assertStringContainsString('VoMediaQueue.caseAnswerDeferral(', $fn);
+        $this->assertStringContainsString('caseDeferredAt', $fn);
+        $this->assertStringContainsString('if (!reordered) return false;', $fn);
+        // The re-flush happens only when the queue was really reordered.
+        $this->assertStringContainsString('if (result && deferCaseAnswers(item)) setTimeout(flushQueue, 500);', $this->page);
+    }
+
+    public function test_the_overlay_sos_looks_the_real_button_up_when_it_fires_and_the_viewer_scopes_the_cache(): void
+    {
+        $start = strpos($this->page, "caseBtn = e.target.closest('.vo-case-open-btn')");
+        $this->assertNotFalse($start);
+        $handler = substr($this->page, $start, 1700);
+        $this->assertStringContainsString('const findRealSos = () => document.querySelector(', $handler);
+        $this->assertStringContainsString('const sos = findRealSos(); if (sos) sos.click(); return !!sos;', $handler);
+        $this->assertStringNotContainsString('realSos', $handler, 'the node is not captured when the overlay opens');
+        $this->assertStringContainsString('userId: WR_MY_USER_ID', $handler);
+    }
+
+    public function test_the_player_is_accessible_and_scopes_its_cache_by_viewer(): void
+    {
+        foreach (["aria-modal', 'true'", "'aria-label', t('case.dialog_label')", 'overlay.focus(', 'previousFocus', 'storageKeys(opts.userId, opts.placementId)', 'refreshIfChanged'] as $needle) {
+            $this->assertStringContainsString($needle, $this->js, $needle);
+        }
+        // The overlay's SOS is a normal-sized target and can be held from the keyboard too.
+        $this->assertDoesNotMatchRegularExpression('/btn-sm btn-danger/', $this->js);
+        $this->assertStringContainsString("e.key !== 'Enter'", $this->js);
     }
 
     public function test_case_text_only_reaches_innerhtml_through_escapeHtml(): void
