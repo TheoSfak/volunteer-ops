@@ -104,4 +104,20 @@ final class TrainingMissionSourceTest extends TestCase
         $this->assertStringContainsString('getVolunteerTrainingRecord(', $r);
         $this->assertStringContainsString('Εκπαιδευτικές Ασκήσεις', $r);
     }
+
+    public function test_certificate_documents_say_training_exercise_and_show_hours(): void
+    {
+        $p = $this->src('mission-certificate-print.php');
+        $this->assertStringContainsString('Βεβαίωση Συμμετοχής σε Εκπαιδευτική Άσκηση', $p);
+        $this->assertStringContainsString('Certificate of Participation in a Training Exercise', $p);
+        $this->assertStringContainsString('getTrainingHoursForMission(', $p);
+        $this->assertStringContainsString('m.is_training', $p);
+
+        $v = $this->src('certificate-verify.php');
+        $this->assertStringContainsString('m.is_training', $v);
+        $this->assertStringContainsString('Εκπαιδευτική Άσκηση', $v);
+
+        $i = $this->src('mission-certificates.php');
+        $this->assertStringContainsString('getTrainingHoursForMission(', $i);
+    }
 }

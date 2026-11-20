@@ -26,7 +26,7 @@ $certId = (int) get('id');
 
 $cert = dbFetchOne(
     "SELECT mc.*, m.title AS mission_title, m.location, m.location_details,
-            m.start_datetime, m.end_datetime, m.responsible_user_id,
+            m.start_datetime, m.end_datetime, m.responsible_user_id, m.is_training,
             u.name AS recipient_name, u.is_external AS recipient_is_external, u.guest_org_name AS recipient_guest_org_name
      FROM mission_certificates mc
      JOIN missions m ON m.id = mc.mission_id AND m.deleted_at IS NULL
@@ -102,6 +102,22 @@ $copy = [
         'scan_verify' => 'Scan to verify authenticity',
     ],
 ][$lang];
+
+$isTrainingCert = (int) ($cert['is_training'] ?? 0) === 1;
+$trainingHours = $isTrainingCert ? getTrainingHoursForMission((int) $cert['mission_id'], (int) $cert['recipient_user_id']) : 0.0;
+if ($isTrainingCert) {
+    if ($lang === 'en') {
+        $copy['doc_title']  = 'Certificate of Participation in a Training Exercise';
+        $copy['body_lead']  = 'in recognition of participation in the training exercise';
+        $copy['notice']     = 'Print Preview — Certificate of Participation in a Training Exercise';
+        $copy['hours_line'] = 'Training hours completed';
+    } else {
+        $copy['doc_title']  = 'Βεβαίωση Συμμετοχής σε Εκπαιδευτική Άσκηση';
+        $copy['body_lead']  = 'για τη συμμετοχή του/της στην εκπαιδευτική άσκηση';
+        $copy['notice']     = 'Προεπισκόπηση Εκτύπωσης — Βεβαίωση Συμμετοχής σε Εκπαιδευτική Άσκηση';
+        $copy['hours_line'] = 'Ώρες εκπαίδευσης';
+    }
+}
 
 $printDate = date('d/m/Y');
 ?><!DOCTYPE html>
@@ -297,6 +313,9 @@ $printDate = date('d/m/Y');
                 <?= h($copy['body_lead']) ?> «<strong><?= h($cert['mission_title']) ?></strong>»
                 <?= h($copy['held_on']) ?> <strong><?= h($missionDateRange) ?></strong><?php if (!empty($cert['location'])): ?>,
                 <?= h($copy['at_location']) ?> <strong><?= h($cert['location']) ?></strong><?php endif; ?>.
+                <?php if ($isTrainingCert && $trainingHours > 0): ?>
+                    <br><?= h($copy['hours_line']) ?>: <strong><?= number_format($trainingHours, 1) ?></strong>
+                <?php endif; ?>
             </div>
 
             <?php if (!empty($cert['citation_text'])): ?>

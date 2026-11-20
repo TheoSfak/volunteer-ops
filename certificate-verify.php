@@ -25,7 +25,7 @@ $number = trim(get('number', ''));
 
 $cert = $number !== '' ? dbFetchOne(
     "SELECT mc.certificate_number, mc.issued_at, mc.language,
-            m.title AS mission_title, m.start_datetime,
+            m.title AS mission_title, m.start_datetime, m.is_training,
             u.name AS recipient_name, u.is_external AS recipient_is_external, u.guest_org_name AS recipient_guest_org_name
      FROM mission_certificates mc
      JOIN missions m ON m.id = mc.mission_id
@@ -101,6 +101,9 @@ $hasLogo = !empty($appLogo) && file_exists(__DIR__ . '/uploads/logos/' . $appLog
         <div class="verify-details">
             <div class="verify-row"><span class="label">Παραλήπτης / Recipient</span><span class="value"><?= h($cert['recipient_name']) ?><?php if ($cert['recipient_is_external'] && $cert['recipient_guest_org_name']): ?> (<?= h($cert['recipient_guest_org_name']) ?>)<?php endif; ?></span></div>
             <div class="verify-row"><span class="label">Αποστολή / Mission</span><span class="value"><?= h($cert['mission_title']) ?></span></div>
+            <?php if (!empty($cert['is_training'])): ?>
+            <div class="verify-row"><span class="label">Τύπος / Type</span><span class="value">Εκπαιδευτική Άσκηση / Training Exercise</span></div>
+            <?php endif; ?>
             <div class="verify-row"><span class="label">Ημερομηνία / Date</span><span class="value"><?= formatDate($cert['start_datetime']) ?></span></div>
             <div class="verify-row"><span class="label">Έκδοση / Issued</span><span class="value"><?= formatDate($cert['issued_at']) ?></span></div>
         </div>

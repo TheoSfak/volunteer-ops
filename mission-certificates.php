@@ -206,6 +206,9 @@ include __DIR__ . '/includes/header.php';
                     Σημειώστε τις παρουσίες από τη <a href="attendance.php?mission_id=<?= $missionId ?>">Διαχείριση Παρουσιών</a>.
                 </div>
             <?php endif; ?>
+            <?php if (isTrainingMission($mission)): ?>
+                <div class="alert alert-warning py-2 small"><i class="bi bi-mortarboard-fill me-1"></i>Εκπαιδευτική άσκηση: οι βεβαιώσεις θα αναφέρουν «Βεβαίωση Συμμετοχής σε Εκπαιδευτική Άσκηση» και τις ώρες εκπαίδευσης κάθε συμμετέχοντα.</div>
+            <?php endif; ?>
             <div class="mb-3">
                 <input type="text" class="form-control" id="certRecipientSearch" placeholder="Αναζήτηση με όνομα ή email...">
             </div>
@@ -233,6 +236,9 @@ include __DIR__ . '/includes/header.php';
                                <?= $u['has_checked_in'] && !$hasCert ? 'checked' : '' ?>>
                         <span class="flex-grow-1">
                             <span class="cert-recipient-name fw-bold"><?= guestNameHtml($u['name'], (bool) $u['is_external'], $u['home_team_name'], $u['home_team_color'], $u['guest_country_code']) ?><?= k9BadgeHtml((int) $u['id']) ?><?= captainBadgeHtml((int) $u['id']) ?></span>
+                            <?php if (isTrainingMission($mission) && $u['has_checked_in']): ?>
+                                <span class="badge bg-light text-dark border ms-1"><?= number_format(getTrainingHoursForMission($missionId, (int) $u['id']), 1) ?> ώρες</span>
+                            <?php endif; ?>
                             <small class="text-muted cert-recipient-email d-block"><?= h($u['email']) ?></small>
                         </span>
                         <?php if ($u['has_checked_in']): ?>
