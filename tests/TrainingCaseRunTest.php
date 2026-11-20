@@ -462,12 +462,39 @@ final class TrainingCaseRunTest extends TestCase
         $src = str_replace("\r\n", "\n", (string) file_get_contents(dirname(__DIR__) . '/includes/functions-training-case-runs.php'));
         $from = strpos($src, 'function trainingCaseAnswer');
         $body = substr($src, $from, strpos($src, "\nfunction ", $from + 1) - $from);
-        $insert = strpos($body, 'INSERT IGNORE INTO mission_case_runs');
-        $lock = strpos($body, 'FOR UPDATE');
+        $insert = strpos($body, 'INSERT INTO mission_case_runs');
+        $lock = strpos($body, 'mission_case_runs WHERE placement_id = ? AND user_id = ? FOR UPDATE');
         $this->assertNotFalse($insert);
         $this->assertNotFalse($lock);
         $this->assertLessThan($lock, $insert, 'the run row exists before the locking read');
-        $this->assertSame(1, substr_count($body, 'FOR UPDATE'));
+    }
+
+    public function test_the_first_run_is_created_with_an_x_lock_not_insert_ignore(): void
+    {
+        // INSERT IGNORE takes a shared lock on a duplicate that must be upgraded: three first answers at once deadlock on it.
+        $src = str_replace("\r\n", "\n", (string) file_get_contents(dirname(__DIR__) . '/includes/functions-training-case-runs.php'));
+        $from = strpos($src, 'function trainingCaseAnswer');
+        $body = substr($src, $from, strpos($src, "\nfunction ", $from + 1) - $from);
+        $this->assertStringContainsString('INSERT INTO mission_case_runs (placement_id, user_id, current_step) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE id = id', $body);
+        $this->assertStringNotContainsString('INSERT IGNORE INTO mission_case_runs', $body);
+    }
+
+    public function test_every_read_after_the_run_lock_that_decides_the_outcome_is_a_locking_read(): void
+    {
+        // The existence check opens the REPEATABLE READ snapshot; a plain read after waiting on the lock would be stale.
+        // (The behaviour is driven for real in TrainingCaseConcurrencyTest; this pins the shape.)
+        $src = str_replace("\r\n", "\n", (string) file_get_contents(dirname(__DIR__) . '/includes/functions-training-case-runs.php'));
+        foreach (['function trainingCaseAnswer', 'function trainingCaseCatchUpRun'] as $function) {
+            $from = strpos($src, $function);
+            $this->assertNotFalse($from);
+            $body = substr($src, $from, strpos($src, "\nfunction ", $from + 1) - $from);
+            $afterLock = $function === 'function trainingCaseAnswer' ? substr($body, strpos($body, 'WHERE placement_id = ? AND user_id = ? FOR UPDATE')) : $body;
+            preg_match_all('/"(SELECT [^"]*FROM mission_case_(?:answers|runs)[^"]*)"/', $afterLock, $m);
+            $this->assertNotEmpty($m[1], $function);
+            foreach ($m[1] as $sql) {
+                $this->assertStringContainsString('FOR UPDATE', $sql, "$function: a plain read after the run lock: $sql");
+            }
+        }
     }
 
     // ── Task 5 review findings ─────────────────────────────────────────────────────────────────────────────

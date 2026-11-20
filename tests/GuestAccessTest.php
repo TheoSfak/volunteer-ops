@@ -147,6 +147,15 @@ final class GuestAccessTest extends TestCase
         }
     }
 
+    public function testTheTrainingCaseEndpointIsAnActionRoomScriptForGuestsAndVisitors(): void
+    {
+        // training-case.php is called from the Action Room's dispatch card; without the entry a guest or visitor gets
+        // bootstrap.php's HTML redirect instead of JSON, and the idle-timeout exemption would be missing.
+        $this->assertContains('training-case.php', WAR_ROOM_ACTION_SCRIPTS);
+        $this->assertContains('training-case.php', self::guestAllowed());
+        $this->assertContains('training-case.php', self::visitorAllowed());
+    }
+
     public function testBootstrapBuildsBothGuestListsFromTheSharedConstants(): void
     {
         $bootstrap = (string) file_get_contents(self::root() . '/bootstrap.php');

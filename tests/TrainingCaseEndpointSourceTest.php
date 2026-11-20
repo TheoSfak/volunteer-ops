@@ -26,6 +26,55 @@ final class TrainingCaseEndpointSourceTest extends TestCase
         $this->assertMatchesRegularExpression('/csrf_token.*hash_equals|hash_equals.*csrf_token/s', $this->src);
     }
 
+    public function test_an_empty_session_token_never_passes_the_csrf_check(): void
+    {
+        // hash_equals('', '') is true: a session without a token would accept a post without one.
+        $this->assertMatchesRegularExpression('/\$sessionToken\s*=\s*\$_SESSION\[\'csrf_token\'\]/', $this->src);
+        $this->assertStringContainsString("\$sessionToken === ''", $this->src);
+        $this->assertStringContainsString('hash_equals($sessionToken, (string) $_POST[\'csrf_token\'])', $this->src);
+        $this->assertStringNotContainsString("hash_equals(\$_SESSION['csrf_token'] ?? ''", $this->src);
+        $at = strpos($this->src, "\$sessionToken === ''");
+        $this->assertLessThan(strpos($this->src, 'hash_equals($sessionToken'), $at, 'the empty-token refusal is checked before the comparison');
+    }
+
+    public function test_the_reply_is_never_cached(): void
+    {
+        // The load reply carries the answer key.
+        $this->assertStringContainsString("header('Cache-Control: private, no-store');", $this->src);
+        $this->assertLessThan(strpos($this->src, 'trainingCasePlacement('), strpos($this->src, 'Cache-Control'), 'sent before anything can be echoed');
+    }
+
+    public function test_the_whole_dispatch_is_inside_one_try_that_answers_json(): void
+    {
+        $try = strpos($this->src, "\ntry {");
+        $catch = strpos($this->src, '} catch (Throwable $e) {');
+        $this->assertNotFalse($try);
+        $this->assertNotFalse($catch);
+        $this->assertSame(1, substr_count($this->src, '} catch (Throwable $e) {'), 'one outer catch');
+        // Everything that reads or writes - the mission lookup, the overview, load, start, answer - is between them.
+        foreach (['dbFetchOne(', 'trainingCaseOverview(', 'trainingCasePlacement(', 'trainingCaseRunState(', 'trainingCaseStartRun(', 'trainingCaseAnswer('] as $call) {
+            $at = strpos($this->src, $call);
+            $this->assertNotFalse($at, $call);
+            $this->assertGreaterThan($try, $at, "$call is inside the try");
+            $this->assertLessThan($catch, $at, "$call is inside the try");
+        }
+        $handler = substr($this->src, $catch);
+        $this->assertStringContainsString('error_log(', $handler, 'the exception is logged');
+        $this->assertStringContainsString("t('common.error')", $handler, 'and answered with the generic JSON error');
+        $this->assertStringContainsString('echo json_encode(', $handler);
+    }
+
+    public function test_every_reply_is_encoded_with_the_substitute_and_unescaped_unicode_flags(): void
+    {
+        $this->assertStringContainsString('JSON_INVALID_UTF8_SUBSTITUTE | JSON_UNESCAPED_UNICODE', $this->src);
+        // No json_encode() call without the flags: a malformed byte in a title must not make json_encode() return false.
+        preg_match_all('/json_encode\(.*?\);/s', $this->src, $calls);
+        $this->assertNotEmpty($calls[0]);
+        foreach ($calls[0] as $call) {
+            $this->assertStringContainsString('TRAINING_CASE_JSON_FLAGS', $call, $call);
+        }
+    }
+
     public function test_the_overview_is_for_command_only(): void
     {
         $this->assertMatchesRegularExpression('/action === \'overview\'.*canManageActionRoom/s', $this->src);

@@ -171,7 +171,8 @@ function trainingCaseTransaction(callable $work) {
 function trainingCaseCatchUpRun(array $run, string $lastStepId, array $lastChoice): array {
     $points = 0;
     $answered = 0;
-    foreach (dbFetchAll("SELECT rating FROM mission_case_answers WHERE run_id = ?", [(int) $run['id']]) as $a) {
+    // A locking read: it must see every answer committed so far, whatever snapshot the transaction already holds.
+    foreach (dbFetchAll("SELECT rating FROM mission_case_answers WHERE run_id = ? FOR UPDATE", [(int) $run['id']]) as $a) {
         $points += trainingCaseRatingPoints((string) $a['rating']);
         $answered++;
     }
@@ -181,7 +182,7 @@ function trainingCaseCatchUpRun(array $run, string $lastStepId, array $lastChoic
          WHERE id = ?",
         [$points, 2 * $answered, $lastChoice['next'] ?? $lastStepId, (int) $run['id']]
     );
-    return dbFetchOne("SELECT * FROM mission_case_runs WHERE id = ?", [(int) $run['id']]);
+    return dbFetchOne("SELECT * FROM mission_case_runs WHERE id = ? FOR UPDATE", [(int) $run['id']]);
 }
 
 /**
@@ -230,18 +231,26 @@ function trainingCaseAnswer(int $placementId, int $userId, string $stepId, strin
         // No run yet: only a valid first answer may create one. The run row is created BEFORE the locking read: a
         // locking read of a row that is not there takes a gap lock, and two first answers at once deadlock on it (1213).
         // The existence check is a plain read (no lock), so a run that is already there is locked by the one read below.
+        //
+        // That plain read opens this transaction's REPEATABLE READ snapshot, and the locking read below may have to WAIT
+        // for another request that is answering - which commits its answer meanwhile. A plain read after the wait would
+        // still see the snapshot from BEFORE the wait (no answer, the run not advanced) and refuse this request as «not
+        // valid now» instead of answering «duplicate». So every read from here on that decides the outcome is a LOCKING
+        // read (FOR UPDATE), which always reads the latest committed row.
         if (!dbFetchValue("SELECT 1 FROM mission_case_runs WHERE placement_id = ? AND user_id = ?", [$placementId, $userId])) {
             if ($step === null || $choice === null || $stepId !== $doc['start']) {
                 return $bad;
             }
-            dbExecute("INSERT IGNORE INTO mission_case_runs (placement_id, user_id, current_step) VALUES (?, ?, ?)", [$placementId, $userId, $doc['start']]);
+            // ON DUPLICATE KEY UPDATE (a no-op) takes the row's X lock straight away; INSERT IGNORE takes a shared lock on
+            // a duplicate that has to be upgraded, and three first answers at once deadlock on that upgrade.
+            dbExecute("INSERT INTO mission_case_runs (placement_id, user_id, current_step) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE id = id", [$placementId, $userId, $doc['start']]);
         }
         $run = dbFetchOne("SELECT * FROM mission_case_runs WHERE placement_id = ? AND user_id = ? FOR UPDATE", [$placementId, $userId]);
         if (!$run) {
             return $bad;
         }
 
-        $stored = dbFetchOne("SELECT choice_id FROM mission_case_answers WHERE run_id = ? AND step_id = ?", [(int) $run['id'], $stepId]);
+        $stored = dbFetchOne("SELECT choice_id FROM mission_case_answers WHERE run_id = ? AND step_id = ? FOR UPDATE", [(int) $run['id'], $stepId]);
         if ($stored) {
             $storedChoice = $choiceIn($step, (string) $stored['choice_id']);
             if ($storedChoice === null) {
@@ -269,13 +278,13 @@ function trainingCaseAnswer(int $placementId, int $userId, string $stepId, strin
             );
         } else {
             // Somebody else's answer for this step got in first: the STORED choice is the result, not this caller's.
-            $stored = dbFetchOne("SELECT choice_id FROM mission_case_answers WHERE run_id = ? AND step_id = ?", [(int) $run['id'], $stepId]);
+            $stored = dbFetchOne("SELECT choice_id FROM mission_case_answers WHERE run_id = ? AND step_id = ? FOR UPDATE", [(int) $run['id'], $stepId]);
             $choice = $stored ? $choiceIn($step, (string) $stored['choice_id']) : null;
             if ($choice === null) {
                 return ['ok' => false, 'error' => t('case.err_gone')];
             }
         }
-        $run = dbFetchOne("SELECT * FROM mission_case_runs WHERE id = ?", [(int) $run['id']]);
+        $run = dbFetchOne("SELECT * FROM mission_case_runs WHERE id = ? FOR UPDATE", [(int) $run['id']]);
         return $result($choice, $inserted === 0, $run);
     });
 }
