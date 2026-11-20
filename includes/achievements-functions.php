@@ -50,7 +50,7 @@ function checkAndAwardAchievements(int $userId): array
                 COUNT(DISTINCT DATE_FORMAT(s.start_time, '%Y-%m')) as distinct_months
              FROM participation_requests pr
              JOIN shifts s ON pr.shift_id = s.id
-             WHERE pr.volunteer_id = ? AND pr.status = 'APPROVED' AND pr.attended = 1",
+             WHERE pr.volunteer_id = ? AND pr.status = 'APPROVED' AND pr.attended = 1 AND pr.is_training = 0",
             [$userId]
         );
         $completedShifts = (int)($stats['completed_shifts'] ?? 0);
@@ -66,7 +66,7 @@ function checkAndAwardAchievements(int $userId): array
             "SELECT COUNT(DISTINCT m.id) FROM participation_requests pr
              JOIN shifts s ON pr.shift_id = s.id
              JOIN missions m ON s.mission_id = m.id
-             WHERE pr.volunteer_id = ? AND pr.status = 'APPROVED' AND pr.attended = 1
+             WHERE pr.volunteer_id = ? AND pr.status = 'APPROVED' AND pr.attended = 1 AND pr.is_training = 0
                AND (m.title LIKE '%υγει%' OR m.title LIKE '%ιατρ%'
                  OR m.title LIKE '%νοσηλ%' OR m.title LIKE '%αίμα%'
                  OR m.title LIKE '%ΤΕΠΥ%'  OR m.title LIKE '%βοήθ%'

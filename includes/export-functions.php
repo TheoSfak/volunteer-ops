@@ -35,6 +35,14 @@ function exportMissionsToCsv($filters = []) {
         $where[] = 'm.mission_type_id = ?';
         $params[] = (int) $filters['mission_type'];
     }
+
+    // Training filter: strictly '1' (drills only) or '0' (operational only); anything else = all.
+    $trainingFilter = (string) ($filters['training'] ?? '');
+    if ($trainingFilter === '1') {
+        $where[] = 'm.is_training = 1';
+    } elseif ($trainingFilter === '0') {
+        $where[] = 'm.is_training = 0';
+    }
     
     if (!empty($filters['search'])) {
         $where[] = '(m.title LIKE ? OR m.description LIKE ? OR m.location LIKE ?)';
@@ -462,7 +470,7 @@ function exportStatisticsToCsv($period = 'monthly', $deptId = null, $branchId = 
                 FROM missions m
                 LEFT JOIN shifts s ON m.id = s.mission_id
                 LEFT JOIN participation_requests pr ON s.id = pr.shift_id AND pr.status = '" . PARTICIPATION_APPROVED . "'
-                WHERE m.start_datetime >= DATE_SUB(NOW(), INTERVAL 12 MONTH)" . $deptWhere . "
+                WHERE m.is_training = 0 AND m.start_datetime >= DATE_SUB(NOW(), INTERVAL 12 MONTH)" . $deptWhere . "
                 GROUP BY DATE_FORMAT(m.start_datetime, '%Y-%m')
                 ORDER BY period DESC";
     } else {
@@ -477,7 +485,7 @@ function exportStatisticsToCsv($period = 'monthly', $deptId = null, $branchId = 
                 FROM missions m
                 LEFT JOIN shifts s ON m.id = s.mission_id
                 LEFT JOIN participation_requests pr ON s.id = pr.shift_id AND pr.status = '" . PARTICIPATION_APPROVED . "'
-                WHERE 1=1" . $deptWhere . "
+                WHERE m.is_training = 0" . $deptWhere . "
                 GROUP BY YEAR(m.start_datetime)
                 ORDER BY period DESC";
     }

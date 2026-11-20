@@ -3737,6 +3737,9 @@ include __DIR__ . '/includes/header.php';
         <div>
             <div class="text-uppercase small fw-semibold opacity-75 mb-1"><i class="bi bi-broadcast-pin me-1"></i><?= t('hero.eyebrow') ?></div>
             <h1 class="h3 mb-2"><?= h($mission['title']) ?></h1>
+            <?php if (!empty($mission['is_training'])): ?>
+                <div class="badge bg-warning text-dark mb-2"><i class="bi bi-mortarboard-fill me-1"></i><?= t('hero.training_badge') ?></div>
+            <?php endif; ?>
             <div class="small opacity-75"><i class="bi bi-geo-alt me-1"></i><?= h($mission['location']) ?> · <?= formatDateTime($firstShift) ?> <?= t('hero.until') ?> <?= formatDateTime($lastShift) ?></div>
         </div>
         <!-- Status + back-to-ops live in their own top-right group, apart

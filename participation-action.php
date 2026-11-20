@@ -25,7 +25,7 @@ if (!$id || !in_array($action, ['approve', 'reject'])) {
 
 $request = dbFetchOne(
     "SELECT pr.*, u.name as volunteer_name, u.email as volunteer_email,
-            s.start_time, s.end_time, m.title as mission_title, m.department_id, m.branch_id, m.location
+            s.start_time, s.end_time, m.title as mission_title, m.is_training, m.department_id, m.branch_id, m.location
      FROM participation_requests pr
      JOIN users u ON pr.volunteer_id = u.id
      JOIN shifts s ON pr.shift_id = s.id
@@ -38,6 +38,9 @@ if (!$request) {
     setFlash('error', 'Δεν βρέθηκε η αίτηση.');
     redirect('dashboard.php');
 }
+
+// Training missions are labelled «[ΑΣΚΗΣΗ]» in the participant's email and in-app notification.
+$missionLabel = trainingTitlePrefix(['is_training' => $request['is_training']]) . $request['mission_title'];
 
 // Check department/branch access for department/branch admins
 $currentUser = getCurrentUser();
@@ -104,7 +107,7 @@ try {
             
             sendNotificationEmail('participation_approved', $volunteer['email'], [
                 'user_name' => $volunteer['name'],
-                'mission_title' => $request['mission_title'],
+                'mission_title' => $missionLabel,
                 'shift_date' => formatDateTime($request['start_time'], 'd/m/Y'),
                 'shift_time' => formatDateTime($request['start_time'], 'H:i'),
                 'location' => $request['location'] ?: 'Θα ανακοινωθεί'
@@ -113,7 +116,7 @@ try {
             sendNotification(
                 $request['volunteer_id'],
                 'Η αίτησή σας εγκρίθηκε',
-                'Η αίτησή σας για τη βάρδια "' . $request['mission_title'] . '" στις ' . 
+                'Η αίτησή σας για τη βάρδια "' . $missionLabel . '" στις ' . 
                 formatDateTime($request['start_time']) . ' εγκρίθηκε.',
                 'success',
                 '',
@@ -137,7 +140,7 @@ try {
             
             sendNotificationEmail('participation_rejected', $volunteer['email'], [
                 'user_name' => $volunteer['name'],
-                'mission_title' => $request['mission_title'],
+                'mission_title' => $missionLabel,
                 'shift_date' => formatDateTime($request['start_time'], 'd/m/Y'),
                 'rejection_reason' => 'Η αίτηση απορρίφθηκε από τον διαχειριστή'
             ]);
@@ -145,7 +148,7 @@ try {
             sendNotification(
                 $request['volunteer_id'],
                 'Η αίτησή σας απορρίφθηκε',
-                'Η αίτησή σας για τη βάρδια "' . $request['mission_title'] . '" στις ' . 
+                'Η αίτησή σας για τη βάρδια "' . $missionLabel . '" στις ' . 
                 formatDateTime($request['start_time']) . ' απορρίφθηκε. Λόγος: Η αίτηση απορρίφθηκε από τον διαχειριστή',
                 'warning',
                 '',

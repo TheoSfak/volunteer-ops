@@ -19,7 +19,7 @@ if (!$prId) {
 // Verify participation belongs to current user, is APPROVED, shift is in the future
 $participation = dbFetchOne(
     "SELECT pr.*, s.start_time, s.end_time, s.mission_id, s.max_volunteers,
-            m.title as mission_title, m.location, m.status as mission_status
+            m.title as mission_title, m.location, m.is_training, m.status as mission_status
      FROM participation_requests pr
      JOIN shifts s ON pr.shift_id = s.id
      JOIN missions m ON s.mission_id = m.id
@@ -96,12 +96,13 @@ if (isPost()) {
     $basePath   = dirname($_SERVER['SCRIPT_NAME'] ?? '/volunteerops');
     $actionUrl  = rtrim($proto . '://' . $host . $basePath, '/') . '/my-participations.php';
 
+    $missionLabel = trainingTitlePrefix($participation) . $participation['mission_title'];
     // Email to replacement volunteer
     if (!empty($replacement['email']) && isNotificationEnabled('shift_swap_requested')) {
         sendNotificationEmail('shift_swap_requested', $replacement['email'], [
             'user_name'      => $replacement['name'],
             'requester_name' => $user['name'],
-            'mission_title'  => $participation['mission_title'],
+            'mission_title'  => $missionLabel,
             'shift_date'     => formatDateTime($participation['start_time'], 'd/m/Y'),
             'shift_time'     => formatDateTime($participation['start_time'], 'H:i') . ' - ' . formatDateTime($participation['end_time'], 'H:i'),
             'location'       => $participation['location'] ?: 'Θα ανακοινωθεί',
@@ -115,7 +116,7 @@ if (isPost()) {
         $toVolunteerId,
         'Αίτημα Αντικατάστασης',
         'Ο/Η ' . $user['name'] . ' σας ζητά να τον/την αντικαταστήσετε στη βάρδια: ' .
-        $participation['mission_title'] . ' (' . formatDateTime($participation['start_time']) . ')'
+        $missionLabel . ' (' . formatDateTime($participation['start_time']) . ')'
     );
 
     setFlash('success', 'Το αίτημα στάλθηκε στον/ην ' . h($replacement['name']) . ' και αναμένει την αποδοχή του/της.');

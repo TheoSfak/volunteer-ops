@@ -144,7 +144,8 @@ if (isPost() && post('action') === 'bulk_complete_overdue') {
                      WHERE s.mission_id = ?
                        AND pr.status = ?
                        AND pr.attended = 1
-                       AND pr.points_awarded = 0",
+                       AND pr.points_awarded = 0
+                       AND pr.is_training = 0",
                     [$missionId, PARTICIPATION_APPROVED]
                 );
 
@@ -215,14 +216,14 @@ if (isPost() && post('action') === 'bulk_complete_overdue') {
 // Get statistics based on role
 if (isAdmin()) {
     // Admin statistics
-    $departmentFilter = '';
+    $departmentFilter = 'AND m.is_training = 0';
     $params = [];
 
     if ($user['role'] === ROLE_DEPARTMENT_ADMIN && $user['department_id']) {
-        $departmentFilter = 'AND m.department_id = ?';
+        $departmentFilter = 'AND m.department_id = ? AND m.is_training = 0';
         $params = [$user['department_id']];
     } elseif ($user['role'] === ROLE_BRANCH_ADMIN && $user['warehouse_id']) {
-        $departmentFilter = 'AND m.branch_id = ?';
+        $departmentFilter = 'AND m.branch_id = ? AND m.is_training = 0';
         $params = [$user['warehouse_id']];
     }
     
@@ -399,7 +400,7 @@ if (isAdmin()) {
     );
     $stats = [
         'my_shifts' => dbFetchValue(
-            "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = ?",
+            "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = ? AND is_training = 0",
             [$user['id'], PARTICIPATION_APPROVED]
         ),
         'pending_requests' => dbFetchValue(
@@ -413,7 +414,7 @@ if (isAdmin()) {
             ), 0)
             FROM participation_requests pr
             JOIN shifts s ON pr.shift_id = s.id
-            WHERE pr.volunteer_id = ? AND pr.status = ? AND pr.attended = 1",
+            WHERE pr.volunteer_id = ? AND pr.status = ? AND pr.attended = 1 AND pr.is_training = 0",
             [$user['id'], PARTICIPATION_APPROVED]
         ),
         'total_points' => $user['total_points'] ?? 0,
@@ -421,7 +422,7 @@ if (isAdmin()) {
 
     // My upcoming shifts
     $myShifts = dbFetchAll(
-        "SELECT s.*, m.title as mission_title, m.location, pr.status as participation_status
+        "SELECT s.*, m.title as mission_title, m.is_training, m.location, pr.status as participation_status
          FROM participation_requests pr
          JOIN shifts s ON pr.shift_id = s.id
          JOIN missions m ON s.mission_id = m.id
@@ -461,7 +462,7 @@ if (isAdmin()) {
          FROM participation_requests pr
          JOIN shifts s ON pr.shift_id = s.id
          JOIN missions m ON s.mission_id = m.id
-         WHERE pr.volunteer_id = ? AND pr.attended = 1
+         WHERE pr.volunteer_id = ? AND pr.attended = 1 AND pr.is_training = 0
          AND YEAR(m.start_datetime) = ?
          AND m.mission_type_id IN ($attPlaceholders)",
         array_merge([$user['id'], $currentYear], $attTypeIds)
@@ -484,7 +485,7 @@ if (isAdmin()) {
             FROM participation_requests pr
             JOIN shifts s ON pr.shift_id = s.id
             JOIN missions m ON s.mission_id = m.id
-            WHERE pr.volunteer_id = ? AND pr.status = ? AND pr.attended = 1
+            WHERE pr.volunteer_id = ? AND pr.status = ? AND pr.attended = 1 AND pr.is_training = 0
               AND m.mission_type_id = ?",
             [$user['id'], PARTICIPATION_APPROVED, getTepMissionTypeId()]
         );
@@ -525,7 +526,7 @@ if (isAdmin()) {
     // admin "Εκκρεμείς Αποστολές" alert — the responsible user can already
     // close, mark attendance and file the debrief, so they need the reminder.
     $myOverdueMissions = dbFetchAll(
-        "SELECT m.id, m.title, m.status, m.end_datetime, d.name AS department_name,
+        "SELECT m.id, m.title, m.status, m.end_datetime, m.is_training, d.name AS department_name,
                 (SELECT COUNT(*) FROM shifts s WHERE s.mission_id = m.id) AS shift_count,
                 (SELECT COALESCE(SUM(s.max_volunteers), 0) FROM shifts s WHERE s.mission_id = m.id) AS capacity_total,
                 (SELECT COUNT(*)
@@ -957,7 +958,7 @@ $swapAwaitingMe = isAdmin()
                         <strong><?= h($sa['to_volunteer_name']) ?></strong>, που έχει ήδη αποδεχτεί:
                     </div>
                     <div class="mt-1 small">
-                        <i class="bi bi-flag-fill text-primary me-1"></i><?= h($sa['mission_title']) ?>
+                        <i class="bi bi-flag-fill text-primary me-1"></i><?= h($sa['mission_title']) ?><?= trainingMissionBadgeHtml($sa) ?>
                         <span class="mx-1 text-muted">·</span>
                         <i class="bi bi-calendar3 me-1 text-muted"></i><?= formatDateTime($sa['start_time'], 'd/m/Y') ?>
                         <span class="mx-1 text-muted">·</span>
@@ -998,7 +999,7 @@ $swapAwaitingMe = isAdmin()
                         <strong><?= h($sr['requester_name']) ?></strong> σας ζητά να τον/την αντικαταστήσετε:
                     </div>
                     <div class="mt-1 small">
-                        <i class="bi bi-flag-fill text-primary me-1"></i><?= h($sr['mission_title']) ?>
+                        <i class="bi bi-flag-fill text-primary me-1"></i><?= h($sr['mission_title']) ?><?= trainingMissionBadgeHtml($sr) ?>
                         <span class="mx-1 text-muted">·</span>
                         <i class="bi bi-calendar3 me-1 text-muted"></i><?= formatDateTime($sr['start_time'], 'd/m/Y') ?>
                         <span class="mx-1 text-muted">·</span>
@@ -1047,7 +1048,7 @@ $swapAwaitingMe = isAdmin()
                         Ζητήσατε από τον/την <strong><?= h($sw['to_volunteer_name']) ?></strong> να σας αντικαταστήσει:
                     </div>
                     <div class="mt-1 small">
-                        <i class="bi bi-flag-fill text-primary me-1"></i><?= h($sw['mission_title']) ?>
+                        <i class="bi bi-flag-fill text-primary me-1"></i><?= h($sw['mission_title']) ?><?= trainingMissionBadgeHtml($sw) ?>
                         <span class="mx-1 text-muted">·</span>
                         <i class="bi bi-calendar3 me-1 text-muted"></i><?= formatDateTime($sw['start_time'], 'd/m/Y') ?>
                         <span class="mx-1 text-muted">·</span>
@@ -1336,7 +1337,7 @@ $swapAwaitingMe = isAdmin()
                 <div class="flex-grow-1">
                     <div class="d-flex flex-wrap align-items-center gap-2">
                         <i class="bi bi-flag-fill"></i>
-                        <strong><?= h($om['title']) ?></strong>
+                        <strong><?= h($om['title']) ?></strong><?= trainingMissionBadgeHtml($om) ?>
                         <?= statusBadge($om['status']) ?>
                     </div>
                     <small class="d-block mt-1">
@@ -1404,6 +1405,8 @@ $swapAwaitingMe = isAdmin()
 <?php endif; ?>
 
 <?php if (isAdmin()): ?>
+
+<?php include __DIR__ . '/includes/training-gate-banner.php'; ?>
 
 <?php if (!empty($overdueMissions)): ?>
 <!-- Overdue Missions Alert -->
@@ -2376,7 +2379,7 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
                                 <div class="list-group-item volunteer-shift-card">
                                     <div class="d-flex justify-content-between align-items-start">
                                         <div>
-                                            <strong><?= h($shift['mission_title']) ?></strong>
+                                            <strong><?= h($shift['mission_title']) ?></strong><?= trainingMissionBadgeHtml($shift) ?>
                                             <br>
                                             <small class="text-muted">
                                                 <i class="bi bi-geo-alt"></i> <?= h($shift['location']) ?>
@@ -2415,7 +2418,7 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
                                 <a href="mission-view.php?id=<?= $mission['id'] ?>" class="list-group-item list-group-item-action volunteer-shift-card" style="border-left-color:#10b981">
                                     <div class="d-flex justify-content-between align-items-start">
                                         <div>
-                                            <strong><?= h($mission['title']) ?></strong>
+                                            <strong><?= h($mission['title']) ?></strong><?= trainingMissionBadgeHtml($mission) ?>
                                             <br>
                                             <small class="text-muted">
                                                 <?= h($mission['department_name'] ?? '-') ?> · 

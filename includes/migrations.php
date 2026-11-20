@@ -8526,6 +8526,56 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
             },
         ],
 
+        [
+            'version'     => 224,
+            'description' => 'Training missions: missions.is_training (set at creation, locked) + participation_requests.is_training, ' .
+                'copied from the mission by a BEFORE INSERT trigger so every insert path gets it. Operational stats, ' .
+                'points and achievements filter on it; the volunteer\'s training record reads the same rows.',
+            'up' => function () {
+                $cols = dbFetchAll("SHOW COLUMNS FROM missions LIKE 'is_training'");
+                if (empty($cols)) {
+                    dbExecute("ALTER TABLE missions
+                        ADD COLUMN is_training TINYINT(1) NOT NULL DEFAULT 0
+                        COMMENT 'Training exercise: set at creation, never changed; isolated from real stats/points/reports'
+                        AFTER is_locked");
+                }
+                $cols = dbFetchAll("SHOW COLUMNS FROM participation_requests LIKE 'is_training'");
+                if (empty($cols)) {
+                    dbExecute("ALTER TABLE participation_requests
+                        ADD COLUMN is_training TINYINT(1) NOT NULL DEFAULT 0
+                        COMMENT 'Copied from missions.is_training by trg_pr_set_training',
+                        ADD INDEX idx_pr_training (volunteer_id, is_training, attended)");
+                }
+
+                // Single-statement trigger (no BEGIN/END), same style as trg_booking_insert.
+                // If this CREATE fails the migration is NOT recorded as applied: falling back
+                // silently would leave is_training at 0 and leak drills into real statistics.
+                $pdo = db();
+                $pdo->exec("DROP TRIGGER IF EXISTS `trg_pr_set_training`");
+                $pdo->exec("
+                    CREATE TRIGGER `trg_pr_set_training`
+                    BEFORE INSERT ON `participation_requests`
+                    FOR EACH ROW
+                      SET NEW.is_training = COALESCE(
+                          (SELECT m.is_training FROM shifts s JOIN missions m ON m.id = s.mission_id WHERE s.id = NEW.shift_id),
+                          0)
+                ");
+
+                // Repair participation rows created while an earlier attempt's CREATE TRIGGER was failing
+                // (the columns already existed then, so the app kept running). Reached only if the
+                // CREATE above succeeded: a failed one throws first and the version is not recorded.
+                // The SQL is a literal on purpose: update.php evals this file inside the OLD running
+                // process, whose bootstrap predates functions-training-missions.php, so no helper
+                // from that file may be called here. This is the canonical copy;
+                // trainingReconcileParticipationsSql() mirrors it for the tests only (drift-guarded).
+                dbExecute("UPDATE participation_requests pr
+                    JOIN shifts s ON s.id = pr.shift_id
+                    JOIN missions m ON m.id = s.mission_id
+                    SET pr.is_training = m.is_training
+                    WHERE pr.is_training <> m.is_training");
+            },
+        ],
+
     ];
     // ────────────────────────────────────────────────────────────────────────
 

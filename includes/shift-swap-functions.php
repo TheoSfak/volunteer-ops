@@ -22,7 +22,7 @@ if (!defined('VOLUNTEEROPS')) {
 function shiftSwapIncomingRequests(int $userId): array {
     return dbFetchAll(
         "SELECT ssr.*, s.start_time, s.end_time,
-                m.id as mission_id, m.title as mission_title, m.location,
+                m.id as mission_id, m.title as mission_title, m.is_training, m.location,
                 fu.name as requester_name
          FROM shift_swap_requests ssr
          JOIN shifts s ON ssr.shift_id = s.id
@@ -41,7 +41,7 @@ function shiftSwapIncomingRequests(int $userId): array {
 function shiftSwapOutgoingRequests(int $userId): array {
     return dbFetchAll(
         "SELECT ssr.*, s.start_time, s.end_time,
-                m.id as mission_id, m.title as mission_title, m.location,
+                m.id as mission_id, m.title as mission_title, m.is_training, m.location,
                 tu.name as to_volunteer_name
          FROM shift_swap_requests ssr
          JOIN shifts s ON ssr.shift_id = s.id
@@ -62,7 +62,7 @@ function shiftSwapOutgoingRequests(int $userId): array {
  */
 function shiftSwapRespond(int $swapId, array $responder, string $response): array {
     $swap = dbFetchOne(
-        "SELECT ssr.*, s.start_time, s.end_time, m.title as mission_title
+        "SELECT ssr.*, s.start_time, s.end_time, m.title as mission_title, m.is_training
          FROM shift_swap_requests ssr
          JOIN shifts s ON ssr.shift_id = s.id
          JOIN missions m ON s.mission_id = m.id
@@ -74,6 +74,7 @@ function shiftSwapRespond(int $swapId, array $responder, string $response): arra
         return ['level' => 'error', 'message' => 'Δεν βρέθηκε το αίτημα αντικατάστασης.'];
     }
 
+    $missionLabel = trainingTitlePrefix($swap) . $swap['mission_title'];
     if ($response === 'accept') {
         dbExecute(
             "UPDATE shift_swap_requests SET status = ?, to_volunteer_responded_at = NOW(), updated_at = NOW() WHERE id = ?",
@@ -87,7 +88,7 @@ function shiftSwapRespond(int $swapId, array $responder, string $response): arra
                 sendNotificationEmail('shift_swap_accepted', $requester['email'], [
                     'user_name'        => $requester['name'],
                     'replacement_name' => $responder['name'],
-                    'mission_title'    => $swap['mission_title'],
+                    'mission_title'    => $missionLabel,
                     'shift_date'       => formatDateTime($swap['start_time'], 'd/m/Y'),
                     'shift_time'       => formatDateTime($swap['start_time'], 'H:i') . ' - ' . formatDateTime($swap['end_time'], 'H:i'),
                 ]);
@@ -95,7 +96,7 @@ function shiftSwapRespond(int $swapId, array $responder, string $response): arra
             sendNotification(
                 $swap['from_volunteer_id'],
                 'Αποδοχή Αντικατάστασης',
-                'Ο/Η ' . $responder['name'] . ' αποδέχτηκε το αίτημα αντικατάστασης για: ' . $swap['mission_title'] . '. Αναμένεται έγκριση διαχειριστή.'
+                'Ο/Η ' . $responder['name'] . ' αποδέχτηκε το αίτημα αντικατάστασης για: ' . $missionLabel . '. Αναμένεται έγκριση διαχειριστή.'
             );
         }
 
@@ -111,7 +112,7 @@ function shiftSwapRespond(int $swapId, array $responder, string $response): arra
     sendNotification(
         $swap['from_volunteer_id'],
         'Άρνηση Αντικατάστασης',
-        'Ο/Η ' . $responder['name'] . ' αρνήθηκε το αίτημα αντικατάστασης για: ' . $swap['mission_title'] . '. Μπορείτε να ζητήσετε άλλον εθελοντή.'
+        'Ο/Η ' . $responder['name'] . ' αρνήθηκε το αίτημα αντικατάστασης για: ' . $missionLabel . '. Μπορείτε να ζητήσετε άλλον εθελοντή.'
     );
 
     return ['level' => 'warning', 'message' => 'Αρνηθήκατε το αίτημα αντικατάστασης.'];
@@ -140,7 +141,7 @@ function shiftSwapAwaitingAdmin(?int $departmentId = null, ?int $branchId = null
 
     return dbFetchAll(
         "SELECT ssr.*, s.start_time, s.end_time,
-                m.id as mission_id, m.title as mission_title, m.location,
+                m.id as mission_id, m.title as mission_title, m.is_training, m.location,
                 fu.name as from_volunteer_name, tu.name as to_volunteer_name
          FROM shift_swap_requests ssr
          JOIN shifts s ON ssr.shift_id = s.id
@@ -169,6 +170,7 @@ function shiftSwapAdminApprove(int $swapId, array $admin, ?int $requireShiftId =
     if (!$swap) {
         return ['level' => 'error', 'message' => 'Δεν βρέθηκε το αίτημα αντικατάστασης.'];
     }
+    $missionLabel = trainingTitlePrefix($swap) . $swap['mission_title'];
     if ($swap['mission_status'] === STATUS_COMPLETED) {
         return ['level' => 'error', 'message' => 'Η αποστολή είναι ολοκληρωμένη. Αλλάξτε πρώτα την κατάσταση σε «Κλειστή» για να κάνετε αλλαγές.'];
     }
@@ -211,7 +213,7 @@ function shiftSwapAdminApprove(int $swapId, array $admin, ?int $requireShiftId =
 
     $shiftUrl = 'shift-view.php?id=' . (int) $swap['shift_id'];
     $vars = [
-        'mission_title' => $swap['mission_title'],
+        'mission_title' => $missionLabel,
         'shift_date'    => formatDateTime($swap['start_time'], 'd/m/Y'),
         'shift_time'    => formatDateTime($swap['start_time'], 'H:i') . ' - ' . formatDateTime($swap['end_time'], 'H:i'),
     ];
@@ -226,7 +228,7 @@ function shiftSwapAdminApprove(int $swapId, array $admin, ?int $requireShiftId =
     sendNotification($swap['from_volunteer_id'], 'Αντικατάσταση Εγκρίθηκε',
         'Η αντικατάστασή σας από τον/την ' . $swap['to_volunteer_name'] . ' εγκρίθηκε από τον διαχειριστή.', 'success', '', ['url' => $shiftUrl]);
     sendNotification($swap['to_volunteer_id'], 'Εγκρίθηκε η Συμμετοχή σας',
-        'Εγκριθήκατε ως αντικατάσταση για τη βάρδια της αποστολής: ' . $swap['mission_title'] . '.', 'success', '', ['url' => $shiftUrl]);
+        'Εγκριθήκατε ως αντικατάσταση για τη βάρδια της αποστολής: ' . $missionLabel . '.', 'success', '', ['url' => $shiftUrl]);
 
     return ['level' => 'success', 'message' => 'Η αντικατάσταση εγκρίθηκε επιτυχώς.'];
 }
@@ -274,7 +276,7 @@ function shiftSwapFetchForAdmin(int $swapId, ?int $requireShiftId = null): ?arra
 
     return dbFetchOne(
         "SELECT ssr.*, s.start_time, s.end_time,
-                m.title as mission_title, m.status as mission_status,
+                m.title as mission_title, m.is_training, m.status as mission_status,
                 fu.name as from_volunteer_name, fu.email as from_email,
                 tu.name as to_volunteer_name, tu.email as to_email
          FROM shift_swap_requests ssr

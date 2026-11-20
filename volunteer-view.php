@@ -467,15 +467,15 @@ $participations = dbFetchAll(
 // Get stats
 $stats = [
     'total_shifts' => dbFetchValue(
-        "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = '" . PARTICIPATION_APPROVED . "'",
+        "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = '" . PARTICIPATION_APPROVED . "' AND is_training = 0",
         [$id]
     ),
     'attended_shifts' => dbFetchValue(
-        "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND attended = 1",
+        "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND attended = 1 AND is_training = 0",
         [$id]
     ),
     'total_hours' => dbFetchValue(
-        "SELECT COALESCE(SUM(actual_hours), 0) FROM participation_requests WHERE volunteer_id = ? AND attended = 1",
+        "SELECT COALESCE(SUM(actual_hours), 0) FROM participation_requests WHERE volunteer_id = ? AND attended = 1 AND is_training = 0",
         [$id]
     ),
     'pending_requests' => dbFetchValue(
@@ -493,7 +493,7 @@ $missionAttendance = (int) dbFetchValue(
      FROM participation_requests pr
      JOIN shifts s ON pr.shift_id = s.id
      JOIN missions m ON s.mission_id = m.id
-     WHERE pr.volunteer_id = ? AND pr.attended = 1
+     WHERE pr.volunteer_id = ? AND pr.attended = 1 AND pr.is_training = 0
      AND YEAR(m.start_datetime) = ?
      AND m.mission_type_id IN ($attPlaceholders)",
     array_merge([$id, $currentYear], $attTypeIds)
@@ -516,7 +516,7 @@ if (($volunteer['volunteer_type'] ?? '') === VTYPE_TRAINEE) {
         FROM participation_requests pr
         JOIN shifts s ON pr.shift_id = s.id
         JOIN missions m ON s.mission_id = m.id
-        WHERE pr.volunteer_id = ? AND pr.status = ? AND pr.attended = 1
+        WHERE pr.volunteer_id = ? AND pr.status = ? AND pr.attended = 1 AND pr.is_training = 0
           AND m.mission_type_id = ?",
         [$id, PARTICIPATION_APPROVED, getTepMissionTypeId()]
     );
@@ -535,7 +535,7 @@ if (($volunteer['volunteer_type'] ?? '') === VTYPE_RESCUER) {
          FROM participation_requests pr
          JOIN shifts s ON pr.shift_id = s.id
          JOIN missions m ON s.mission_id = m.id
-         WHERE pr.volunteer_id = ? AND pr.attended = 1
+         WHERE pr.volunteer_id = ? AND pr.attended = 1 AND pr.is_training = 0
            AND YEAR(m.start_datetime) = ?
            AND m.mission_type_id = ?",
         [$id, $currentYear, getEduMissionTypeId()]
@@ -1301,6 +1301,12 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
                 <?php endif; ?>
             </div>
         </div>
+
+        <?php
+        $trainingRecord = getVolunteerTrainingRecord((int) $id);
+        $trainingRecordCanViewCertificate = hasPagePermission('missions_manage'); // mission-certificate-print.php admits only the recipient, missions_manage and the responsible user
+        include __DIR__ . '/includes/training-record-section.php';
+        ?>
 
         <!-- Mission Certificates (Βεβαιώσεις) — separate from the qualification
              certificates card above; lets an admin delete one directly from a

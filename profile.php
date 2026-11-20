@@ -48,7 +48,7 @@ $allSkills = dbFetchAll("SELECT * FROM skills ORDER BY category, name");
 // Get stats
 $stats = [
     'total_shifts' => dbFetchValue(
-        "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = '" . PARTICIPATION_APPROVED . "'",
+        "SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = '" . PARTICIPATION_APPROVED . "' AND is_training = 0",
         [$user['id']]
     ),
     'total_hours' => dbFetchValue(
@@ -58,7 +58,7 @@ $stats = [
         ), 0)
         FROM participation_requests pr
         JOIN shifts s ON pr.shift_id = s.id
-        WHERE pr.volunteer_id = ? AND pr.status = '" . PARTICIPATION_APPROVED . "' AND pr.attended = 1",
+        WHERE pr.volunteer_id = ? AND pr.status = '" . PARTICIPATION_APPROVED . "' AND pr.attended = 1 AND pr.is_training = 0",
         [$user['id']]
     ),
     'achievements' => (getSetting('achievements_enabled', '1') === '1') ? dbFetchValue(
@@ -76,7 +76,7 @@ $missionAttendance = (int) dbFetchValue(
      FROM participation_requests pr
      JOIN shifts s ON pr.shift_id = s.id
      JOIN missions m ON s.mission_id = m.id
-     WHERE pr.volunteer_id = ? AND pr.attended = 1
+     WHERE pr.volunteer_id = ? AND pr.attended = 1 AND pr.is_training = 0
      AND YEAR(m.start_datetime) = ?
      AND m.mission_type_id IN ($attPlaceholders)",
     array_merge([$user['id'], $currentYear], $attTypeIds)
@@ -99,7 +99,7 @@ if (isTraineeRescuer()) {
         FROM participation_requests pr
         JOIN shifts s ON pr.shift_id = s.id
         JOIN missions m ON s.mission_id = m.id
-        WHERE pr.volunteer_id = ? AND pr.status = ? AND pr.attended = 1
+        WHERE pr.volunteer_id = ? AND pr.status = ? AND pr.attended = 1 AND pr.is_training = 0
           AND m.mission_type_id = ?",
         [$user['id'], PARTICIPATION_APPROVED, getTepMissionTypeId()]
     );
@@ -118,7 +118,7 @@ if (($user['volunteer_type'] ?? '') === VTYPE_RESCUER) {
          FROM participation_requests pr
          JOIN shifts s ON pr.shift_id = s.id
          JOIN missions m ON s.mission_id = m.id
-         WHERE pr.volunteer_id = ? AND pr.attended = 1
+         WHERE pr.volunteer_id = ? AND pr.attended = 1 AND pr.is_training = 0
            AND YEAR(m.start_datetime) = ?
            AND m.mission_type_id = ?",
         [$user['id'], $currentYear, getEduMissionTypeId()]
@@ -892,6 +892,12 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
     </div>
 </div>
 <?php endif; ?>
+
+<?php
+$trainingRecord = getVolunteerTrainingRecord((int) $user['id']);
+$trainingRecordCanViewCertificate = true; // the volunteer's own certificates
+include __DIR__ . '/includes/training-record-section.php';
+?>
 
 <!-- My Certificates -->
 <?php

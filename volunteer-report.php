@@ -38,7 +38,7 @@ $attendedShifts = dbFetchAll(
      JOIN shifts s ON pr.shift_id = s.id
      JOIN missions m ON s.mission_id = m.id
      WHERE pr.volunteer_id = ?
-       AND pr.attended = 1
+       AND pr.attended = 1 AND pr.is_training = 0
      ORDER BY s.start_time DESC",
     [$id]
 );
@@ -51,7 +51,7 @@ $monthlyBreakdown = dbFetchAll(
      FROM participation_requests pr
      JOIN shifts s ON pr.shift_id = s.id
      WHERE pr.volunteer_id = ?
-       AND pr.attended = 1
+       AND pr.attended = 1 AND pr.is_training = 0
      GROUP BY YEAR(s.start_time), MONTH(s.start_time)
      ORDER BY yr DESC, mo DESC",
     [$id]
@@ -366,6 +366,22 @@ $greekMonths = [
             <i class="bi bi-inbox fs-3 d-block mb-2"></i>
             Δεν υπάρχουν καταγεγραμμένες παρουσίες ακόμα.
         </div>
+        <?php endif; ?>
+
+        <?php $trainingRecord = getVolunteerTrainingRecord((int) $id); ?>
+        <?php if (!empty($trainingRecord['rows'])): ?>
+        <div class="section-title"><i class="bi bi-mortarboard me-1"></i>Εκπαιδευτικές Ασκήσεις</div>
+        <p class="small text-muted mb-2">Δεν περιλαμβάνονται στις ώρες εθελοντισμού παραπάνω.
+            Σύνολο: <?= (int) $trainingRecord['drills'] ?> ασκήσεις, <?= number_format($trainingRecord['hours'], 1) ?> ώρες.</p>
+        <table class="table table-sm">
+            <?php foreach ($trainingRecord['rows'] as $row): ?>
+                <tr>
+                    <td><?= formatDate($row['first_start']) ?></td>
+                    <td><?= h($row['title']) ?></td>
+                    <td class="text-end"><?= number_format($row['hours'], 1) ?>h</td>
+                </tr>
+            <?php endforeach; ?>
+        </table>
         <?php endif; ?>
 
         <?php if (!empty($achievements)): ?>

@@ -17,7 +17,7 @@ $shift = dbFetchOne(
     "SELECT s.*, m.title as mission_title, m.status as mission_status, m.department_id,
             m.description, m.location, m.end_datetime as mission_end_datetime,
             m.mission_type_id, m.responsible_user_id, m.is_locked as mission_is_locked,
-            m.latitude as mission_latitude, m.longitude as mission_longitude
+            m.latitude as mission_latitude, m.longitude as mission_longitude, m.is_training
      FROM shifts s
      JOIN missions m ON s.mission_id = m.id
      WHERE s.id = ?",
@@ -29,6 +29,8 @@ if (!$shift) {
     redirect('shifts.php');
 }
 
+// Participant-facing messages (email, in-app, calendar title) name a drill as such.
+$missionLabel = trainingTitlePrefix($shift) . $shift['mission_title'];
 $pageTitle = $shift['mission_title'] . ' - ' . formatDateTime($shift['start_time']);
 $user = getCurrentUser();
 $missionCompleted = ($shift['mission_status'] === STATUS_COMPLETED);
@@ -136,11 +138,11 @@ if (isPost()) {
                 
                 // Send notification
                 if ($prInfo && isNotificationEnabled('participation_approved')) {
-                    $gcalLink = buildGcalLink($shift['mission_title'], $shift['start_time'], $shift['end_time'], $shift['location'] ?: '');
+                    $gcalLink = buildGcalLink($missionLabel, $shift['start_time'], $shift['end_time'], $shift['location'] ?: '');
                     // Send email
                     sendNotificationEmail('participation_approved', $prInfo['email'], [
                         'user_name'     => $prInfo['name'],
-                        'mission_title' => $shift['mission_title'],
+                        'mission_title' => $missionLabel,
                         'shift_date'    => formatDateTime($shift['start_time'], 'd/m/Y'),
                         'shift_time'    => formatDateTime($shift['start_time'], 'H:i'),
                         'location'      => $shift['location'] ?: 'Θα ανακοινωθεί',
@@ -151,7 +153,7 @@ if (isPost()) {
                     sendNotification(
                         $prInfo['volunteer_id'],
                         'Η αίτησή σας εγκρίθηκε',
-                        'Η αίτησή σας για τη βάρδια "' . $shift['mission_title'] . '" στις ' . 
+                        'Η αίτησή σας για τη βάρδια "' . $missionLabel . '" στις ' . 
                         formatDateTime($shift['start_time']) . ' εγκρίθηκε.',
                         'success',
                         '',
@@ -187,13 +189,13 @@ if (isPost()) {
                     // Send email
                     sendNotificationEmail('participation_rejected', $volunteer['email'], [
                         'user_name' => $volunteer['name'],
-                        'mission_title' => $shift['mission_title'],
+                        'mission_title' => $missionLabel,
                         'shift_date' => formatDateTime($shift['start_time'], 'd/m/Y'),
                         'rejection_reason' => $reason ?: 'Δεν αναφέρθηκε λόγος'
                     ]);
                     
                     // Send in-app notification
-                    $message = 'Η αίτηση συμμετοχής σας στη βάρδια "' . $shift['mission_title'] . '" (' . formatDateTime($shift['start_time']) . ') απορρίφθηκε.';
+                    $message = 'Η αίτηση συμμετοχής σας στη βάρδια "' . $missionLabel . '" (' . formatDateTime($shift['start_time']) . ') απορρίφθηκε.';
                     if ($reason) {
                         $message .= ' Αιτία: ' . $reason;
                     }
@@ -230,10 +232,10 @@ if (isPost()) {
 
                     // Send email notification (reuse participation_approved template)
                     if (isNotificationEnabled('participation_approved')) {
-                        $gcalLink = buildGcalLink($shift['mission_title'], $shift['start_time'], $shift['end_time'], $shift['location'] ?: '');
+                        $gcalLink = buildGcalLink($missionLabel, $shift['start_time'], $shift['end_time'], $shift['location'] ?: '');
                         sendNotificationEmail('participation_approved', $pr['email'], [
                             'user_name'     => $pr['name'],
-                            'mission_title' => $shift['mission_title'],
+                            'mission_title' => $missionLabel,
                             'shift_date'    => formatDateTime($shift['start_time'], 'd/m/Y'),
                             'shift_time'    => formatDateTime($shift['start_time'], 'H:i'),
                             'location'      => $shift['location'] ?: 'Θα ανακοινωθεί',
@@ -245,7 +247,7 @@ if (isPost()) {
                     sendNotification(
                         (int) $pr['volunteer_id'],
                         'Επανενεργοποίηση Συμμετοχής',
-                        'Η συμμετοχή σας στη βάρδια "' . $shift['mission_title'] . '" (' . formatDateTime($shift['start_time']) . ') επανενεργοποιήθηκε και είναι πλέον εγκεκριμένη.',
+                        'Η συμμετοχή σας στη βάρδια "' . $missionLabel . '" (' . formatDateTime($shift['start_time']) . ') επανενεργοποιήθηκε και είναι πλέον εγκεκριμένη.',
                         'success',
                         '',
                         ['url' => 'shift-view.php?id=' . $id]
@@ -281,7 +283,7 @@ if (isPost()) {
                     recordManualAttendance((int) $prId, (int) $id, (int) $user['id'], $actualHours);
 
                     // Award points
-                    if (getSetting('points_enabled', '1') === '1') {
+                    if (getSetting('points_enabled', '1') === '1' && empty($pr['is_training'])) {
                         $hours = $actualHours ?: calculateShiftHours($shift);
                         $points = calculatePoints($shift, $hours);
 
@@ -306,7 +308,7 @@ if (isPost()) {
                         checkAndAwardAchievements((int)$pr['volunteer_id']);
                     }
 
-                    setFlash('success', getSetting('points_enabled', '1') === '1' ? 'Η παρουσία καταγράφηκε και δόθηκαν πόντοι.' : 'Η παρουσία καταγράφηκε επιτυχώς.');
+                    setFlash('success', !empty($pr['is_training']) ? 'Η παρουσία καταγράφηκε (εκπαιδευτική άσκηση, χωρίς πόντους).' : (getSetting('points_enabled', '1') === '1' ? 'Η παρουσία καταγράφηκε και δόθηκαν πόντοι.' : 'Η παρουσία καταγράφηκε επιτυχώς.'));
                 } catch (Exception $e) {
                     db()->rollBack();
                     setFlash('error', 'Σφάλμα κατά την καταγραφή παρουσίας. Παρακαλώ δοκιμάστε ξανά.');
@@ -361,7 +363,7 @@ if (isPost()) {
                         sendBulkNotifications(
                             $userIds,
                             'Ακύρωση Βάρδιας',
-                            'Η βάρδια στην αποστολή "' . $shift['mission_title'] . '" (' . formatDateTime($shift['start_time']) . ') διαγράφηκε. Η αίτησή σας ακυρώθηκε αυτόματα.'
+                            'Η βάρδια στην αποστολή "' . $missionLabel . '" (' . formatDateTime($shift['start_time']) . ') διαγράφηκε. Η αίτησή σας ακυρώθηκε αυτόματα.'
                         );
                     }
                     
@@ -426,13 +428,13 @@ if (isPost()) {
                     
                     // Send email notification
                     if ($volunteerInfo && !empty($volunteerInfo['email']) && isNotificationEnabled('admin_added_volunteer')) {
-                        $gcalLink = buildGcalLink($shift['mission_title'], $shift['start_time'], $shift['end_time'], $shift['location'] ?: '');
+                        $gcalLink = buildGcalLink($missionLabel, $shift['start_time'], $shift['end_time'], $shift['location'] ?: '');
                         sendNotificationEmail(
                             'admin_added_volunteer',
                             $volunteerInfo['email'],
                             [
                                 'user_name'     => $volunteerInfo['name'],
-                                'mission_title' => $shift['mission_title'],
+                                'mission_title' => $missionLabel,
                                 'shift_date'    => formatDateTime($shift['start_time'], 'd/m/Y'),
                                 'shift_time'    => formatDateTime($shift['start_time'], 'H:i') . ' - ' . formatDateTime($shift['end_time'], 'H:i'),
                                 'location'      => $shift['location'] ?: 'Θα ανακοινωθεί',
@@ -446,7 +448,7 @@ if (isPost()) {
                     sendNotification(
                         (int) $volunteerId,
                         'Τοποθετήθηκατε σε βάρδια',
-                        'Ο διαχειριστής σας τοποθέτησε στη βάρδια: ' . $shift['mission_title'] . ' - ' . formatDateTime($shift['start_time']),
+                        'Ο διαχειριστής σας τοποθέτησε στη βάρδια: ' . $missionLabel . ' - ' . formatDateTime($shift['start_time']),
                         'success',
                         '',
                         ['url' => 'shift-view.php?id=' . $id]
@@ -513,13 +515,13 @@ if (isPost()) {
                     
                     // Send email notification
                     if ($volunteerInfo && !empty($volunteerInfo['email']) && isNotificationEnabled('admin_added_volunteer')) {
-                        $gcalLink = buildGcalLink($shift['mission_title'], $shift['start_time'], $shift['end_time'], $shift['location'] ?: '');
+                        $gcalLink = buildGcalLink($missionLabel, $shift['start_time'], $shift['end_time'], $shift['location'] ?: '');
                         sendNotificationEmail(
                             'admin_added_volunteer',
                             $volunteerInfo['email'],
                             [
                                 'user_name'     => $volunteerInfo['name'],
-                                'mission_title' => $shift['mission_title'],
+                                'mission_title' => $missionLabel,
                                 'shift_date'    => formatDateTime($shift['start_time'], 'd/m/Y'),
                                 'shift_time'    => formatDateTime($shift['start_time'], 'H:i') . ' - ' . formatDateTime($shift['end_time'], 'H:i'),
                                 'location'      => $shift['location'] ?: 'Θα ανακοινωθεί',
@@ -533,7 +535,7 @@ if (isPost()) {
                     sendNotification(
                         (int) $volunteerId,
                         'Τοποθετήθηκατε σε βάρδια',
-                        'Ο διαχειριστής σας τοποθέτησε στη βάρδια: ' . $shift['mission_title'] . ' - ' . formatDateTime($shift['start_time']),
+                        'Ο διαχειριστής σας τοποθέτησε στη βάρδια: ' . $missionLabel . ' - ' . formatDateTime($shift['start_time']),
                         'success',
                         '',
                         ['url' => 'shift-view.php?id=' . $id]
@@ -613,7 +615,7 @@ if (isPost()) {
                                 sendNotification(
                                     (int) $pr['volunteer_id'],
                                     'Ακύρωση Συμμετοχής',
-                                    'Η συμμετοχή σας στη βάρδια "' . $shift['mission_title'] . '" (' . formatDateTime($shift['start_time']) . ') ακυρώθηκε από τον διαχειριστή.',
+                                    'Η συμμετοχή σας στη βάρδια "' . $missionLabel . '" (' . formatDateTime($shift['start_time']) . ') ακυρώθηκε από τον διαχειριστή.',
                                     'warning',
                                     '',
                                     ['url' => 'shift-view.php?id=' . $id]
@@ -629,7 +631,7 @@ if (isPost()) {
                                 sendNotification(
                                     (int) $pr['volunteer_id'],
                                     'Ενεργοποίηση Συμμετοχής',
-                                    'Η συμμετοχή σας στη βάρδια "' . $shift['mission_title'] . '" (' . formatDateTime($shift['start_time']) . ') είναι πλέον εγκεκριμένη.',
+                                    'Η συμμετοχή σας στη βάρδια "' . $missionLabel . '" (' . formatDateTime($shift['start_time']) . ') είναι πλέον εγκεκριμένη.',
                                     'success',
                                     '',
                                     ['url' => 'shift-view.php?id=' . $id]

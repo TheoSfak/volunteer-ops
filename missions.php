@@ -16,13 +16,18 @@ if (isPost() && post('action') === 'duplicate' && isAdmin()) {
         "SELECT * FROM missions WHERE id = ? AND deleted_at IS NULL",
         [$srcId]
     );
+    if ($src && (int) $src['is_training'] === 1 && !trainingMissionsAvailable()) {
+        // Fail closed, same rule as creating a drill: never copy it into a mission the trigger cannot isolate.
+        setFlash('error', 'Η δημιουργία εκπαιδευτικής άσκησης δεν είναι διαθέσιμη: η βάση δεδομένων δεν έχει ενεργό τον μηχανισμό (trigger) που απομονώνει τις ασκήσεις από τα πραγματικά στατιστικά. Ενημερώστε τον διαχειριστή συστήματος.');
+        redirect('missions.php');
+    }
     if ($src) {
         $newId = dbInsert(
             "INSERT INTO missions
              (title, description, mission_type_id, department_id, branch_id, location, location_details,
               latitude, longitude, start_datetime, end_datetime, requirements, notes,
-              is_urgent, status, responsible_user_id, created_by, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
+              is_urgent, is_training, status, responsible_user_id, created_by, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
             [
                 t('missions_page.duplicate_prefix', ['title' => $src['title']]),
                 $src['description'],
@@ -38,6 +43,7 @@ if (isPost() && post('action') === 'duplicate' && isAdmin()) {
                 $src['requirements'],
                 $src['notes'],
                 $src['is_urgent'],
+                $src['is_training'],
                 STATUS_DRAFT,
                 $src['responsible_user_id'],
                 $user['id'],
@@ -62,6 +68,7 @@ if (!isAdmin() && $status !== STATUS_OPEN) {
 $department = get('department');
 $branch = get('branch');
 $missionType = (int)get('mission_type', 0);
+$trainingFilter = get('training'); // '' = all, '0' = operational only, '1' = training only
 $search = get('search');
 $page = max(1, (int)get('page', 1));
 $perPage = 20;
@@ -104,6 +111,11 @@ if ($search) {
 if ($missionType) {
     $where[] = 'm.mission_type_id = ?';
     $params[] = $missionType;
+}
+if ($trainingFilter === '1') {
+    $where[] = 'm.is_training = 1';
+} elseif ($trainingFilter === '0') {
+    $where[] = 'm.is_training = 0';
 }
 
 // Τ.Ε.Π. αποστολές: ορατές μόνο σε admins, δόκιμους και υπεύθυνο αποστολής
@@ -241,7 +253,7 @@ include __DIR__ . '/includes/header.php';
     </h1>
     <?php if (isAdmin()): ?>
         <div class="d-flex flex-wrap gap-2">
-            <a href="exports/export-missions.php?status=<?= h($status) ?>&department_id=<?= h($department) ?>&branch_id=<?= h($branch) ?>&search=<?= h($search) ?>&mission_type=<?= h($missionType) ?>"
+            <a href="exports/export-missions.php?status=<?= h($status) ?>&department_id=<?= h($department) ?>&branch_id=<?= h($branch) ?>&search=<?= h($search) ?>&mission_type=<?= h($missionType) ?>&training=<?= h($trainingFilter) ?>"
                class="btn btn-outline-success">
                 <i class="bi bi-download me-1"></i><?= t('missions_page.export_csv') ?>
             </a>
@@ -282,6 +294,13 @@ include __DIR__ . '/includes/header.php';
                             <?= h($mtf['name']) ?>
                         </option>
                     <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="col-md-2">
+                <select class="form-select form-select-sm" name="training">
+                    <option value="">Όλες</option>
+                    <option value="0" <?= $trainingFilter === '0' ? 'selected' : '' ?>>Επιχειρησιακές</option>
+                    <option value="1" <?= $trainingFilter === '1' ? 'selected' : '' ?>>Εκπαιδευτικές</option>
                 </select>
             </div>
             <div class="col-md-3">
@@ -343,7 +362,7 @@ include __DIR__ . '/includes/header.php';
                             <tr>
                                 <td>
                                     <a href="<?= $missionLinkBase ?>?id=<?= $mission['id'] ?>" class="text-decoration-none">
-                                        <strong><?= h($mission['title']) ?></strong>
+                                        <strong><?= h($mission['title']) ?></strong><?= trainingMissionBadgeHtml($mission) ?>
                                     </a>
                                     <?php if ($mission['is_urgent']): ?>
                                         <span class="badge bg-danger ms-1"><?= t('missions_page.urgent_badge') ?></span>
@@ -454,7 +473,7 @@ include __DIR__ . '/includes/header.php';
                             <div class="mobile-card-header">
                                 <div>
                                     <a href="<?= $missionLinkBase ?>?id=<?= $mission['id'] ?>" class="text-decoration-none">
-                                        <strong><?= h($mission['title']) ?></strong>
+                                        <strong><?= h($mission['title']) ?></strong><?= trainingMissionBadgeHtml($mission) ?>
                                     </a>
                                     <?php if ($mission['is_urgent']): ?>
                                         <span class="badge bg-danger ms-1"><?= t('missions_page.urgent_badge') ?></span>

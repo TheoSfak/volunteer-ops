@@ -817,7 +817,7 @@ function sendMissionOpenedNotifications(int $missionId, array $mission, array $p
     if (!empty($userIds)) {
         sendBulkNotifications(
             $userIds,
-            'Νέα Αποστολή: ' . $mission['title'],
+            trainingTitlePrefix($mission) . 'Νέα Αποστολή: ' . $mission['title'],
             'Μια νέα αποστολή δημοσιεύτηκε και αναζητά εθελοντές. Δείτε τις διαθέσιμες βάρδιες.',
             'info',
             '',
@@ -840,7 +840,7 @@ function sendMissionOpenedNotifications(int $missionId, array $mission, array $p
         if (!empty($v['email'])) {
             $result = sendNotificationEmail('new_mission', $v['email'], [
                 'user_name'           => $v['name'],
-                'mission_title'       => $mission['title'],
+                'mission_title'       => trainingTitlePrefix($mission) . $mission['title'],
                 'mission_description' => $mission['description'] ?? '',
                 'location'            => $mission['location'] ?? 'Θα ανακοινωθεί',
                 'start_date'          => formatDate($mission['start_datetime']),
