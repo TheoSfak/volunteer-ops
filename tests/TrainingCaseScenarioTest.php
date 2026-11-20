@@ -173,6 +173,56 @@ final class TrainingCaseScenarioTest extends TestCase
         $this->assertFalse(addScenarioCaseItem($m, $phase, $this->admin, $this->form())['ok']);
     }
 
+    /** The items of the plan as the card gets them, by id. */
+    private function planItems(): array
+    {
+        $items = [];
+        foreach (loadMissionScenario($this->drill['mission'])['phases'] as $phase) {
+            foreach ($phase['items'] as $item) {
+                $items[$item['id']] = $item;
+            }
+        }
+        return $items;
+    }
+
+    public function test_the_plan_says_whether_a_staged_case_has_been_reviewed_reading_the_library_now(): void
+    {
+        $phase = $this->phase($this->drill);
+        $m = $this->mission($this->drill);
+        $case = addScenarioCaseItem($m, $phase, $this->admin, $this->form());
+        $plain = addScenarioDispatchItem($m, $phase, $this->admin, ['team_id' => (string) $this->teamId, 'type' => 'point', 'geo' => json_encode(['lat' => 35.3, 'lng' => 25.1]), 'label' => 'x']);
+
+        trainingCaseSetReviewed($this->caseId, false, $this->admin);
+        $items = $this->planItems();
+        $this->assertFalse($items[$case['id']]['case_reviewed'], 'a starter is unreviewed until somebody has checked it');
+        $this->assertNull($items[$plain['id']]['case_reviewed'], 'an ordinary order has no such flag');
+
+        trainingCaseSetReviewed($this->caseId, true, $this->admin);
+        $this->assertTrue($this->planItems()[$case['id']]['case_reviewed'], 'the badge follows the library, the snapshot does not record it');
+    }
+
+    public function test_the_plan_tolerates_a_staged_case_whose_library_row_is_gone(): void
+    {
+        $phase = $this->phase($this->drill);
+        $case = addScenarioCaseItem($this->mission($this->drill), $phase, $this->admin, $this->form());
+        trainingCaseSetReviewed($this->caseId, true, $this->admin);
+        dbExecute("DELETE FROM training_cases WHERE id = ?", [$this->caseId]);
+
+        $items = $this->planItems();
+        $this->assertNotSame('', $items[$case['id']]['case_title'], 'the snapshot still names the case');
+        $this->assertFalse($items[$case['id']]['case_reviewed'], 'nothing can show it was checked, so it is not claimed');
+    }
+
+    public function test_the_scenario_page_gets_the_words_a_case_needs_on_its_card(): void
+    {
+        foreach (['el', 'en'] as $lang) {
+            $strings = scenarioPageStrings($lang)['strings'];
+            foreach (['case.plan_title', 'case.badge_unreviewed', 'case.picker_unreviewed_warning'] as $key) {
+                $this->assertArrayHasKey($key, $strings, "$key missing for $lang: the page would show the bare key");
+            }
+        }
+    }
+
     public function test_scenario_staged_case_ids_lists_what_is_already_in_the_plan(): void
     {
         $phase = $this->phase($this->drill);

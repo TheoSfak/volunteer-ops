@@ -6016,6 +6016,22 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
             </div>
         </div>
 
+        <?php
+        // «Περιστατικά» (v3.505.0): in a drill, who has opened each training case placed in it and how they chose. Command staff
+        // only, and only in a training mission. Drawn entirely by VoTrainingCase.renderOverview() from
+        // training-case.php?action=overview, which the card asks for by itself (its own light request every 20 s while it is
+        // on screen): the answers are not in WR_BOOT and not in the 5-second poll.
+        ?>
+        <?php if ($canManageWarRoom && !empty($mission['is_training'])): ?>
+        <div class="card shadow-sm mb-4 border-warning" data-card-id="trainingCasesCard">
+            <div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-clipboard2-pulse-fill me-1"></i><?= t('case.card_title') ?></h5>
+                <button type="button" class="btn btn-sm btn-outline-secondary" id="trainingCasesRefresh" title="<?= t('case.overview_refresh') ?>" aria-label="<?= t('case.overview_refresh') ?>"><i class="bi bi-arrow-clockwise"></i></button>
+            </div>
+            <div class="card-body py-2"><div id="trainingCasesBody" class="small text-muted" aria-live="polite"><?= t('case.overview_empty') ?></div></div>
+        </div>
+        <?php endif; ?>
+
         <?php if (!empty($teams)): ?>
         <div class="card shadow-sm mb-4 border-primary" data-card-id="routeOrderCard">
             <div class="card-header bg-primary bg-opacity-10"><h5 class="mb-0"><i class="bi bi-signpost-split-fill me-1"></i><?= t('route.card_title') ?></h5></div>
@@ -6302,6 +6318,26 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                         <option value="vehicle"><?= t('travel.vehicle') ?></option>
                     </select>
                     <span class="small text-danger fw-semibold d-none" id="dispatchIncidentLine"><i class="bi bi-heart-pulse-fill me-1"></i><span></span></span>
+                    <?php
+                    // «Περιστατικό» (v3.505.0): a training case put at the point drawn here, staged with «Στο σενάριο» and never
+                    // sent at once (the button «Αποστολή» is hidden while one is chosen). Only in a drill, only for the system
+                    // admin who can stage at all; the options are filled from mission-scenario.php (case_list) on first open.
+                    // «Τυχαίο» draws one at once and shows which came up (the «Άλλο» button draws again).
+                    ?>
+                    <?php if (isSystemAdmin() && !empty($mission['is_training'])): ?>
+                    <label class="small fw-semibold mb-0" for="dispatchCaseSelect"><i class="bi bi-clipboard2-pulse me-1"></i><?= t('case.picker_label') ?></label>
+                    <select class="form-select form-select-sm" id="dispatchCaseSelect" style="max-width:260px;">
+                        <option value=""><?= t('case.picker_none') ?></option>
+                    </select>
+                    <select class="form-select form-select-sm d-none" id="dispatchCaseType" style="max-width:150px;" aria-label="<?= t('case.picker_any_type') ?>"></select>
+                    <select class="form-select form-select-sm d-none" id="dispatchCaseDifficulty" style="max-width:150px;" aria-label="<?= t('case.picker_any_difficulty') ?>"></select>
+                    <select class="form-select form-select-sm d-none" id="dispatchCaseLanguage" style="max-width:130px;" aria-label="<?= t('case.picker_any_language') ?>"></select>
+                    <label class="small d-none" id="dispatchCaseUnrevWrap"><input type="checkbox" id="dispatchCaseUnrev"> <?= t('case.picker_include_unreviewed') ?></label>
+                    <span class="small fw-semibold text-primary d-none" id="dispatchCaseDrawn" role="status"></span>
+                    <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="dispatchCaseRedraw"><i class="bi bi-shuffle me-1"></i><?= t('case.picker_redraw') ?></button>
+                    <input type="text" id="dispatchCaseBriefing" class="form-control form-control-sm d-none" style="max-width:260px;" maxlength="300" placeholder="<?= t('case.picker_briefing') ?>">
+                    <div class="w-100 small text-danger fw-semibold d-none" id="dispatchCaseWarn" role="alert"></div>
+                    <?php endif; ?>
                 </div>
                 <div class="p-2 border-bottom d-flex flex-wrap gap-2 align-items-center bg-light">
                     <input type="text" id="dispatchAddressInput" class="form-control" style="max-width:320px;" placeholder="<?= t('dispatch.address_placeholder') ?>">
@@ -27912,6 +27948,44 @@ function applyTeamBoardCollapsed(collapsed) {
 // «Σενάριο» (v3.452.0): the card, the ghosts on the map and the plan's own requests live in
 // assets/js/war-room-scenario.js, which is only loaded for command staff.
 if (window.wrScenario) window.wrScenario.init();
+
+// «Περιστατικά» (v3.505.0): the card of a drill that says who has opened each training case placed in it, and how they chose.
+// Its own light request, not the 5-second poll: once when the page opens, on its refresh button, and every 20 seconds while the
+// card is on screen and the tab is not hidden (training-case.php?action=overview, command only). Drawn by
+// VoTrainingCase.renderOverview(); the DOM is left alone when nothing changed, and the sections a commander opened (a volunteer's
+// run, the per-step counts) stay open across a refresh.
+(function() {
+    const body = document.getElementById('trainingCasesBody');
+    if (!body || !window.VoTrainingCase) return;
+    const refreshBtn = document.getElementById('trainingCasesRefresh');
+    const REFRESH_MS = 20000;
+    let inFlight = false;
+    let lastJson = null;
+    function onScreen() {
+        return !document.hidden && body.getClientRects().length > 0;
+    }
+    function loadOverview() {
+        if (inFlight) return;
+        inFlight = true;
+        fetch('training-case.php?action=overview&mission_id=' + encodeURIComponent(WR_MISSION_ID))
+            .then(response => response.json())
+            .then(res => {
+                if (!res || !res.ok) return;
+                const json = JSON.stringify(res.placements || []);
+                if (json === lastJson) return;
+                lastJson = json;
+                const open = new Set(Array.from(body.querySelectorAll('details[open]')).map(d => d.dataset.k));
+                body.innerHTML = VoTrainingCase.renderOverview(res, t);
+                body.querySelectorAll('details[data-k]').forEach(d => { if (open.has(d.dataset.k)) d.open = true; });
+            })
+            .catch(() => null)
+            .then(() => { inFlight = false; });
+    }
+    if (refreshBtn) refreshBtn.addEventListener('click', loadOverview);
+    document.addEventListener('visibilitychange', () => { if (onScreen()) loadOverview(); });
+    setInterval(() => { if (onScreen()) loadOverview(); }, REFRESH_MS);
+    loadOverview();
+})();
 <?php endif; ?>
 
 // Named (not the previous inline arrow passed straight to setInterval) so
@@ -28887,6 +28961,12 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
             // Ready is what «Στο σενάριο» says, not what «Αποστολή» says: a slot can be staged but never sent.
             if (!window.wrScenario || scenarioBtn.disabled) return;
             if (!teamSelect.value) { alert(t('dispatch.pick_team_first')); return; }
+            // A training case (v3.505.0, the picker below the recipients): it goes at a point, never an area, and a case that was
+            // asked for but not drawn yet is not staged as a plain point behind the commander's back.
+            const wantsCase = !!(window.wrDispatchCaseWanted && window.wrDispatchCaseWanted());
+            const caseFields = wantsCase && window.wrDispatchCaseFields ? window.wrDispatchCaseFields() : {};
+            if (wantsCase && isClosed) { alert(t('case.err_needs_point')); return; }
+            if (wantsCase && !caseFields.case_id) { alert(t('case.err_pick_first')); return; }
             const type = isClosed ? 'polygon' : 'point';
             const geo = type === 'point' ? {lat: drawPoints[0][0], lng: drawPoints[0][1]} : drawPoints;
             const noteText = noteInput.value.trim();
@@ -28895,11 +28975,11 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
             // closed first: otherwise it stays open over the window after the order has gone into the phase.
             bootstrap.Dropdown.getOrCreateInstance(scenarioBtn).hide();
             scenarioBtn.disabled = true;
-            window.wrScenario.stage(choice.dataset.scPhase, {
+            window.wrScenario.stage(choice.dataset.scPhase, Object.assign({
                 // 'all' is "every team" to the scenario endpoint, and it is the only word that means that.
                 team_id: teamSelect.value, type: type, geo: JSON.stringify(geo), label: combinedLabel,
                 travel_mode: teamSelect.value === 'all' ? '' : travelSelect.value,
-            }).then(res => {
+            }, caseFields)).then(res => {
                 if (res && res.ok) {
                     const phase = window.wrScenario.phases().find(p => String(p.id) === String(res.phase_id));
                     resetDrawing();
@@ -28908,6 +28988,8 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
                     addressStatus.textContent = '';
                     updateSendState();
                     renderDispatchContext();
+                    // A case staged: its briefing is used up, and a random pick is drawn afresh for the next point.
+                    if (window.wrDispatchCaseAfterStage) window.wrDispatchCaseAfterStage();
                     if (scenarioStatus && phase) scenarioStatus.textContent = t('scenario.staged_ok', {phase: t('scenario.phase_n', {n: phase.n}), n: phase.items.length});
                 } else {
                     syncScenarioBtn();
@@ -28948,6 +29030,147 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
                 sendBtn.disabled = false;
             }
         }).catch(() => { alert(t('common.send_failed')); sendBtn.disabled = false; });
+    });
+})();
+
+// «Περιστατικό» in the dispatch window (v3.505.0): a training case staged at the point drawn there. Active only when the picker was
+// printed (a system admin, in a drill). The library comes from mission-scenario.php (case_list) the first time the window opens; a
+// random pick is drawn at once, shows which case came up and can be drawn again, preferring cases not already in the plan.
+// A case is staged only («Στο σενάριο»), never sent at once, so «Αποστολή» is hidden while one is chosen. The staging handler above
+// reads the choice through window.wrDispatchCaseFields(). Case titles reach the page only as option/text content, never as markup.
+(function() {
+    const modalEl = document.getElementById('dispatchMapModal');
+    const select = document.getElementById('dispatchCaseSelect');
+    if (!modalEl || !select || !window.wrScenario || !window.VoTrainingCase) return;
+    const TC = window.VoTrainingCase;
+    const typeSel = document.getElementById('dispatchCaseType');
+    const diffSel = document.getElementById('dispatchCaseDifficulty');
+    const langSel = document.getElementById('dispatchCaseLanguage');
+    const unrev = document.getElementById('dispatchCaseUnrev');
+    const unrevWrap = document.getElementById('dispatchCaseUnrevWrap');
+    const drawnEl = document.getElementById('dispatchCaseDrawn');
+    const redrawBtn = document.getElementById('dispatchCaseRedraw');
+    const briefing = document.getElementById('dispatchCaseBriefing');
+    const warn = document.getElementById('dispatchCaseWarn');
+    const sendBtn = document.getElementById('dispatchSendBtn');
+    const scenarioGroup = document.getElementById('dispatchScenarioGroup');
+    let cases = null;
+    let loading = false;
+    let errorText = '';
+    let drawToken = 0;
+    let state = {mode: null, caseId: '', reviewed: true, filter: {}};
+
+    function show(el, on) { el.classList.toggle('d-none', !on); }
+
+    function renderWarn() {
+        const parts = [];
+        if (errorText) parts.push(errorText);
+        if (state.mode && state.caseId && state.reviewed === false) parts.push('⚠ ' + t('case.picker_unreviewed_warning'));
+        warn.textContent = parts.join(' ');
+        show(warn, parts.length > 0);
+    }
+
+    function syncView() {
+        const wanted = state.mode !== null;
+        const random = state.mode === 'random';
+        sendBtn.classList.toggle('d-none', wanted);
+        show(briefing, wanted);
+        [typeSel, diffSel, langSel, unrevWrap, redrawBtn].forEach(el => show(el, random));
+        show(drawnEl, random && !!state.caseId);
+        renderWarn();
+    }
+
+    function fillFilter(sel, anyKey, values, label) {
+        sel.innerHTML = '';
+        sel.add(new Option(t(anyKey), ''));
+        values.forEach(v => sel.add(new Option(label(v), String(v))));
+    }
+
+    function fillOptions() {
+        while (select.options.length > 1) select.remove(1);
+        select.add(new Option(t('case.picker_random'), 'random'));
+        cases.forEach(c => select.add(new Option(TC.caseOptionLabel(c, t), String(c.id))));
+        const distinct = key => Array.from(new Set(cases.map(c => c[key]).filter(v => v !== '' && v != null))).sort();
+        fillFilter(typeSel, 'case.picker_any_type', distinct('type'), v => v);
+        fillFilter(diffSel, 'case.picker_any_difficulty', distinct('difficulty'), v => '★'.repeat(Number(v)));
+        fillFilter(langSel, 'case.picker_any_language', distinct('language'), v => String(v).toUpperCase());
+    }
+
+    function ensureLoaded() {
+        if (cases !== null || loading) return;
+        loading = true;
+        errorText = '';
+        window.wrScenario.caseList().then(res => {
+            loading = false;
+            if (res && res.ok && Array.isArray(res.cases)) {
+                cases = res.cases;
+                fillOptions();
+            } else {
+                errorText = (res && res.error) || t('case.picker_load_failed');
+            }
+            renderWarn();
+        });
+    }
+
+    function draw() {
+        const token = ++drawToken;
+        const filter = {};
+        if (typeSel.value) filter.type = typeSel.value;
+        if (diffSel.value) filter.difficulty = diffSel.value;
+        if (langSel.value) filter.language = langSel.value;
+        state = {mode: 'random', caseId: '', reviewed: true, filter: filter};
+        errorText = '';
+        redrawBtn.disabled = true;
+        syncView();
+        window.wrScenario.caseDraw(unrev.checked ? Object.assign({allow_unreviewed: '1'}, filter) : filter).then(res => {
+            if (token !== drawToken) return;
+            redrawBtn.disabled = false;
+            if (res && res.ok && res.case) {
+                state = {mode: 'random', caseId: String(res.case.id), reviewed: !!res.case.reviewed, filter: filter};
+                drawnEl.textContent = t('case.picker_drawn', {title: TC.caseOptionLabel(res.case, t)});
+            } else {
+                errorText = (res && res.error) || t('case.picker_draw_failed');
+            }
+            syncView();
+        });
+    }
+
+    function onSelect() {
+        const value = select.value;
+        drawToken++;
+        errorText = '';
+        redrawBtn.disabled = false;
+        if (value === 'random') { draw(); return; }
+        if (value === '') {
+            state = {mode: null, caseId: '', reviewed: true, filter: {}};
+        } else {
+            const chosen = (cases || []).find(c => String(c.id) === value);
+            state = {mode: 'chosen', caseId: value, reviewed: !!(chosen && chosen.reviewed), filter: {}};
+        }
+        syncView();
+    }
+
+    select.addEventListener('change', onSelect);
+    [typeSel, diffSel, langSel, unrev].forEach(el => el.addEventListener('change', draw));
+    redrawBtn.addEventListener('click', draw);
+
+    window.wrDispatchCaseWanted = () => state.mode !== null;
+    window.wrDispatchCaseFields = () => TC.caseStageFields(state.mode ? {caseId: state.caseId, mode: state.mode, filter: state.filter, briefing: briefing.value} : null);
+    window.wrDispatchCaseAfterStage = () => {
+        briefing.value = '';
+        if (state.mode === 'random') draw();
+    };
+
+    modalEl.addEventListener('shown.bs.modal', () => {
+        select.disabled = !!(scenarioGroup && scenarioGroup.classList.contains('d-none'));
+        ensureLoaded();
+    });
+    modalEl.addEventListener('hidden.bs.modal', () => {
+        select.value = '';
+        [typeSel, diffSel, langSel].forEach(el => { el.value = ''; });
+        unrev.checked = false;
+        briefing.value = '';
+        onSelect();
     });
 })();
 

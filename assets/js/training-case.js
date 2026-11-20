@@ -384,9 +384,86 @@
         return {close: close};
     }
 
+    // ── Command's side (the «Περιστατικά» card and the staging picker in war-room.php) ──────────────────────
+    const RATING_BADGE = {best: 'bg-success', acceptable: 'bg-warning text-dark', harmful: 'bg-danger'};
+
+    /** 65000 -> '1m 05s'; 4200 -> '4s'. Whole seconds, as the answers are recorded. */
+    function formatSeconds(ms) {
+        const s = Math.round(ms / 1000);
+        return s >= 60 ? Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's' : s + 's';
+    }
+
+    /**
+     * The body of the command card: for every case placed, each volunteer's state (not started / in progress at step N /
+     * finished with score and time), the run of a volunteer opened to its choices, and for each step how many chose each
+     * option (the group debrief). `data` is training-case.php?action=overview; t is the page's translator. Pure: every
+     * value that comes from a person or a case goes through escapeHtml().
+     */
+    function renderOverview(data, t) {
+        const placements = (data && data.placements) || [];
+        if (!placements.length) return '<div class="small text-muted">' + escapeHtml(t('case.overview_empty')) + '</div>';
+        return placements.map(p => {
+            const steps = p.steps || [];
+            const stateBadge = v => {
+                const cls = {done: 'bg-success', running: 'bg-primary', new: 'bg-secondary'}[v.state] || 'bg-secondary';
+                const answers = Array.isArray(v.answers) ? v.answers : null;
+                let extra = '';
+                if (v.state === 'done') {
+                    const timed = (answers || []).filter(a => a.ms_taken != null);
+                    extra = ' ' + escapeHtml(v.score_points + '/' + v.score_max) + ' · ' + escapeHtml(v.percent) + '%'
+                        + (timed.length ? ' · ' + escapeHtml(formatSeconds(timed.reduce((sum, a) => sum + a.ms_taken, 0))) : '');
+                } else if (v.state === 'running') {
+                    // The step a volunteer is at counts along their own path (what they have answered, plus one).
+                    const at = steps.findIndex(s => s.step_id === v.step);
+                    const n = answers ? answers.length + 1 : (at >= 0 ? at + 1 : null);
+                    extra = ' · ' + (n !== null ? escapeHtml(t('case.overview_step', {n: n})) : escapeHtml(v.step || ''));
+                }
+                return '<span class="badge ' + cls + '">' + escapeHtml(t('case.state.' + v.state)) + extra + '</span>';
+            };
+            // One run opens to show each step: the choice, its rating and the time taken.
+            const runHtml = v => (v.answers && v.answers.length)
+                ? '<details class="ms-2" data-k="r' + escapeHtml(p.id) + '-' + escapeHtml(v.user_id) + '"><summary class="small text-muted">' + escapeHtml(t('case.overview_run')) + '</summary><ol class="small mb-1">'
+                    + v.answers.map(a => '<li>' + escapeHtml(a.choice_label) + ' <span class="badge ' + (RATING_BADGE[a.rating] || 'bg-secondary') + '">'
+                        + escapeHtml(t('case.rating.' + a.rating)) + '</span>'
+                        + (a.ms_taken != null ? ' <span class="text-muted">' + escapeHtml(formatSeconds(a.ms_taken)) + '</span>' : '') + '</li>').join('')
+                    + '</ol></details>'
+                : '';
+            const people = (p.volunteers || []).map(v => '<li><div class="d-flex justify-content-between gap-2"><span>' + escapeHtml(v.name) + '</span>' + stateBadge(v) + '</div>' + runHtml(v) + '</li>').join('');
+            const stepHtml = steps.map(s => '<div class="small mt-2"><div class="fw-semibold">' + escapeHtml(s.prompt) + '</div>'
+                + (s.choices || []).map(c => '<div class="d-flex justify-content-between gap-2"><span>' + escapeHtml(c.label) + '</span><span class="badge '
+                    + (RATING_BADGE[c.rating] || 'bg-secondary') + '">' + escapeHtml(c.count) + '</span></div>').join('') + '</div>').join('');
+            return '<div class="border rounded p-2 mb-2"><div class="fw-semibold">' + escapeHtml(p.title) + '</div>'
+                + (p.label ? '<div class="small text-muted mb-1">' + escapeHtml(p.label) + '</div>' : '')
+                + '<ul class="list-unstyled small mb-1">' + people + '</ul>'
+                + '<details data-k="s' + escapeHtml(p.id) + '"><summary class="small">' + escapeHtml(t('case.overview_breakdown')) + '</summary>' + stepHtml + '</details></div>';
+        }).join('');
+    }
+
+    /** The text of one picker option (set with textContent / new Option, never as markup): stars, title, and a flag when unreviewed. */
+    function caseOptionLabel(c, t) {
+        const stars = c.difficulty > 0 ? '★'.repeat(c.difficulty) + ' ' : '';
+        const flag = c.reviewed ? '' : ' · ' + t('case.picker_unreviewed_tag');
+        return [stars, String(c.title == null ? '' : c.title), flag].join('');
+    }
+
+    /**
+     * The extra fields «Στο σενάριο» sends for a case chosen in the dispatch window (mission-scenario.php add_item), or {} when none
+     * is chosen. sel = {caseId, mode: 'chosen'|'random', filter, briefing}. Only a random draw records the filter it used.
+     */
+    function caseStageFields(sel) {
+        if (!sel || sel.caseId === '' || sel.caseId == null) return {};
+        const mode = sel.mode === 'random' ? 'random' : 'chosen';
+        return {
+            case_id: String(sel.caseId), case_mode: mode,
+            case_pool: JSON.stringify(mode === 'random' ? (sel.filter || {}) : {}),
+            briefing: String(sel.briefing || '').trim(),
+        };
+    }
+
     const api = {
         escapeHtml, scoreLabel, choiceOutcome, runFromAnswers, bestPathLabels, mergeAnswers, withoutAnswer, answerQueueItem,
         storageKeys, queueOutcome, replayCandidate, forgetLocalAnswer, validDoc, viewSignature, open,
+        renderOverview, caseOptionLabel, caseStageFields, formatSeconds,
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.VoTrainingCase = api;

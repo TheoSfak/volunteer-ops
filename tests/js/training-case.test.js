@@ -205,3 +205,87 @@ test('forgetLocalAnswer takes one step out of this viewer\'s copy only', () => {
         delete global.localStorage;
     }
 });
+
+const overviewT = (k, v) => k + (v ? JSON.stringify(v) : '');
+
+test('renderOverview shows each volunteer with a state and the per-step breakdown, and escapes names', () => {
+    const t = overviewT;
+    const html = TC.renderOverview({placements: [{
+        id: 1, title: 'Περιστατικό <1>', label: 'Σημείο', audience: 'team',
+        volunteers: [
+            {user_id: 1, name: '<b>Άννα</b>', state: 'done', step: null, score_points: 3, score_max: 4, percent: 75, label: 'good',
+             answers: [{step_id: 's1', choice_id: 'a', choice_label: 'Ελέγχω <i>αεραγωγό</i>', rating: 'best', ms_taken: 4200}]},
+            {user_id: 2, name: 'Γιώργος', state: 'running', step: 's2', score_points: 2, score_max: 2, percent: 100, label: 'excellent', answers: [{step_id: 's1', choice_id: 'a', choice_label: 'Α', rating: 'best', ms_taken: 1000}]},
+            {user_id: 3, name: 'Μαρία', state: 'new', step: null, score_points: 0, score_max: 0, percent: 0, label: null, answers: []},
+        ],
+        steps: [{step_id: 's1', prompt: 'Πρώτο;', choices: [{id: 'a', label: 'Α', rating: 'best', count: 2}, {id: 'b', label: 'Β', rating: 'harmful', count: 1}]}],
+    }]}, t);
+    assert.ok(!html.includes('<b>Άννα</b>'), 'names are escaped');
+    assert.ok(html.includes('&lt;b&gt;Άννα&lt;/b&gt;'));
+    assert.ok(!html.includes('Περιστατικό <1>'), 'the case title is escaped');
+    assert.ok(html.includes('75%'));
+    assert.ok(html.includes('3/4'), 'the score as points');
+    assert.ok(html.includes('case.state.running'));
+    assert.ok(html.includes('case.state.new'));
+    assert.ok(html.includes('case.state.done'));
+    assert.ok(html.includes('Πρώτο;'));
+    assert.ok(html.includes('>2<'), 'the count of the best choice');
+    assert.ok(html.includes('Ελέγχω &lt;i&gt;αεραγωγό&lt;/i&gt;'), 'a run opens to show its choices, escaped');
+    assert.ok(!html.includes('<i>αεραγωγό</i>'));
+    assert.ok(html.includes('4s'), 'and the time taken');
+});
+
+test('renderOverview says which step a volunteer in progress is at (their next step on their own path)', () => {
+    const html = TC.renderOverview({placements: [{
+        id: 1, title: 'T', label: '', audience: 'all', steps: [],
+        volunteers: [{user_id: 2, name: 'Γ', state: 'running', step: 's3', score_points: 4, score_max: 4, percent: 100, label: 'excellent',
+            answers: [{step_id: 's1', choice_label: 'a', rating: 'best', ms_taken: 1000}, {step_id: 's2', choice_label: 'b', rating: 'best', ms_taken: 2000}]}],
+    }]}, (k, v) => k + (v ? ':' + v.n : ''));
+    assert.ok(html.includes('case.overview_step:3'), html);
+});
+
+test('renderOverview shows the time of a finished run as minutes and seconds, and stays quiet without times', () => {
+    const run = ms => TC.renderOverview({placements: [{
+        id: 1, title: 'T', label: '', audience: 'all', steps: [],
+        volunteers: [{user_id: 1, name: 'A', state: 'done', step: null, score_points: 2, score_max: 2, percent: 100, label: 'excellent',
+            answers: ms.map((m, i) => ({step_id: 's' + i, choice_label: 'x', rating: 'best', ms_taken: m}))}],
+    }]}, k => k);
+    assert.ok(run([65000, 60000]).includes('2m 05s'));
+    assert.ok(run([null]).includes('100%'));
+    assert.ok(!run([null]).includes('0s'), 'no time when none was recorded');
+});
+
+test('renderOverview tolerates a volunteer without answers or a placement without steps', () => {
+    const html = TC.renderOverview({placements: [{id: 1, title: 'T', label: null, audience: 'all',
+        volunteers: [{user_id: 1, name: 'A', state: 'new'}]}]}, k => k);
+    assert.ok(html.includes('case.state.new'));
+});
+
+test('renderOverview says when nothing has been placed', () => {
+    assert.ok(TC.renderOverview({placements: []}, k => k).includes('case.overview_empty'));
+    assert.ok(TC.renderOverview(null, k => k).includes('case.overview_empty'));
+});
+
+test('caseOptionLabel names the case with its stars and flags an unchecked one; the title stays plain text', () => {
+    const t = overviewT;
+    assert.equal(TC.caseOptionLabel({title: 'Πνιγμός', difficulty: 2, reviewed: true}, t), '★★ Πνιγμός');
+    assert.equal(TC.caseOptionLabel({title: 'Πνιγμός', difficulty: 1, reviewed: false}, t), '★ Πνιγμός · case.picker_unreviewed_tag');
+    assert.equal(TC.caseOptionLabel({title: '<b>x</b>', difficulty: 0, reviewed: true}, t), '<b>x</b>', 'a label for textContent is not escaped');
+});
+
+test('caseStageFields adds nothing without a case and carries the choice, the draw and the briefing with one', () => {
+    assert.deepEqual(TC.caseStageFields(null), {});
+    assert.deepEqual(TC.caseStageFields({caseId: ''}), {});
+    assert.deepEqual(TC.caseStageFields({caseId: 7, mode: 'chosen', filter: {type: 'x'}, briefing: ' Ακούστηκε φωνή '}),
+        {case_id: '7', case_mode: 'chosen', case_pool: '{}', briefing: 'Ακούστηκε φωνή'}, 'a chosen case records no pool');
+    assert.deepEqual(TC.caseStageFields({caseId: 7, mode: 'random', filter: {type: 'airway', difficulty: 2}, briefing: ''}),
+        {case_id: '7', case_mode: 'random', case_pool: '{"type":"airway","difficulty":2}', briefing: ''});
+    assert.equal(TC.caseStageFields({caseId: 7, mode: 'bogus'}).case_mode, 'chosen');
+});
+
+test('renderOverview gives each opening section a stable key, so a refresh can keep it open', () => {
+    const html = TC.renderOverview({placements: [{id: 4, title: 'T', label: '', audience: 'all', steps: [],
+        volunteers: [{user_id: 9, name: 'A', state: 'done', score_points: 1, score_max: 2, percent: 50, answers: [{step_id: 's1', choice_label: 'x', rating: 'best', ms_taken: 1000}]}]}]}, k => k);
+    assert.ok(html.includes('data-k="r4-9"'), 'the run of one volunteer');
+    assert.ok(html.includes('data-k="s4"'), 'the per-step breakdown of one case');
+});

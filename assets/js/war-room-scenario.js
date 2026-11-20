@@ -339,6 +339,8 @@
         return item.team_label || t('scenario.team_gone');
     }
     function itemTitle(item) {
+        // A staged training case is named by the case (v3.505.0): the commander sees which one is waiting at this point.
+        if (item.case_title) return t('case.plan_title', {title: item.case_title});
         // The words of an order to people can be long: the card shows the beginning.
         const label = (item.type === 'order' && item.label && String(item.label).length > 60) ? String(item.label).slice(0, 57) + '…' : item.label;
         return label ? itemKind(item) + ' «' + label + '»' : itemKind(item);
@@ -440,7 +442,8 @@
     }
 
     function itemHtml(phase, item) {
-        const icon = item.type === 'point' ? 'bi-geo-alt-fill'
+        const icon = item.case_title ? 'bi-clipboard2-pulse-fill'
+            : item.type === 'point' ? 'bi-geo-alt-fill'
             : (item.type === 'sector' ? 'bi-grid-3x3-gap-fill'
                 : (item.type === 'route' ? 'bi-signpost-split-fill'
                     : (item.type === 'restricted' ? 'bi-exclamation-triangle-fill'
@@ -508,6 +511,11 @@
                     : t('scenario.building_in_sector', {sector: item.sector_label}))
                 : '';
             where = ` <span class="text-muted small">${esc([floors, inSector].filter(Boolean).join(' · '))}</span>`;
+        }
+        // A staged case that nobody qualified has checked says so, on the card and not only in the picker where it was chosen.
+        // case_reviewed is read from the library at load time; false also covers a library case that has since been deleted.
+        if (item.case_title && item.case_reviewed === false) {
+            where += ` <span class="badge bg-warning text-dark" title="${esc(t('case.picker_unreviewed_warning'))}"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(t('case.badge_unreviewed'))}</span>`;
         }
         // A search area is a boundary and not an order to anybody: no «→ προς:» for it. Until it is made it has «Τομείς»,
         // which opens the division window on it (the sectors cut there go into the scenario, against this area). A building
@@ -1132,7 +1140,8 @@
             phase.items.forEach(item => {
                 if (item.sent || !item.geo) return;
                 // A search area goes to nobody, so its tooltip has no «→ …» part (v3.459.0).
-                const tip = ((item.type === 'search_area' || item.type === 'building') ? [phaseName(phase), itemTitle(item)] : [phaseName(phase), itemTitle(item), '→ ' + itemTarget(item)]).join(' · ') + ' — ' + t('scenario.ghost_not_sent');
+                // Leaflet reads a string as markup, and a case's title is text from the library: escaped like the card does.
+                const tip = esc(((item.type === 'search_area' || item.type === 'building') ? [phaseName(phase), itemTitle(item)] : [phaseName(phase), itemTitle(item), '→ ' + itemTarget(item)]).join(' · ') + ' — ' + t('scenario.ghost_not_sent'));
                 if (item.type === 'route') {
                     // A dashed line through the waypoints (back to the first one when the route is a loop), a dot at each
                     // waypoint, and the phase number where it starts.
@@ -1251,6 +1260,19 @@
             .catch(() => { alert(t('common.send_failed')); return {ok: false}; });
     }
 
+    // The dispatch window's case picker (v3.505.0, training missions only: the endpoint refuses any other). Both resolve with the
+    // endpoint's own answer ({ok, cases: [...]} / {ok, case: {...}} / {ok: false, error}); a network failure resolves with
+    // {ok: false} and no error text, so the picker can show its own message. Nothing is alerted here: the picker is in a window
+    // that stays open and says what went wrong beside the select.
+    function caseList() {
+        return request('case_list', {}).catch(() => ({ok: false}));
+    }
+    // filter = {type, difficulty, language, allow_unreviewed: '1'}: any subset. Draws one case, preferring those not yet staged
+    // in this scenario; nothing is saved until the case is staged with the order.
+    function caseDraw(filter) {
+        return request('case_draw', filter || {}).catch(() => ({ok: false}));
+    }
+
     function phaseNumber(phaseId) {
         const p = findPhase(phaseId);
         return p ? p.n : null;
@@ -1287,5 +1309,5 @@
         ['click', 'touchstart', 'keydown'].forEach(evt => document.addEventListener(evt, unlockScenarioAudio, {once: true}));
     }
 
-    window.wrScenario = {init: init, reload: load, menuHtml: menuHtml, stage: stage, stageSectors: stageSectors, stageRoute: stageRoute, stageRestricted: stageRestricted, stageArea: stageArea, stageBuilding: stageBuilding, phaseNumber: phaseNumber, drawGhostsInto: drawGhostsInto, phases: () => scenario.phases, newSlot: newSlot, fillSlotOptions: fillSlotOptions};
+    window.wrScenario = {init: init, reload: load, menuHtml: menuHtml, stage: stage, stageSectors: stageSectors, stageRoute: stageRoute, stageRestricted: stageRestricted, stageArea: stageArea, stageBuilding: stageBuilding, caseList: caseList, caseDraw: caseDraw, phaseNumber: phaseNumber, drawGhostsInto: drawGhostsInto, phases: () => scenario.phases, newSlot: newSlot, fillSlotOptions: fillSlotOptions};
 })();

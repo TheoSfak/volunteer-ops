@@ -269,6 +269,26 @@ function loadMissionScenario(int $missionId): array {
         }
     }
 
+    // Whether each staged training case has been checked by a medically qualified person, read from the library NOW: the
+    // snapshot in the order does not record it, and a case can be reviewed (or un-reviewed) after it was staged. One query,
+    // and only when a case is staged. A case whose library row has been deleted is absent from the answer (see below).
+    $caseReviewed = [];
+    $caseIds = [];
+    foreach ($items as $row) {
+        if ($row['kind'] === 'dispatch' && strpos((string) $row['payload'], '"case":') !== false) {
+            $casePayload = json_decode((string) $row['payload'], true);
+            $caseId = is_array($casePayload) && is_array($casePayload['case'] ?? null) ? (int) ($casePayload['case']['case_id'] ?? 0) : 0;
+            if ($caseId > 0) {
+                $caseIds[$caseId] = $caseId;
+            }
+        }
+    }
+    if ($caseIds) {
+        foreach (dbFetchAll("SELECT id, reviewed FROM training_cases WHERE id IN (" . implode(',', array_fill(0, count($caseIds), '?')) . ")", array_values($caseIds)) as $libraryRow) {
+            $caseReviewed[(int) $libraryRow['id']] = !empty($libraryRow['reviewed']);
+        }
+    }
+
     // How each order that was sent stands now (v3.456.0): finished, still under way, or taken back.
     $states = scenarioItemLiveStates($missionId, $items);
 
@@ -409,6 +429,9 @@ function loadMissionScenario(int $missionId): array {
             // A staged training case (v3.505.0): its title and the line the people receive; null for an ordinary order.
             'case_title'   => !empty($payload['case']) && is_array($payload['case']) ? (string) ($payload['case']['title'] ?? '') : null,
             'case_briefing' => !empty($payload['case']) && is_array($payload['case']) ? (string) ($payload['case']['briefing'] ?? '') : null,
+            // Has the library case been reviewed: true / false for a staged case (false too when its library row is gone: nothing
+            // shows it was checked), null for an ordinary order. The card badges «Ανέλεγκτο» on false.
+            'case_reviewed' => !empty($payload['case']) && is_array($payload['case']) ? ($caseReviewed[(int) ($payload['case']['case_id'] ?? 0)] ?? false) : null,
             'area_id'      => $isSector ? ($areaId ?: null) : null,
             'area_label'   => $areaLabel,
             'area_missing' => $areaMissing,
@@ -2739,6 +2762,8 @@ function scenarioPageExtraStringKeys(): array {
         'common.send_failed', 'common.cancel', 'common.all_teams', 'common.close',
         'restricted_area.kind_danger', 'restricted_area.kind_cliff', 'restricted_area.kind_forbidden',
         'restricted_area.shape_polygon', 'restricted_area.shape_line',
+        // A staged training case on the card (v3.505.0): its name and the badge of one nobody qualified has checked.
+        'case.plan_title', 'case.badge_unreviewed', 'case.picker_unreviewed_warning',
     ];
 }
 

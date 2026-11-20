@@ -1440,3 +1440,48 @@ test('switching the passive hint off hides an already-showing nudge at once, not
     assert.doesNotMatch(page.body.innerHTML, /data-sc-nudge="1"/);
     assert.doesNotMatch(page.body.innerHTML, /data-sc-ready="1"/, 'the passive note is hidden the same way');
 });
+
+const caseItem = (id, over = {}) => Object.assign({}, TEAM, {
+    id, kind: 'dispatch', type: 'point', label: 'Περιστατικό', geo: [[35.3, 25.1]], case_title: 'Πνιγμός <b>', case_briefing: 'Ακούστηκε φωνή', case_reviewed: true,
+}, over);
+
+test('a staged case is named by the case with its own icon, escaped, and an unreviewed one carries the badge', async () => {
+    const {body} = await load(plan([caseItem(1), caseItem(2, {case_title: 'Άλλο', case_reviewed: false}), Object.assign({}, TEAM, {id: 3, kind: 'dispatch', type: 'point', label: 'Σημείο Α', geo: [[35, 25]], case_title: null})]));
+    const html = body.innerHTML;
+    assert.match(html, /case\.plan_title\{"title":"Πνιγμός &lt;b/, 'the title goes through the page\'s escapeHtml');
+    assert.doesNotMatch(html, /Πνιγμός <b>/);
+    assert.match(html, /bi-clipboard2-pulse-fill/);
+    assert.equal((html.match(/case\.badge_unreviewed/g) || []).length, 1, 'only the case that has not been reviewed');
+    assert.match(html, /scenario\.kind_point/, 'an ordinary order is unchanged');
+});
+
+test('a case staged before the review flag existed (no case_reviewed) shows no badge', async () => {
+    const {body} = await load(plan([caseItem(1, {case_reviewed: undefined}), caseItem(2, {case_reviewed: null})]));
+    assert.doesNotMatch(body.innerHTML, /case\.badge_unreviewed/);
+});
+
+test('the case picker asks case_list and case_draw through the plan endpoint and hands back the answer', async () => {
+    const {api, calls} = await load(plan([]), {
+        case_list: {ok: true, cases: [{id: 5, title: 'T', type: 'airway', difficulty: 1, language: 'el', reviewed: false}]},
+        case_draw: {ok: true, case: {id: 5, title: 'T', reviewed: false}},
+    });
+    const list = await api.caseList();
+    assert.equal(list.cases[0].id, 5);
+    const drawn = await api.caseDraw({type: 'airway', allow_unreviewed: '1'});
+    assert.equal(drawn.case.id, 5);
+    const posts = calls.filter(c => c[0] === 'fetch' && c[2]).map(c => new URLSearchParams(c[2]));
+    const listPost = posts.find(p => p.get('action') === 'case_list');
+    const drawPost = posts.find(p => p.get('action') === 'case_draw');
+    assert.equal(listPost.get('csrf_token'), 'tok');
+    assert.equal(drawPost.get('type'), 'airway');
+    assert.equal(drawPost.get('allow_unreviewed'), '1');
+    assert.equal(drawPost.get('mission_id'), '83');
+});
+
+test('the case picker answers {ok:false} when the network fails, without an alert', async () => {
+    const page = await load(plan([]));
+    page.ctx.fetch = async () => { throw new Error('offline'); };
+    const res = await page.api.caseList();
+    assert.equal(res.ok, false);
+    assert.equal(page.calls.filter(c => c[0] === 'alert').length, 0);
+});
