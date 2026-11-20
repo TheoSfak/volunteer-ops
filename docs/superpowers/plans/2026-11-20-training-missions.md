@@ -1030,7 +1030,6 @@ Append inside the class:
 
         // Personal totals: hours, yearly attendance, TEP hours, shift count.
         $this->assertGreaterThanOrEqual(3, substr_count($s, 'pr.attended = 1 AND pr.is_training = 0'));
-        $this->assertStringContainsString('AND m.mission_type_id = ? AND pr.is_training = 0', $s);
     }
 ```
 
@@ -1071,9 +1070,8 @@ with
 with
 ```
             WHERE pr.volunteer_id = ? AND pr.status = ? AND pr.attended = 1 AND pr.is_training = 0
-              AND m.mission_type_id = ? AND pr.is_training = 0",
+              AND m.mission_type_id = ?",
 ```
-(The second `AND pr.is_training = 0` is redundant but keeps the substring the test looks for and costs nothing; if you prefer, drop it and change the test's last assertion to the first form.)
 
 (d) total shifts: the first of the two `SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = ?` (~line 402, the one for approved shifts, not the `pending_requests` one) becomes
 `SELECT COUNT(*) FROM participation_requests WHERE volunteer_id = ? AND status = ? AND is_training = 0`.
