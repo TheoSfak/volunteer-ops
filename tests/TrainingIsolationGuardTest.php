@@ -17,8 +17,11 @@ final class TrainingIsolationGuardTest extends TestCase
 {
     /** Files that legitimately read participation numbers without filtering, and why. */
     private const ALLOWED = [
-        'includes/functions-warroom.php'      => 'check-in UPDATEs write attended/actual_hours for the mission being run (a drill must record them too); the certificate pick list reads attended scoped by s.mission_id = ?',
-        'mission-stats.php'                   => 'per-mission page: SUM(actual_hours) and per-volunteer hours are both scoped by s.mission_id = ?, a drill shows its own stats',
+        // includes/functions-warroom.php is no longer listed: computeWarRoomTypeAggregates() now filters
+        // m.is_training = 0, so the file passes on its own. Its remaining unfiltered spots are per-mission
+        // (the QR/GPS check-in UPDATEs and the certificate pick list are scoped by s.mission_id = ?, a drill
+        // must record attendance too).
+        'mission-stats.php'                  => 'per-mission page: SUM(actual_hours) and per-volunteer hours are both scoped by s.mission_id = ?, a drill shows its own stats',
         'mission-report-print.php'            => 'per-mission report: SUM(actual_hours) and per-volunteer hours are both scoped by s.mission_id = ?',
         'shift-participants-print.php'        => 'per-shift roster print: lists one shift\'s participants with their own attended/actual_hours, no aggregate',
         'ops-dashboard.php'                   => 'live operations board: attended count per shift of an open mission, no cross-mission total; drills appear with their badge',

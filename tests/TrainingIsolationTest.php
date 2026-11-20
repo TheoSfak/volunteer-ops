@@ -91,4 +91,24 @@ final class TrainingIsolationTest extends TestCase
 
         $this->assertContains('first_shift', $earned);
     }
+
+    public function test_action_room_type_scorecard_counts_only_real_missions(): void
+    {
+        // One COMPLETED real mission and one COMPLETED drill of the same type, same period.
+        $realDone = TrainingFixtures::mission(false, STATUS_COMPLETED);
+        $drillDone = TrainingFixtures::mission(true, STATUS_COMPLETED);
+        $typeId = (int) dbFetchValue("SELECT mission_type_id FROM missions WHERE id = ?", [$realDone['mission']]);
+        $this->assertSame($typeId, (int) dbFetchValue("SELECT mission_type_id FROM missions WHERE id = ?", [$drillDone['mission']]));
+
+        $from = date('Y-m-d', strtotime('-1 day'));
+        $to = date('Y-m-d', strtotime('+1 day'));
+        $range = "m.deleted_at IS NULL AND m.mission_type_id = ? AND m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 DAY";
+        $realCount = (int) dbFetchValue("SELECT COUNT(*) FROM missions m WHERE $range AND m.is_training = 0", [$typeId, $from, $to]);
+        $allCount = (int) dbFetchValue("SELECT COUNT(*) FROM missions m WHERE $range", [$typeId, $from, $to]);
+        $this->assertGreaterThan($realCount, $allCount, 'the fixture must contain at least one drill in the period');
+
+        $aggregates = computeWarRoomTypeAggregates($from, $to);
+
+        $this->assertSame($realCount, $aggregates[$typeId]['mission_count']);
+    }
 }

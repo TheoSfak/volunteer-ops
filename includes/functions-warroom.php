@@ -13443,7 +13443,9 @@ function generateTeamComparisonNarrative(array $teams, array $alreadyCited = [])
  * $departmentId is '' for "all" — callers pass null, not '').
  */
 function computeWarRoomTypeAggregates(string $startDate, string $endDate, ?int $departmentId = null, ?int $branchId = null): array {
-    $where = "m.deleted_at IS NULL AND m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 DAY";
+    // m.is_training = 0: a drill is not an operational number; this scorecard
+    // feeds reports.php's Action Room tab and the warroom CSV.
+    $where = "m.deleted_at IS NULL AND m.is_training = 0 AND m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 DAY";
     $params = [$startDate, $endDate];
     if ($departmentId) {
         $where .= " AND m.department_id = ?";
