@@ -1492,7 +1492,10 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
         }
     }
 
-    return array_map(function ($row) use ($canManageWarRoom, $isApprovedParticipant, $userId, $myTeamId, $acksByDispatch, $receiptsByDispatch, $progressByDispatch, $myScopeKey, $declines, $incidentsById, $broadcastScopes) {
+    // The training cases staged on these orders, with this volunteer's own state for each (v3.505.0).
+    $caseCards = trainingCaseCardsForDispatches($dispatchIds, $userId);
+
+    return array_map(function ($row) use ($canManageWarRoom, $isApprovedParticipant, $userId, $myTeamId, $acksByDispatch, $receiptsByDispatch, $progressByDispatch, $myScopeKey, $declines, $incidentsById, $broadcastScopes, $caseCards) {
         $dispatchId = (int) $row['id'];
         $teamId = $row['team_id'] ? (int) $row['team_id'] : null;
         $acks = $acksByDispatch[$dispatchId] ?? [];
@@ -1569,6 +1572,12 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             'can_depart'   => $isApprovedParticipant && $eligible && !$mine['departed'] && !$teamArrived && !$mine['completed'],
             'my_ack'       => $teamArrived,
             'can_ack'      => $isApprovedParticipant && $eligible && !$teamArrived && !$mine['completed'],
+            // A staged training case rides on this order (v3.505.0): the volunteer's own card for it. `available` is the TEAM's
+            // arrival (or finishing), the same fact the gate of training-case.php checks; the document itself is fetched once
+            // by that endpoint, not carried by the poll.
+            'case'         => isset($caseCards[$dispatchId])
+                ? $caseCards[$dispatchId] + ['can_play' => $isApprovedParticipant && $eligible, 'available' => $isApprovedParticipant && $eligible && (bool) ($teamArrived || $mine['completed'])]
+                : null,
             'my_completed' => $mine['completed'],
             // When the team this was sent to finished it (v3.439.0): the map fades it a few minutes
             // later. Always null for an order sent to every team, since no single team finishes that
@@ -5056,6 +5065,11 @@ function advanceMissionDispatch(array $mission, int $dispatchId, int $userId, st
         logAudit($auditAction, 'mission_dispatch_points', $dispatchId, null, [
             'mission_id' => $missionId, 'team_id' => $myTeamId, 'user_id' => $userId,
         ] + receiptAuditExtra($userId, $via));
+
+        // A team that arrives at a training case opens it for every member (v3.505.0): the other on-duty members are told.
+        if ($step === 'arrive' && in_array('arrive', $recorded, true) && !$legacyArrived) {
+            trainingCaseNotifyArrival($missionId, $dispatchId, $myTeamId, $userId);
+        }
 
         // Only the step that was pressed is announced. A backfilled one is not
         // news: «Ολοκληρώθηκε» from a team that never pressed «Έφτασα» says

@@ -75,6 +75,86 @@ final class TrainingCaseScenarioTest extends TestCase
         $this->assertSame($before, dbFetchValue("SELECT payload FROM mission_scenario_items WHERE id = ?", [$result['id']]));
     }
 
+    /** Team member on duty, so a sent order has somebody to reach. */
+    private function onDutyMember(): int
+    {
+        $member = TrainingFixtures::user('Member');
+        dbExecute("INSERT INTO mission_team_members (mission_id, team_id, user_id) VALUES (?, ?, ?)", [$this->drill['mission'], $this->teamId, $member]);
+        dbExecute("UPDATE shifts SET start_time = ?, end_time = ? WHERE id = ?", [date('Y-m-d H:i:s', time() - 3600), date('Y-m-d H:i:s', time() + 3600), $this->drill['shift']]);
+        TrainingFixtures::participation($this->drill['shift'], $member, false, null);
+        dbExecute("INSERT INTO mission_action_room_participants (mission_id, user_id) VALUES (?, ?)", [$this->drill['mission'], $member]);
+        return $member;
+    }
+
+    public function test_a_placement_that_cannot_be_recorded_does_not_stop_the_order(): void
+    {
+        $this->onDutyMember();
+        $m = $this->mission($this->drill);
+        $phase = $this->phase($this->drill);
+        $staged = addScenarioCaseItem($m, $phase, $this->admin, $this->form());
+
+        // Make the placement insert throw: one placement already holds the id the order is about to get (the dispatch id is unique
+        // in the placements table). The id is read off a throwaway order, and the foreign key is switched off just for that row.
+        $probe = (int) dbInsert(
+            "INSERT INTO mission_dispatch_points (mission_id, team_id, type, geo, created_by) VALUES (?, ?, 'point', ?, ?)",
+            [$this->drill['mission'], $this->teamId, json_encode(['lat' => 35.3, 'lng' => 25.1]), $this->admin]
+        );
+        dbExecute("DELETE FROM mission_dispatch_points WHERE id = ?", [$probe]);
+        $next = $probe + 1;
+        db()->exec("SET FOREIGN_KEY_CHECKS = 0");
+        dbExecute(
+            "INSERT INTO mission_case_placements (mission_id, dispatch_id, title, snapshot) VALUES (?, ?, 'squatter', '{}')",
+            [$this->drill['mission'], $next]
+        );
+        db()->exec("SET FOREIGN_KEY_CHECKS = 1");
+
+        $log = tempnam(sys_get_temp_dir(), 'tcl');
+        $previous = ini_set('error_log', $log);
+        try {
+            $played = playScenarioPhase($m, $phase, $this->admin, 'Case Stager');
+        } finally {
+            ini_set('error_log', (string) $previous);
+        }
+        $logged = (string) file_get_contents($log);
+        @unlink($log);
+
+        $this->assertTrue($played['ok'], (string) ($played['error'] ?? ''));
+        $this->assertSame(1, $played['sent']);
+        $item = dbFetchOne("SELECT sent_at, sent_ref_id, last_error FROM mission_scenario_items WHERE id = ?", [$staged['id']]);
+        $this->assertNotNull($item['sent_at'], 'the order is marked as sent');
+        $this->assertSame($next, (int) $item['sent_ref_id'], 'the order took the id the squatter was holding');
+        $this->assertNull($item['last_error']);
+        $this->assertSame(1, (int) dbFetchValue("SELECT COUNT(*) FROM mission_dispatch_points WHERE id = ?", [$next]), 'the dispatch exists');
+        $this->assertSame(1, (int) dbFetchValue("SELECT COUNT(*) FROM mission_case_placements WHERE dispatch_id = ?", [$next]), 'still only the squatter: nothing was recorded');
+        $this->assertStringContainsString('recording the case of item', $logged, 'command sees the failure in the log');
+    }
+
+    public function test_the_recorded_snapshot_is_the_document_as_staged_not_as_edited_since(): void
+    {
+        $this->onDutyMember();
+        $m = $this->mission($this->drill);
+        $phase = $this->phase($this->drill);
+        $staged = addScenarioCaseItem($m, $phase, $this->admin, $this->form());
+        $stagedDoc = json_decode((string) dbFetchValue("SELECT payload FROM mission_scenario_items WHERE id = ?", [$staged['id']]), true)['case']['document'];
+
+        // The library case is edited after staging and before the phase is played.
+        $library = trainingCaseLoad($this->caseId);
+        $edited = $library['doc'];
+        $edited['title'] = 'Αλλαγμένος τίτλος';
+        $edited['story'] = 'Εντελώς άλλη ιστορία.';
+        dbExecute("UPDATE training_cases SET title = ?, document = ? WHERE id = ?", ['Αλλαγμένος τίτλος', json_encode($edited, JSON_UNESCAPED_UNICODE), $this->caseId]);
+        $this->assertNotSame($stagedDoc['story'], json_decode((string) dbFetchValue("SELECT document FROM training_cases WHERE id = ?", [$this->caseId]), true)['story'], 'the library really changed');
+
+        $played = playScenarioPhase($m, $phase, $this->admin, 'Case Stager');
+        $this->assertTrue($played['ok'], (string) ($played['error'] ?? ''));
+        $dispatchId = (int) dbFetchValue("SELECT sent_ref_id FROM mission_scenario_items WHERE id = ?", [$staged['id']]);
+        $recorded = json_decode((string) dbFetchValue("SELECT snapshot FROM mission_case_placements WHERE dispatch_id = ?", [$dispatchId]), true);
+
+        $this->assertSame($stagedDoc, $recorded, 'the placement holds the staged document, byte for byte');
+        $this->assertNotSame('Εντελώς άλλη ιστορία.', $recorded['story']);
+        $this->assertNotSame('Αλλαγμένος τίτλος', trainingCasePlacementForDispatch($dispatchId)['title']);
+    }
+
     public function test_a_real_mission_refuses_a_case(): void
     {
         $phase = $this->phase($this->real);

@@ -463,6 +463,11 @@ if ($action === 'retry_item') {
 }
 
 if ($action === 'case_list') {
+    // Cases belong to training exercises: no case endpoint answers for a real mission.
+    if (!isTrainingMission($mission)) {
+        echo json_encode(['ok' => false, 'error' => t('case.err_not_training')]);
+        exit;
+    }
     // The library for the staging picker: seeded on first use, no documents.
     trainingCaseSeedStarters();
     echo json_encode(['ok' => true, 'cases' => array_map(fn($c) => [
@@ -475,11 +480,15 @@ if ($action === 'case_list') {
 if ($action === 'case_draw') {
     // «Τυχαίο»: one case from the library, preferring ones not yet staged here. Nothing is saved; the commander sees it
     // and either accepts it (staging it with case_mode=random) or draws again.
+    if (!isTrainingMission($mission)) {
+        echo json_encode(['ok' => false, 'error' => t('case.err_not_training')]);
+        exit;
+    }
     trainingCaseSeedStarters();
     $filter = array_filter([
         'type' => (string) post('type'), 'difficulty' => (int) post('difficulty'), 'language' => (string) post('language'),
     ]);
-    $case = trainingCaseDraw($filter, scenarioStagedCaseIds($missionId), !empty(post('allow_unreviewed')));
+    $case = trainingCaseDraw($filter, scenarioStagedCaseIds($missionId), post('allow_unreviewed') === '1');
     echo $case
         ? json_encode(['ok' => true, 'case' => ['id' => (int) $case['id'], 'title' => $case['title'], 'type' => $case['type_tag'], 'difficulty' => (int) $case['difficulty'], 'reviewed' => (bool) $case['reviewed']]])
         : json_encode(['ok' => false, 'error' => t('case.err_pool_empty')]);
