@@ -479,22 +479,48 @@ final class TrainingCaseRunTest extends TestCase
         $this->assertStringNotContainsString('INSERT IGNORE INTO mission_case_runs', $body);
     }
 
-    public function test_every_read_after_the_run_lock_that_decides_the_outcome_is_a_locking_read(): void
+    public function test_no_locking_read_touches_the_answers_table(): void
     {
-        // The existence check opens the REPEATABLE READ snapshot; a plain read after waiting on the lock would be stale.
+        // A FOR UPDATE on an answer row that is not there takes a gap lock under REPEATABLE READ, and the insert that follows
+        // deadlocks against another run's gap lock (1213). The staleness is solved by ORDER instead (see the next test).
+        $src = str_replace("\r\n", "\n", (string) file_get_contents(dirname(__DIR__) . '/includes/functions-training-case-runs.php'));
+        preg_match_all('/"([^"]*mission_case_answers[^"]*)"/', $src, $m);
+        $this->assertNotEmpty($m[1]);
+        foreach ($m[1] as $sql) {
+            $this->assertStringNotContainsString('FOR UPDATE', $sql, "a locking read of the answers table: $sql");
+            $this->assertStringNotContainsString('LOCK IN SHARE MODE', $sql, "a locking read of the answers table: $sql");
+        }
+    }
+
+    public function test_the_snapshot_starts_after_the_run_lock_not_before_it(): void
+    {
+        // InnoDB opens the REPEATABLE READ snapshot at a transaction's FIRST plain read. The existence check therefore runs
+        // before the transaction (autocommit), and the first data statement inside it is the run row's locking read (or the
+        // run's insert), so every later plain read sees what the request we waited on committed.
         // (The behaviour is driven for real in TrainingCaseConcurrencyTest; this pins the shape.)
         $src = str_replace("\r\n", "\n", (string) file_get_contents(dirname(__DIR__) . '/includes/functions-training-case-runs.php'));
-        foreach (['function trainingCaseAnswer', 'function trainingCaseCatchUpRun'] as $function) {
-            $from = strpos($src, $function);
-            $this->assertNotFalse($from);
-            $body = substr($src, $from, strpos($src, "\nfunction ", $from + 1) - $from);
-            $afterLock = $function === 'function trainingCaseAnswer' ? substr($body, strpos($body, 'WHERE placement_id = ? AND user_id = ? FOR UPDATE')) : $body;
-            preg_match_all('/"(SELECT [^"]*FROM mission_case_(?:answers|runs)[^"]*)"/', $afterLock, $m);
-            $this->assertNotEmpty($m[1], $function);
-            foreach ($m[1] as $sql) {
-                $this->assertStringContainsString('FOR UPDATE', $sql, "$function: a plain read after the run lock: $sql");
-            }
+        $from = strpos($src, 'function trainingCaseAnswer');
+        $this->assertNotFalse($from);
+        $body = substr($src, $from, strpos($src, "\nfunction ", $from + 1) - $from);
+
+        $exists = strpos($body, 'SELECT 1 FROM mission_case_runs WHERE placement_id = ? AND user_id = ?');
+        $tx = strpos($body, 'return trainingCaseTransaction(');
+        $this->assertNotFalse($exists);
+        $this->assertNotFalse($tx);
+        $this->assertLessThan($tx, $exists, 'the existence check precedes the transaction');
+
+        $inside = substr($body, $tx);
+        $this->assertSame(1, preg_match('/\bdb(?:FetchValue|FetchOne|FetchAll|Execute|Insert)\(\s*"([^"]*)"/', $inside, $first), 'a statement inside the transaction');
+        $this->assertStringStartsWith('INSERT INTO mission_case_runs', $first[1], 'the first statement inside is the run\'s insert...');
+        $lock = strpos($inside, 'mission_case_runs WHERE placement_id = ? AND user_id = ? FOR UPDATE');
+        $this->assertNotFalse($lock);
+        $this->assertStringNotContainsString('SELECT 1 FROM mission_case_runs', $inside, 'no plain pre-check inside the transaction');
+        foreach (['FROM mission_case_answers', 'trainingCaseCatchUpRun('] as $needle) {
+            $pos = strpos($inside, $needle);
+            $this->assertNotFalse($pos, $needle);
+            $this->assertLessThan($pos, $lock, "...and the run lock comes before: $needle");
         }
+        $this->assertLessThan($lock, strpos($inside, 'INSERT INTO mission_case_runs'), 'the run exists before the locking read');
     }
 
     // ── Task 5 review findings ─────────────────────────────────────────────────────────────────────────────

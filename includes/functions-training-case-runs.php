@@ -171,8 +171,10 @@ function trainingCaseTransaction(callable $work) {
 function trainingCaseCatchUpRun(array $run, string $lastStepId, array $lastChoice): array {
     $points = 0;
     $answered = 0;
-    // A locking read: it must see every answer committed so far, whatever snapshot the transaction already holds.
-    foreach (dbFetchAll("SELECT rating FROM mission_case_answers WHERE run_id = ? FOR UPDATE", [(int) $run['id']]) as $a) {
+    // A plain read, on purpose: the caller holds the run row's lock, and the transaction's snapshot only starts at its first
+    // plain read - which is after that lock wait - so this sees every answer committed so far. (A FOR UPDATE here would
+    // gap-lock when nothing matches and deadlock against another run's insert.)
+    foreach (dbFetchAll("SELECT rating FROM mission_case_answers WHERE run_id = ?", [(int) $run['id']]) as $a) {
         $points += trainingCaseRatingPoints((string) $a['rating']);
         $answered++;
     }
@@ -227,17 +229,21 @@ function trainingCaseAnswer(int $placementId, int $userId, string $stepId, strin
         ] + trainingCaseScoreFields($runRow);
     };
 
-    return trainingCaseTransaction(function () use ($placementId, $userId, $stepId, $choiceId, $msTaken, $doc, $step, $choice, $choiceIn, $bad, $result) {
+    // The existence check is a plain read and runs BEFORE the transaction (autocommit): InnoDB opens the REPEATABLE READ
+    // snapshot at a transaction's first plain read, and the run's lock below may have to WAIT for another request that is
+    // answering - which commits its answer meanwhile. A snapshot opened before that wait would not see the answer (nor
+    // the advanced run) and this request would be refused as «not valid now» instead of answered «duplicate».
+    $runExists = (bool) dbFetchValue("SELECT 1 FROM mission_case_runs WHERE placement_id = ? AND user_id = ?", [$placementId, $userId]);
+
+    return trainingCaseTransaction(function () use ($placementId, $userId, $stepId, $choiceId, $msTaken, $doc, $step, $choice, $choiceIn, $bad, $result, $runExists) {
+        // The first statement that touches data in here is the run row's locking read (preceded, for a first answer, by the
+        // insert of the run, which is a write and opens no snapshot). Every plain read after it starts its snapshot once
+        // the lock is held, so it sees the latest committed state. Nothing on mission_case_answers is a locking read: one
+        // that matches no row takes a gap lock, and the insert that follows would deadlock against another run's (1213).
+        //
         // No run yet: only a valid first answer may create one. The run row is created BEFORE the locking read: a
         // locking read of a row that is not there takes a gap lock, and two first answers at once deadlock on it (1213).
-        // The existence check is a plain read (no lock), so a run that is already there is locked by the one read below.
-        //
-        // That plain read opens this transaction's REPEATABLE READ snapshot, and the locking read below may have to WAIT
-        // for another request that is answering - which commits its answer meanwhile. A plain read after the wait would
-        // still see the snapshot from BEFORE the wait (no answer, the run not advanced) and refuse this request as «not
-        // valid now» instead of answering «duplicate». So every read from here on that decides the outcome is a LOCKING
-        // read (FOR UPDATE), which always reads the latest committed row.
-        if (!dbFetchValue("SELECT 1 FROM mission_case_runs WHERE placement_id = ? AND user_id = ?", [$placementId, $userId])) {
+        if (!$runExists) {
             if ($step === null || $choice === null || $stepId !== $doc['start']) {
                 return $bad;
             }
@@ -250,7 +256,7 @@ function trainingCaseAnswer(int $placementId, int $userId, string $stepId, strin
             return $bad;
         }
 
-        $stored = dbFetchOne("SELECT choice_id FROM mission_case_answers WHERE run_id = ? AND step_id = ? FOR UPDATE", [(int) $run['id'], $stepId]);
+        $stored = dbFetchOne("SELECT choice_id FROM mission_case_answers WHERE run_id = ? AND step_id = ?", [(int) $run['id'], $stepId]);
         if ($stored) {
             $storedChoice = $choiceIn($step, (string) $stored['choice_id']);
             if ($storedChoice === null) {
@@ -278,7 +284,7 @@ function trainingCaseAnswer(int $placementId, int $userId, string $stepId, strin
             );
         } else {
             // Somebody else's answer for this step got in first: the STORED choice is the result, not this caller's.
-            $stored = dbFetchOne("SELECT choice_id FROM mission_case_answers WHERE run_id = ? AND step_id = ? FOR UPDATE", [(int) $run['id'], $stepId]);
+            $stored = dbFetchOne("SELECT choice_id FROM mission_case_answers WHERE run_id = ? AND step_id = ?", [(int) $run['id'], $stepId]);
             $choice = $stored ? $choiceIn($step, (string) $stored['choice_id']) : null;
             if ($choice === null) {
                 return ['ok' => false, 'error' => t('case.err_gone')];
