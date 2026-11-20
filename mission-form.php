@@ -93,6 +93,11 @@ if (isPost()) {
     if (empty($data['location'])) $errors[] = 'Η τοποθεσία είναι υποχρεωτική.';
     if (empty($data['start_datetime'])) $errors[] = 'Η ημερομηνία έναρξης είναι υποχρεωτική.';
     if (empty($data['end_datetime'])) $errors[] = 'Η ημερομηνία λήξης είναι υποχρεωτική.';
+    // Fail closed: a drill is only created while the trigger that isolates its participations exists.
+    // A forged or stale POST must never fall through and create a REAL mission instead.
+    if (!$isEdit && !empty($_POST['is_training']) && !trainingMissionsAvailable()) {
+        $errors[] = 'Η δημιουργία εκπαιδευτικής άσκησης δεν είναι διαθέσιμη: η βάση δεδομένων δεν έχει ενεργό τον μηχανισμό (trigger) που απομονώνει τις ασκήσεις από τα πραγματικά στατιστικά. Ενημερώστε τον διαχειριστή συστήματος.';
+    }
 
     // Recurring fields (create-only)
     $isRecurring = !$isEdit && isset($_POST['is_recurring']);
@@ -412,6 +417,8 @@ include __DIR__ . '/includes/header.php';
     </div>
 <?php endif; ?>
 
+<?php if (isAdmin()) { include __DIR__ . '/includes/training-gate-banner.php'; } ?>
+
 <form method="post" action="">
     <?= csrfField() ?>
     
@@ -655,7 +662,11 @@ include __DIR__ . '/includes/header.php';
                         <div class="form-text">Οι εθελοντές θα βλέπουν την αποστολή αλλά δεν θα μπορούν να υποβάλουν αίτηση συμμετοχής μόνοι τους — μόνο ο διαχειριστής μπορεί να τους προσθέσει σε βάρδια. Εμφανίζεται με 🔒 στη λίστα αποστολών.</div>
                     </div>
 
-                    <?php if (!$isEdit): ?>
+                    <?php if (!$isEdit && !trainingMissionsAvailable()): ?>
+                    <div class="mb-3 border rounded p-3 bg-light small text-muted">
+                        <i class="bi bi-mortarboard-fill text-secondary me-1"></i>Η δημιουργία εκπαιδευτικής άσκησης δεν είναι διαθέσιμη: η βάση δεδομένων δεν έχει ενεργό τον μηχανισμό (trigger) που απομονώνει τις ασκήσεις από τα πραγματικά στατιστικά. Ενημερώστε τον διαχειριστή συστήματος.
+                    </div>
+                    <?php elseif (!$isEdit): ?>
                     <div class="form-check mb-3 border rounded p-3 bg-light">
                         <input class="form-check-input" type="checkbox" id="is_training" name="is_training" value="1"
                                <?= post('is_training') ? 'checked' : '' ?>>

@@ -53,6 +53,40 @@ if (!function_exists('isTrainingMission')) {
         return !empty($post['is_training']) ? 1 : 0;
     }
 
+    /**
+     * Does the trigger that copies missions.is_training onto participation_requests exist?
+     * Without it a drill's participations would be counted as real ones, so every gate
+     * asks this and fails closed: a query that throws or returns nothing means "no".
+     * Cached per request, per trigger name. Known limit: information_schema.TRIGGERS only
+     * lists the triggers the database user holds the TRIGGER privilege for, so on a host
+     * where the user lacks that privilege this returns false even if the trigger exists;
+     * that is the safe direction (drills stay unavailable), never the dangerous one.
+     */
+    function trainingTriggerExists(?string $triggerName = null): bool
+    {
+        static $cache = [];
+        $name = $triggerName ?? 'trg_pr_set_training';
+        if (!array_key_exists($name, $cache)) {
+            try {
+                $cache[$name] = (int) dbFetchValue(
+                    "SELECT COUNT(*) FROM information_schema.TRIGGERS
+                     WHERE TRIGGER_SCHEMA = DATABASE() AND TRIGGER_NAME = ?
+                       AND EVENT_OBJECT_TABLE = 'participation_requests'",
+                    [$name]
+                ) > 0;
+            } catch (Throwable $e) {
+                $cache[$name] = false;
+            }
+        }
+        return $cache[$name];
+    }
+
+    /** Can a training mission be created right now? One name for call sites to read as intent. */
+    function trainingMissionsAvailable(): bool
+    {
+        return trainingTriggerExists();
+    }
+
     /** '[ΑΣΚΗΣΗ] ' for a training mission, '' otherwise. */
     function trainingTitlePrefix($mission): string
     {

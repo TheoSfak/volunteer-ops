@@ -1406,6 +1406,8 @@ $swapAwaitingMe = isAdmin()
 
 <?php if (isAdmin()): ?>
 
+<?php include __DIR__ . '/includes/training-gate-banner.php'; ?>
+
 <?php if (!empty($overdueMissions)): ?>
 <!-- Overdue Missions Alert -->
 <div class="alert alert-danger shadow-sm mb-4" style="border-left: 5px solid #dc3545 !important;">
