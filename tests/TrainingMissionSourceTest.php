@@ -193,4 +193,18 @@ final class TrainingMissionSourceTest extends TestCase
         $this->assertStringContainsString("!empty(\$pr['is_training']) ? 'Η παρουσία καταγράφηκε (εκπαιδευτική άσκηση, χωρίς πόντους).'", $s);
         $this->assertStringContainsString('Η παρουσία καταγράφηκε και δόθηκαν πόντοι.', $s);
     }
+
+    public function test_participant_notifications_carry_the_exercise_prefix(): void
+    {
+        $e = $this->src('includes/email.php');
+        $this->assertStringContainsString("trainingTitlePrefix(\$mission) . 'Νέα Αποστολή: '", $e);
+        $this->assertStringContainsString("'mission_title'       => trainingTitlePrefix(\$mission) . \$mission['title']", $e);
+
+        $c = $this->src('cron_shift_reminders.php');
+        $this->assertStringContainsString('m.is_training', $c);
+        $this->assertStringContainsString('trainingTitlePrefix(', $c);
+
+        $p = $this->src('participation-action.php');
+        $this->assertStringContainsString('trainingTitlePrefix(', $p);
+    }
 }

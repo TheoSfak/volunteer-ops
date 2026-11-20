@@ -22,7 +22,7 @@ $now = date('Y-m-d H:i:s');
 
 try {
     $shifts = dbFetchAll(
-        "SELECT s.*, m.title as mission_title, m.description as mission_description
+        "SELECT s.*, m.title as mission_title, m.is_training, m.description as mission_description
          FROM shifts s 
          INNER JOIN missions m ON s.mission_id = m.id 
          WHERE s.start_time BETWEEN ? AND ? 
@@ -42,6 +42,9 @@ foreach ($shifts as $shift) {
         continue;
     }
     
+    // Training missions are labelled «[ΑΣΚΗΣΗ]» in both the email and the in-app message.
+    $missionLabel = trainingTitlePrefix(['is_training' => $shift['is_training']]) . $shift['mission_title'];
+
     // Skip duplicate checks for now - simplified
     
     // Get all approved participants for this shift
@@ -58,7 +61,7 @@ foreach ($shifts as $shift) {
         if ($user['email']) {
             $result = sendNotificationEmail('shift_reminder', $user['email'], [
                 'user_name' => $user['name'],
-                'mission_title' => $shift['mission_title'],
+                'mission_title' => $missionLabel,
                 'shift_time' => formatDateTime($shift['start_time']) . ' - ' . date('H:i', strtotime($shift['end_time'])),
                 'shift_date' => formatDate($shift['start_time']),
                 'mission_description' => $shift['mission_description'] ?: 'Χωρίς περιγραφή'
@@ -73,7 +76,7 @@ foreach ($shifts as $shift) {
         sendNotification(
             $user['id'], 
             'Υπενθύμιση Βάρδιας', 
-            "Σε {$reminderHours} ώρες έχετε βάρδια στην αποστολή '{$shift['mission_title']}' στις " . date('H:i', strtotime($shift['start_time'])),
+            "Σε {$reminderHours} ώρες έχετε βάρδια στην αποστολή '{$missionLabel}' στις " . date('H:i', strtotime($shift['start_time'])),
             'warning',
             '',
             ['url' => 'shift-view.php?id=' . $shift['id']]
