@@ -467,3 +467,74 @@ function trainingCaseImport(string $json, int $userId): array {
     }
     return ['saved' => count($saved), 'skipped' => $skipped, 'ids' => $saved];
 }
+
+/**
+ * Loads the starter cases shipped in includes/training-cases/*.json into the library, by slug. A new slug is inserted
+ * as an unreviewed starter; an existing starter whose document differs from the file is updated and goes back to
+ * unreviewed (the content changed, so the medical check no longer applies); anything else is left alone. Never touches
+ * a case that is not a starter. Returns how many rows were inserted or updated. Cheap enough to call when the library
+ * or the staging list opens.
+ */
+function trainingCaseSeedStarters(): int {
+    $changed = 0;
+    foreach (glob(__DIR__ . '/training-cases/*.json') ?: [] as $file) {
+        $entry = json_decode((string) file_get_contents($file), true);
+        $doc = is_array($entry) ? trainingCaseNormalize($entry['document'] ?? null) : null;
+        $slug = is_array($entry) ? strtolower(trim((string) ($entry['slug'] ?? ''))) : '';
+        if ($doc === null || $slug === '' || trainingCaseValidate($doc)) {
+            error_log('[training-cases] starter file ' . basename($file) . ' is not a valid case');
+            continue;
+        }
+        $meta = trainingCaseMeta($entry);
+        $json = json_encode($doc, JSON_UNESCAPED_UNICODE);
+        $existing = dbFetchOne("SELECT id, is_starter, document FROM training_cases WHERE slug = ?", [$slug]);
+        if (!$existing) {
+            dbInsert(
+                "INSERT INTO training_cases (slug, title, type_tag, difficulty, language, est_minutes, document, format_version, is_starter, reviewed)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0)",
+                [$slug, $doc['title'], $meta['type_tag'], $meta['difficulty'], $meta['language'], $meta['est_minutes'], $json, TRAINING_CASE_FORMAT_VERSION]
+            );
+            $changed++;
+        } elseif ((int) $existing['is_starter'] === 1 && $existing['document'] !== $json) {
+            dbExecute(
+                "UPDATE training_cases SET title = ?, type_tag = ?, difficulty = ?, language = ?, est_minutes = ?, document = ?,
+                        format_version = ?, reviewed = 0, reviewed_by = NULL, reviewed_at = NULL WHERE id = ?",
+                [$doc['title'], $meta['type_tag'], $meta['difficulty'], $meta['language'], $meta['est_minutes'], $json, TRAINING_CASE_FORMAT_VERSION, (int) $existing['id']]
+            );
+            $changed++;
+        }
+    }
+    return $changed;
+}
+
+/**
+ * Picks one case from the library for "random": not archived, matching the filters (type, difficulty, language), reviewed
+ * unless $allowUnreviewed. Cases already staged in this scenario ($excludeCaseIds) are avoided while others remain; when
+ * nothing else is left the whole pool is used. Returns a trainingCaseLoad() row, or null when the pool is empty.
+ */
+function trainingCaseDraw(array $filter, array $excludeCaseIds = [], bool $allowUnreviewed = false): ?array {
+    $where = ['archived_at IS NULL'];
+    $args = [];
+    if (!empty($filter['type'])) {
+        $where[] = 'type_tag = ?';
+        $args[] = (string) $filter['type'];
+    }
+    if (!empty($filter['difficulty'])) {
+        $where[] = 'difficulty = ?';
+        $args[] = (int) $filter['difficulty'];
+    }
+    if (!empty($filter['language'])) {
+        $where[] = 'language = ?';
+        $args[] = (string) $filter['language'];
+    }
+    if (!$allowUnreviewed) {
+        $where[] = 'reviewed = 1';
+    }
+    $ids = array_map('intval', array_column(dbFetchAll("SELECT id FROM training_cases WHERE " . implode(' AND ', $where), $args), 'id'));
+    if (!$ids) {
+        return null;
+    }
+    $fresh = array_values(array_diff($ids, array_map('intval', $excludeCaseIds)));
+    $pool = $fresh ?: $ids;
+    return trainingCaseLoad($pool[random_int(0, count($pool) - 1)]);
+}
