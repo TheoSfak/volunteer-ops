@@ -28,8 +28,8 @@ converting an existing mission to or from training; bulk-importing past drills.
    record and a certificate (not points or badges).
 2. **Flag lifecycle.** `is_training` is chosen when the mission is created and is locked afterwards.
    A wrong choice is fixed by deleting the draft or cancelling and recreating.
-3. **Notifications.** Training missions notify only the people in the drill, every message prefixed
-   "[ΑΣΚΗΣΗ]". Anything that reaches beyond the participants is suppressed.
+3. **Notifications.** Participant-facing messages of a training mission are prefixed "[ΑΣΚΗΣΗ]"
+   (details in section 2).
 4. **Mechanism.** The flag is copied onto each participation row by a database trigger, and operational
    queries filter on it, enforced by a guard test.
 
@@ -46,8 +46,9 @@ converting an existing mission to or from training; bulk-importing past drills.
   `shift-swap-functions.php`, `install.php`); the trigger covers all of them and any future one.
 - Because the mission flag is locked, the copied value cannot go stale.
 - Delivery: one numbered migration in `includes/migrations.php` (with backfill; every existing mission is
-  0 so nothing changes), the same columns and trigger in `sql/schema.sql`, and a regenerated
-  `tests/fixtures/schema-structure.sql`.
+  0 so nothing changes) and the same columns and trigger in `sql/schema.sql`.
+  `tests/fixtures/schema-structure.sql` is not regenerated: it lags by design and
+  `tests/migrate-fixture.php` brings it forward.
 
 ## 2. Keeping real numbers clean
 
@@ -68,9 +69,15 @@ for the complete list.
 dashboard and report mission counts, municipality and official reports, the public and ICS calendar feeds,
 statistics. The missions pages still show training missions (section 3).
 
-**Outbound notifications.** Notifications go only to the people in the drill, each prefixed "[ΑΣΚΗΣΗ]"
-(email subject, push title, SMS text). Suppressed for training missions: org-wide "new mission"
-broadcasts, newsletters, public listings, the public calendar feed, and external or municipality outputs.
+**Outbound notifications.** Participant-facing notifications of a training mission carry the "[ΑΣΚΗΣΗ]"
+prefix: the "new mission" notification (its audience is picked by the admin in the form, so it IS the
+drill's invitation and is not suppressed), shift reminders, and participation approved/rejected. For
+approved/rejected and the reminder the marker is in the message body; their in-app titles do not contain
+the mission title. The calendar feeds are login-gated and show the user's own shifts, so a drill shift
+correctly appears in the volunteer's own calendar. Action Room notifications (31 call sites in
+`includes/functions-warroom.php`, no common choke point) are not prefixed in this sub-project; the Action
+Room shows the "ΑΣΚΗΣΗ" badge instead (text via the `t()` key `hero.training_badge`, Greek and English).
+Prefixing them is revisited with sub-projects 2 and 3.
 
 **Guard test** (new PHP test). It fails if either:
 - a file reading `actual_hours`, `attended` or `points_awarded` has no `is_training` reference and is not
@@ -88,20 +95,29 @@ CLOSED/COMPLETED gate, roster-based recipient picker) in `mission_certificates`.
 training missions:
 - the document and the verify page read "Βεβαίωση συμμετοχής σε εκπαιδευτική άσκηση" (and the English
   equivalent) and show the hours attended;
-- the issue page pre-selects the people with `attended = 1` and shows each recipient's recorded hours;
-  recipients without `attended = 1` produce a clear warning.
-(The print template's current wording has not been read yet; the implementation plan starts there.)
+- the issue page shows each recipient's recorded hours; recipients without `attended = 1` produce a
+  clear warning. Pre-selecting the people with `attended = 1` already existed in
+  `mission-certificates.php`; this sub-project only adds the exercise wording and the hours.
 
 **The volunteer's training record.**
 - A new "Εκπαιδευτικές ασκήσεις" section on `profile.php`: drills attended, total training hours, and a
   dated list (title, hours, link to the certificate if issued).
 - The same section on `volunteer-view.php` for admins, and a separate training block in
-  `volunteer-report.php` and the volunteer export. Never added into operational totals.
+  `volunteer-report.php`. Never added into operational totals. The volunteer export gets no change and no
+  training columns in this sub-project (the earlier idea of filtering its participation count was a
+  misreading: that subquery is the per-mission headcount of the MISSIONS csv, which still lists drills
+  with their real headcount). The missions CSV honours the missions-list `training` filter (all /
+  operational / training). Training columns in a volunteer export are a possible follow-up.
 - Hours come from rows with `attended = 1` and `is_training = 1`, using the same shift-duration fallback
   the profile page already applies when `actual_hours` is empty.
 
 **How a training mission looks.**
-- An "ΑΣΚΗΣΗ" badge on `missions.php`, the dashboard cards, `mission-view.php` and the Action Room header.
+- An "ΑΣΚΗΣΗ" badge on `missions.php` (list and cards), `mission-view.php`, the Action Room header, and on
+  `dashboard.php` wherever a drill title can render for a volunteer or in swap requests (my overdue
+  missions, my upcoming shifts, available missions, the three shift-swap request lists). Admin dashboard
+  widgets (recent missions, the overdue-missions alert and its bulk-complete, the pending-requests widget,
+  statistics) exclude drills; drill participation requests remain listed and approvable on
+  `participations.php`.
 - A banner: "Εκπαιδευτική άσκηση - δεν επηρεάζει τα στατιστικά".
 - A missions-list filter: Όλες / Επιχειρησιακές / Εκπαιδευτικές. Training missions stay visible by
   default so volunteers can find them.
@@ -112,7 +128,8 @@ training missions:
 - Trigger cannot be created (hosting permissions): the migration creates it inside try/catch and fails
   loudly, and is not recorded as applied. It never falls back silently, because that would leave
   `is_training` at 0 and leak. The alternative (setting the column in each insert site) is raised with the
-  owner, not done unilaterally.
+  owner, not done unilaterally. Whether the trigger exists on the Hostinger database is checked after
+  deployment (`SHOW TRIGGERS LIKE 'participation_requests'`).
 - Tampered requests: the server ignores `is_training` on mission edit; training-only UI and endpoints
   re-check the stored flag, not the request.
 - Missing mission or shift: `COALESCE(..., 0)` treats it as a real row (existing behaviour).
@@ -125,10 +142,18 @@ training missions:
   rows, and the training record counts only them.
 - Trigger tests: a participation inserted through each path gets the right `is_training`, and editing a
   mission cannot flip it.
-- Notification tests: "[ΑΣΚΗΣΗ]" prefix on training mission messages; broadcasts, newsletters, public
+- Notification tests: "[ΑΣΚΗΣΗ]" prefix on the participant-facing training mission messages; public
   feeds and municipality outputs skip training missions.
-- Certificate tests: training wording and hours on the document and the verify page; attended-only
-  pre-selection.
+- Certificate tests: training wording and hours on the document and the verify page.
 
-**Delivery.** One migration, schema and fixture updates, the filters, the new profile and certificate
-pieces, the tests, and the repo's usual version-bump commit.
+**Delivery.** One migration, the schema update, the filters, the new profile and certificate pieces, the
+tests, and the repo's usual version-bump commit. `tests/fixtures/schema-structure.sql` is not regenerated:
+it lags by design and `tests/migrate-fixture.php` brings it forward (CI and local).
+
+**Execution notes.**
+- The guard test is per-file, as stated above: it cannot catch a second unfiltered query inside a file
+  that filters elsewhere.
+- The browser-level checks (the printed certificate, the badges, the banner, the missions-list filter)
+  were not performed by the automated run and remain manual.
+- The Hostinger trigger check (`trg_pr_set_training` exists, `migration_last_error` is empty) remains a
+  deployment step.

@@ -1890,3 +1890,13 @@ git commit -m "v3.504.0: Training missions - an is_training flag, isolation from
 **Type consistency:** `isTrainingMission`, `trainingMissionFlagForSave`, `trainingTitlePrefix`, `trainingMissionBadgeHtml`, `getVolunteerTrainingRecord`, `getTrainingHoursForMission` are defined in Task 2 and used with those exact names and shapes in Tasks 3, 8, 9, 10, 11. `TrainingFixtures::user/mission/participation` are defined in Task 1 and used with those signatures in Tasks 2 and 4.
 
 **Known limits, stated plainly:** the Action Room's 31 notification sites are not prefixed (deviation 2); the per-file guard cannot catch a second unfiltered query inside a file that filters elsewhere; the browser checks in Tasks 9, 10 and 13 are manual and must be reported as observed, not assumed.
+
+## Execution notes (added after implementation)
+
+Where execution diverged from the plan text above:
+
+- **Task 7:** the line-69 export edit was reverted. That subquery is the per-mission headcount of the missions CSV, not a volunteer-export count, so drills keep their real headcount there.
+- **Task 10:** the Action Room uses a `hero.training_badge` t() key (Greek and English) rather than a hard-coded string. The task also adds the ΑΣΚΗΣΗ badge on the dashboard (including the shift-swap rows), makes the missions CSV honour the `training` filter, and makes the attendance flash in `shift-view.php` accurate for drills.
+- **Task 12:** the guard test dropped the `migrations.php` / `install.php` skip and added a `.superpowers` skip.
+- **Task 1:** also bumped the schema-version pin in `tests/ScenarioPageTest.php`.
+- **Task 4:** the test seeds the missing achievement rows inside its transaction.
