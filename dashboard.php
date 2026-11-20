@@ -422,7 +422,7 @@ if (isAdmin()) {
 
     // My upcoming shifts
     $myShifts = dbFetchAll(
-        "SELECT s.*, m.title as mission_title, m.location, pr.status as participation_status
+        "SELECT s.*, m.title as mission_title, m.is_training, m.location, pr.status as participation_status
          FROM participation_requests pr
          JOIN shifts s ON pr.shift_id = s.id
          JOIN missions m ON s.mission_id = m.id
@@ -526,7 +526,7 @@ if (isAdmin()) {
     // admin "Εκκρεμείς Αποστολές" alert — the responsible user can already
     // close, mark attendance and file the debrief, so they need the reminder.
     $myOverdueMissions = dbFetchAll(
-        "SELECT m.id, m.title, m.status, m.end_datetime, d.name AS department_name,
+        "SELECT m.id, m.title, m.status, m.end_datetime, m.is_training, d.name AS department_name,
                 (SELECT COUNT(*) FROM shifts s WHERE s.mission_id = m.id) AS shift_count,
                 (SELECT COALESCE(SUM(s.max_volunteers), 0) FROM shifts s WHERE s.mission_id = m.id) AS capacity_total,
                 (SELECT COUNT(*)
@@ -1337,7 +1337,7 @@ $swapAwaitingMe = isAdmin()
                 <div class="flex-grow-1">
                     <div class="d-flex flex-wrap align-items-center gap-2">
                         <i class="bi bi-flag-fill"></i>
-                        <strong><?= h($om['title']) ?></strong>
+                        <strong><?= h($om['title']) ?></strong><?= trainingMissionBadgeHtml($om) ?>
                         <?= statusBadge($om['status']) ?>
                     </div>
                     <small class="d-block mt-1">
@@ -2377,7 +2377,7 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
                                 <div class="list-group-item volunteer-shift-card">
                                     <div class="d-flex justify-content-between align-items-start">
                                         <div>
-                                            <strong><?= h($shift['mission_title']) ?></strong>
+                                            <strong><?= h($shift['mission_title']) ?></strong><?= trainingMissionBadgeHtml($shift) ?>
                                             <br>
                                             <small class="text-muted">
                                                 <i class="bi bi-geo-alt"></i> <?= h($shift['location']) ?>
@@ -2416,7 +2416,7 @@ document.getElementById('clearPreferencesBtn')?.addEventListener('click', functi
                                 <a href="mission-view.php?id=<?= $mission['id'] ?>" class="list-group-item list-group-item-action volunteer-shift-card" style="border-left-color:#10b981">
                                     <div class="d-flex justify-content-between align-items-start">
                                         <div>
-                                            <strong><?= h($mission['title']) ?></strong>
+                                            <strong><?= h($mission['title']) ?></strong><?= trainingMissionBadgeHtml($mission) ?>
                                             <br>
                                             <small class="text-muted">
                                                 <?= h($mission['department_name'] ?? '-') ?> · 

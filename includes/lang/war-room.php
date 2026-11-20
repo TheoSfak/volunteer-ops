@@ -528,6 +528,7 @@ return [
 
         // Hero
         'hero.eyebrow' => 'Action Room · Επιχειρησιακό Κέντρο Αποστολής',
+        'hero.training_badge' => 'ΑΣΚΗΣΗ · Εκπαιδευτική άσκηση - δεν επηρεάζει τα στατιστικά',
         'hero.until' => 'έως',
         'hero.status_active' => 'ΣΕ ΕΞΕΛΙΞΗ',
         'hero.status_upcoming' => 'ΠΡΟΣΕΧΩΣ',
@@ -4293,6 +4294,7 @@ return [
         'incident.gender.unknown' => 'Unknown',
 
         'hero.eyebrow' => 'Action Room · Mission Operations Center',
+        'hero.training_badge' => 'EXERCISE · Training exercise - does not affect statistics',
         'hero.until' => 'to',
         'hero.status_active' => 'IN PROGRESS',
         'hero.status_upcoming' => 'UPCOMING',

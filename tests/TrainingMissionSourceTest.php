@@ -133,7 +133,55 @@ final class TrainingMissionSourceTest extends TestCase
         $this->assertStringContainsString('trainingMissionBadgeHtml($mission)', $v);
         $this->assertStringContainsString('Εκπαιδευτική άσκηση - δεν επηρεάζει τα στατιστικά', $v);
 
+        // The Action Room's text goes through t(): the banner is a lang key, defined once per language.
         $w = $this->src('war-room.php');
-        $this->assertStringContainsString('Εκπαιδευτική άσκηση - δεν επηρεάζει τα στατιστικά', $w);
+        $this->assertStringContainsString("t('hero.training_badge')", $w);
+        $this->assertStringContainsString("!empty(\$mission['is_training'])", $w);
+        $this->assertStringNotContainsString('ΑΣΚΗΣΗ · Εκπαιδευτική άσκηση', $w, 'the banner text must not be hard-coded');
+        $lang = $this->src('includes/lang/war-room.php');
+        $this->assertSame(2, substr_count($lang, "'hero.training_badge'"));
+        $strings = require __DIR__ . '/../includes/lang/war-room.php';
+        $this->assertSame('ΑΣΚΗΣΗ · Εκπαιδευτική άσκηση - δεν επηρεάζει τα στατιστικά', $strings['el']['hero.training_badge']);
+        $this->assertSame('EXERCISE · Training exercise - does not affect statistics', $strings['en']['hero.training_badge']);
+    }
+
+    public function test_dashboard_shows_the_badge_where_a_volunteer_can_see_a_drill(): void
+    {
+        $d = $this->src('dashboard.php');
+
+        // Volunteer-side lists only: "my overdue missions", "my upcoming shifts", "available missions".
+        // The admin lists (recent/overdue missions, pending requests) are already filtered by $departmentFilter.
+        $this->assertSame(3, substr_count($d, 'trainingMissionBadgeHtml('));
+        $this->assertStringContainsString('trainingMissionBadgeHtml($om)', $d);
+        $this->assertStringContainsString('trainingMissionBadgeHtml($shift)', $d);
+        $this->assertStringContainsString('trainingMissionBadgeHtml($mission)', $d);
+
+        // Queries that name their columns must select the flag the badge reads.
+        $this->assertStringContainsString('SELECT m.id, m.title, m.status, m.end_datetime, m.is_training,', $d);
+        $this->assertStringContainsString('SELECT s.*, m.title as mission_title, m.is_training, m.location,', $d);
+    }
+
+    public function test_missions_csv_export_carries_and_honours_the_training_filter(): void
+    {
+        $l = $this->src('missions.php');
+        $this->assertStringContainsString('&mission_type=<?= h($missionType) ?>&training=<?= h($trainingFilter) ?>', $l);
+
+        $x = $this->src('exports/export-missions.php');
+        $this->assertStringContainsString("'training'      => get('training')", $x);
+
+        $e = $this->src('includes/export-functions.php');
+        $this->assertStringContainsString("\$where[] = 'm.is_training = 1';", $e);
+        $this->assertStringContainsString("\$where[] = 'm.is_training = 0';", $e);
+        $this->assertStringContainsString("(string) (\$filters['training'] ?? '')", $e);
+        // Static SQL only: the filter value never reaches the query text.
+        $this->assertStringNotContainsString("is_training = ' .", $e);
+    }
+
+    public function test_shift_view_manual_attendance_flash_is_accurate_for_training_rows(): void
+    {
+        $s = $this->src('shift-view.php');
+        $this->assertStringContainsString('Η παρουσία καταγράφηκε (εκπαιδευτική άσκηση, χωρίς πόντους).', $s);
+        $this->assertStringContainsString("!empty(\$pr['is_training']) ? 'Η παρουσία καταγράφηκε (εκπαιδευτική άσκηση, χωρίς πόντους).'", $s);
+        $this->assertStringContainsString('Η παρουσία καταγράφηκε και δόθηκαν πόντοι.', $s);
     }
 }

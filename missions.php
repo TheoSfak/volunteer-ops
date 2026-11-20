@@ -248,7 +248,7 @@ include __DIR__ . '/includes/header.php';
     </h1>
     <?php if (isAdmin()): ?>
         <div class="d-flex flex-wrap gap-2">
-            <a href="exports/export-missions.php?status=<?= h($status) ?>&department_id=<?= h($department) ?>&branch_id=<?= h($branch) ?>&search=<?= h($search) ?>&mission_type=<?= h($missionType) ?>"
+            <a href="exports/export-missions.php?status=<?= h($status) ?>&department_id=<?= h($department) ?>&branch_id=<?= h($branch) ?>&search=<?= h($search) ?>&mission_type=<?= h($missionType) ?>&training=<?= h($trainingFilter) ?>"
                class="btn btn-outline-success">
                 <i class="bi bi-download me-1"></i><?= t('missions_page.export_csv') ?>
             </a>

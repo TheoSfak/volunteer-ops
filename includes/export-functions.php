@@ -35,6 +35,14 @@ function exportMissionsToCsv($filters = []) {
         $where[] = 'm.mission_type_id = ?';
         $params[] = (int) $filters['mission_type'];
     }
+
+    // Training filter: strictly '1' (drills only) or '0' (operational only); anything else = all.
+    $trainingFilter = (string) ($filters['training'] ?? '');
+    if ($trainingFilter === '1') {
+        $where[] = 'm.is_training = 1';
+    } elseif ($trainingFilter === '0') {
+        $where[] = 'm.is_training = 0';
+    }
     
     if (!empty($filters['search'])) {
         $where[] = '(m.title LIKE ? OR m.description LIKE ? OR m.location LIKE ?)';

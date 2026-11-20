@@ -9,6 +9,7 @@ $filters = [
     'department_id' => get('department_id'),
     'branch_id'     => get('branch_id'),
     'mission_type'  => get('mission_type'),
+    'training'      => get('training'),
     'search'        => get('search'),
     'start_date'    => get('start_date'),
     'end_date'      => get('end_date')

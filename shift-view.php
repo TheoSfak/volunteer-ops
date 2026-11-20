@@ -306,7 +306,7 @@ if (isPost()) {
                         checkAndAwardAchievements((int)$pr['volunteer_id']);
                     }
 
-                    setFlash('success', getSetting('points_enabled', '1') === '1' ? 'Η παρουσία καταγράφηκε και δόθηκαν πόντοι.' : 'Η παρουσία καταγράφηκε επιτυχώς.');
+                    setFlash('success', !empty($pr['is_training']) ? 'Η παρουσία καταγράφηκε (εκπαιδευτική άσκηση, χωρίς πόντους).' : (getSetting('points_enabled', '1') === '1' ? 'Η παρουσία καταγράφηκε και δόθηκαν πόντοι.' : 'Η παρουσία καταγράφηκε επιτυχώς.'));
                 } catch (Exception $e) {
                     db()->rollBack();
                     setFlash('error', 'Σφάλμα κατά την καταγραφή παρουσίας. Παρακαλώ δοκιμάστε ξανά.');
