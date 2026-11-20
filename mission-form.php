@@ -77,6 +77,7 @@ if (isPost()) {
         'is_urgent' => isset($_POST['is_urgent']) ? 1 : 0,
         'is_special_mission' => isset($_POST['is_special_mission']) ? 1 : 0,
         'is_locked' => isset($_POST['is_locked']) ? 1 : 0,
+        'is_training' => trainingMissionFlagForSave($mission, $_POST),
         'show_in_ops' => isset($_POST['show_in_ops']) ? 1 : 0,
         'status' => post('status') ?: STATUS_DRAFT,
         'responsible_user_id' => post('responsible_user_id') ?: null,
@@ -286,13 +287,13 @@ if (isPost()) {
                             "INSERT INTO missions
                              (title, description, mission_type_id, department_id, branch_id, location, location_details,
                               latitude, longitude, start_datetime, end_datetime, requirements, notes,
-                              is_urgent, is_special_mission, is_locked, show_in_ops, status, responsible_user_id, created_by, recurrence_id, recurrence_instance_date, created_at, updated_at)
-                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
+                              is_urgent, is_special_mission, is_locked, is_training, show_in_ops, status, responsible_user_id, created_by, recurrence_id, recurrence_instance_date, created_at, updated_at)
+                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
                             [
                                 $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'], $data['branch_id'],
                                 $data['location'], $data['location_details'], $data['latitude'], $data['longitude'],
                                 $instStart, $instEnd, $data['requirements'], $data['notes'],
-                                $data['is_urgent'], $data['is_special_mission'], $data['is_locked'], $data['show_in_ops'], STATUS_OPEN, $data['responsible_user_id'], $user['id'],
+                                $data['is_urgent'], $data['is_special_mission'], $data['is_locked'], $data['is_training'], $data['show_in_ops'], STATUS_OPEN, $data['responsible_user_id'], $user['id'],
                                 $recurrenceId, $instanceDate,
                             ]
                         );
@@ -318,13 +319,13 @@ if (isPost()) {
                     $sql = "INSERT INTO missions
                             (title, description, mission_type_id, department_id, branch_id, location, location_details,
                              latitude, longitude, start_datetime, end_datetime, requirements, notes,
-                             is_urgent, is_special_mission, is_locked, show_in_ops, status, responsible_user_id, created_by, created_at, updated_at)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                             is_urgent, is_special_mission, is_locked, is_training, show_in_ops, status, responsible_user_id, created_by, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
                     $newId = dbInsert($sql, [
                         $data['title'], $data['description'], $data['mission_type_id'], $data['department_id'], $data['branch_id'],
                         $data['location'], $data['location_details'], $data['latitude'], $data['longitude'],
                         $data['start_datetime'], $data['end_datetime'], $data['requirements'], $data['notes'],
-                        $data['is_urgent'], $data['is_special_mission'], $data['is_locked'], $data['show_in_ops'], $data['status'], $data['responsible_user_id'], $user['id']
+                        $data['is_urgent'], $data['is_special_mission'], $data['is_locked'], $data['is_training'], $data['show_in_ops'], $data['status'], $data['responsible_user_id'], $user['id']
                     ]);
 
                     // Auto-create a default shift matching the mission's own date/time,
@@ -653,6 +654,23 @@ include __DIR__ . '/includes/header.php';
                         </label>
                         <div class="form-text">Οι εθελοντές θα βλέπουν την αποστολή αλλά δεν θα μπορούν να υποβάλουν αίτηση συμμετοχής μόνοι τους — μόνο ο διαχειριστής μπορεί να τους προσθέσει σε βάρδια. Εμφανίζεται με 🔒 στη λίστα αποστολών.</div>
                     </div>
+
+                    <?php if (!$isEdit): ?>
+                    <div class="form-check mb-3 border rounded p-3 bg-light">
+                        <input class="form-check-input" type="checkbox" id="is_training" name="is_training" value="1"
+                               <?= post('is_training') ? 'checked' : '' ?>>
+                        <label class="form-check-label fw-semibold" for="is_training">
+                            <i class="bi bi-mortarboard-fill text-warning me-1"></i>Εκπαιδευτική Άσκηση (δοκιμαστική αποστολή)
+                        </label>
+                        <div class="form-text">Δεν επηρεάζει στατιστικά, πόντους, επιτεύγματα ή αναφορές. Οι εθελοντές που συμμετέχουν παίρνουν εκπαιδευτικές ώρες και βεβαίωση. <strong>Δεν αλλάζει μετά τη δημιουργία.</strong></div>
+                    </div>
+                    <?php else: ?>
+                    <div class="mb-3 border rounded p-3 bg-light small">
+                        <i class="bi bi-mortarboard-fill text-warning me-1"></i>
+                        <?= !empty($mission['is_training']) ? 'Αυτή είναι εκπαιδευτική άσκηση.' : 'Αυτή είναι πραγματική αποστολή.' ?>
+                        Η επιλογή αυτή ορίζεται κατά τη δημιουργία και δεν αλλάζει.
+                    </div>
+                    <?php endif; ?>
 
                     <div class="mb-3">
                         <label for="responsible_user_id" class="form-label">Υπεύθυνος Αποστολής</label>

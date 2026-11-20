@@ -21,8 +21,8 @@ if (isPost() && post('action') === 'duplicate' && isAdmin()) {
             "INSERT INTO missions
              (title, description, mission_type_id, department_id, branch_id, location, location_details,
               latitude, longitude, start_datetime, end_datetime, requirements, notes,
-              is_urgent, status, responsible_user_id, created_by, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
+              is_urgent, is_training, status, responsible_user_id, created_by, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())",
             [
                 t('missions_page.duplicate_prefix', ['title' => $src['title']]),
                 $src['description'],
@@ -38,6 +38,7 @@ if (isPost() && post('action') === 'duplicate' && isAdmin()) {
                 $src['requirements'],
                 $src['notes'],
                 $src['is_urgent'],
+                $src['is_training'],
                 STATUS_DRAFT,
                 $src['responsible_user_id'],
                 $user['id'],
