@@ -22,7 +22,7 @@ if (!defined('VOLUNTEEROPS')) {
 function shiftSwapIncomingRequests(int $userId): array {
     return dbFetchAll(
         "SELECT ssr.*, s.start_time, s.end_time,
-                m.id as mission_id, m.title as mission_title, m.location,
+                m.id as mission_id, m.title as mission_title, m.is_training, m.location,
                 fu.name as requester_name
          FROM shift_swap_requests ssr
          JOIN shifts s ON ssr.shift_id = s.id
@@ -41,7 +41,7 @@ function shiftSwapIncomingRequests(int $userId): array {
 function shiftSwapOutgoingRequests(int $userId): array {
     return dbFetchAll(
         "SELECT ssr.*, s.start_time, s.end_time,
-                m.id as mission_id, m.title as mission_title, m.location,
+                m.id as mission_id, m.title as mission_title, m.is_training, m.location,
                 tu.name as to_volunteer_name
          FROM shift_swap_requests ssr
          JOIN shifts s ON ssr.shift_id = s.id
@@ -62,7 +62,7 @@ function shiftSwapOutgoingRequests(int $userId): array {
  */
 function shiftSwapRespond(int $swapId, array $responder, string $response): array {
     $swap = dbFetchOne(
-        "SELECT ssr.*, s.start_time, s.end_time, m.title as mission_title
+        "SELECT ssr.*, s.start_time, s.end_time, m.title as mission_title, m.is_training
          FROM shift_swap_requests ssr
          JOIN shifts s ON ssr.shift_id = s.id
          JOIN missions m ON s.mission_id = m.id
@@ -140,7 +140,7 @@ function shiftSwapAwaitingAdmin(?int $departmentId = null, ?int $branchId = null
 
     return dbFetchAll(
         "SELECT ssr.*, s.start_time, s.end_time,
-                m.id as mission_id, m.title as mission_title, m.location,
+                m.id as mission_id, m.title as mission_title, m.is_training, m.location,
                 fu.name as from_volunteer_name, tu.name as to_volunteer_name
          FROM shift_swap_requests ssr
          JOIN shifts s ON ssr.shift_id = s.id
@@ -274,7 +274,7 @@ function shiftSwapFetchForAdmin(int $swapId, ?int $requireShiftId = null): ?arra
 
     return dbFetchOne(
         "SELECT ssr.*, s.start_time, s.end_time,
-                m.title as mission_title, m.status as mission_status,
+                m.title as mission_title, m.is_training, m.status as mission_status,
                 fu.name as from_volunteer_name, fu.email as from_email,
                 tu.name as to_volunteer_name, tu.email as to_email
          FROM shift_swap_requests ssr

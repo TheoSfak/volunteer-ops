@@ -151,10 +151,19 @@ final class TrainingMissionSourceTest extends TestCase
 
         // Volunteer-side lists only: "my overdue missions", "my upcoming shifts", "available missions".
         // The admin lists (recent/overdue missions, pending requests) are already filtered by $departmentFilter.
-        $this->assertSame(3, substr_count($d, 'trainingMissionBadgeHtml('));
+        // Plus the three shift-swap rows (awaiting admin, incoming, outgoing).
+        $this->assertSame(6, substr_count($d, 'trainingMissionBadgeHtml('));
         $this->assertStringContainsString('trainingMissionBadgeHtml($om)', $d);
         $this->assertStringContainsString('trainingMissionBadgeHtml($shift)', $d);
         $this->assertStringContainsString('trainingMissionBadgeHtml($mission)', $d);
+
+        // The swap rows read the flag from these queries: every one that selects the mission title
+        // must also select m.is_training, or a drill would show unbadged.
+        $swap = $this->src('includes/shift-swap-functions.php');
+        $this->assertGreaterThanOrEqual(
+            substr_count($swap, 'm.title as mission_title'),
+            substr_count($swap, 'm.is_training')
+        );
 
         // Queries that name their columns must select the flag the badge reads.
         $this->assertStringContainsString('SELECT m.id, m.title, m.status, m.end_datetime, m.is_training,', $d);

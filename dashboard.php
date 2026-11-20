@@ -958,7 +958,7 @@ $swapAwaitingMe = isAdmin()
                         <strong><?= h($sa['to_volunteer_name']) ?></strong>, που έχει ήδη αποδεχτεί:
                     </div>
                     <div class="mt-1 small">
-                        <i class="bi bi-flag-fill text-primary me-1"></i><?= h($sa['mission_title']) ?>
+                        <i class="bi bi-flag-fill text-primary me-1"></i><?= h($sa['mission_title']) ?><?= trainingMissionBadgeHtml($sa) ?>
                         <span class="mx-1 text-muted">·</span>
                         <i class="bi bi-calendar3 me-1 text-muted"></i><?= formatDateTime($sa['start_time'], 'd/m/Y') ?>
                         <span class="mx-1 text-muted">·</span>
@@ -999,7 +999,7 @@ $swapAwaitingMe = isAdmin()
                         <strong><?= h($sr['requester_name']) ?></strong> σας ζητά να τον/την αντικαταστήσετε:
                     </div>
                     <div class="mt-1 small">
-                        <i class="bi bi-flag-fill text-primary me-1"></i><?= h($sr['mission_title']) ?>
+                        <i class="bi bi-flag-fill text-primary me-1"></i><?= h($sr['mission_title']) ?><?= trainingMissionBadgeHtml($sr) ?>
                         <span class="mx-1 text-muted">·</span>
                         <i class="bi bi-calendar3 me-1 text-muted"></i><?= formatDateTime($sr['start_time'], 'd/m/Y') ?>
                         <span class="mx-1 text-muted">·</span>
@@ -1048,7 +1048,7 @@ $swapAwaitingMe = isAdmin()
                         Ζητήσατε από τον/την <strong><?= h($sw['to_volunteer_name']) ?></strong> να σας αντικαταστήσει:
                     </div>
                     <div class="mt-1 small">
-                        <i class="bi bi-flag-fill text-primary me-1"></i><?= h($sw['mission_title']) ?>
+                        <i class="bi bi-flag-fill text-primary me-1"></i><?= h($sw['mission_title']) ?><?= trainingMissionBadgeHtml($sw) ?>
                         <span class="mx-1 text-muted">·</span>
                         <i class="bi bi-calendar3 me-1 text-muted"></i><?= formatDateTime($sw['start_time'], 'd/m/Y') ?>
                         <span class="mx-1 text-muted">·</span>
