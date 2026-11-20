@@ -67,7 +67,7 @@ function exportMissionsToCsv($filters = []) {
                 m.created_at,
                 (SELECT COUNT(*) FROM shifts WHERE mission_id = m.id) AS shift_count,
                 (SELECT COUNT(*) FROM shifts s JOIN participation_requests pr ON pr.shift_id = s.id
-                 WHERE s.mission_id = m.id AND pr.status = 'APPROVED' AND pr.is_training = 0) AS volunteer_count
+                 WHERE s.mission_id = m.id AND pr.status = 'APPROVED') AS volunteer_count
             FROM missions m
             LEFT JOIN departments d ON m.department_id = d.id
             LEFT JOIN departments br ON m.branch_id = br.id

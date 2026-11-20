@@ -87,6 +87,6 @@ final class TrainingMissionSourceTest extends TestCase
 
         $e = $this->src('includes/export-functions.php');
         $this->assertSame(2, substr_count($e, 'WHERE m.is_training = 0'));
-        $this->assertStringContainsString('pr.is_training = 0', $e); // the volunteer export's participation count
+        $this->assertStringNotContainsString('pr.is_training', $e); // the volunteer export's participation count is unfiltered (drills keep their real headcount)
     }
 }
