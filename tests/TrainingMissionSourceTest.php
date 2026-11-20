@@ -278,4 +278,31 @@ final class TrainingMissionSourceTest extends TestCase
         $s = $this->src('cron_incomplete_missions.php');
         $this->assertMatchesRegularExpression('/FROM shifts s\s+INNER JOIN missions m.*?WHERE s\.start_time.*?m\.is_training = 0.*?GROUP BY s\.id/s', $s);
     }
+
+    public function test_certificate_links_in_the_training_record_follow_who_may_open_them(): void
+    {
+        // mission-certificate-print.php admits the recipient, missions_manage users and the mission's responsible user.
+        $v = $this->src('volunteer-view.php');
+        $this->assertStringContainsString('$trainingRecordCanViewCertificate = hasPagePermission(\'missions_manage\');', $v);
+        $this->assertStringNotContainsString('$trainingRecordCanViewCertificate = true;', $v);
+
+        // profile.php shows the volunteer their own certificates.
+        $this->assertStringContainsString('$trainingRecordCanViewCertificate = true;', $this->src('profile.php'));
+    }
+
+    public function test_missions_pagination_keeps_the_training_and_type_filters(): void
+    {
+        // paginationLinks() ignores its second argument and rebuilds every link from $_GET, so page 2
+        // keeps training and mission_type; this pins the function the missions list depends on.
+        $old = $_GET;
+        $_GET = ['status' => 'OPEN', 'training' => '1', 'mission_type' => '3', 'page' => '1'];
+        try {
+            $html = paginationLinks(['total_pages' => 3, 'current_page' => 1, 'has_prev' => false, 'has_next' => true]);
+        } finally {
+            $_GET = $old;
+        }
+        $this->assertStringContainsString('training=1', $html);
+        $this->assertStringContainsString('mission_type=3', $html);
+        $this->assertStringContainsString('page=2', $html);
+    }
 }

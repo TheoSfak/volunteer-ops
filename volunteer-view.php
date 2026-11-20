@@ -1304,7 +1304,7 @@ include __DIR__ . '/includes/subscription-payment-history-modal.php';
 
         <?php
         $trainingRecord = getVolunteerTrainingRecord((int) $id);
-        $trainingRecordCanViewCertificate = true; // admin viewing a volunteer
+        $trainingRecordCanViewCertificate = hasPagePermission('missions_manage'); // mission-certificate-print.php admits only the recipient, missions_manage and the responsible user
         include __DIR__ . '/includes/training-record-section.php';
         ?>
 
