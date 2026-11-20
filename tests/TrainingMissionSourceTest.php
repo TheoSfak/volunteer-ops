@@ -120,4 +120,20 @@ final class TrainingMissionSourceTest extends TestCase
         $i = $this->src('mission-certificates.php');
         $this->assertStringContainsString('getTrainingHoursForMission(', $i);
     }
+
+    public function test_badges_banners_and_list_filter(): void
+    {
+        $l = $this->src('missions.php');
+        $this->assertStringContainsString("\$trainingFilter = get('training');", $l);
+        $this->assertStringContainsString("'m.is_training = 1'", $l);
+        $this->assertStringContainsString("'m.is_training = 0'", $l);
+        $this->assertSame(2, substr_count($l, 'trainingMissionBadgeHtml($mission)'));
+
+        $v = $this->src('mission-view.php');
+        $this->assertStringContainsString('trainingMissionBadgeHtml($mission)', $v);
+        $this->assertStringContainsString('Εκπαιδευτική άσκηση - δεν επηρεάζει τα στατιστικά', $v);
+
+        $w = $this->src('war-room.php');
+        $this->assertStringContainsString('Εκπαιδευτική άσκηση - δεν επηρεάζει τα στατιστικά', $w);
+    }
 }

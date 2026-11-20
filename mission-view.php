@@ -583,6 +583,7 @@ include __DIR__ . '/includes/header.php';
     <div>
         <h1 class="h3 mb-0">
             <?= h($mission['title']) ?>
+            <?= trainingMissionBadgeHtml($mission) ?>
             <?php if (!empty($mission['type_name'])): ?>
                 <span class="badge bg-<?= h($mission['type_color'] ?? 'secondary') ?>">
                     <i class="bi <?= h($mission['type_icon'] ?? 'bi-flag') ?>"></i>
@@ -669,6 +670,14 @@ include __DIR__ . '/includes/header.php';
         <?php endif; ?>
     </div>
 </div>
+
+<?php if (!empty($mission['is_training'])): ?>
+<div class="alert alert-warning d-flex align-items-center mb-4">
+    <i class="bi bi-mortarboard-fill fs-4 me-3"></i>
+    <div><strong>Εκπαιδευτική άσκηση - δεν επηρεάζει τα στατιστικά.</strong>
+    Οι ώρες σας καταγράφονται ως εκπαιδευτικές και δεν δίνουν πόντους ή επιτεύγματα.</div>
+</div>
+<?php endif; ?>
 
 <?php if ($isOverdue && !$canManageMissions): ?>
 <div class="alert alert-warning d-flex align-items-center gap-2 mb-4">

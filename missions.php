@@ -63,6 +63,7 @@ if (!isAdmin() && $status !== STATUS_OPEN) {
 $department = get('department');
 $branch = get('branch');
 $missionType = (int)get('mission_type', 0);
+$trainingFilter = get('training'); // '' = all, '0' = operational only, '1' = training only
 $search = get('search');
 $page = max(1, (int)get('page', 1));
 $perPage = 20;
@@ -105,6 +106,11 @@ if ($search) {
 if ($missionType) {
     $where[] = 'm.mission_type_id = ?';
     $params[] = $missionType;
+}
+if ($trainingFilter === '1') {
+    $where[] = 'm.is_training = 1';
+} elseif ($trainingFilter === '0') {
+    $where[] = 'm.is_training = 0';
 }
 
 // Τ.Ε.Π. αποστολές: ορατές μόνο σε admins, δόκιμους και υπεύθυνο αποστολής
@@ -285,6 +291,13 @@ include __DIR__ . '/includes/header.php';
                     <?php endforeach; ?>
                 </select>
             </div>
+            <div class="col-md-2">
+                <select class="form-select form-select-sm" name="training">
+                    <option value="">Όλες</option>
+                    <option value="0" <?= $trainingFilter === '0' ? 'selected' : '' ?>>Επιχειρησιακές</option>
+                    <option value="1" <?= $trainingFilter === '1' ? 'selected' : '' ?>>Εκπαιδευτικές</option>
+                </select>
+            </div>
             <div class="col-md-3">
                 <select class="form-select form-select-sm" name="department">
                     <option value=""><?= t('missions_page.all_departments') ?></option>
@@ -344,7 +357,7 @@ include __DIR__ . '/includes/header.php';
                             <tr>
                                 <td>
                                     <a href="<?= $missionLinkBase ?>?id=<?= $mission['id'] ?>" class="text-decoration-none">
-                                        <strong><?= h($mission['title']) ?></strong>
+                                        <strong><?= h($mission['title']) ?></strong><?= trainingMissionBadgeHtml($mission) ?>
                                     </a>
                                     <?php if ($mission['is_urgent']): ?>
                                         <span class="badge bg-danger ms-1"><?= t('missions_page.urgent_badge') ?></span>
@@ -455,7 +468,7 @@ include __DIR__ . '/includes/header.php';
                             <div class="mobile-card-header">
                                 <div>
                                     <a href="<?= $missionLinkBase ?>?id=<?= $mission['id'] ?>" class="text-decoration-none">
-                                        <strong><?= h($mission['title']) ?></strong>
+                                        <strong><?= h($mission['title']) ?></strong><?= trainingMissionBadgeHtml($mission) ?>
                                     </a>
                                     <?php if ($mission['is_urgent']): ?>
                                         <span class="badge bg-danger ms-1"><?= t('missions_page.urgent_badge') ?></span>
