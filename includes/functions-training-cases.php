@@ -27,9 +27,12 @@ const TRAINING_CASE_RATING_POINTS = ['best' => 2, 'acceptable' => 1, 'harmful' =
  * A '<' that does not start a tag (for example '<90' or '<50') is kept literally: clinical thresholds are content.
  * A tag starts with '<' then a letter, '/', '!' or '?'. Removal repeats until nothing changes, so '<<b>b>' cannot
  * rebuild a tag. Non-scalar input (an array from JSON) reads as ''.
+ * The raw text is first cut to 4 times $max bytes, so the repeated removal costs a bounded amount whatever the input
+ * ('<<<...b>b>b>' is quadratic otherwise); real text is far shorter than that, tags included.
  */
 function trainingCasePlain($value, int $max): string {
     $text = is_scalar($value) ? (string) $value : '';
+    $text = mb_strcut($text, 0, max(1, $max) * 4, 'UTF-8');
     do {
         $before = $text;
         $text = (string) preg_replace('/<!--.*?-->|<[\/!?]?[a-z][^>]*>/is', '', $text);
@@ -245,4 +248,222 @@ function trainingCaseBestPath(array $doc): array {
         $stepId = $best['next'];
     }
     return $path;
+}
+
+const TRAINING_CASE_TYPES = ['trauma', 'cardiac', 'respiratory', 'neuro', 'environmental', 'other'];
+const TRAINING_CASE_MAX_IMPORT_BYTES = 200000;
+const TRAINING_CASE_PACK_FORMAT = 'volunteerops-training-cases';
+
+/** type, difficulty (1 to 3), language (el|en) and minutes (1 to 30), clamped to what the library allows. */
+function trainingCaseMeta(array $meta): array {
+    $type = (string) ($meta['type_tag'] ?? 'other');
+    $lang = (string) ($meta['language'] ?? 'el');
+    return [
+        'type_tag'    => in_array($type, TRAINING_CASE_TYPES, true) ? $type : 'other',
+        'difficulty'  => max(1, min(3, (int) ($meta['difficulty'] ?? 1))),
+        'language'    => in_array($lang, ['el', 'en'], true) ? $lang : 'el',
+        'est_minutes' => max(1, min(30, (int) ($meta['est_minutes'] ?? 5))),
+    ];
+}
+
+/** A slug nobody uses yet. Greek titles have no latin letters, so the base falls back to 'case'. */
+function trainingCaseUniqueSlug(string $title): string {
+    $base = strtolower(trim((string) preg_replace('/[^a-z0-9]+/i', '-', $title), '-'));
+    if ($base === '') {
+        $base = 'case';
+    }
+    $base = substr($base, 0, 60);
+    $slug = $base;
+    $n = 1;
+    while (dbFetchValue("SELECT 1 FROM training_cases WHERE slug = ?", [$slug])) {
+        $n++;
+        $slug = $base . '-' . $n;
+    }
+    return $slug;
+}
+
+/**
+ * Creates ($id null) or edits a case. The document is normalised and validated first; nothing is written when it
+ * has errors. Editing resets `reviewed` (the content changed) and a starter case cannot be edited, only duplicated.
+ */
+function trainingCaseSave(?int $id, array $meta, $rawDoc, int $userId): array {
+    $doc = trainingCaseNormalize($rawDoc);
+    if ($doc === null) {
+        return ['ok' => false, 'errors' => [['code' => 'unreadable', 'where' => '']]];
+    }
+    $errors = trainingCaseValidate($doc);
+    if ($errors) {
+        return ['ok' => false, 'errors' => $errors];
+    }
+    $fields = trainingCaseMeta($meta);
+    $json = json_encode($doc, JSON_UNESCAPED_UNICODE);
+    if ($id === null) {
+        $newId = (int) dbInsert(
+            "INSERT INTO training_cases (slug, title, type_tag, difficulty, language, est_minutes, document, format_version, is_starter, reviewed, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)",
+            [trainingCaseUniqueSlug($doc['title']), $doc['title'], $fields['type_tag'], $fields['difficulty'], $fields['language'],
+             $fields['est_minutes'], $json, TRAINING_CASE_FORMAT_VERSION, $userId]
+        );
+        logAudit('create_training_case', 'training_cases', $newId, null, ['title' => $doc['title']]);
+        return ['ok' => true, 'id' => $newId];
+    }
+    $row = dbFetchOne("SELECT id, is_starter FROM training_cases WHERE id = ?", [$id]);
+    if (!$row) {
+        return ['ok' => false, 'errors' => [['code' => 'not_found', 'where' => '']]];
+    }
+    if ((int) $row['is_starter'] === 1) {
+        return ['ok' => false, 'errors' => [['code' => 'starter_locked', 'where' => '']]];
+    }
+    dbExecute(
+        "UPDATE training_cases SET title = ?, type_tag = ?, difficulty = ?, language = ?, est_minutes = ?, document = ?, format_version = ?,
+                reviewed = 0, reviewed_by = NULL, reviewed_at = NULL
+         WHERE id = ?",
+        [$doc['title'], $fields['type_tag'], $fields['difficulty'], $fields['language'], $fields['est_minutes'], $json, TRAINING_CASE_FORMAT_VERSION, $id]
+    );
+    logAudit('update_training_case', 'training_cases', $id, null, ['title' => $doc['title']]);
+    return ['ok' => true, 'id' => $id];
+}
+
+/** One case with its document decoded into ['doc'], or null. */
+function trainingCaseLoad(int $id): ?array {
+    $row = dbFetchOne("SELECT * FROM training_cases WHERE id = ?", [$id]);
+    if (!$row) {
+        return null;
+    }
+    $row['doc'] = trainingCaseNormalize(json_decode((string) $row['document'], true)) ?? [];
+    return $row;
+}
+
+/** The library, without documents: starters first, then by title. Archived ones only with include_archived. */
+function trainingCaseList(array $filter = []): array {
+    $where = [];
+    $args = [];
+    if (empty($filter['include_archived'])) {
+        $where[] = 'archived_at IS NULL';
+    }
+    if (!empty($filter['type'])) {
+        $where[] = 'type_tag = ?';
+        $args[] = (string) $filter['type'];
+    }
+    if (!empty($filter['difficulty'])) {
+        $where[] = 'difficulty = ?';
+        $args[] = (int) $filter['difficulty'];
+    }
+    if (!empty($filter['language'])) {
+        $where[] = 'language = ?';
+        $args[] = (string) $filter['language'];
+    }
+    return dbFetchAll(
+        "SELECT id, slug, title, type_tag, difficulty, language, est_minutes, is_starter, reviewed, reviewed_at, archived_at
+         FROM training_cases" . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . "
+         ORDER BY is_starter DESC, title, id",
+        $args
+    );
+}
+
+/** An editable, unreviewed copy of any case (a starter included). */
+function trainingCaseDuplicate(int $id, int $userId): array {
+    $row = trainingCaseLoad($id);
+    if (!$row) {
+        return ['ok' => false, 'errors' => [['code' => 'not_found', 'where' => '']]];
+    }
+    $doc = $row['doc'];
+    $doc['title'] = mb_substr($doc['title'] . ' (αντίγραφο)', 0, 160);
+    return trainingCaseSave(null, $row, $doc, $userId);
+}
+
+function trainingCaseArchive(int $id, bool $archive): void {
+    dbExecute("UPDATE training_cases SET archived_at = " . ($archive ? 'NOW()' : 'NULL') . " WHERE id = ?", [$id]);
+}
+
+function trainingCaseSetReviewed(int $id, bool $reviewed, int $userId): void {
+    if ($reviewed) {
+        dbExecute("UPDATE training_cases SET reviewed = 1, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?", [$userId, $id]);
+    } else {
+        dbExecute("UPDATE training_cases SET reviewed = 0, reviewed_by = NULL, reviewed_at = NULL WHERE id = ?", [$id]);
+    }
+}
+
+/** One file holding any number of cases: {format, format_version, cases: [{slug, type_tag, difficulty, language, est_minutes, document}]}. */
+function trainingCaseExport(array $ids): string {
+    $cases = [];
+    foreach ($ids as $id) {
+        $row = trainingCaseLoad((int) $id);
+        if (!$row) {
+            continue;
+        }
+        $cases[] = [
+            'slug' => $row['slug'], 'type_tag' => $row['type_tag'], 'difficulty' => (int) $row['difficulty'],
+            'language' => $row['language'], 'est_minutes' => (int) $row['est_minutes'], 'document' => $row['doc'],
+        ];
+    }
+    return (string) json_encode(
+        ['format' => TRAINING_CASE_PACK_FORMAT, 'format_version' => TRAINING_CASE_FORMAT_VERSION, 'cases' => $cases],
+        JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT
+    );
+}
+
+/**
+ * Reads an import file WITHOUT saving: ['ok' => false, 'error' => t() key] for a file that is too big, not JSON, not
+ * one of ours or from a newer format; else ['ok' => true, 'cases' => [['title', 'meta', 'doc', 'errors', 'clash']]],
+ * where `clash` says the slug is already in the library (the import renames it) and `errors` is the validation list.
+ * Anything the format does not know is ignored. The size check comes first: nothing is decoded or normalised before it.
+ */
+function trainingCaseImportRead(string $json): array {
+    if (strlen($json) > TRAINING_CASE_MAX_IMPORT_BYTES) {
+        return ['ok' => false, 'error' => 'case.import_too_big'];
+    }
+    $pack = json_decode($json, true);
+    if (!is_array($pack) || ($pack['format'] ?? '') !== TRAINING_CASE_PACK_FORMAT || !is_array($pack['cases'] ?? null)) {
+        return ['ok' => false, 'error' => 'case.import_unreadable'];
+    }
+    if ((int) ($pack['format_version'] ?? 0) > TRAINING_CASE_FORMAT_VERSION) {
+        return ['ok' => false, 'error' => 'case.import_newer'];
+    }
+    $out = [];
+    foreach (array_slice($pack['cases'], 0, 50) as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+        $doc = trainingCaseNormalize($entry['document'] ?? null);
+        $errors = $doc === null ? [['code' => 'unreadable', 'where' => '']] : trainingCaseValidate($doc);
+        $slugRaw = $entry['slug'] ?? '';
+        $slug = substr(trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower(is_scalar($slugRaw) ? (string) $slugRaw : '')), '-'), 0, 80);
+        $out[] = [
+            'title'  => $doc['title'] ?? '',
+            'slug'   => $slug,
+            'meta'   => trainingCaseMeta($entry),
+            'doc'    => $doc,
+            'errors' => $errors,
+            'clash'  => $slug !== '' && (bool) dbFetchValue("SELECT 1 FROM training_cases WHERE slug = ?", [$slug]),
+        ];
+    }
+    return ['ok' => true, 'cases' => $out];
+}
+
+/** Saves every valid case of an import file as a new, unreviewed, non-starter case. Returns ['saved' => n, 'skipped' => n, 'ids' => []]. */
+function trainingCaseImport(string $json, int $userId): array {
+    $read = trainingCaseImportRead($json);
+    if (!$read['ok']) {
+        return ['saved' => 0, 'skipped' => 0, 'ids' => [], 'error' => $read['error']];
+    }
+    $saved = [];
+    $skipped = 0;
+    foreach ($read['cases'] as $case) {
+        if ($case['errors'] || $case['doc'] === null) {
+            $skipped++;
+            continue;
+        }
+        $result = trainingCaseSave(null, $case['meta'], $case['doc'], $userId);
+        if ($result['ok']) {
+            // trainingCaseSave() names the slug from the title; keep the file's own slug when it is free.
+            if ($case['slug'] !== '' && !dbFetchValue("SELECT 1 FROM training_cases WHERE slug = ?", [$case['slug']])) {
+                dbExecute("UPDATE training_cases SET slug = ? WHERE id = ?", [$case['slug'], $result['id']]);
+            }
+            $saved[] = $result['id'];
+        } else {
+            $skipped++;
+        }
+    }
+    return ['saved' => count($saved), 'skipped' => $skipped, 'ids' => $saved];
 }
