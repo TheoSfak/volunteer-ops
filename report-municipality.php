@@ -79,7 +79,7 @@ $appLogo = getSetting('app_logo', '');
 $reportData = null;
 if ($generate) {
     $typePlaceholders = implode(',', array_fill(0, count($selectedTypes), '?'));
-    $baseWhere = "m.deleted_at IS NULL AND m.start_datetime >= ? AND m.start_datetime <= ? AND m.mission_type_id IN ($typePlaceholders)" . $deptFilter;
+    $baseWhere = "m.deleted_at IS NULL AND m.is_training = 0 AND m.start_datetime >= ? AND m.start_datetime <= ? AND m.mission_type_id IN ($typePlaceholders)" . $deptFilter;
     $baseParams = array_merge([$startDate, $endDate . ' 23:59:59'], $selectedTypes, $deptParams);
 
     // --- KPI: Missions ---
@@ -178,13 +178,13 @@ if ($generate) {
                 SUM(m.status = '" . STATUS_COMPLETED . "') as completed,
                 SUM(m.status = '" . STATUS_CANCELED . "') as canceled,
                 COALESCE((SELECT COUNT(DISTINCT s2.id) FROM shifts s2 JOIN missions m2 ON s2.mission_id = m2.id
-                 WHERE m2.deleted_at IS NULL AND m2.start_datetime >= ? AND m2.start_datetime <= ? AND m2.mission_type_id = mt.id" . $deptFilter . "), 0) as shift_count,
+                 WHERE m2.deleted_at IS NULL AND m2.is_training = 0 AND m2.start_datetime >= ? AND m2.start_datetime <= ? AND m2.mission_type_id = mt.id" . $deptFilter . "), 0) as shift_count,
                 COALESCE((SELECT SUM(pr2.actual_hours) FROM participation_requests pr2 
                  JOIN shifts s3 ON pr2.shift_id = s3.id JOIN missions m3 ON s3.mission_id = m3.id 
-                 WHERE pr2.attended = 1 AND m3.deleted_at IS NULL AND m3.start_datetime >= ? AND m3.start_datetime <= ? AND m3.mission_type_id = mt.id" . $deptFilter . "), 0) as hours,
+                 WHERE pr2.attended = 1 AND m3.deleted_at IS NULL AND m3.is_training = 0 AND m3.start_datetime >= ? AND m3.start_datetime <= ? AND m3.mission_type_id = mt.id" . $deptFilter . "), 0) as hours,
                 COALESCE((SELECT COUNT(DISTINCT pr3.volunteer_id) FROM participation_requests pr3 
                  JOIN shifts s4 ON pr3.shift_id = s4.id JOIN missions m4 ON s4.mission_id = m4.id 
-                 WHERE pr3.attended = 1 AND m4.deleted_at IS NULL AND m4.start_datetime >= ? AND m4.start_datetime <= ? AND m4.mission_type_id = mt.id" . $deptFilter . "), 0) as volunteers
+                 WHERE pr3.attended = 1 AND m4.deleted_at IS NULL AND m4.is_training = 0 AND m4.start_datetime >= ? AND m4.start_datetime <= ? AND m4.mission_type_id = mt.id" . $deptFilter . "), 0) as volunteers
          FROM mission_types mt JOIN missions m ON m.mission_type_id = mt.id
          WHERE $baseWhere GROUP BY mt.id, mt.name, mt.color, mt.icon ORDER BY mission_count DESC",
         array_merge(

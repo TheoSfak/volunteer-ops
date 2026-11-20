@@ -71,4 +71,22 @@ final class TrainingMissionSourceTest extends TestCase
         // Personal totals: hours, yearly attendance, TEP hours, shift count.
         $this->assertGreaterThanOrEqual(3, substr_count($s, 'pr.attended = 1 AND pr.is_training = 0'));
     }
+
+    public function test_reports_and_exports_exclude_training(): void
+    {
+        $r = $this->src('reports.php');
+        $this->assertStringContainsString('m.deleted_at IS NULL AND m.is_training = 0 AND m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 DAY', $r);
+        $this->assertSame(2, substr_count($r, 'ON pr.volunteer_id=u.id AND pr.attended=1 AND pr.is_training=0'));
+        $this->assertStringContainsString('WHERE m.deleted_at IS NULL AND m.is_training = 0 AND m.start_datetime >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)', $r);
+
+        $m = $this->src('report-municipality.php');
+        $this->assertStringContainsString('m.deleted_at IS NULL AND m.is_training = 0 AND m.start_datetime >= ? AND m.start_datetime <= ? AND m.mission_type_id IN', $m);
+        foreach (['m2', 'm3', 'm4'] as $alias) {
+            $this->assertStringContainsString("{$alias}.deleted_at IS NULL AND {$alias}.is_training = 0 AND", $m);
+        }
+
+        $e = $this->src('includes/export-functions.php');
+        $this->assertSame(2, substr_count($e, 'WHERE m.is_training = 0'));
+        $this->assertStringContainsString('pr.is_training = 0', $e); // the volunteer export's participation count
+    }
 }

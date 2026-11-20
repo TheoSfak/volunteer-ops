@@ -67,7 +67,7 @@ function exportMissionsToCsv($filters = []) {
                 m.created_at,
                 (SELECT COUNT(*) FROM shifts WHERE mission_id = m.id) AS shift_count,
                 (SELECT COUNT(*) FROM shifts s JOIN participation_requests pr ON pr.shift_id = s.id
-                 WHERE s.mission_id = m.id AND pr.status = 'APPROVED') AS volunteer_count
+                 WHERE s.mission_id = m.id AND pr.status = 'APPROVED' AND pr.is_training = 0) AS volunteer_count
             FROM missions m
             LEFT JOIN departments d ON m.department_id = d.id
             LEFT JOIN departments br ON m.branch_id = br.id
@@ -462,7 +462,7 @@ function exportStatisticsToCsv($period = 'monthly', $deptId = null, $branchId = 
                 FROM missions m
                 LEFT JOIN shifts s ON m.id = s.mission_id
                 LEFT JOIN participation_requests pr ON s.id = pr.shift_id AND pr.status = '" . PARTICIPATION_APPROVED . "'
-                WHERE m.start_datetime >= DATE_SUB(NOW(), INTERVAL 12 MONTH)" . $deptWhere . "
+                WHERE m.is_training = 0 AND m.start_datetime >= DATE_SUB(NOW(), INTERVAL 12 MONTH)" . $deptWhere . "
                 GROUP BY DATE_FORMAT(m.start_datetime, '%Y-%m')
                 ORDER BY period DESC";
     } else {
@@ -477,7 +477,7 @@ function exportStatisticsToCsv($period = 'monthly', $deptId = null, $branchId = 
                 FROM missions m
                 LEFT JOIN shifts s ON m.id = s.mission_id
                 LEFT JOIN participation_requests pr ON s.id = pr.shift_id AND pr.status = '" . PARTICIPATION_APPROVED . "'
-                WHERE 1=1" . $deptWhere . "
+                WHERE m.is_training = 0" . $deptWhere . "
                 GROUP BY YEAR(m.start_datetime)
                 ORDER BY period DESC";
     }

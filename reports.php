@@ -49,7 +49,7 @@ function tabUrl($tab) { global $fp; return "reports.php?tab=$tab" . ($fp ? "&$fp
 // their own filter column (missions: department_id/branch_id; users below:
 // department_id/warehouse_id), never both at once in practice since a user
 // has only one role, but nothing stops a system admin combining both filters.
-$mWhere = "m.deleted_at IS NULL AND m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 DAY";
+$mWhere = "m.deleted_at IS NULL AND m.is_training = 0 AND m.start_datetime >= ? AND m.start_datetime < ? + INTERVAL 1 DAY";
 $mParams = [$startDate, $endDate];
 if ($departmentId) { $mWhere .= " AND m.department_id = ?"; $mParams[] = $departmentId; }
 if ($branchId) { $mWhere .= " AND m.branch_id = ?"; $mParams[] = $branchId; }
@@ -97,7 +97,7 @@ if (get('export') === 'csv') {
             $csvUParams = [];
             if ($departmentId) { $csvUWhere .= " AND u.department_id=?"; $csvUParams[] = $departmentId; }
             if ($branchId) { $csvUWhere .= " AND u.warehouse_id=?"; $csvUParams[] = $branchId; }
-            $rows = safeFetchAll("SELECT u.name, d.name as dept, COALESCE(SUM(pr.actual_hours),0) as hours, COUNT(DISTINCT CASE WHEN pr.attended=1 THEN pr.id END) as shifts, u.total_points FROM users u LEFT JOIN departments d ON u.department_id=d.id LEFT JOIN participation_requests pr ON pr.volunteer_id=u.id AND pr.attended=1 WHERE $csvUWhere GROUP BY u.id ORDER BY hours DESC LIMIT 100", $csvUParams);
+            $rows = safeFetchAll("SELECT u.name, d.name as dept, COALESCE(SUM(pr.actual_hours),0) as hours, COUNT(DISTINCT CASE WHEN pr.attended=1 THEN pr.id END) as shifts, u.total_points FROM users u LEFT JOIN departments d ON u.department_id=d.id LEFT JOIN participation_requests pr ON pr.volunteer_id=u.id AND pr.attended=1 AND pr.is_training=0 WHERE $csvUWhere GROUP BY u.id ORDER BY hours DESC LIMIT 100", $csvUParams);
             foreach ($rows as $r) {
                 if (getSetting('points_enabled', '1') === '1') {
                     fputcsvSafe($out, [$r['name'], $r['dept'], $r['hours'], $r['shifts'], $r['total_points']]);
@@ -193,7 +193,7 @@ case 'overview':
          FROM missions m
          LEFT JOIN shifts s ON s.mission_id=m.id
          LEFT JOIN participation_requests pr ON pr.shift_id=s.id
-         WHERE m.deleted_at IS NULL AND m.start_datetime >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
+         WHERE m.deleted_at IS NULL AND m.is_training = 0 AND m.start_datetime >= DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
          " . ($departmentId ? "AND m.department_id = ?" : "") . "
          GROUP BY month ORDER BY month",
         $departmentId ? [$departmentId] : []);
@@ -301,7 +301,7 @@ case 'volunteers':
                 u.total_points
          FROM users u
          LEFT JOIN departments d ON u.department_id=d.id
-         LEFT JOIN participation_requests pr ON pr.volunteer_id=u.id AND pr.attended=1
+         LEFT JOIN participation_requests pr ON pr.volunteer_id=u.id AND pr.attended=1 AND pr.is_training=0
          WHERE $uWhere AND u.role IN ('VOLUNTEER','SHIFT_LEADER')
          GROUP BY u.id ORDER BY hours DESC LIMIT 15", $uParams);
     break;
