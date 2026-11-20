@@ -33,7 +33,7 @@ final class TrainingGatingTest extends TestCase
         $this->assertFalse(trainingTriggerExists('no_such_trigger_xyz'));
     }
 
-    public function test_the_trigger_name_is_matched_exactly_and_the_result_is_cached_per_name(): void
+    public function test_the_trigger_name_is_matched_exactly_and_repeated_calls_agree(): void
     {
         // A prefix of the real name must not match, and asking twice gives the same answer.
         $this->assertFalse(trainingTriggerExists('trg_pr_set_trainin'));
@@ -77,6 +77,34 @@ final class TrainingGatingTest extends TestCase
             strpos($s, "!empty(\$_POST['is_training']) && !trainingMissionsAvailable()"),
             'the gate must run before the mission is written'
         );
+    }
+
+    public function test_duplicating_a_drill_is_refused_while_the_trigger_is_missing(): void
+    {
+        $s = $this->src('missions.php');
+        $start = strpos($s, "post('action') === 'duplicate'");
+        $this->assertNotFalse($start, 'the duplicate block was not found');
+        // The block ends at the not-found flash that closes it.
+        $end = strpos($s, "t('missions_page.mission_not_found_alt')", $start);
+        $this->assertNotFalse($end);
+        $block = substr($s, $start, $end - $start);
+
+        $gate = strpos($block, 'trainingMissionsAvailable()');
+        $insert = strpos($block, 'INSERT INTO missions');
+        $this->assertNotFalse($gate, 'the duplicate block must ask trainingMissionsAvailable()');
+        $this->assertNotFalse($insert);
+        $this->assertLessThan($insert, $gate, 'the gate must run before the INSERT');
+
+        // Only a drill is refused (a normal mission still duplicates), with the same message as creation.
+        $this->assertMatchesRegularExpression(
+            '/\(int\)\s*\$src\[\'is_training\'\]\s*===\s*1\s*&&\s*!trainingMissionsAvailable\(\)/',
+            $block
+        );
+        $gateBranch = substr($block, $gate, $insert - $gate);
+        $this->assertStringContainsString("setFlash('error', '" . self::UNAVAILABLE_MESSAGE . "');", $gateBranch);
+        $this->assertStringContainsString("redirect('missions.php');", $gateBranch, 'refuse, never fall through to the INSERT');
+        // The drill flag is still copied for a normal duplication.
+        $this->assertStringContainsString("\$src['is_training']", substr($block, $insert));
     }
 
     public function test_the_checkbox_is_still_create_only_and_hidden_when_unavailable(): void

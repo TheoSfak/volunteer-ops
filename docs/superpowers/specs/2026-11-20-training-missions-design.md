@@ -159,7 +159,11 @@ training missions:
   lists only the triggers the database user holds the TRIGGER privilege for, so on a host without that
   privilege the check says "missing" even if the trigger exists: it fails closed, never open. While the
   trigger is missing the mission form hides the checkbox and explains why, and the server rejects a posted
-  `is_training` on create with an error instead of silently saving a real mission. Admins see a warning
+  `is_training` on create with an error instead of silently saving a real mission. Duplicating a drill
+  (the "duplicate" action in `missions.php`) is refused with the same message while the trigger is missing
+  (same rule as creation); duplicating a real mission is unaffected. Drills that already exist can still
+  receive participations while the trigger is missing; the reconcile UPDATE repairs those rows once the
+  trigger is created (points already granted in the gap need manual reversal). Admins see a warning
   banner (`includes/training-gate-banner.php`) on the dashboard and the mission form for as long as the
   trigger is missing; it shows the last recorded `migration_last_error` only as a detail line, never as a
   reason to appear (the runner never clears that record).
@@ -189,5 +193,5 @@ it lags by design and `tests/migrate-fixture.php` brings it forward (CI and loca
   that filters elsewhere.
 - The browser-level checks (the printed certificate, the badges, the banner, the missions-list filter)
   were not performed by the automated run and remain manual.
-- The Hostinger trigger check (`trg_pr_set_training` exists, `migration_last_error` is empty) remains a
+- The Hostinger trigger check (the trigger `trg_pr_set_training` exists, `SHOW TRIGGERS LIKE 'participation_requests'`) remains a
   deployment step.

@@ -16,6 +16,11 @@ if (isPost() && post('action') === 'duplicate' && isAdmin()) {
         "SELECT * FROM missions WHERE id = ? AND deleted_at IS NULL",
         [$srcId]
     );
+    if ($src && (int) $src['is_training'] === 1 && !trainingMissionsAvailable()) {
+        // Fail closed, same rule as creating a drill: never copy it into a mission the trigger cannot isolate.
+        setFlash('error', 'Η δημιουργία εκπαιδευτικής άσκησης δεν είναι διαθέσιμη: η βάση δεδομένων δεν έχει ενεργό τον μηχανισμό (trigger) που απομονώνει τις ασκήσεις από τα πραγματικά στατιστικά. Ενημερώστε τον διαχειριστή συστήματος.');
+        redirect('missions.php');
+    }
     if ($src) {
         $newId = dbInsert(
             "INSERT INTO missions
