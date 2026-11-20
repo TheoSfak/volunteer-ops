@@ -22,9 +22,6 @@ $userId = (int) getCurrentUserId();
 $showArchived = get('archived') === '1' || post('archived') === '1';
 $listUrl = 'training-cases.php' . ($showArchived ? '?archived=1' : '');
 
-// The shipped starter cases are loaded (or refreshed) when the library opens; cheap, and a no-op when nothing changed.
-trainingCaseSeedStarters();
-
 /** The type's name in the viewer's language; an unknown tag is shown as it is (the caller escapes it). */
 function trainingCaseTypeLabel(string $tag): string {
     return in_array($tag, TRAINING_CASE_TYPES, true) ? t('case.type.' . $tag) : $tag;
@@ -40,11 +37,17 @@ function trainingCaseActionForm(string $action, int $id, string $label, string $
         . '</form>';
 }
 
+// A POST is checked before anything is written: the seeding below is a write too.
+if (isPost()) {
+    verifyCsrf();
+}
+// The shipped starter cases are loaded (or refreshed) when the library opens; cheap, and a no-op when nothing changed.
+trainingCaseSeedStarters();
+
 $importPreview = null;   // ['json' => the file's text, 'cases' => the preview rows] after an upload
 $importError = '';
 
 if (isPost()) {
-    verifyCsrf();
     $action = post('action');
     $id = (int) post('id');
 
@@ -134,6 +137,11 @@ if (isPost()) {
                 $packed = json_decode($json, true);
                 if (empty($packed['cases'])) {
                     setFlash('error', t('case.lib.err_nothing_to_export'));
+                    break;
+                }
+                // A file this page's own import would refuse (too many bytes) or cut short (only the first cases are read) is not sent.
+                if (strlen($json) > TRAINING_CASE_MAX_IMPORT_BYTES || count($packed['cases']) > TRAINING_CASE_MAX_IMPORT_CASES) {
+                    setFlash('error', t('case.lib.err_export_too_big'));
                     break;
                 }
                 logAudit('export_training_cases', 'training_cases', null, null, ['count' => count($packed['cases'])]);

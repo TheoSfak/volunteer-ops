@@ -126,7 +126,7 @@ if (!function_exists('isTrainingMission')) {
      * A volunteer's training record: attended participations of training missions.
      * Hours use the same fallback profile.php uses (recorded hours, else the shift's length).
      *
-     * @return array{drills:int, hours:float, rows:array<int,array{mission_id:int,title:string,first_start:string,hours:float,certificate_id:?int}>}
+     * @return array{drills:int, hours:float, rows:array<int,array{mission_id:int,title:string,first_start:string,hours:float,certificate_id:?int,cases:int,case_percent:?int}>}
      */
     function getVolunteerTrainingRecord(int $userId): array
     {
@@ -146,6 +146,10 @@ if (!function_exists('isTrainingMission')) {
             [$userId, PARTICIPATION_APPROVED]
         );
 
+        // Case results per drill (finished runs of the drill's staged cases). The file that defines this is loaded
+        // separately from the training-case rules, so ask only when they are there.
+        $caseStats = function_exists('trainingCaseRecordForUser') ? trainingCaseRecordForUser($userId) : [];
+
         $hours = 0.0;
         $out = [];
         foreach ($rows as $r) {
@@ -157,6 +161,8 @@ if (!function_exists('isTrainingMission')) {
                 'first_start'    => (string) $r['first_start'],
                 'hours'          => $h,
                 'certificate_id' => $r['certificate_id'] !== null ? (int) $r['certificate_id'] : null,
+                'cases'          => $caseStats[(int) $r['mission_id']]['cases'] ?? 0,
+                'case_percent'   => $caseStats[(int) $r['mission_id']]['percent'] ?? null,
             ];
         }
         return ['drills' => count($out), 'hours' => $hours, 'rows' => $out];

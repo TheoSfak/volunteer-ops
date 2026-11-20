@@ -252,6 +252,8 @@ function trainingCaseBestPath(array $doc): array {
 
 const TRAINING_CASE_TYPES = ['trauma', 'cardiac', 'respiratory', 'neuro', 'environmental', 'other'];
 const TRAINING_CASE_MAX_IMPORT_BYTES = 200000;
+/** An import reads only this many cases of a file; the library's export refuses to produce more than the import would keep. */
+const TRAINING_CASE_MAX_IMPORT_CASES = 50;
 /** The editor posts the whole document as one JSON field: a real case is far under this (the stored limit is 24000 bytes). */
 const TRAINING_CASE_MAX_EDITOR_BYTES = 100000;
 const TRAINING_CASE_PACK_FORMAT = 'volunteerops-training-cases';
@@ -423,7 +425,7 @@ function trainingCaseImportRead(string $json): array {
         return ['ok' => false, 'error' => 'case.import_newer'];
     }
     $out = [];
-    foreach (array_slice($pack['cases'], 0, 50) as $entry) {
+    foreach (array_slice($pack['cases'], 0, TRAINING_CASE_MAX_IMPORT_CASES) as $entry) {
         if (!is_array($entry)) {
             continue;
         }

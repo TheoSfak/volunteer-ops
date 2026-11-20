@@ -281,4 +281,55 @@ if (isPost()) {");
         $player = $this->src('assets/js/training-case.js');
         $this->assertStringContainsString('previewOptions(', $player);
     }
+
+    public function test_the_default_export_is_refused_when_this_page_would_not_import_it_back(): void
+    {
+        $src = $this->pages()['training-cases.php'];
+        $case = strpos($src, "case 'export':");
+        $this->assertNotFalse($case);
+        $header = strpos($src, "header('Content-Type: application/json", $case);
+        $this->assertNotFalse($header);
+        $body = substr($src, $case, $header - $case);
+        $this->assertStringContainsString('strlen($json) > TRAINING_CASE_MAX_IMPORT_BYTES', $body, 'the file is not sent when the import would refuse its size');
+        $this->assertStringContainsString("count(\$packed['cases']) > TRAINING_CASE_MAX_IMPORT_CASES", $body, 'nor when the import would keep only the first cases');
+        $this->assertStringContainsString("t('case.lib.err_export_too_big')", $body);
+        $this->assertStringNotContainsString('echo $json', $body);
+        foreach (['el', 'en'] as $lang) {
+            $this->assertNotSame('', $this->lang()[$lang]['case.lib.err_export_too_big'] ?? '');
+        }
+        $rules = $this->src('includes/functions-training-cases.php');
+        $this->assertStringContainsString('const TRAINING_CASE_MAX_IMPORT_CASES = 50;', $rules);
+        $this->assertStringContainsString("array_slice(\$pack['cases'], 0, TRAINING_CASE_MAX_IMPORT_CASES)", $rules, 'the import cap is the same named constant');
+    }
+
+    public function test_the_shipped_starters_export_within_the_import_limits(): void
+    {
+        // "Export everything" on a fresh library must produce a file this page can import back.
+        db()->beginTransaction();
+        try {
+            trainingCaseSeedStarters();
+            $ids = array_map('intval', array_column(dbFetchAll("SELECT id FROM training_cases WHERE is_starter = 1"), 'id'));
+            $this->assertNotEmpty($ids);
+            $json = trainingCaseExport($ids);
+            $this->assertLessThanOrEqual(TRAINING_CASE_MAX_IMPORT_BYTES, strlen($json));
+            $this->assertLessThanOrEqual(TRAINING_CASE_MAX_IMPORT_CASES, count(json_decode($json, true)['cases']));
+        } finally {
+            db()->rollBack();
+        }
+    }
+
+    public function test_the_starters_are_seeded_only_on_a_get_or_after_the_csrf_check(): void
+    {
+        $src = $this->pages()['training-cases.php'];
+        $seed = strpos($src, 'trainingCaseSeedStarters();');
+        $csrf = strpos($src, 'verifyCsrf();');
+        $this->assertNotFalse($seed);
+        $this->assertNotFalse($csrf);
+        $this->assertLessThan($seed, $csrf, 'no write before the CSRF check');
+        $this->assertSame(1, substr_count($src, 'trainingCaseSeedStarters();'));
+        $this->assertSame(1, substr_count($src, 'verifyCsrf();'), 'one check, in front of every POST action');
+        $this->assertMatchesRegularExpression('/if \(isPost\(\)\) \{\s*verifyCsrf\(\);\s*\}\s*(\/\/[^
+]*
+\s*)*trainingCaseSeedStarters\(\);/', $src, 'the seeding follows the POST check and still runs on a GET');
+    }
 }
