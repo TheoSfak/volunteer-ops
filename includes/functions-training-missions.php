@@ -97,8 +97,10 @@ if (!function_exists('isTrainingMission')) {
      * The reconciliation UPDATE migration 224 runs right after it creates the trigger:
      * if CREATE TRIGGER failed on an earlier request (shared-host privilege), the
      * columns already existed and the app kept running, so participation rows created
-     * in that gap carry is_training = 0 even for a drill. Idempotent. One shared
-     * string so the migration and its test execute exactly the same SQL.
+     * in that gap carry is_training = 0 even for a drill. Idempotent.
+     * FOR THE TESTS ONLY: migration 224 carries its own literal copy (canonical, because
+     * update.php evals migrations.php in an old process where this file may not be loaded);
+     * TrainingMissionSchemaTest fails if the two drift apart.
      * (Points already granted in the gap need manual reversal.)
      */
     function trainingReconcileParticipationsSql(): string

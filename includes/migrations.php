@@ -8564,7 +8564,15 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
                 // Repair participation rows created while an earlier attempt's CREATE TRIGGER was failing
                 // (the columns already existed then, so the app kept running). Reached only if the
                 // CREATE above succeeded: a failed one throws first and the version is not recorded.
-                dbExecute(trainingReconcileParticipationsSql());
+                // The SQL is a literal on purpose: update.php evals this file inside the OLD running
+                // process, whose bootstrap predates functions-training-missions.php, so no helper
+                // from that file may be called here. This is the canonical copy;
+                // trainingReconcileParticipationsSql() mirrors it for the tests only (drift-guarded).
+                dbExecute("UPDATE participation_requests pr
+                    JOIN shifts s ON s.id = pr.shift_id
+                    JOIN missions m ON m.id = s.mission_id
+                    SET pr.is_training = m.is_training
+                    WHERE pr.is_training <> m.is_training");
             },
         ],
 
