@@ -7197,7 +7197,8 @@ const WR_STRINGS_FALLBACK = <?= json_encode($__wrStrings[DEFAULT_LANGUAGE] ?? []
 <?php endif; ?>
 function t(key, vars = {}) {
     let text = WR_STRINGS[key] ?? WR_STRINGS_FALLBACK[key] ?? key;
-    for (const [k, v] of Object.entries(vars)) text = text.replaceAll('{' + k + '}', String(v));
+    // A function replacer: a string one would read «$&» or «$1» in a value (a case title) as a pattern and mangle it.
+    for (const [k, v] of Object.entries(vars)) text = text.replaceAll('{' + k + '}', () => String(v));
     return text;
 }
 const jsLocale = WR_BOOT.jsLocale;
@@ -29090,7 +29091,8 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
         while (select.options.length > 1) select.remove(1);
         select.add(new Option(t('case.picker_random'), 'random'));
         cases.forEach(c => select.add(new Option(TC.caseOptionLabel(c, t), String(c.id))));
-        const distinct = key => Array.from(new Set(cases.map(c => c[key]).filter(v => v !== '' && v != null))).sort();
+        // A falsy value (a difficulty of 0, an empty tag) would make an option with a blank label: it is left out.
+        const distinct = key => Array.from(new Set(cases.map(c => c[key]).filter(v => v !== '' && v != null && v !== 0 && v !== '0'))).sort();
         fillFilter(typeSel, 'case.picker_any_type', distinct('type'), v => v);
         fillFilter(diffSel, 'case.picker_any_difficulty', distinct('difficulty'), v => '★'.repeat(Number(v)));
         fillFilter(langSel, 'case.picker_any_language', distinct('language'), v => String(v).toUpperCase());

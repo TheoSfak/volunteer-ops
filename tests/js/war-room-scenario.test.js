@@ -1455,6 +1455,15 @@ test('a staged case is named by the case with its own icon, escaped, and an unre
     assert.match(html, /scenario\.kind_point/, 'an ordinary order is unchanged');
 });
 
+test('a case with an empty title is still a case: its icon, the generic word and the badge', async () => {
+    const {body} = await load(plan([caseItem(1, {case_title: '', case_reviewed: false})]));
+    const html = body.innerHTML;
+    assert.match(html, /bi-clipboard2-pulse-fill/);
+    assert.match(html, /case\.default_label/);
+    assert.doesNotMatch(html, /case\.plan_title/);
+    assert.match(html, /case\.badge_unreviewed/);
+});
+
 test('a case staged before the review flag existed (no case_reviewed) shows no badge', async () => {
     const {body} = await load(plan([caseItem(1, {case_reviewed: undefined}), caseItem(2, {case_reviewed: null})]));
     assert.doesNotMatch(body.innerHTML, /case\.badge_unreviewed/);

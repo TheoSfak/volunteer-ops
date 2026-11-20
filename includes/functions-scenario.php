@@ -269,15 +269,19 @@ function loadMissionScenario(int $missionId): array {
         }
     }
 
-    // Whether each staged training case has been checked by a medically qualified person, read from the library NOW: the
-    // snapshot in the order does not record it, and a case can be reviewed (or un-reviewed) after it was staged. One query,
-    // and only when a case is staged. A case whose library row has been deleted is absent from the answer (see below).
+    // Whether each staged training case had been checked by a medically qualified person: the order plays the SNAPSHOT taken
+    // at staging, so the answer is the flag recorded with that snapshot (see addScenarioCaseItem). Only an item staged before
+    // that flag was recorded (no `reviewed` key in its case block) falls back to the library row as it is NOW. One query, and
+    // only when such an item is staged. A case whose library row has been deleted is absent from the answer (see below).
     $caseReviewed = [];
     $caseIds = [];
     foreach ($items as $row) {
         if ($row['kind'] === 'dispatch' && strpos((string) $row['payload'], '"case":') !== false) {
             $casePayload = json_decode((string) $row['payload'], true);
-            $caseId = is_array($casePayload) && is_array($casePayload['case'] ?? null) ? (int) ($casePayload['case']['case_id'] ?? 0) : 0;
+            if (!is_array($casePayload) || !is_array($casePayload['case'] ?? null) || array_key_exists('reviewed', $casePayload['case'])) {
+                continue;
+            }
+            $caseId = (int) ($casePayload['case']['case_id'] ?? 0);
             if ($caseId > 0) {
                 $caseIds[$caseId] = $caseId;
             }
@@ -429,9 +433,12 @@ function loadMissionScenario(int $missionId): array {
             // A staged training case (v3.505.0): its title and the line the people receive; null for an ordinary order.
             'case_title'   => !empty($payload['case']) && is_array($payload['case']) ? (string) ($payload['case']['title'] ?? '') : null,
             'case_briefing' => !empty($payload['case']) && is_array($payload['case']) ? (string) ($payload['case']['briefing'] ?? '') : null,
-            // Has the library case been reviewed: true / false for a staged case (false too when its library row is gone: nothing
-            // shows it was checked), null for an ordinary order. The card badges «Ανέλεγκτο» on false.
-            'case_reviewed' => !empty($payload['case']) && is_array($payload['case']) ? ($caseReviewed[(int) ($payload['case']['case_id'] ?? 0)] ?? false) : null,
+            // Had the case been reviewed when it was staged (the snapshot's own recorded flag; an older item with none reads the
+            // library row now): true / false for a staged case (false too when that row is gone: nothing shows it was checked),
+            // null for an ordinary order. The card badges «Ανέλεγκτο» on false.
+            'case_reviewed' => !empty($payload['case']) && is_array($payload['case'])
+                ? (array_key_exists('reviewed', $payload['case']) ? $payload['case']['reviewed'] === true : ($caseReviewed[(int) ($payload['case']['case_id'] ?? 0)] ?? false))
+                : null,
             'area_id'      => $isSector ? ($areaId ?: null) : null,
             'area_label'   => $areaLabel,
             'area_missing' => $areaMissing,
@@ -954,6 +961,10 @@ function addScenarioCaseItem(array $mission, int $phaseId, int $userId, array $i
         'draw_mode'      => ($input['case_mode'] ?? '') === 'random' ? 'random' : 'chosen',
         'pool'           => $pool,
         'briefing'       => trainingCasePlain($input['briefing'] ?? '', 300),
+        // Whether the case had been reviewed when it was staged, recorded beside the snapshot (never inside the document, and
+        // never copied to a placement): editing or re-reviewing the library case later does not change what this order plays.
+        'reviewed'       => !empty($case['reviewed']),
+        'reviewed_at'    => $case['reviewed_at'] ?? null,
         'document'       => $case['doc'],
     ]]);
 }
@@ -2763,7 +2774,7 @@ function scenarioPageExtraStringKeys(): array {
         'restricted_area.kind_danger', 'restricted_area.kind_cliff', 'restricted_area.kind_forbidden',
         'restricted_area.shape_polygon', 'restricted_area.shape_line',
         // A staged training case on the card (v3.505.0): its name and the badge of one nobody qualified has checked.
-        'case.plan_title', 'case.badge_unreviewed', 'case.picker_unreviewed_warning',
+        'case.plan_title', 'case.default_label', 'case.badge_unreviewed', 'case.picker_unreviewed_warning',
     ];
 }
 

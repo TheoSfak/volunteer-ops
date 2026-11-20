@@ -131,6 +131,21 @@ final class TrainingCaseWarRoomSourceTest extends TestCase
         $this->assertStringContainsString("t('case.picker_unreviewed_warning')", $this->page);
     }
 
+    public function test_the_page_translator_inserts_a_value_literally_so_a_case_title_with_a_dollar_sign_is_not_mangled(): void
+    {
+        // A string replacement reads «$&» / «$1» as a pattern; only a function replacer inserts the value as it is.
+        foreach (['war-room.php', 'mission-scenario-view.php'] as $file) {
+            $page = str_replace("\r\n", "\n", (string) WarRoomSource::read($file));
+            $this->assertStringContainsString("text.replaceAll('{' + k + '}', () => String(v))", $page, $file);
+            $this->assertStringNotContainsString("'}', String(v))", $page, $file);
+        }
+    }
+
+    public function test_the_picker_leaves_out_a_filter_value_that_would_be_a_blank_option(): void
+    {
+        $this->assertStringContainsString("v !== '' && v != null && v !== 0 && v !== '0'", $this->page);
+    }
+
     public function test_the_plan_card_names_the_case_and_asks_the_endpoint_for_the_library(): void
     {
         $js = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../assets/js/war-room-scenario.js'));

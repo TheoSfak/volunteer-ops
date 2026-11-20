@@ -338,9 +338,14 @@
         if (item.audience === 'slot') return (item.slot_label || '') + (item.team_label ? ' → ' + item.team_label : '');
         return item.team_label || t('scenario.team_gone');
     }
+    function isCaseItem(item) {
+        return item.case_title !== null && item.case_title !== undefined;
+    }
     function itemTitle(item) {
         // A staged training case is named by the case (v3.505.0): the commander sees which one is waiting at this point.
-        if (item.case_title) return t('case.plan_title', {title: item.case_title});
+        // A case item is told by a title that is there (null for an ordinary order), not by a non-empty one: an empty title
+        // still names a case, with the generic word.
+        if (isCaseItem(item)) return item.case_title === '' ? t('case.default_label') : t('case.plan_title', {title: item.case_title});
         // The words of an order to people can be long: the card shows the beginning.
         const label = (item.type === 'order' && item.label && String(item.label).length > 60) ? String(item.label).slice(0, 57) + '…' : item.label;
         return label ? itemKind(item) + ' «' + label + '»' : itemKind(item);
@@ -442,7 +447,7 @@
     }
 
     function itemHtml(phase, item) {
-        const icon = item.case_title ? 'bi-clipboard2-pulse-fill'
+        const icon = isCaseItem(item) ? 'bi-clipboard2-pulse-fill'
             : item.type === 'point' ? 'bi-geo-alt-fill'
             : (item.type === 'sector' ? 'bi-grid-3x3-gap-fill'
                 : (item.type === 'route' ? 'bi-signpost-split-fill'
@@ -513,8 +518,8 @@
             where = ` <span class="text-muted small">${esc([floors, inSector].filter(Boolean).join(' · '))}</span>`;
         }
         // A staged case that nobody qualified has checked says so, on the card and not only in the picker where it was chosen.
-        // case_reviewed is read from the library at load time; false also covers a library case that has since been deleted.
-        if (item.case_title && item.case_reviewed === false) {
+        // case_reviewed is the flag recorded when the case was staged; false also covers an older item whose library case is gone.
+        if (isCaseItem(item) && item.case_reviewed === false) {
             where += ` <span class="badge bg-warning text-dark" title="${esc(t('case.picker_unreviewed_warning'))}"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(t('case.badge_unreviewed'))}</span>`;
         }
         // A search area is a boundary and not an order to anybody: no «→ προς:» for it. Until it is made it has «Τομείς»,

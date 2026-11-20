@@ -116,7 +116,8 @@ const WR_STRINGS = <?= json_encode($pageStrings['strings'], $jsonFlags) ?>;
 const WR_STRINGS_FALLBACK = <?= json_encode($pageStrings['fallback'], $jsonFlags) ?>;
 function t(key, vars = {}) {
     let text = WR_STRINGS[key] ?? WR_STRINGS_FALLBACK[key] ?? key;
-    for (const [k, v] of Object.entries(vars)) text = text.replaceAll('{' + k + '}', String(v));
+    // A function replacer: a string one would read «$&» or «$1» in a value (a case title) as a pattern and mangle it.
+    for (const [k, v] of Object.entries(vars)) text = text.replaceAll('{' + k + '}', () => String(v));
     return text;
 }
 </script>
