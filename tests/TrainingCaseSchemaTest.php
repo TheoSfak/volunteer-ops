@@ -72,4 +72,20 @@ final class TrainingCaseSchemaTest extends TestCase
         $col = dbFetchOne("SHOW COLUMNS FROM mission_scenario_items LIKE 'payload'");
         $this->assertSame('mediumtext', strtolower((string) $col['Type']));
     }
+
+    /**
+     * A MODIFY COLUMN drops the column's COMMENT unless it is restated, so migration 225 must carry the same comment as
+     * sql/schema.sql. Compared by source (a database that already ran the migration would not be re-altered).
+     */
+    public function test_the_migration_keeps_the_payload_comment_of_the_schema(): void
+    {
+        $root = dirname(__DIR__);
+        $schema = (string) file_get_contents($root . '/sql/schema.sql');
+        $migrations = (string) file_get_contents($root . '/includes/migrations.php');
+
+        $this->assertSame(1, preg_match("/`payload` MEDIUMTEXT NOT NULL COMMENT '([^']*)'/", substr($schema, (int) strpos($schema, 'CREATE TABLE IF NOT EXISTS `mission_scenario_items`')), $fromSchema));
+        $this->assertSame(1, preg_match("/ALTER TABLE `mission_scenario_items` MODIFY COLUMN `payload` MEDIUMTEXT NOT NULL COMMENT '([^']*)'/", $migrations, $fromMigration));
+        $this->assertNotSame('', $fromSchema[1]);
+        $this->assertSame($fromSchema[1], $fromMigration[1]);
+    }
 }

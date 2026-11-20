@@ -8650,7 +8650,8 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
                     FOREIGN KEY (`run_id`) REFERENCES `mission_case_runs`(`id`) ON DELETE CASCADE
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
-                dbExecute("ALTER TABLE `mission_scenario_items` MODIFY COLUMN `payload` MEDIUMTEXT NOT NULL");
+                // The COMMENT is restated in full (a MODIFY drops it otherwise); it must stay identical to sql/schema.sql.
+                dbExecute("ALTER TABLE `mission_scenario_items` MODIFY COLUMN `payload` MEDIUMTEXT NOT NULL COMMENT 'JSON: audience (team|all|slot; a sector or a route never all), team_id, slot_id, type, geo, label, travel_mode; a sector: area_id (or area_item_id = a staged area of the scenario), area_label, label, geo; a route: label (its title), waypoints, is_closed_loop, add_return_waypoint, member_ids; an order: order_type, text; a search area: label, geo; a building: label, lat, lng, floor_count, sector_id (or sector_item_id = a staged sector of the scenario), sector_label'");
             },
         ],
 
