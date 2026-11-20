@@ -6947,6 +6947,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/mesh-gateway.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/mesh-gateway.js') ?>"></script>
 <?php endif; ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-ar.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-ar.js') ?>"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/training-case.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/training-case.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-team-arcs.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-team-arcs.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-time-machine.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-time-machine.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-team-coverage.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-team-coverage.js') ?>"></script>
@@ -15548,6 +15549,22 @@ document.addEventListener('click', e => {
     const back = e.target.closest('.wr-withdraw-btn');
     if (back && !back.disabled) postOrderDecline('withdraw', back.dataset.kind, back.dataset.id, null, back);
 });
+// The training case's button on an order's row (v3.505.0, assets/js/training-case.js). Answers are queued like every other
+// field action (sendQueuedItem() replays {kind:'case_answer'} to training-case.php), so the case plays with no signal.
+document.addEventListener('click', e => {
+    const caseBtn = e.target.closest('.vo-case-open-btn');
+    if (!caseBtn || !window.VoTrainingCase || document.getElementById('voCaseOverlay')) return;
+    // The page's own SOS button (the volunteer's status row) sits under the overlay: the overlay's SOS forwards to it,
+    // so the offline queue, the badge and the poll reconciliation stay the one code path.
+    const realSos = document.querySelector('[onclick*="setFieldStatus"][onclick*="needs_help"]');
+    window.VoTrainingCase.open({
+        placementId: Number(caseBtn.dataset.placement), missionId: WR_MISSION_ID, briefing: caseBtn.dataset.briefing || '',
+        t: t, enqueue: enqueueAction, flush: flushQueue,
+        isQueued: (placementId, stepId) => loadQueue().some(q => q.kind === 'case_answer' && q.placementId === placementId && q.stepId === stepId),
+        onClose: () => { renderQueueStatus(); flushQueue(); refreshMyOrdersCard(); },
+        onSos: realSos ? () => realSos.click() : null,
+    });
+});
 
 // Both answers go through here, from the popup, a card or a map popup. The
 // reply carries this person's four order lists freshly loaded, redrawn with the
@@ -15861,6 +15878,19 @@ function myOrderEntriesFromDispatches(items) {
             // its own way to actually get there.
             const dNav = dispatchNavPoint(d);
             const directionsHtml = navigationPairHtml(dNav.lat, dNav.lng, 'block');
+            // A training case rides on this order (v3.505.0): once my team has arrived it opens here, for me alone. The
+            // row carries the button only when the poll's dispatch has a `case` card (the placement is recorded just after
+            // the order is sent, so a phone may see the order a moment before the card).
+            let caseHtml = '';
+            if (d.case && d.case.can_play) {
+                const cs = d.case;
+                const caseLabel = cs.state === 'done'
+                    ? t('case.btn_done', {percent: cs.percent})
+                    : (cs.state === 'running' ? t('case.btn_resume') : t('case.btn_open'));
+                caseHtml = d.my_ack || cs.available
+                    ? `<button type="button" class="btn btn-sm btn-primary w-100 mt-1 vo-case-open-btn" data-placement="${Number(cs.placement_id)}" data-briefing="${escapeHtml(cs.briefing || '')}"><i class="bi bi-clipboard2-pulse me-1"></i>${escapeHtml(caseLabel)}</button>`
+                    : `<div class="small text-muted mt-1"><i class="bi bi-clipboard2-pulse me-1"></i>${escapeHtml(t('case.opens_on_arrival'))}</div>`;
+            }
             // «Δεν μπορώ» — my team's, like the steps above it.
             if (d.my_declined && !d.my_completed) {
                 return {
@@ -15872,7 +15902,7 @@ function myOrderEntriesFromDispatches(items) {
             const declineHtml = d.can_decline && !d.my_completed ? declineOpenBtnHtml('dispatch:' + d.id) : '';
             return {
                 outstanding: !d.my_completed,
-                html: myOrderRow(labelHtml, escapeHtml(d.team_label), dispatchIncidentHtml(d.incident) + receiptHtml + actionHtml + directionsHtml + declineHtml),
+                html: myOrderRow(labelHtml, escapeHtml(d.team_label), dispatchIncidentHtml(d.incident) + receiptHtml + actionHtml + caseHtml + directionsHtml + declineHtml),
                 popup: opModelFromDispatch(d),
             };
         });
@@ -17801,10 +17831,48 @@ function sendQueuedPings() {
     });
 }
 
+// Moves this placement's queued case answers (in their own order: step N must reach the server before step N+1) behind
+// everything else in the queue. True when something else was waiting.
+function deferCaseAnswers(placementId) {
+    const queue = loadQueue();
+    const isMine = q => q.kind === 'case_answer' && q.placementId === placementId;
+    const others = queue.filter(q => !isMine(q));
+    if (!others.length) return false;
+    saveQueue(others.concat(queue.filter(isMine)));
+    return true;
+}
+
+// A training case answer (v3.505.0): the server recomputes the rating and the score from its own copy; a replay that
+// already landed comes back as duplicate:true, which is success. What VoTrainingCase.queueOutcome() calls a retry
+// stays queued: no signal, a login redirect (the page's null, or a non-JSON reply, which postQueuedForm() reports as
+// a network error) and the endpoint's «cannot take anything now» errors (closed mission, stale token, server error).
+// Only an explicit refusal of the answer itself (err_bad_answer, err_not_audience, ...) drops it, with the notice the
+// queue shows for any refused item; the phone's own copy of that answer goes too, so the step can be answered again.
+function sendQueuedCaseAnswer(item) {
+    if (!window.VoTrainingCase) return Promise.resolve({ok: false, networkError: true});
+    return postQueuedForm('training-case.php', {
+        mission_id: String(WR_MISSION_ID), action: 'answer', placement_id: String(item.placementId),
+        step_id: item.stepId, choice_id: item.choiceId, ms_taken: String(item.ms || 0), queued: '1'
+    }).then(result => {
+        const retryable = [t('common.mission_not_found_or_inactive'), t('common.invalid_request'), t('common.error')];
+        const verdict = VoTrainingCase.queueOutcome(result, retryable);
+        if (verdict === 'retry') {
+            if (result && result.networkError) return result;
+            // The server answered but cannot take it now. The fast lane stops at a head it cannot send, and an SOS or an
+            // order queued behind a case answer must not wait for the mission's case tables to recover.
+            if (result && deferCaseAnswers(item.placementId)) setTimeout(flushQueue, 500);
+            return null; // stays queued: wait for the next timer tick
+        }
+        if (verdict === 'drop') VoTrainingCase.forgetLocalAnswer(item.placementId, item.stepId);
+        return result;
+    });
+}
+
 function sendQueuedItem(item) {
     if (item.kind === 'media') return sendQueuedMedia(item);
     if (item.kind === 'chat') return sendQueuedChat(item);
     if (item.kind === 'ping') return sendQueuedPings();
+    if (item.kind === 'case_answer') return sendQueuedCaseAnswer(item);
     // Triage writes carry their own ids (victim / assessment / bulk uuid), so
     // a replay that already landed is recognised server-side and ignored.
     if (item.kind === 'triage') {

@@ -132,6 +132,17 @@ test('an SOS never waits behind a file, and files go in their own order', () => 
     assert.equal(nextQueueIndex(queue, 'media'), 0);
 });
 
+test('a training case answer is an ordinary text item: fast lane, in order, never behind a video', () => {
+    const queue = [
+        {kind: 'media', mediaId: 'a', mediaType: 'video', waypointId: null},
+        {kind: 'case_answer', placementId: 7, stepId: 's1', choiceId: 'a', ms: 10, at: 1},
+        {kind: 'case_answer', placementId: 7, stepId: 's2', choiceId: 'b', ms: 10, at: 2},
+    ];
+    assert.equal(nextQueueIndex(queue, 'fast'), 1);
+    assert.equal(nextQueueIndex(queue, 'media'), 0);
+    assert.equal(nextQueueIndex(queue, 'gps'), -1);
+});
+
 test('a queue with no files behaves exactly as before: first item first', () => {
     const queue = [
         {kind: 'route', action: 'arrive', id: '9'},
