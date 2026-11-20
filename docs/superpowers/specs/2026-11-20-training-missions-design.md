@@ -86,8 +86,10 @@ For approved/rejected and the reminder the marker is in the message body; their 
 the mission title. The automated `mission_needs_volunteers` broadcast (`cron_incomplete_missions.php`, which
 mails and notifies every active volunteer about an open mission that is short of people) skips drills
 entirely (`m.is_training = 0`): a drill is recruited for through its own "new mission" notification, never
-by this cron. The calendar feeds are login-gated and show only the user's own shifts, so a drill shift
-appears in the volunteer's own calendar and is not filtered from them. Action Room notifications (31 call sites in
+by this cron. The calendar feeds (`api-shifts-calendar-ics.php`) are login-gated. They list the user's own
+shifts by default (`mine`, the default for volunteers) and otherwise the shifts of open missions the user
+may see (every mission for an admin, whose default is `mine=0`), so a drill shift can appear in a feed and
+is not filtered from them. Action Room notifications (31 call sites in
 `includes/functions-warroom.php`, no common choke point) are not prefixed in this sub-project; the Action
 Room shows the "ΑΣΚΗΣΗ" badge instead (text via the `t()` key `hero.training_badge`, Greek and English).
 Prefixing them is revisited with sub-projects 2 and 3.
@@ -143,12 +145,24 @@ training missions:
   `_dbcheck.php`). The migration is retried on later requests. Meanwhile the columns already exist and the
   app keeps running, so participation rows created in that gap would carry `is_training = 0` even for a
   drill. The migration therefore ends, after the trigger is created, with an idempotent reconciliation
-  `UPDATE` (`trainingReconcileParticipationsSql()`) that copies `missions.is_training` onto every
-  participation row that disagrees; it never runs if the `CREATE TRIGGER` threw. Points already granted
+  `UPDATE` that copies `missions.is_training` onto every participation row that disagrees; it never runs
+  if the `CREATE TRIGGER` threw. The SQL is a literal inside the migration closure (canonical copy), not a
+  helper call: `update.php` evals a freshly downloaded `migrations.php` inside the old running process,
+  whose bootstrap may not have the new helper file. `trainingReconcileParticipationsSql()` mirrors the
+  literal for the functional test only, and a test fails if the two drift apart. Points already granted
   in the gap would need manual reversal. It never falls back silently to "no trigger". The alternative
   (setting the column in each insert site) is raised with the owner, not done unilaterally. Whether the
   trigger exists on the Hostinger database is checked after deployment
   (`SHOW TRIGGERS LIKE 'participation_requests'`).
+- **Fail-closed gate.** A drill can be created only while the trigger `trg_pr_set_training` exists
+  (`trainingMissionsAvailable()`, one query on `information_schema.TRIGGERS`, cached per request). That view
+  lists only the triggers the database user holds the TRIGGER privilege for, so on a host without that
+  privilege the check says "missing" even if the trigger exists: it fails closed, never open. While the
+  trigger is missing the mission form hides the checkbox and explains why, and the server rejects a posted
+  `is_training` on create with an error instead of silently saving a real mission. Admins see a warning
+  banner (`includes/training-gate-banner.php`) on the dashboard and the mission form for as long as the
+  trigger is missing; it shows the last recorded `migration_last_error` only as a detail line, never as a
+  reason to appear (the runner never clears that record).
 - Tampered requests: the server ignores `is_training` on mission edit; training-only UI and endpoints
   re-check the stored flag, not the request.
 - Missing mission or shift: `COALESCE(..., 0)` treats it as a real row (existing behaviour).
