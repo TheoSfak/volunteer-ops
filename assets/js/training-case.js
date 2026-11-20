@@ -109,13 +109,6 @@
         return result.code === 'refused' ? 'drop' : 'retry';
     }
 
-    /** What only this phone knows: the local answers for steps the server run does not report (server wins per step). */
-    function localOnlyAnswers(serverAnswers, localAnswers) {
-        const seen = {};
-        (serverAnswers || []).forEach(a => { seen[a.stepId] = true; });
-        return (localAnswers || []).filter(a => !seen[a.stepId]);
-    }
-
     /** A cheap fingerprint of what the screen is built from: the case itself and where the run stands. */
     function viewSignature(doc, answers) {
         const run = runFromAnswers(doc, answers);
@@ -362,8 +355,9 @@
                 const run = res.run || null;
                 const serverAnswers = ((run && run.answers) || []).map(a => ({stepId: a.step_id, choiceId: a.choice_id}));
                 answers = mergeAnswers(serverAnswers, answers);
-                // Server wins: what the server run already reports is not kept on the phone any more, only what it lacks.
-                write(keys.answers, localOnlyAnswers(serverAnswers, answers));
+                // mergeAnswers already lets the server win per step. The merged list stays on the phone: without it, opening
+                // the case again with no signal would restart at the first step.
+                write(keys.answers, answers);
                 if (answers.length) started = true;
                 // The server's run may lag behind an answer it already holds; replaying it lets the server catch up.
                 const again = replayCandidate(run, answers);
@@ -392,7 +386,7 @@
 
     const api = {
         escapeHtml, scoreLabel, choiceOutcome, runFromAnswers, bestPathLabels, mergeAnswers, withoutAnswer, answerQueueItem,
-        storageKeys, queueOutcome, replayCandidate, forgetLocalAnswer, validDoc, localOnlyAnswers, viewSignature, open,
+        storageKeys, queueOutcome, replayCandidate, forgetLocalAnswer, validDoc, viewSignature, open,
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.VoTrainingCase = api;

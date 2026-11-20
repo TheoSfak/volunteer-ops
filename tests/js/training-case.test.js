@@ -181,13 +181,6 @@ test('validDoc accepts a sound document and refuses broken shapes', () => {
     bad.forEach((d, i) => assert.equal(TC.validDoc(d), false, 'bad document #' + i));
 });
 
-test('localOnlyAnswers keeps only what the server run does not report yet', () => {
-    const server = [{stepId: 's1', choiceId: 'a'}];
-    assert.deepEqual(TC.localOnlyAnswers(server, [{stepId: 's1', choiceId: 'b'}, {stepId: 's2', choiceId: 'b'}]), [{stepId: 's2', choiceId: 'b'}]);
-    assert.deepEqual(TC.localOnlyAnswers([], [{stepId: 's1', choiceId: 'b'}]), [{stepId: 's1', choiceId: 'b'}]);
-    assert.deepEqual(TC.localOnlyAnswers(undefined, undefined), []);
-});
-
 test('viewSignature changes when the case or where the run stands changes, not otherwise', () => {
     const a = [{stepId: 's1', choiceId: 'a'}];
     const same = TC.viewSignature(doc, a);
