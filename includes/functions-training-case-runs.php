@@ -227,15 +227,18 @@ function trainingCaseAnswer(int $placementId, int $userId, string $stepId, strin
     };
 
     return trainingCaseTransaction(function () use ($placementId, $userId, $stepId, $choiceId, $msTaken, $doc, $step, $choice, $choiceIn, $bad, $result) {
-        $runSql = "SELECT * FROM mission_case_runs WHERE placement_id = ? AND user_id = ? FOR UPDATE";
-        $run = dbFetchOne($runSql, [$placementId, $userId]);
-        if (!$run) {
-            // No run yet: only a valid first answer may create one.
+        // No run yet: only a valid first answer may create one. The run row is created BEFORE the locking read: a
+        // locking read of a row that is not there takes a gap lock, and two first answers at once deadlock on it (1213).
+        // The existence check is a plain read (no lock), so a run that is already there is locked by the one read below.
+        if (!dbFetchValue("SELECT 1 FROM mission_case_runs WHERE placement_id = ? AND user_id = ?", [$placementId, $userId])) {
             if ($step === null || $choice === null || $stepId !== $doc['start']) {
                 return $bad;
             }
             dbExecute("INSERT IGNORE INTO mission_case_runs (placement_id, user_id, current_step) VALUES (?, ?, ?)", [$placementId, $userId, $doc['start']]);
-            $run = dbFetchOne($runSql, [$placementId, $userId]);
+        }
+        $run = dbFetchOne("SELECT * FROM mission_case_runs WHERE placement_id = ? AND user_id = ? FOR UPDATE", [$placementId, $userId]);
+        if (!$run) {
+            return $bad;
         }
 
         $stored = dbFetchOne("SELECT choice_id FROM mission_case_answers WHERE run_id = ? AND step_id = ?", [(int) $run['id'], $stepId]);
@@ -277,6 +280,24 @@ function trainingCaseAnswer(int $placementId, int $userId, string $stepId, strin
     });
 }
 
+/** Is this the database's "table does not exist" error (SQLSTATE 42S02, MySQL 1146)? */
+function trainingCaseIsMissingTable(Throwable $e): bool {
+    if (!$e instanceof PDOException) {
+        return false;
+    }
+    $info = $e->errorInfo ?? [];
+    return ($info[0] ?? $e->getCode()) === '42S02' || (int) ($info[1] ?? 0) === 1146 || stripos($e->getMessage(), "doesn't exist") !== false;
+}
+
+/** Is this a MySQL deadlock (1213) or lock-wait timeout (1205)? Those are worth one retry of the whole transaction. */
+function trainingCaseIsLockError(Throwable $e): bool {
+    if (!$e instanceof PDOException) {
+        return false;
+    }
+    $code = (int) (($e->errorInfo ?? [])[1] ?? 0);
+    return $code === 1213 || $code === 1205;
+}
+
 /** error_log()s $message the first time $key is seen in this process; returns whether it logged. */
 function trainingCaseLogOnce(string $key, string $message): bool {
     static $seen = [];
@@ -308,8 +329,11 @@ function trainingCaseCardsForDispatches(array $dispatchIds, int $userId): array 
             array_merge([$userId], array_map('intval', $dispatchIds))
         );
     } catch (Throwable $e) {
-        // The Action Room polls every few seconds: say so once per process, not on every poll.
-        trainingCaseLogOnce('cards', '[training-cases] cards: ' . $e->getMessage());
+        // A site that has not migrated yet has no case tables: that is expected and silent (the Action Room polls every
+        // few seconds, and a per-process once-only log would still repeat on every request). Anything else is logged.
+        if (!trainingCaseIsMissingTable($e)) {
+            trainingCaseLogOnce('cards', '[training-cases] cards: ' . $e->getMessage());
+        }
         return [];
     }
     $out = [];

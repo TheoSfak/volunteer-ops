@@ -422,12 +422,52 @@ final class TrainingCaseRunTest extends TestCase
         $src = str_replace("\r\n", "\n", (string) file_get_contents(dirname(__DIR__) . '/includes/functions-warroom.php'));
         $start = strpos($src, 'function advanceMissionDispatch');
         $this->assertNotFalse($start);
-        $body = substr($src, $start, 6000);
+        // The function's own body: up to the next top-level function declaration.
+        $next = strpos($src, "\nfunction ", $start + 1);
+        $body = $next === false ? substr($src, $start) : substr($src, $start, $next - $start);
         $command = strpos($body, 'notifyDispatchArrival(');
         $team = strpos($body, 'trainingCaseNotifyArrival(');
         $this->assertNotFalse($command);
         $this->assertNotFalse($team);
         $this->assertGreaterThan($command, $team, 'a slow teammate loop must not delay command\'s alert');
+    }
+
+    // ── Task 6 review findings (done with the endpoint) ──────────────────────────────────────────────────────
+
+    public function test_a_missing_table_is_recognised_so_the_poll_stays_silent(): void
+    {
+        $missing = null;
+        try {
+            dbFetchAll("SELECT 1 FROM mission_case_table_that_does_not_exist");
+        } catch (PDOException $e) {
+            $missing = $e;
+        }
+        $this->assertNotNull($missing);
+        $this->assertTrue(trainingCaseIsMissingTable($missing));
+        $this->assertFalse(trainingCaseIsMissingTable(new RuntimeException('Connection refused')));
+        $e = new PDOException('Deadlock found');
+        $e->errorInfo = ['40001', 1213, 'Deadlock found'];
+        $this->assertFalse(trainingCaseIsMissingTable($e));
+
+        $src = str_replace("\r\n", "\n", (string) file_get_contents(dirname(__DIR__) . '/includes/functions-training-case-runs.php'));
+        $from = strpos($src, 'function trainingCaseCardsForDispatches');
+        $this->assertNotFalse($from);
+        $catch = substr($src, strpos($src, '} catch (Throwable $e) {', $from), 400);
+        $this->assertLessThan(strpos($catch, 'trainingCaseLogOnce('), strpos($catch, 'trainingCaseIsMissingTable('), 'a missing table returns [] before anything is logged');
+    }
+
+    public function test_a_first_answer_creates_the_run_before_it_locks_it(): void
+    {
+        // Locking a row that does not exist takes a gap lock, and two first answers at once deadlock on it.
+        $src = str_replace("\r\n", "\n", (string) file_get_contents(dirname(__DIR__) . '/includes/functions-training-case-runs.php'));
+        $from = strpos($src, 'function trainingCaseAnswer');
+        $body = substr($src, $from, strpos($src, "\nfunction ", $from + 1) - $from);
+        $insert = strpos($body, 'INSERT IGNORE INTO mission_case_runs');
+        $lock = strpos($body, 'FOR UPDATE');
+        $this->assertNotFalse($insert);
+        $this->assertNotFalse($lock);
+        $this->assertLessThan($lock, $insert, 'the run row exists before the locking read');
+        $this->assertSame(1, substr_count($body, 'FOR UPDATE'));
     }
 
     // ── Task 5 review findings ─────────────────────────────────────────────────────────────────────────────
