@@ -58,7 +58,7 @@ if ($period === 'all') {
          FROM users u
          LEFT JOIN departments d ON u.department_id = d.id
          $achJoin
-         LEFT JOIN participation_requests pr ON pr.volunteer_id = u.id AND pr.attended = 1
+         LEFT JOIN participation_requests pr ON pr.volunteer_id = u.id AND pr.attended = 1 AND pr.is_training = 0
          WHERE $whereClause
          GROUP BY u.id
          ORDER BY u.total_points DESC, u.name ASC

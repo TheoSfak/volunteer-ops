@@ -138,7 +138,7 @@ $volunteers = dbFetchAll(
                 COUNT(*) as shifts_count,
                 COALESCE(SUM(actual_hours), 0) as total_hours
          FROM participation_requests 
-         WHERE status = ? OR attended = 1
+         WHERE (status = ? OR attended = 1) AND is_training = 0
          GROUP BY volunteer_id
      ) pr_stats ON u.id = pr_stats.volunteer_id
      WHERE $whereClause

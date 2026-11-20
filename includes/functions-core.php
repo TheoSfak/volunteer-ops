@@ -962,7 +962,7 @@ function leaderboardTop(int $limit = 5): array {
                 WHERE is_active = 1 AND deleted_at IS NULL
                 ORDER BY total_points DESC, name ASC
                 LIMIT {$limit}) t
-         LEFT JOIN participation_requests pr ON pr.volunteer_id = t.id AND pr.attended = 1
+         LEFT JOIN participation_requests pr ON pr.volunteer_id = t.id AND pr.attended = 1 AND pr.is_training = 0
          GROUP BY t.id, t.name, t.total_points
          ORDER BY t.total_points DESC, t.name ASC"
     );
@@ -987,7 +987,7 @@ function hoursRankSql(): string {
                    COUNT(DISTINCT pr.id) AS shifts_count,
                    COALESCE(SUM(pr.actual_hours), 0) AS total_hours
               FROM users u
-              JOIN participation_requests pr ON pr.volunteer_id = u.id AND pr.attended = 1
+              JOIN participation_requests pr ON pr.volunteer_id = u.id AND pr.attended = 1 AND pr.is_training = 0
               JOIN shifts s ON pr.shift_id = s.id
               JOIN missions m ON s.mission_id = m.id AND m.deleted_at IS NULL
              GROUP BY u.id, u.name, u.total_points";
