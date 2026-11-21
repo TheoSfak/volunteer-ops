@@ -119,13 +119,25 @@ if ($action === 'add_item') {
         $phaseId = (int) $made['id'];
         $madePhase = true;
     }
-    $result = addScenarioDispatchItem($mission, $phaseId, (int) $userId, [
+    $form = [
         'team_id'     => post('team_id'),
         'type'        => post('type'),
         'label'       => post('label'),
         'geo'         => post('geo'),
         'travel_mode' => post('travel_mode'),
-    ]);
+    ];
+    if (post('case_id') !== '' && post('case_id') !== null) {
+        // A training case staged at the point (v3.505.0): the order carries a snapshot of the library case.
+        $pool = json_decode((string) post('case_pool'), true);
+        $result = addScenarioCaseItem($mission, $phaseId, (int) $userId, $form + [
+            'case_id'   => post('case_id'),
+            'case_mode' => post('case_mode'),
+            'case_pool' => is_array($pool) ? $pool : [],
+            'briefing'  => post('briefing'),
+        ]);
+    } else {
+        $result = addScenarioDispatchItem($mission, $phaseId, (int) $userId, $form);
+    }
     if (!$result['ok']) {
         if ($madePhase) {
             deleteScenarioPhase($mission, $phaseId, (int) $userId);
@@ -447,6 +459,39 @@ if ($action === 'retry_item') {
         'item'       => $result['item'],
         'dispatches' => loadMissionDispatchesForUser($missionId, (int) $userId, true, false),
     ] + $liveSectors([$result['item']]) + $liveRoutes([$result['item']]) + $liveRestricted([$result['item']]));
+    exit;
+}
+
+if ($action === 'case_list') {
+    // Cases belong to training exercises: no case endpoint answers for a real mission.
+    if (!isTrainingMission($mission)) {
+        echo json_encode(['ok' => false, 'error' => t('case.err_not_training')]);
+        exit;
+    }
+    // The library for the staging picker: seeded on first use, no documents.
+    trainingCaseSeedStarters();
+    echo json_encode(['ok' => true, 'cases' => array_map(fn($c) => [
+        'id' => (int) $c['id'], 'title' => $c['title'], 'type' => $c['type_tag'], 'difficulty' => (int) $c['difficulty'],
+        'language' => $c['language'], 'minutes' => (int) $c['est_minutes'], 'starter' => (bool) $c['is_starter'], 'reviewed' => (bool) $c['reviewed'],
+    ], trainingCaseList()), 'training' => isTrainingMission($mission)]);
+    exit;
+}
+
+if ($action === 'case_draw') {
+    // «Τυχαίο»: one case from the library, preferring ones not yet staged here. Nothing is saved; the commander sees it
+    // and either accepts it (staging it with case_mode=random) or draws again.
+    if (!isTrainingMission($mission)) {
+        echo json_encode(['ok' => false, 'error' => t('case.err_not_training')]);
+        exit;
+    }
+    trainingCaseSeedStarters();
+    $filter = array_filter([
+        'type' => (string) post('type'), 'difficulty' => (int) post('difficulty'), 'language' => (string) post('language'),
+    ]);
+    $case = trainingCaseDraw($filter, scenarioStagedCaseIds($missionId), post('allow_unreviewed') === '1');
+    echo $case
+        ? json_encode(['ok' => true, 'case' => ['id' => (int) $case['id'], 'title' => $case['title'], 'type' => $case['type_tag'], 'difficulty' => (int) $case['difficulty'], 'reviewed' => (bool) $case['reviewed']]])
+        : json_encode(['ok' => false, 'error' => t('case.err_pool_empty')]);
     exit;
 }
 

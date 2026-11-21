@@ -88,6 +88,49 @@ final class TrainingIsolationGuardTest extends TestCase
         }
     }
 
+    /** @return array<string, string> the training-case files (rules, runs, the player endpoint and the two admin pages), source by relative path */
+    private function caseFiles(): array
+    {
+        $out = [];
+        foreach ($this->projectFiles() as $rel => $path) {
+            if (preg_match('#^(includes/functions-training-cases?(-runs)?|training-case(s|-edit)?)\.php$#', $rel)) {
+                $out[$rel] = (string) file_get_contents($path);
+            }
+        }
+        return $out;
+    }
+
+    public function test_the_training_case_files_never_read_attendance_hours_or_points(): void
+    {
+        $files = $this->caseFiles();
+        foreach (['includes/functions-training-cases.php', 'includes/functions-training-case-runs.php', 'training-case.php', 'training-cases.php', 'training-case-edit.php'] as $expected) {
+            $this->assertArrayHasKey($expected, $files, "{$expected} is expected to be covered by this guard");
+        }
+        foreach ($files as $rel => $src) {
+            $this->assertDoesNotMatchRegularExpression('/actual_hours|points_awarded|attended\s*=\s*[01]/', $src, "{$rel} must not touch hours, points or attendance");
+            // Reading who took part (status only) is allowed; a statement that names participation_requests must stop there.
+            preg_match_all('/participation_requests(.{0,500})/s', $src, $matches);
+            foreach ($matches[1] as $tail) {
+                $statement = preg_split('/\);/', $tail)[0];
+                $this->assertDoesNotMatchRegularExpression('/actual_hours|attended|points/', $statement, "{$rel}: a participation_requests query reads more than who took part");
+            }
+        }
+    }
+
+    public function test_the_case_record_query_reads_only_the_case_tables(): void
+    {
+        $src = (string) file_get_contents(realpath(__DIR__ . '/..') . '/includes/functions-training-case-runs.php');
+        $start = strpos($src, 'function trainingCaseRecordForUser');
+        $this->assertNotFalse($start);
+        $end = strpos($src, "\nfunction ", $start + 10);
+        $body = substr($src, $start, $end === false ? null : $end - $start);
+        preg_match_all('/\b(?:FROM|JOIN)\s+(\w+)/i', $body, $tables);
+        $this->assertNotEmpty($tables[1]);
+        foreach ($tables[1] as $table) {
+            $this->assertStringStartsWith('mission_case_', $table, 'the case record may only read the case tables');
+        }
+    }
+
     public function test_the_allow_list_has_no_stale_entries(): void
     {
         $root = realpath(__DIR__ . '/..');

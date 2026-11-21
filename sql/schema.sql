@@ -3773,7 +3773,7 @@ CREATE TABLE IF NOT EXISTS `mission_scenario_items` (
     `mission_id` INT UNSIGNED NOT NULL,
     `seq` SMALLINT UNSIGNED NOT NULL DEFAULT 1,
     `kind` ENUM('dispatch','sector','route','order','restricted','area','building') NOT NULL DEFAULT 'dispatch' COMMENT 'What kind of order: dispatch = a point or an area, sector = a search sector (migration 205), route = a patrol of waypoints (migration 206), order = a general order to people (migration 207), restricted = a restricted area (migration 208), area = a search area (migration 209), building = a building of a search sector (migration 210)',
-    `payload` TEXT NOT NULL COMMENT 'JSON: audience (team|all|slot; a sector or a route never all), team_id, slot_id, type, geo, label, travel_mode; a sector: area_id (or area_item_id = a staged area of the scenario), area_label, label, geo; a route: label (its title), waypoints, is_closed_loop, add_return_waypoint, member_ids; an order: order_type, text; a search area: label, geo; a building: label, lat, lng, floor_count, sector_id (or sector_item_id = a staged sector of the scenario), sector_label',
+    `payload` MEDIUMTEXT NOT NULL COMMENT 'JSON: audience (team|all|slot; a sector or a route never all), team_id, slot_id, type, geo, label, travel_mode; a sector: area_id (or area_item_id = a staged area of the scenario), area_label, label, geo; a route: label (its title), waypoints, is_closed_loop, add_return_waypoint, member_ids; an order: order_type, text; a search area: label, geo; a building: label, lat, lng, floor_count, sector_id (or sector_item_id = a staged sector of the scenario), sector_label',
     `slot_id` INT UNSIGNED NULL COMMENT 'The slot the order goes to, if it goes to one (migration 204)',
     `sent_at` DATETIME NULL COMMENT 'When it went out as a live order',
     `sent_ref_id` INT UNSIGNED NULL COMMENT 'The live order it became (mission_dispatch_points.id); no foreign key',
@@ -3809,6 +3809,76 @@ CREATE TABLE IF NOT EXISTS `mission_scenario_slots` (
     FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`team_id`) REFERENCES `mission_teams`(`id`) ON DELETE SET NULL,
     FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- TRAINING CASES - v3.505.0 (migration 225)
+CREATE TABLE IF NOT EXISTS `training_cases` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `slug` VARCHAR(80) NOT NULL,
+    `title` VARCHAR(160) NOT NULL,
+    `type_tag` VARCHAR(40) NOT NULL DEFAULT 'other',
+    `difficulty` TINYINT UNSIGNED NOT NULL DEFAULT 1,
+    `language` ENUM('el','en') NOT NULL DEFAULT 'el',
+    `est_minutes` TINYINT UNSIGNED NOT NULL DEFAULT 5,
+    `document` MEDIUMTEXT NOT NULL,
+    `format_version` SMALLINT UNSIGNED NOT NULL DEFAULT 1,
+    `is_starter` TINYINT(1) NOT NULL DEFAULT 0,
+    `reviewed` TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'A medically qualified person has checked the content',
+    `reviewed_by` INT UNSIGNED NULL,
+    `reviewed_at` DATETIME NULL,
+    `archived_at` DATETIME NULL,
+    `created_by` INT UNSIGNED NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY `uq_training_case_slug` (`slug`),
+    FOREIGN KEY (`reviewed_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `mission_case_placements` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `mission_id` INT UNSIGNED NOT NULL,
+    `scenario_item_id` INT UNSIGNED NULL COMMENT 'The staged item; no foreign key',
+    `dispatch_id` INT UNSIGNED NULL COMMENT 'The point order sent for it; NULL once that order is withdrawn (runs are kept)',
+    `case_id` INT UNSIGNED NULL COMMENT 'The library case it came from; NULL if that was deleted',
+    `title` VARCHAR(160) NOT NULL,
+    `snapshot` MEDIUMTEXT NOT NULL COMMENT 'The case document as it was when staged',
+    `audience` VARCHAR(10) NOT NULL DEFAULT 'all' COMMENT 'team|all',
+    `team_id` INT UNSIGNED NULL,
+    `briefing` VARCHAR(300) NULL,
+    `draw_mode` ENUM('chosen','random') NOT NULL DEFAULT 'chosen',
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY `uq_case_placement_dispatch` (`dispatch_id`),
+    INDEX `idx_case_placement_mission` (`mission_id`),
+    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`dispatch_id`) REFERENCES `mission_dispatch_points`(`id`) ON DELETE SET NULL,
+    FOREIGN KEY (`case_id`) REFERENCES `training_cases`(`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `mission_case_runs` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `placement_id` INT UNSIGNED NOT NULL,
+    `user_id` INT UNSIGNED NOT NULL,
+    `started_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `finished_at` DATETIME NULL,
+    `score_points` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    `score_max` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
+    `current_step` VARCHAR(24) NULL,
+    UNIQUE KEY `uq_case_run` (`placement_id`, `user_id`),
+    FOREIGN KEY (`placement_id`) REFERENCES `mission_case_placements`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `mission_case_answers` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `run_id` INT UNSIGNED NOT NULL,
+    `step_id` VARCHAR(24) NOT NULL,
+    `choice_id` VARCHAR(24) NOT NULL,
+    `rating` ENUM('best','acceptable','harmful') NOT NULL,
+    `answered_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `ms_taken` INT UNSIGNED NULL,
+    UNIQUE KEY `uq_case_answer` (`run_id`, `step_id`),
+    FOREIGN KEY (`run_id`) REFERENCES `mission_case_runs`(`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;

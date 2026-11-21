@@ -40,7 +40,14 @@ if (!defined('VOLUNTEEROPS')) {
 define('WAR_ROOM_ACTION_SCRIPTS', [
     'war-room.php', 'ping-location.php', 'volunteer-status.php',
     'mission-chat.php', 'mission-photo.php', 'mission-photo-view.php',
-    'mission-dispatch.php', 'mission-order.php', 'mission-sos.php',
+    'mission-dispatch.php',
+    // training-case.php (a training case played from the dispatch card of a
+    // drill, v3.505.0) is called from the same long-open Action Room tab by
+    // every approved participant, partner-org guests and mission visitors
+    // included, so it needs the same JSON-not-redirect treatment and the same
+    // idle-timeout exemption as mission-dispatch.php above.
+    'training-case.php',
+    'mission-order.php', 'mission-sos.php',
     'mission-shortage.php', 'mission-history.php', 'mission-response-report.php',
     'mission-track.php', 'geocode-address.php', 'api-push-subscribe.php',
     // mission-incident.php (Action Room incident/casualty log, added alongside

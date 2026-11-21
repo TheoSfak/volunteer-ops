@@ -11,6 +11,7 @@ const {
     isIosDevice, newMediaId, mediaFileName, mediaKind, makeSpec, buildFormData,
     classifyFailure, queuedMediaFor, countQueuedMedia, nextQueueIndex,
     PING_QUEUE_MAX_AGE_MS, PING_QUEUE_MAX, PING_BATCH_MAX, countQueuedPings, prunePings, collectPingBatch,
+    caseAnswerDeferral, CASE_DEFER_WINDOW_MS,
 } = require('../../assets/js/media-queue.js');
 
 const entries = fd => Array.from(fd.entries()).reduce((o, [k, v]) => { o[k] = v; return o; }, {});
@@ -132,6 +133,17 @@ test('an SOS never waits behind a file, and files go in their own order', () => 
     assert.equal(nextQueueIndex(queue, 'media'), 0);
 });
 
+test('a training case answer is an ordinary text item: fast lane, in order, never behind a video', () => {
+    const queue = [
+        {kind: 'media', mediaId: 'a', mediaType: 'video', waypointId: null},
+        {kind: 'case_answer', placementId: 7, stepId: 's1', choiceId: 'a', ms: 10, at: 1},
+        {kind: 'case_answer', placementId: 7, stepId: 's2', choiceId: 'b', ms: 10, at: 2},
+    ];
+    assert.equal(nextQueueIndex(queue, 'fast'), 1);
+    assert.equal(nextQueueIndex(queue, 'media'), 0);
+    assert.equal(nextQueueIndex(queue, 'gps'), -1);
+});
+
 test('a queue with no files behaves exactly as before: first item first', () => {
     const queue = [
         {kind: 'route', action: 'arrive', id: '9'},
@@ -229,4 +241,54 @@ test('a batch is never larger than the server is willing to take at once', () =>
     assert.equal(batch.items.length, PING_BATCH_MAX);
     assert.equal(batch.items[0].lat, 0, 'oldest first');
     assert.equal(batch.items[PING_BATCH_MAX - 1].lat, PING_BATCH_MAX - 1);
+});
+
+// ── A stuck training-case answer and what waits behind it ───────────────────
+const answer = (stepId, placementId = 7) => ({kind: 'case_answer', placementId, stepId, choiceId: 'a', ms: 1, at: 1});
+const order = id => ({kind: 'order', action: 'acknowledge', orderId: id});
+
+test('caseAnswerDeferral: media or a position alongside a stuck answer never causes a re-flush', () => {
+    const media = {kind: 'media', mediaId: 'm1', waypointId: null};
+    assert.equal(caseAnswerDeferral([answer('s1'), media], 7, 0, 1000), null);
+    assert.equal(caseAnswerDeferral([answer('s1'), {kind: 'ping', shiftId: 1, lat: 1, lng: 2, at: 1}], 7, 0, 1000), null);
+    assert.equal(caseAnswerDeferral([media, answer('s1'), {kind: 'ping', shiftId: 1, at: 1}], 7, 0, 1000), null);
+});
+
+test('caseAnswerDeferral: another placement\'s answer is not something to defer behind (no ping-pong)', () => {
+    assert.equal(caseAnswerDeferral([answer('s1', 7), answer('s1', 8)], 7, 0, 1000), null);
+});
+
+test('caseAnswerDeferral: a real fast-lane item (order, triage, chat, status) is sent first', () => {
+    for (const other of [order(5), {kind: 'triage', params: {}}, {kind: 'chat', teamId: '', text: 'x', uuid: 'u', at: 1}, {kind: 'status', prId: 1, status: 'needs_help'}]) {
+        const queue = [answer('s1'), answer('s2'), other];
+        const next = caseAnswerDeferral(queue, 7, 0, 1000);
+        assert.deepEqual(next, [other, answer('s1'), answer('s2')], other.kind + ': the answers move behind it, in their own order');
+        assert.equal(nextQueueIndex(next, 'fast'), 0);
+    }
+});
+
+test('caseAnswerDeferral: media in the queue does not hide a real item behind it', () => {
+    const media = {kind: 'media', mediaId: 'm1', waypointId: null};
+    const next = caseAnswerDeferral([answer('s1'), media, order(5)], 7, 0, 1000);
+    assert.deepEqual(next, [media, order(5), answer('s1')]);
+});
+
+test('caseAnswerDeferral: at most one deferral per tick - none again inside the window', () => {
+    const queue = [answer('s1'), order(5)];
+    assert.notEqual(caseAnswerDeferral(queue, 7, 0, 1000), null, 'never deferred before');
+    assert.equal(caseAnswerDeferral(queue, 7, 1000, 1000 + CASE_DEFER_WINDOW_MS - 1), null, 'deferred a moment ago');
+    assert.notEqual(caseAnswerDeferral(queue, 7, 1000, 1000 + CASE_DEFER_WINDOW_MS), null, 'a new tick');
+});
+
+test('caseAnswerDeferral: nothing to do when the answers are not queued or already trail everything', () => {
+    assert.equal(caseAnswerDeferral([order(5)], 7, 0, 1000), null);
+    assert.equal(caseAnswerDeferral([answer('s1')], 7, 0, 1000), null);
+    assert.equal(caseAnswerDeferral([order(5), answer('s1')], 7, 0, 1000), null, 'already behind it');
+});
+
+test('caseAnswerDeferral: a route completion held for its own file is not "something else waiting"', () => {
+    const held = {kind: 'route', action: 'complete', id: 9};
+    const media = {kind: 'media', mediaId: 'm1', waypointId: 9};
+    // The held completion cannot be sent by the fast lane (its photo is still ahead), so deferring for it would only spin.
+    assert.equal(caseAnswerDeferral([answer('s1'), media, held], 7, 0, 1000), null);
 });

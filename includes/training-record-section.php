@@ -31,6 +31,9 @@ if (empty($trainingRecord) || ($trainingRecord['drills'] ?? 0) < 1) {
                     <span>
                         <strong><?= h($row['title']) ?></strong><br>
                         <small class="text-muted"><?= formatDate($row['first_start']) ?> · <?= number_format($row['hours'], 1) ?> ώρες</small>
+                        <?php if (!empty($row['cases'])): ?>
+                            <br><small class="text-muted"><i class="bi bi-clipboard2-pulse me-1" aria-hidden="true"></i><?= h(t('case.record.line', ['cases' => (int) $row['cases'], 'percent' => (int) $row['case_percent']])) ?></small>
+                        <?php endif; ?>
                     </span>
                     <?php if (!empty($row['certificate_id']) && !empty($trainingRecordCanViewCertificate)): ?>
                         <a class="btn btn-sm btn-outline-success" target="_blank"
