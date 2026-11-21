@@ -292,10 +292,15 @@ if (isPost()) {");
         $body = substr($src, $case, $header - $case);
         $this->assertStringContainsString('strlen($json) > TRAINING_CASE_MAX_IMPORT_BYTES', $body, 'the file is not sent when the import would refuse its size');
         $this->assertStringContainsString("count(\$packed['cases']) > TRAINING_CASE_MAX_IMPORT_CASES", $body, 'nor when the import would keep only the first cases');
-        $this->assertStringContainsString("t('case.lib.err_export_too_big')", $body);
+        $this->assertStringContainsString("t('case.lib.err_export_too_big', [", $body);
+        $this->assertStringContainsString("'cases' => TRAINING_CASE_MAX_IMPORT_CASES", $body, 'the message quotes the live limit, not a typed-in number');
+        $this->assertStringContainsString('TRAINING_CASE_MAX_IMPORT_BYTES / 1000', $body);
         $this->assertStringNotContainsString('echo $json', $body);
         foreach (['el', 'en'] as $lang) {
-            $this->assertNotSame('', $this->lang()[$lang]['case.lib.err_export_too_big'] ?? '');
+            $text = $this->lang()[$lang]['case.lib.err_export_too_big'] ?? '';
+            $this->assertStringContainsString('{kb}', $text);
+            $this->assertStringContainsString('{cases}', $text);
+            $this->assertDoesNotMatchRegularExpression('/\b(200|50)\b/', $text, 'no limit is hard-coded in the text');
         }
         $rules = $this->src('includes/functions-training-cases.php');
         $this->assertStringContainsString('const TRAINING_CASE_MAX_IMPORT_CASES = 50;', $rules);

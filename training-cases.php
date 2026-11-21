@@ -141,7 +141,10 @@ if (isPost()) {
                 }
                 // A file this page's own import would refuse (too many bytes) or cut short (only the first cases are read) is not sent.
                 if (strlen($json) > TRAINING_CASE_MAX_IMPORT_BYTES || count($packed['cases']) > TRAINING_CASE_MAX_IMPORT_CASES) {
-                    setFlash('error', t('case.lib.err_export_too_big'));
+                    setFlash('error', t('case.lib.err_export_too_big', [
+                        'kb' => (int) round(TRAINING_CASE_MAX_IMPORT_BYTES / 1000),
+                        'cases' => TRAINING_CASE_MAX_IMPORT_CASES,
+                    ]));
                     break;
                 }
                 logAudit('export_training_cases', 'training_cases', null, null, ['count' => count($packed['cases'])]);

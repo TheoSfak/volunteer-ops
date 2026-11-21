@@ -92,7 +92,7 @@ Because the payload now carries a whole document, `mission_scenario_items.payloa
 
 **Volunteers** see only their own results; there is no ranking.
 
-**Training record.** Each drill in «Εκπαιδευτικές ασκήσεις» (profile, admin volunteer view) gains a line such as "Περιστατικά: 2, μέσος όρος 85%", where the average is the sum of points over the sum of maximum points of the finished runs. The certificate is unchanged.
+**Training record.** Each drill in «Εκπαιδευτικές ασκήσεις» (profile, admin volunteer view) gains a line such as "Περιστατικά: 2, βαθμολογία 85%", where the score is the sum of points over the sum of maximum points of the finished runs. The certificate is unchanged.
 
 ## 5. The endpoint, errors, testing
 

@@ -74,7 +74,7 @@ After review: an admin sets «Ελέγχθηκε» in the library (see the libra
 
 ## 5. Training record and certificate
 
-- [ ] The volunteer's training record shows «Περιστατικά: n, μέσος όρος x%» for the drill (average = sum of points over sum of maximum, finished runs only), in the profile and in the admin's volunteer view.
+- [ ] The volunteer's training record shows «Περιστατικά: n, βαθμολογία x%» for the drill (score = sum of points over sum of maximum, finished runs only), in the profile and in the admin's volunteer view.
 - [ ] The printed participation certificate is unchanged and prints correctly.
 - [ ] A drill with no finished case shows no case line.
 
