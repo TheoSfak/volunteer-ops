@@ -6,6 +6,10 @@ use PHPUnit\Framework\TestCase;
 
 final class TrainingCaseStarterTest extends TestCase
 {
+    /** Shipped starter files: the 3 from v3.505.0 and the 21 added in v3.506.0. */
+    private const STARTER_COUNT = 24;
+    private const ORIGINAL_STARTERS = ['starter-chest-pain', 'starter-heat-collapse', 'starter-unresponsive-adult'];
+
     protected function setUp(): void
     {
         db()->beginTransaction();
@@ -36,15 +40,112 @@ final class TrainingCaseStarterTest extends TestCase
     public function test_every_starter_file_is_a_valid_case(): void
     {
         $files = glob(__DIR__ . '/../includes/training-cases/*.json');
-        $this->assertCount(3, $files);
+        $this->assertCount(self::STARTER_COUNT, $files);
+        $slugs = [];
         foreach ($files as $file) {
             $entry = json_decode((string) file_get_contents($file), true);
             $this->assertIsArray($entry, basename($file));
             $doc = trainingCaseNormalize($entry['document']);
             $this->assertSame([], trainingCaseValidate($doc), basename($file) . ' must be a valid case');
             $this->assertMatchesRegularExpression('/^[a-z0-9-]+$/', $entry['slug']);
+            $this->assertSame(basename($file, '.json'), $entry['slug'], 'the file is named after its slug');
             $this->assertGreaterThanOrEqual(4, count($doc['steps']), basename($file) . ' should have several decisions');
+            $slugs[] = $entry['slug'];
         }
+        $this->assertSame($slugs, array_values(array_unique($slugs)), 'no two starters share a slug');
+    }
+
+    /** Nothing a file says may be silently cut to the editor limits, which would drop the end of a sentence. */
+    public function test_no_starter_text_is_longer_than_the_limits_that_would_cut_it(): void
+    {
+        $limits = ['story' => 1500, 'closing' => 1500];
+        foreach (glob(__DIR__ . '/../includes/training-cases/*.json') as $file) {
+            $name = basename($file);
+            $doc = json_decode((string) file_get_contents($file), true)['document'];
+            foreach ($limits as $key => $max) {
+                $this->assertLessThanOrEqual($max, mb_strlen($doc[$key]), "$name $key");
+            }
+            $this->assertLessThanOrEqual(160, mb_strlen($doc['title']), "$name title");
+            foreach ($doc['steps'] as $stepId => $step) {
+                $this->assertLessThanOrEqual(400, mb_strlen($step['prompt']), "$name $stepId prompt");
+                $this->assertLessThanOrEqual(300, mb_strlen($step['hint'] ?? ''), "$name $stepId hint");
+                foreach ($step['choices'] as $choice) {
+                    $this->assertLessThanOrEqual(200, mb_strlen($choice['label']), "$name $stepId{$choice['id']} label");
+                    $this->assertLessThanOrEqual(600, mb_strlen($choice['feedback']), "$name $stepId{$choice['id']} feedback");
+                }
+            }
+            foreach ($doc['findings'] as $finding) {
+                $this->assertLessThanOrEqual(60, mb_strlen($finding['label']), "$name finding label");
+                $this->assertLessThanOrEqual(60, mb_strlen($finding['value']), "$name finding value");
+                $this->assertLessThanOrEqual(20, mb_strlen($finding['unit'] ?? ''), "$name finding unit");
+            }
+        }
+    }
+
+    public function test_every_starter_is_listed_in_the_sources_note_and_says_what_it_is_based_on(): void
+    {
+        $note = (string) file_get_contents(__DIR__ . '/../docs/training-cases-sources.md');
+        $this->assertStringContainsString('None of them has been reviewed', $note, 'the note says plainly that no case is medically reviewed');
+        foreach (glob(__DIR__ . '/../includes/training-cases/*.json') as $file) {
+            $entry = json_decode((string) file_get_contents($file), true);
+            if (in_array($entry['slug'], self::ORIGINAL_STARTERS, true)) {
+                continue;
+            }
+            $this->assertStringContainsString('Βάση:', $entry['document']['closing'], $entry['slug'] . ' names its basis in the closing text');
+        }
+    }
+
+    /**
+     * Choices that would hurt a real patient must stay "harmful" whatever else is edited. Each entry is a case, a step
+     * and the choices that must never earn points.
+     */
+    public function test_choices_that_would_hurt_a_patient_are_never_rated_best_or_acceptable(): void
+    {
+        $mustBeHarmful = [
+            'starter-choking-adult'        => ['s2' => ['a', 'd']],
+            'starter-infant-choking'       => ['s2' => ['a', 'b'], 's3' => ['c']],
+            'starter-snakebite-trail'      => ['s2' => ['a', 'b', 'c'], 's5' => ['a', 'b']],
+            'starter-stroke-hiker'         => ['s4' => ['a', 'b']],
+            'starter-seizure-festival'     => ['s1' => ['a', 'b', 'd']],
+            'starter-hypoglycemia'         => ['s1' => ['b'], 's4' => ['a', 'b']],
+            'starter-hypothermia-hiker'    => ['s1' => ['a', 'b', 'd'], 's4' => ['b', 'c']],
+            'starter-burn-scald-child'     => ['s2' => ['a', 'b', 'c']],
+            'starter-spinal-fall'          => ['s1' => ['a', 'b'], 's3' => ['a', 'b']],
+            'starter-electric-shock'       => ['s1' => ['a', 'c', 'd']],
+            'starter-carbon-monoxide-hut'  => ['s1' => ['a', 'b'], 's2' => ['a', 'c']],
+            'starter-lightning-ridge'      => ['s1' => ['a', 'b'], 's3' => ['a', 'c']],
+            'starter-anaphylaxis-sting'    => ['s1' => ['a', 'b'], 's3' => ['b']],
+            'starter-bleeding-leg'         => ['s3' => ['a', 'b'], 's4' => ['a', 'b']],
+            'starter-drowning-child'       => ['s1' => ['a', 'b']],
+        ];
+        foreach ($mustBeHarmful as $slug => $steps) {
+            $doc = json_decode((string) file_get_contents(__DIR__ . "/../includes/training-cases/$slug.json"), true)['document'];
+            foreach ($steps as $stepId => $ids) {
+                $choices = array_column($doc['steps'][$stepId]['choices'], null, 'id');
+                foreach ($ids as $id) {
+                    $this->assertSame('harmful', $choices[$id]['rating'], "$slug $stepId$id must stay harmful");
+                }
+            }
+        }
+    }
+
+    /** In every step of every starter the best answer is one choice, and it is not always the first or the longest. */
+    public function test_each_step_has_one_best_choice_and_the_best_is_not_always_first(): void
+    {
+        $firstIsBest = 0;
+        $total = 0;
+        foreach (glob(__DIR__ . '/../includes/training-cases/*.json') as $file) {
+            $doc = json_decode((string) file_get_contents($file), true)['document'];
+            foreach ($doc['steps'] as $stepId => $step) {
+                $best = array_values(array_filter($step['choices'], static fn (array $c): bool => $c['rating'] === 'best'));
+                $this->assertCount(1, $best, basename($file) . " $stepId has exactly one best choice");
+                $total++;
+                if ($step['choices'][0]['rating'] === 'best') {
+                    $firstIsBest++;
+                }
+            }
+        }
+        $this->assertLessThan($total * 0.5, $firstIsBest, 'the best answer is not first in most steps');
     }
 
     public function test_heat_case_never_rates_drinking_or_getting_up_as_acceptable_for_a_confused_runner(): void
@@ -60,7 +161,7 @@ final class TrainingCaseStarterTest extends TestCase
     public function test_seeding_is_idempotent_and_marks_starters_unreviewed(): void
     {
         $first = trainingCaseSeedStarters();
-        $this->assertSame(3, $first);
+        $this->assertSame(self::STARTER_COUNT, $first);
         $this->assertSame(0, trainingCaseSeedStarters(), 'a second run changes nothing');
         foreach ($this->starterSlugs() as $slug) {
             $row = dbFetchOne("SELECT is_starter, reviewed FROM training_cases WHERE slug = ?", [$slug]);

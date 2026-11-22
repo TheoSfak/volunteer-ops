@@ -251,7 +251,11 @@ function trainingCaseBestPath(array $doc): array {
 }
 
 const TRAINING_CASE_TYPES = ['trauma', 'cardiac', 'respiratory', 'neuro', 'environmental', 'other'];
-const TRAINING_CASE_MAX_IMPORT_BYTES = 200000;
+/**
+ * The size of an import or export file. The export is pretty-printed, and the 24 starters shipped since v3.506.0 come to
+ * about 355 KB on their own, so "export everything" on a fresh library has to fit: 1 MB holds 50 cases of a normal size.
+ */
+const TRAINING_CASE_MAX_IMPORT_BYTES = 1000000;
 /** An import reads only this many cases of a file; the library's export refuses to produce more than the import would keep. */
 const TRAINING_CASE_MAX_IMPORT_CASES = 50;
 /** The editor posts the whole document as one JSON field: a real case is far under this (the stored limit is 24000 bytes). */
