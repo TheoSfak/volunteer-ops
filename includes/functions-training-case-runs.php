@@ -91,11 +91,16 @@ function trainingCasePlacementWithDoc(array $row): array {
     return $row;
 }
 
+/** Has this team (or lone volunteer: the scope key from dispatchProgressScopeKey()) found the victim of the placement? */
+function trainingCaseTeamFound(int $placementId, string $scopeKey): bool {
+    return (bool) dbFetchValue("SELECT 1 FROM mission_case_finds WHERE placement_id = ? AND scope_key = ?", [$placementId, $scopeKey]);
+}
+
 /**
  * May this volunteer open (and, with $needArrival, play) this placement? Returns null when yes, else the t() key of
  * why not. Checked on every request of the endpoint: a drill only, the order still exists, the person is an approved
  * participant of the mission and in the order's audience (its team, or any team for an order to every team), and - to
- * PLAY - their team has arrived (arrival is a team fact, see recordDispatchProgress()).
+ * PLAY - their team has arrived (a point order) or found the victim (arrival is a team fact, see recordDispatchProgress()).
  */
 function trainingCaseGate(array $placement, int $userId, bool $needArrival): ?string {
     $missionId = (int) $placement['mission_id'];
@@ -118,6 +123,14 @@ function trainingCaseGate(array $placement, int $userId, bool $needArrival): ?st
         return 'case.err_not_audience';
     }
     if ($needArrival) {
+        // Found is the team's, like arrival (v3.506.0): once anyone on the team has found the victim, the whole team may play.
+        if (trainingCaseTeamFound((int) $placement['id'], dispatchProgressScopeKey($myTeam, $userId))) {
+            return null;
+        }
+        // An area order hides its victim: arriving somewhere in the area proves nothing, only finding opens it.
+        if (!empty($placement['spot_hidden'])) {
+            return 'case.err_not_found_yet';
+        }
         $arrived = dbFetchValue(
             "SELECT 1 FROM mission_dispatch_progress WHERE dispatch_id = ? AND scope_key = ? AND (arrived_at IS NOT NULL OR completed_at IS NOT NULL)",
             [(int) $placement['dispatch_id'], dispatchProgressScopeKey($myTeam, $userId)]
@@ -168,6 +181,45 @@ function trainingCaseStartRun(int $placementId, int $userId): array {
         [$placementId, $userId, $placement['doc']['start']]
     );
     return ['ok' => true, 'run' => trainingCaseRunState($placementId, $userId)];
+}
+
+/**
+ * A volunteer's phone reports that the team has found the victim (v3.506.0). Needs a placement the volunteer may open (the gate,
+ * without the arrival) and that has a spot. The server does not take the phone's word: it measures the reported position against
+ * the spot with the same rule as the phone (trainingCaseProximity()), so a hand-made request from the sofa cannot open a hidden
+ * case. A report for a team that already found it is a quiet duplicate. The first find is audited and the rest of the team told.
+ * ['ok' => true, 'duplicate' => bool] or ['ok' => false, 'error' => text, 'code' => 'refused'|'not_found']. A refusal carries the
+ * code 'refused' on purpose: that is what makes the phone's offline queue DROP the report instead of retrying it for ever.
+ */
+function trainingCaseRecordFound(int $placementId, int $userId, float $lat, float $lng, ?float $accuracyM): array {
+    $placement = trainingCasePlacement($placementId);
+    if (!$placement || !$placement['doc']) {
+        return ['ok' => false, 'error' => t('case.err_gone'), 'code' => 'not_found'];
+    }
+    $gate = trainingCaseGate($placement, $userId, false);
+    if ($gate !== null) {
+        return ['ok' => false, 'error' => t($gate), 'code' => 'refused'];
+    }
+    if ($placement['spot_lat'] === null || $placement['spot_lng'] === null) {
+        return ['ok' => false, 'error' => t('case.err_no_spot'), 'code' => 'refused'];
+    }
+    $distance = gpsDistanceMeters($lat, $lng, (float) $placement['spot_lat'], (float) $placement['spot_lng']);
+    if (trainingCaseProximity($distance, $accuracyM) !== 'found') {
+        return ['ok' => false, 'error' => t('case.err_too_far'), 'code' => 'refused'];
+    }
+    $missionId = (int) $placement['mission_id'];
+    $teamId = getUserTeamIdForMission($missionId, $userId) ?: null;
+    $inserted = dbExecute(
+        "INSERT IGNORE INTO mission_case_finds (placement_id, scope_key, found_by, lat, lng, accuracy_m) VALUES (?, ?, ?, ?, ?, ?)",
+        [$placementId, dispatchProgressScopeKey($teamId, $userId), $userId, round($lat, 6), round($lng, 6), $accuracyM !== null ? (int) round(min(max($accuracyM, 0.0), 65000.0)) : null]
+    );
+    if ($inserted > 0) {
+        logAudit('team_found_case', 'mission_case_placements', $placementId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'user_id' => $userId]);
+        if ($placement['dispatch_id'] !== null) {
+            trainingCaseNotifyFound($missionId, (int) $placement['dispatch_id'], $teamId, $userId);
+        }
+    }
+    return ['ok' => true, 'duplicate' => $inserted === 0];
 }
 
 /**
@@ -398,10 +450,10 @@ function trainingCaseCardsForDispatches(array $dispatchIds, int $userId): array 
 }
 
 /**
- * The team has just arrived at a case's order: tell its other on-duty members that the case is open (arrival is the
- * team's, so only one person's press or GPS fix records it). Never throws; sends nothing for an order without a case.
+ * Tells the other on-duty members of a team that a case is now open for them (arrival is the team's, and so is a find, so only one
+ * person's press or GPS fix records it). Never throws; sends nothing for an order without a case.
  */
-function trainingCaseNotifyArrival(int $missionId, int $dispatchId, ?int $teamId, int $arrivedUserId): void {
+function trainingCaseNotifyTeam(int $missionId, int $dispatchId, ?int $teamId, int $exceptUserId, string $titleKey, string $messageKey): void {
     try {
         $placement = trainingCasePlacementForDispatch($dispatchId);
         if (!$placement || !$teamId) {
@@ -411,18 +463,28 @@ function trainingCaseNotifyArrival(int $missionId, int $dispatchId, ?int $teamId
             dbFetchAll("SELECT user_id FROM mission_team_members WHERE mission_id = ? AND team_id = ?", [$missionId, $teamId]),
             'user_id'
         ));
-        $recipients = array_values(array_diff(array_intersect(activeMissionRecipientIds($missionId), $members), [$arrivedUserId]));
+        $recipients = array_values(array_diff(array_intersect(activeMissionRecipientIds($missionId), $members), [$exceptUserId]));
         foreach ($recipients as $uid) {
             $lang = getUserLanguage($uid);
-            sendNotification($uid, t('case.arrived_title', [], $lang), t('case.arrived_message', ['title' => (string) $placement['briefing'] !== '' ? $placement['briefing'] : $placement['title']], $lang), 'info', '', [
+            sendNotification($uid, t($titleKey, [], $lang), t($messageKey, ['title' => (string) $placement['briefing'] !== '' ? $placement['briefing'] : $placement['title']], $lang), 'info', '', [
                 'url' => rtrim(BASE_URL, '/') . '/war-room.php?id=' . $missionId,
                 'tag' => 'case-' . (int) $placement['id'],
                 'bannerMission' => $missionId,
             ]);
         }
     } catch (Throwable $e) {
-        error_log('[training-cases] arrival notice: ' . $e->getMessage());
+        error_log('[training-cases] team notice: ' . $e->getMessage());
     }
+}
+
+/** The team has just arrived at a case's order: tell its other on-duty members that the case is open. */
+function trainingCaseNotifyArrival(int $missionId, int $dispatchId, ?int $teamId, int $arrivedUserId): void {
+    trainingCaseNotifyTeam($missionId, $dispatchId, $teamId, $arrivedUserId, 'case.arrived_title', 'case.arrived_message');
+}
+
+/** The team has just found the victim of a case: tell its other on-duty members that the case is open. */
+function trainingCaseNotifyFound(int $missionId, int $dispatchId, ?int $teamId, int $foundByUserId): void {
+    trainingCaseNotifyTeam($missionId, $dispatchId, $teamId, $foundByUserId, 'case.found_title', 'case.found_message');
 }
 
 /**
