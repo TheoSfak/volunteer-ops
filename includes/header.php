@@ -1571,6 +1571,44 @@ if (isLoggedIn()) {
             </li>
             <?php endif; ?>
             
+            <?php if (isSystemAdmin() || hasPagePermission('ops_dashboard')): ?>
+            <div class="sidebar-section" data-sec="ops">Επιχειρησιακό</div>
+
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'ops-dashboard' ? 'active' : '' ?>" href="ops-dashboard.php">
+                    <i class="bi bi-broadcast text-danger"></i> Επιχειρησιακό
+                </a>
+            </li>
+            <?php if (isSystemAdmin()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'mission-visitor-tags' ? 'active' : '' ?>" href="mission-visitor-tags.php">
+                    <i class="bi bi-person-badge"></i> Tags Επισκεπτών Αποστολής
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php if (isSystemAdmin()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'mission-types' ? 'active' : '' ?>" href="mission-types.php">
+                    <i class="bi bi-tags"></i> Τύποι Αποστολών
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php if (isSystemAdmin()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'training-cases' || $currentPage === 'training-case-edit' ? 'active' : '' ?>" href="training-cases.php">
+                    <i class="bi bi-clipboard2-pulse"></i> Περιστατικά Εκπαίδευσης
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php if (isSystemAdmin()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'team-equipment-types' ? 'active' : '' ?>" href="team-equipment-types.php">
+                    <i class="bi bi-bag-heart-fill"></i> Υλικό Ομάδων
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php endif; // Επιχειρησιακό section ?>
+
             <div class="sidebar-section" data-sec="manage">Διαχείριση</div>
             
             <li class="nav-item">
@@ -1729,44 +1767,6 @@ if (isLoggedIn()) {
             </li>
             <?php endif; ?>
             <?php endif; // Διοίκηση section ?>
-
-            <?php if (isSystemAdmin() || hasPagePermission('ops_dashboard')): ?>
-            <div class="sidebar-section" data-sec="ops">Επιχειρησιακό</div>
-
-            <li class="nav-item">
-                <a class="nav-link <?= $currentPage === 'ops-dashboard' ? 'active' : '' ?>" href="ops-dashboard.php">
-                    <i class="bi bi-broadcast text-danger"></i> Επιχειρησιακό
-                </a>
-            </li>
-            <?php if (isSystemAdmin()): ?>
-            <li class="nav-item">
-                <a class="nav-link <?= $currentPage === 'mission-visitor-tags' ? 'active' : '' ?>" href="mission-visitor-tags.php">
-                    <i class="bi bi-person-badge"></i> Tags Επισκεπτών Αποστολής
-                </a>
-            </li>
-            <?php endif; ?>
-            <?php if (isSystemAdmin()): ?>
-            <li class="nav-item">
-                <a class="nav-link <?= $currentPage === 'mission-types' ? 'active' : '' ?>" href="mission-types.php">
-                    <i class="bi bi-tags"></i> Τύποι Αποστολών
-                </a>
-            </li>
-            <?php endif; ?>
-            <?php if (isSystemAdmin()): ?>
-            <li class="nav-item">
-                <a class="nav-link <?= $currentPage === 'training-cases' || $currentPage === 'training-case-edit' ? 'active' : '' ?>" href="training-cases.php">
-                    <i class="bi bi-clipboard2-pulse"></i> Περιστατικά Εκπαίδευσης
-                </a>
-            </li>
-            <?php endif; ?>
-            <?php if (isSystemAdmin()): ?>
-            <li class="nav-item">
-                <a class="nav-link <?= $currentPage === 'team-equipment-types' ? 'active' : '' ?>" href="team-equipment-types.php">
-                    <i class="bi bi-bag-heart-fill"></i> Υλικό Ομάδων
-                </a>
-            </li>
-            <?php endif; ?>
-            <?php endif; // Επιχειρησιακό section ?>
 
             <?php if (!isTraineeRescuer()): ?>
             <div class="sidebar-section" data-sec="inventory">Απόθεμα</div>
