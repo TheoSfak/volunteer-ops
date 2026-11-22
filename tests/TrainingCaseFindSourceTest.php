@@ -102,6 +102,11 @@ final class TrainingCaseFindSourceTest extends TestCase
         $this->assertStringContainsString("t('case.err_spot_needed')", $page);
         $this->assertStringContainsString('pointInPolygon(', substr($page, (int) strpos($page, 'dispatchCaseSpotBtn')));
         $this->assertStringContainsString('id="dispatchCaseSpotBtn"', $page);
+        // choosing "no case" again ends a pin mode left switched on, so the next tap on the area is not swallowed as a spot
+        $this->assertStringContainsString('window.wrDispatchCaseCancelPin = () => { casePinMode = false; };', $page);
+        $branch = substr($page, (int) strpos($page, "if (value === '') {"), 300);
+        $this->assertStringContainsString('state = {mode: null', $branch);
+        $this->assertStringContainsString('if (window.wrDispatchCaseCancelPin) window.wrDispatchCaseCancelPin();', $branch);
         $mission = str_replace("\r\n", "\n", (string) file_get_contents(dirname(__DIR__) . '/mission-scenario.php'));
         // (the array is column-aligned, so allow any run of spaces before the arrow)
         $this->assertMatchesRegularExpression("/'spot_lat'\\s+=> post\\('spot_lat'\\)/", $mission);

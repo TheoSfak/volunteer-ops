@@ -28882,6 +28882,7 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
     }
     window.wrDispatchCaseSpot = () => caseSpot ? {lat: caseSpot.lat, lng: caseSpot.lng} : null;
     window.wrDispatchCaseStartPin = () => { casePinMode = true; };
+    window.wrDispatchCaseCancelPin = () => { casePinMode = false; };
     window.wrDispatchAreaClosed = () => isClosed;
     // Set from pendingDispatchSeed.ringIndex when opened via a ring shortcut
     // (openDispatchForRing(), map block), null for the normal "New
@@ -29293,6 +29294,7 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
         if (value === 'random') { draw(); return; }
         if (value === '') {
             state = {mode: null, caseId: '', reviewed: true, filter: {}};
+            if (window.wrDispatchCaseCancelPin) window.wrDispatchCaseCancelPin();
         } else {
             const chosen = (cases || []).find(c => String(c.id) === value);
             state = {mode: 'chosen', caseId: value, reviewed: !!(chosen && chosen.reviewed), filter: {}};
