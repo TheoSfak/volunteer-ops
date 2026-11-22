@@ -2650,8 +2650,13 @@ include __DIR__ . '/includes/header.php';
     .wr-arrow-actions { margin-top: auto; padding-top: 1rem; display: flex; gap: .5rem; }
     .wr-arrow-actions > * { flex: 1; min-height: 52px; display: inline-flex; align-items: center; justify-content: center; }
     .wr-arrow-actions > [hidden] { display: none; }
-    /* «AR Προβολή Πεδίου» (assets/js/war-room-ar.js): the camera view. Fixed dark glass on a camera picture, so no theme tokens. */
-    .wr-ar { position: fixed; inset: 0; z-index: 2100; background: #111418; color: #f2f6f3; overflow: hidden; font-size: 13px; line-height: 1.3; }
+    /* The training notice is a whole sentence, and Bootstrap's .badge is white-space:nowrap: on a phone it ran past the
+       screen edge and stretched the whole page (and with it every fixed layer, the AR screen included) wider than the
+       screen. It wraps inside the column instead. */
+    .wr-training-badge { white-space: normal; text-align: start; max-width: 100%; line-height: 1.3; }
+    /* «AR Προβολή Πεδίου» (assets/js/war-room-ar.js): the camera view. Fixed dark glass on a camera picture, so no theme tokens.
+       It starts below the clock bar like every other fixed layer of this page. */
+    .wr-ar { position: fixed; inset: 0; top: var(--app-clock-h, 0px); z-index: 2100; background: #111418; color: #f2f6f3; overflow: hidden; font-size: 13px; line-height: 1.3; }
     .wr-ar[hidden] { display: none; }
     body.wr-ar-open { overflow: hidden; }
     .wr-ar button { font: inherit; color: inherit; cursor: pointer; }
@@ -3745,7 +3750,7 @@ include __DIR__ . '/includes/header.php';
         <!-- Status + back-to-ops live in their own top-right group, apart
              from the tool-buttons row below — neither is an Action Room
              tool, so mixing them into that row just crowded it. -->
-        <div class="d-flex gap-2 align-items-center flex-shrink-0">
+        <div class="d-flex gap-2 align-items-center flex-wrap mw-100">
             <span class="badge fs-6 <?= $timeState === 'active' ? 'bg-success' : ($timeState === 'upcoming' ? 'bg-info text-dark' : 'bg-warning text-dark') ?>">
                 <?= $timeState === 'active' ? t('hero.status_active') : ($timeState === 'upcoming' ? t('hero.status_upcoming') : t('hero.status_overdue')) ?>
             </span>
