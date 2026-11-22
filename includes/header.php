@@ -1538,14 +1538,7 @@ if (isLoggedIn()) {
                     <?php endif; ?>
                 </a>
             </li>
-            <?php if (isSystemAdmin() || hasPagePermission('ops_dashboard')): ?>
-            <li class="nav-item">
-                <a class="nav-link <?= $currentPage === 'ops-dashboard' ? 'active' : '' ?>" href="ops-dashboard.php">
-                    <i class="bi bi-broadcast text-danger"></i> Επιχειρησιακό
-                </a>
-            </li>
-            <?php endif; ?>
-            
+
             <div class="sidebar-section" data-sec="missions">Αποστολές</div>
             
             <li class="nav-item">
@@ -1676,13 +1669,6 @@ if (isLoggedIn()) {
                 </a>
             </li>
             <?php endif; ?>
-            <?php if (isSystemAdmin() || hasPagePermission('volunteers_manage')): ?>
-            <li class="nav-item">
-                <a class="nav-link <?= $currentPage === 'volunteer-notifications' ? 'active' : '' ?>" href="volunteer-notifications.php">
-                    <i class="bi bi-bell-slash"></i> Ειδοποιήσεις Εθελοντών
-                </a>
-            </li>
-            <?php endif; ?>
             <?php if (isSystemAdmin()): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'departments' ? 'active' : '' ?>" href="departments.php">
@@ -1699,30 +1685,11 @@ if (isLoggedIn()) {
                     <i class="bi bi-flag"></i> Ομάδες Εθελοντών
                 </a>
             </li>
-            <li class="nav-item">
-                <a class="nav-link <?= $currentPage === 'mission-visitor-tags' ? 'active' : '' ?>" href="mission-visitor-tags.php">
-                    <i class="bi bi-person-badge"></i> Tags Επισκεπτών Αποστολής
-                </a>
-            </li>
             <?php endif; ?>
             <?php if (isSystemAdmin() || hasPagePermission('positions_manage')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'volunteer-positions' ? 'active' : '' ?>" href="volunteer-positions.php">
                     <i class="bi bi-person-badge"></i> Θέσεις Εθελοντών
-                </a>
-            </li>
-            <?php endif; ?>
-            <?php if (isSystemAdmin()): ?>
-            <li class="nav-item">
-                <a class="nav-link <?= $currentPage === 'mission-types' ? 'active' : '' ?>" href="mission-types.php">
-                    <i class="bi bi-tags"></i> Τύποι Αποστολών
-                </a>
-            </li>
-            <?php endif; ?>
-            <?php if (isSystemAdmin()): ?>
-            <li class="nav-item">
-                <a class="nav-link <?= $currentPage === 'training-cases' || $currentPage === 'training-case-edit' ? 'active' : '' ?>" href="training-cases.php">
-                    <i class="bi bi-clipboard2-pulse"></i> Περιστατικά Εκπαίδευσης
                 </a>
             </li>
             <?php endif; ?>
@@ -1754,20 +1721,6 @@ if (isLoggedIn()) {
                 </a>
             </li>
             <?php endif; ?>
-            <?php if (isSystemAdmin()): ?>
-            <li class="nav-item">
-                <a class="nav-link <?= $currentPage === 'team-equipment-types' ? 'active' : '' ?>" href="team-equipment-types.php">
-                    <i class="bi bi-bag-heart-fill"></i> Υλικό Ομάδων
-                </a>
-            </li>
-            <?php endif; ?>
-            <?php if (isSystemAdmin() || hasPagePermission('reports')): ?>
-            <li class="nav-item">
-                <a class="nav-link <?= $currentPage === 'reports' ? 'active' : '' ?>" href="reports.php">
-                    <i class="bi bi-graph-up"></i> Αναφορές
-                </a>
-            </li>
-            <?php endif; ?>
             <?php if (isSystemAdmin() || hasPagePermission('complaints_view') || hasPagePermission('complaints_manage')): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'complaints' ? 'active' : '' ?>" href="complaints.php">
@@ -1775,15 +1728,46 @@ if (isLoggedIn()) {
                 </a>
             </li>
             <?php endif; ?>
+            <?php endif; // Διοίκηση section ?>
+
+            <?php if (isSystemAdmin() || hasPagePermission('ops_dashboard')): ?>
+            <div class="sidebar-section" data-sec="ops">Επιχειρησιακό</div>
+
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'ops-dashboard' ? 'active' : '' ?>" href="ops-dashboard.php">
+                    <i class="bi bi-broadcast text-danger"></i> Επιχειρησιακό
+                </a>
+            </li>
             <?php if (isSystemAdmin()): ?>
             <li class="nav-item">
-                <a class="nav-link <?= in_array($currentPage, ['bug-reports', 'bug-report-view']) ? 'active' : '' ?>" href="bug-reports.php">
-                    <i class="bi bi-bug"></i> Bug Reports
+                <a class="nav-link <?= $currentPage === 'mission-visitor-tags' ? 'active' : '' ?>" href="mission-visitor-tags.php">
+                    <i class="bi bi-person-badge"></i> Tags Επισκεπτών Αποστολής
                 </a>
             </li>
             <?php endif; ?>
-            <?php endif; // Διοίκηση section ?>
-            
+            <?php if (isSystemAdmin()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'mission-types' ? 'active' : '' ?>" href="mission-types.php">
+                    <i class="bi bi-tags"></i> Τύποι Αποστολών
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php if (isSystemAdmin()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'training-cases' || $currentPage === 'training-case-edit' ? 'active' : '' ?>" href="training-cases.php">
+                    <i class="bi bi-clipboard2-pulse"></i> Περιστατικά Εκπαίδευσης
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php if (isSystemAdmin()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'team-equipment-types' ? 'active' : '' ?>" href="team-equipment-types.php">
+                    <i class="bi bi-bag-heart-fill"></i> Υλικό Ομάδων
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php endif; // Επιχειρησιακό section ?>
+
             <?php if (!isTraineeRescuer()): ?>
             <div class="sidebar-section" data-sec="inventory">Απόθεμα</div>
             
@@ -1925,9 +1909,15 @@ if (isLoggedIn()) {
                     <i class="bi bi-broadcast"></i> Άμεση Κινητοποίηση
                 </a>
             </li>
+            <?php endif; // Επικοινωνία section ?>
 
+            <?php /* Σύστημα is not gated as a whole: Αναφορές and Ειδοποιήσεις Εθελοντών
+                     keep the page permissions they had under Διοίκηση, so a non-admin
+                     who holds one still sees it here. The admin-only entries each
+                     carry their own isSystemAdmin() check. */ ?>
             <div class="sidebar-section" data-sec="system">Σύστημα</div>
-            
+
+            <?php if (isSystemAdmin()): ?>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'roles' ? 'active' : '' ?>" href="roles.php">
                     <i class="bi bi-shield-lock"></i> Διαχείριση Ρόλων
@@ -1948,6 +1938,27 @@ if (isLoggedIn()) {
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage === 'email-logs' ? 'active' : '' ?>" href="email-logs.php">
                     <i class="bi bi-envelope-check"></i> Email Logs
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php if (isSystemAdmin() || hasPagePermission('volunteers_manage')): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'volunteer-notifications' ? 'active' : '' ?>" href="volunteer-notifications.php">
+                    <i class="bi bi-bell-slash"></i> Ειδοποιήσεις Εθελοντών
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php if (isSystemAdmin() || hasPagePermission('reports')): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'reports' ? 'active' : '' ?>" href="reports.php">
+                    <i class="bi bi-graph-up"></i> Αναφορές
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php if (isSystemAdmin()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= in_array($currentPage, ['bug-reports', 'bug-report-view']) ? 'active' : '' ?>" href="bug-reports.php">
+                    <i class="bi bi-bug"></i> Bug Reports
                 </a>
             </li>
             <li class="nav-item">
