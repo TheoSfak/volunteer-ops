@@ -322,6 +322,7 @@ function arElement() {
     // Translated strings only; everything from an order is set as text below.
     el.innerHTML = `<video class="wr-ar-video" playsinline muted autoplay></video>
         <canvas class="wr-ar-world"></canvas>
+        <div class="wr-ar-casenear" hidden></div>
         <div class="wr-ar-top">
             <div class="wr-ar-toprow">
                 <button type="button" class="wr-ar-x" data-ar="close" aria-label="${escapeHtml(t('arrow.close'))}"><i class="bi bi-x-lg"></i></button>
@@ -1008,6 +1009,7 @@ function arFrame(now) {
         arState.timedOut = true;
         arShowMessage(t('ar.timeout'), t('ar.continue'));
     }
+    arState.caseNear = false;
     if (!me || !poseFresh) {
         arUpdateDynamicHud(el, m, null);
         const note = !arState.pose ? t('ar.no_compass') : t('ar.compass_lost');
@@ -1041,6 +1043,11 @@ function arDrawWorld(S, m, me) {
     const navV = arVec(me, nav.lat, nav.lng);
     const flatNav = Math.hypot(navV.x, navV.y);
     const info = {dist: flatNav, dz: navV.z + AR_EYE_HEIGHT_M, near: flatNav <= ARROW_ARRIVE_RADIUS_M, inside: false, outM: 0, edge: null};
+    // The victim of a training case on this order (v3.507.0). A known victim's place is the order's own place, so its beacon turns red;
+    // a hidden one is never drawn at all, the screen only says the team is near. VoCaseFind.victimView decides, so no spot is read here.
+    const victim = m.case && typeof VoCaseFind !== 'undefined' ? VoCaseFind.victimView(m.case, me) : {mode: 'none'};
+    arState.caseNear = victim.mode === 'close';
+    const markCol = victim.mode === 'marker' && t0.kind === 'point' ? AR_COL.red : AR_COL.green;
     const pushMark = (az, col, shape) => S.marks.push({az: az, col: col, shape: shape});
     const navAngles = arBearingElevation([navV.x, navV.y, navV.z]);
     const eta = naismithMinutes(flatNav, Math.max(0, info.dz));
@@ -1107,12 +1114,12 @@ function arDrawWorld(S, m, me) {
         else S.edges.push({turn: arTurnTo(S.heading, navAngles.az), label: title + ' · ' + formatDistanceMeters(flatNav), col: AR_COL.green});
     } else {
         const p = arProject([navV.x, navV.y, navV.z], S.basis, S.focal, S.cw, S.ch);
-        const title = String(m.text || m.title).split('\n')[0];
-        if (p && p.x > -20 && p.x < S.cw + 20) arDrawBeacon(S, p, {color: AR_COL.green, big: true, ring: true, lines: targetLines(title)});
-        else S.edges.push({turn: arTurnTo(S.heading, navAngles.az), label: formatDistanceMeters(flatNav), col: AR_COL.green});
+        const title = markCol === AR_COL.red ? t('ar.victim') : String(m.text || m.title).split('\n')[0];
+        if (p && p.x > -20 && p.x < S.cw + 20) arDrawBeacon(S, p, {color: markCol, big: true, ring: true, lines: targetLines(title)});
+        else S.edges.push({turn: arTurnTo(S.heading, navAngles.az), label: formatDistanceMeters(flatNav), col: markCol});
     }
-    pushMark(navAngles.az, AR_COL.green, 'tri');
-    if (t0.kind !== 'line') S.radar.push({poly: null, lat: nav.lat, lng: nav.lng, col: AR_COL.green, size: 4});
+    pushMark(navAngles.az, markCol, 'tri');
+    if (t0.kind !== 'line') S.radar.push({poly: null, lat: nav.lat, lng: nav.lng, col: markCol, size: 4});
 
     arDrawLayers(S, me, info);
     return info;
@@ -1285,6 +1292,8 @@ function arUpdateStaticHud(el, m) {
 
 function arUpdateDynamicHud(el, m, S) {
     const info = arState.scene;
+    const nearFrame = el.querySelector('.wr-ar-casenear');
+    if (nearFrame) nearFrame.hidden = !arState.caseNear;
     const set = (k, v) => { const e = el.querySelector('[data-ar-k="' + k + '"]'); if (e && e.textContent !== v) e.textContent = v; };
     const me = arMe();
     set('gps', me && typeof me.acc === 'number' ? '±' + Math.round(me.acc) + ' ' + t('common.unit_m') : '—');
@@ -1321,6 +1330,7 @@ function arUpdateDynamicHud(el, m, S) {
     else if (act.needNear && info.near) banner = t('ar.banner_here');
     else if (act.needNear) banner = arGuideText(S, m, info);
     else banner = t('ar.banner_finish');
+    if (arState.caseNear) banner = t('case.close_toast');
     el.querySelector('.wr-ar-banner').textContent = banner;
     arUpdateWarning(el, S, info);
 }
