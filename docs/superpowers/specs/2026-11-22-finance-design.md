@@ -39,7 +39,7 @@ A volunteer group has money coming in (dues, donations, sponsorships) and going 
 
 ## Scanning
 
-Page **Παραστατικά → Νέο**: «Φωτογραφία» (opens the phone camera via `capture="environment"`) or «Αρχείο» (JPG/PNG/WebP/HEIC/PDF, max 10 MB).
+Page **Παραστατικά → Νέο**: «Φωτογραφία» (opens the phone camera via `capture="environment"`) or «Αρχείο» (JPG/PNG/WebP/PDF, max 10 MB; no HEIC: only Safari can decode it for the scan, and iPhones hand the file picker a JPEG anyway).
 
 1. **In the browser:** images are downscaled to max 2000 px long edge, JPEG ~0.85. A PDF's first page is rendered to an image with pdf.js (cdnjs, pinned version). The original file is what gets stored; the downscaled image is what goes to the AI.
 2. **Server** (`finance-scan.php`, POST, CSRF, `finance_manage`): sends the image to the AI and returns JSON. Nothing is saved at this step.
@@ -51,7 +51,7 @@ The scanner uses the providers and keys already in **Ρυθμίσεις → AI**
 
 - Order is `aiFailoverOrder()` (failover_rank): Gemini and Groq (free tiers, rank 10) → xAI Grok (metered, 50) → DeepSeek (90).
 - Only providers **that have a key** and **can read images** are in the chain. `aiProviders()` gains a `vision_model` per provider: Gemini → its configured model (Flash models read images), Groq → a Llama 4 vision model, Grok → a vision-capable Grok model, DeepSeek → none (skipped). Like model names today, these are defaults that can be overridden in Settings (`ai_vision_model_<provider>`).
-- A new `aiVisionChain()` in `includes/ai.php` returns that list; the scan call goes through the existing `aiChat()` retry/failover machinery with messages whose content is an OpenAI-style `[{type:'text'}, {type:'image_url', image_url:{url:'data:image/jpeg;base64,...'}}]` array. `aiChat()` gains an option to take an explicit chain + per-provider model instead of the default chain.
+- A new `includes/ai-vision.php` holds `aiVisionChain()` (that list) and `aiVisionChat()`, which walks it with the existing single-attempt `aiChatOnce()` (same retryable/failover rules as `aiChat()`, which itself is left untouched) and messages whose content is an OpenAI-style `[{type:'text'}, {type:'image_url', image_url:{url:'data:image/jpeg;base64,...'}}]` array.
 - The prompt asks for strict JSON with a fixed schema and `null` for anything not legible; the reply is parsed with `aiDecodeJsonLoose()` and then **validated in PHP** (dates real, amounts numeric, ΑΦΜ 9 digits with the check digit, VAT lines summing to the total). Invalid fields are dropped, not trusted.
 - No key at all, or no vision-capable provider keyed: the scan button is hidden and the page says why; upload + manual entry work exactly the same.
 - **Privacy notice** on the scan page: «Η εικόνα αποστέλλεται στον πάροχο AI (π.χ. Google) για ανάγνωση.» The provider label actually used is stored in `scan_provider`.
@@ -78,14 +78,14 @@ New sidebar section **Οικονομικά** in `includes/header.php`, after Ε�
 
 File access: `finance-file.php?id=` streams the stored file after a `finance_manage` check; files live in `uploads/finance/` protected by `ensurePrivateUploadDir()`, stored names random, like the subscription receipts.
 
-Permission: new `finance_manage` («Οικονομικά», icon `bi-wallet2`) in `includes/permissions.php`, granted to system admins by the migration.
+Permission: new `finance_manage` («Οικονομικά», icon `bi-wallet2`) in `includes/permissions.php`, in a new «Οικονομικά» group. System admins have it implicitly (as every permission); custom roles get it from the role editor.
 
 ## Hooks into what exists
 
 - **Dues (Συνδρομές) are part of the cash book.** The existing dues feature (`subscriptions.php`, `volunteer_subscriptions`, IRIS requests, receipts, expiry reminders) stays as it is and becomes the Οικονομικά source of «Συνδρομές μελών» income:
   - **Record payment** with an amount → an IN movement is created in the same DB transaction: category «Συνδρομές μελών», `subscription_id` set, date = payment date, description «Συνδρομή — <όνομα εθελοντή>».
   - **Which account** comes from the payment method already on the dues form, mapped in Ρυθμίσεις: Μετρητά → (default «Ταμείο μετρητών»), Τραπεζική κατάθεση → a BANK account, Κάρτα → a CARD account, Άλλο / κενό → the cash account. Settings `finance_dues_account_<method>`; an unmapped method falls back to the cash account, so a dues payment is never silently left out of the books.
-  - **Edit** of a dues payment updates its movement (amount, date, account); amount cleared → movement removed. **Delete** removes the movement.
+  - **Edit** of a dues payment updates its movement (amount, date, account); amount cleared → movement removed. **Delete** removes the movement (explicitly, from the delete action: `volunteer_subscriptions` is not in `sql/schema.sql`, so no FK is declared on `subscription_id`).
   - No amount → no movement (nothing to book).
   - The movement row in Κινήσεις links to the dues payment and its receipt (`subscription-receipt.php`); dues movements are edited only from Συνδρομές, never from Κινήσεις, so the two never disagree.
   - **Past dues:** the migration does not touch history. Ρυθμίσεις has «Εισαγωγή παλαιών συνδρομών από [ημερομηνία]», which creates the missing movements for dues payments on or after that date (idempotent: skips any with a movement already). The treasurer picks the same date as the accounts' opening date, so opening balance + imported dues don't double-count.
