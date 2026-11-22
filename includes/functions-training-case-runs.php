@@ -12,6 +12,25 @@ if (!defined('VOLUNTEEROPS')) {
 }
 
 /**
+ * Finding the victim (v3.506.0). Within CLOSE_M of the spot the phone says «κοντά», within FOUND_M «βρέθηκε». A phone's GPS
+ * error is credited to the volunteer, capped so one bad fix cannot find the victim from afar. The same three numbers and the
+ * same rule are in assets/js/training-case-find.js; a test keeps them equal.
+ */
+const TRAINING_CASE_FOUND_M = 10;
+const TRAINING_CASE_CLOSE_M = 50;
+const TRAINING_CASE_ACCURACY_CREDIT_M = 15;
+
+/** 'found', 'close' or 'far' for a distance in metres and the fix's reported accuracy in metres (null = unknown). */
+function trainingCaseProximity(float $distanceM, ?float $accuracyM): string {
+    $credit = min(max((float) $accuracyM, 0.0), (float) TRAINING_CASE_ACCURACY_CREDIT_M);
+    $effective = $distanceM - $credit;
+    if ($effective <= TRAINING_CASE_FOUND_M) {
+        return 'found';
+    }
+    return $effective <= TRAINING_CASE_CLOSE_M ? 'close' : 'far';
+}
+
+/**
  * Records the placement of a case whose point order has just been sent. $payload is the staged item's payload (its
  * `case` block holds the snapshot); who it is for is read from the live order (team_id NULL = every team). Returns
  * the placement id, or null when the payload carries no case or the mission is not a training mission.
