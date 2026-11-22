@@ -655,7 +655,6 @@ Tests:
         $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_case_finds WHERE placement_id = ?", [$this->areaPlacement]));
     }
 
-```php
     public function test_a_second_report_is_a_quiet_duplicate_and_another_team_cannot_report(): void
     {
         $first = trainingCaseRecordFound($this->areaPlacement, $this->member, 35.405, 25.205, 5.0);
