@@ -606,9 +606,18 @@ function trainingCaseOverview(int $missionId): array {
                 'id' => $c['id'], 'label' => $c['label'], 'rating' => $c['rating'], 'count' => $counts[$stepId][$c['id']] ?? 0,
             ], $step['choices'])];
         }
+        $finds = [];
+        foreach (dbFetchAll(
+            "SELECT f.scope_key, f.found_at, u.name AS by_name FROM mission_case_finds f LEFT JOIN users u ON u.id = f.found_by
+             WHERE f.placement_id = ? ORDER BY f.found_at, f.id",
+            [(int) $placement['id']]
+        ) as $f) {
+            $finds[] = ['scope_key' => $f['scope_key'], 'found_at' => $f['found_at'], 'by' => $f['by_name']];
+        }
         $out[] = [
             'id' => (int) $placement['id'], 'title' => $placement['title'], 'label' => (string) ($row['dispatch_label'] ?? ''),
             'audience' => $placement['audience'], 'volunteers' => $volunteers, 'steps' => $steps,
+            'hidden' => !empty($placement['spot_hidden']), 'finds' => $finds,
         ];
     }
     return ['placements' => $out];

@@ -283,6 +283,17 @@ test('caseStageFields adds nothing without a case and carries the choice, the dr
     assert.equal(TC.caseStageFields({caseId: 7, mode: 'bogus'}).case_mode, 'chosen');
 });
 
+test('renderOverview says who found the victim and when, escaping the name', () => {
+    const t = (k, v) => k === 'case.overview_found' ? 'FOUND ' + v.time + ' ' + v.name : k;
+    const html = TC.renderOverview({placements: [{
+        id: 1, title: 'Τ', label: '', audience: 'all', volunteers: [], steps: [],
+        finds: [{scope_key: 't3', found_at: '2026-11-22 14:32:10', by: '<b>Ann</b>'}],
+    }]}, t);
+    assert.match(html, /FOUND 14:32 &lt;b&gt;Ann&lt;\/b&gt;/);
+    const none = TC.renderOverview({placements: [{id: 1, title: 'Τ', label: '', audience: 'all', volunteers: [], steps: [], finds: []}]}, t);
+    assert.doesNotMatch(none, /FOUND/);
+});
+
 test('renderOverview gives each opening section a stable key, so a refresh can keep it open', () => {
     const html = TC.renderOverview({placements: [{id: 4, title: 'T', label: '', audience: 'all', steps: [],
         volunteers: [{user_id: 9, name: 'A', state: 'done', score_points: 1, score_max: 2, percent: 50, answers: [{step_id: 's1', choice_label: 'x', rating: 'best', ms_taken: 1000}]}]}]}, k => k);

@@ -375,4 +375,19 @@ final class TrainingCaseFindTest extends TestCase
         $this->assertStringContainsString("\$caseCards[\$dispatchId]['found']", $block);
         $this->assertStringContainsString("!\$caseCards[\$dispatchId]['hidden']", $block);
     }
+
+    public function test_the_overview_lists_who_found_each_case_and_when(): void
+    {
+        trainingCaseRecordFound($this->areaPlacement, $this->member, 35.405, 25.205, 5.0);
+        $byId = [];
+        foreach (trainingCaseOverview($this->drill['mission'])['placements'] as $p) {
+            $byId[$p['id']] = $p;
+        }
+        $this->assertSame([], $byId[$this->pointPlacement]['finds']);
+        $this->assertFalse($byId[$this->pointPlacement]['hidden']);
+        $this->assertTrue($byId[$this->areaPlacement]['hidden']);
+        $this->assertCount(1, $byId[$this->areaPlacement]['finds']);
+        $this->assertSame('Member', $byId[$this->areaPlacement]['finds'][0]['by']);
+        $this->assertSame('t' . $this->teamId, $byId[$this->areaPlacement]['finds'][0]['scope_key']);
+    }
 }

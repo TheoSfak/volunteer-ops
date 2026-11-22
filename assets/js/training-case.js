@@ -449,6 +449,8 @@
                     + (RATING_BADGE[c.rating] || 'bg-secondary') + '">' + escapeHtml(c.count) + '</span></div>').join('') + '</div>').join('');
             return '<div class="border rounded p-2 mb-2"><div class="fw-semibold">' + escapeHtml(p.title) + '</div>'
                 + (p.label ? '<div class="small text-muted mb-1">' + escapeHtml(p.label) + '</div>' : '')
+                + (p.finds || []).map(f => '<div class="small text-success"><i class="bi bi-geo-alt-fill me-1"></i>'
+                    + escapeHtml(t('case.overview_found', {time: String(f.found_at || '').slice(11, 16), name: f.by || ''})) + '</div>').join('')
                 + '<ul class="list-unstyled small mb-1">' + people + '</ul>'
                 + '<details data-k="s' + escapeHtml(p.id) + '"><summary class="small">' + escapeHtml(t('case.overview_breakdown')) + '</summary>' + stepHtml + '</details></div>';
         }).join('');
