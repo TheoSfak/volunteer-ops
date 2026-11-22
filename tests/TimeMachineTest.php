@@ -424,7 +424,7 @@ final class TimeMachineTest extends TestCase
     public function testTheThreeRenderFunctionsGoThroughTheMachineAtTheirTop(): void
     {
         $page = $this->source('war-room.php');
-        $this->assertMatchesRegularExpression('/function renderDispatches\(items\) \{\s*refreshMyOrdersCard\(\);[^}]*?items = wrTimeDispatches\(items\);/s', $page);
+        $this->assertMatchesRegularExpression('/function renderDispatches\(items\) \{\s*(?:wrCaseFindSync\(items\);\s*)?refreshMyOrdersCard\(\);[^}]*?items = wrTimeDispatches\(items\);/s', $page);
         $this->assertMatchesRegularExpression('/function renderSectorLayer\(items\) \{\s*if \(!sectorLayer \|\| !sectorBuildingLayer\) return;[^}]*?items = wrTimeSectors\(items\);/s', $page);
         $this->assertMatchesRegularExpression('/function renderRouteLayer\(allRoutes\) \{\s*if \(!routeLayer\) return;[^}]*?allRoutes = wrTimeRoutes\(allRoutes\);/s', $page);
     }

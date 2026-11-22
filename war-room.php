@@ -6989,6 +6989,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 <?php endif; ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-ar.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-ar.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/training-case.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/training-case.js') ?>"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/training-case-find.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/training-case-find.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-team-arcs.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-team-arcs.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-time-machine.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-time-machine.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-team-coverage.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-team-coverage.js') ?>"></script>
@@ -9604,6 +9605,7 @@ function dispatchIncidentHtml(inc) {
 // dispatch changed, including its live ETA.
 let dispatchesRenderedSig = null;
 function renderDispatches(items) {
+    wrCaseFindSync(items);
     refreshMyOrdersCard();
     // Back in the past with the scrubber of «Πορεία Ομάδων»: the orders as they stood then, read-only
     // (assets/js/war-room-time-machine.js). The list itself in the present.
@@ -15591,23 +15593,83 @@ document.addEventListener('click', e => {
     const back = e.target.closest('.wr-withdraw-btn');
     if (back && !back.disabled) postOrderDecline('withdraw', back.dataset.kind, back.dataset.id, null, back);
 });
-// The training case's button on an order's row (v3.505.0, assets/js/training-case.js). Answers are queued like every other
-// field action (sendQueuedItem() replays {kind:'case_answer'} to training-case.php), so the case plays with no signal.
-document.addEventListener('click', e => {
-    const caseBtn = e.target.closest('.vo-case-open-btn');
-    if (!caseBtn || !window.VoTrainingCase || document.getElementById('voCaseOverlay')) return;
+// The training case's player (v3.505.0, assets/js/training-case.js). Answers are queued like every other field action
+// (sendQueuedItem() replays {kind:'case_answer'} to training-case.php), so the case plays with no signal. Opened by the
+// button on an order's row and, since v3.506.0, by the phone itself the moment the team finds the victim.
+function openTrainingCase(placementId, briefing) {
+    if (!window.VoTrainingCase || document.getElementById('voCaseOverlay')) return;
     // The page's own SOS button (the volunteer's status row) sits under the overlay: the overlay's SOS forwards to it,
     // so the offline queue, the badge and the poll reconciliation stay the one code path. The button is looked up when
     // the SOS FIRES (the status row is redrawn by the poll, a node captured now may be gone by then); false = none.
     const findRealSos = () => document.querySelector('[onclick*="setFieldStatus"][onclick*="needs_help"]');
     window.VoTrainingCase.open({
-        placementId: Number(caseBtn.dataset.placement), missionId: WR_MISSION_ID, briefing: caseBtn.dataset.briefing || '',
+        placementId: Number(placementId), missionId: WR_MISSION_ID, briefing: briefing || '',
         userId: WR_MY_USER_ID, t: t, enqueue: enqueueAction, flush: flushQueue,
-        isQueued: (placementId, stepId) => loadQueue().some(q => q.kind === 'case_answer' && q.placementId === placementId && q.stepId === stepId),
+        isQueued: (pid, stepId) => loadQueue().some(q => q.kind === 'case_answer' && q.placementId === pid && q.stepId === stepId),
         onClose: () => { renderQueueStatus(); flushQueue(); refreshMyOrdersCard(); },
         onSos: findRealSos() ? () => { const sos = findRealSos(); if (sos) sos.click(); return !!sos; } : null,
     });
+}
+document.addEventListener('click', e => {
+    const caseBtn = e.target.closest('.vo-case-open-btn');
+    if (caseBtn) openTrainingCase(caseBtn.dataset.placement, caseBtn.dataset.briefing);
 });
+
+// Finding the victim (v3.506.0, assets/js/training-case-find.js). The phone watches its OWN high-accuracy GPS, only while a
+// case it may play has a spot its team has not found: the passive location capture can be switched off, is tied to a
+// three-minute send cadence and may run at a battery-saving accuracy. «Κοντά» (50 m) is a toast and a buzz, never a number or a
+// direction; «βρέθηκε» (10 m) queues the report, remembers it on this phone and opens the case.
+let caseFindCards = [];
+let caseFindWatchId = null;
+const caseFindTracker = VoCaseFind.createTracker({
+    onClose: () => { wrCaseFindToast(t('case.close_toast')); if (navigator.vibrate) navigator.vibrate(200); },
+    onFound: (card, fix) => {
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        wrCaseFindToast(t('case.found_toast'));
+        try { localStorage.setItem(wrCaseFoundKey(card.placement_id), '1'); } catch (e) {}
+        if (!loadQueue().some(q => q.kind === 'case_found' && q.placementId === card.placement_id)) {
+            enqueueAction({kind: 'case_found', placementId: card.placement_id, lat: fix.lat, lng: fix.lng, acc: fix.acc, at: Date.now()});
+        }
+        flushQueue();
+        refreshMyOrdersCard();
+        openTrainingCase(card.placement_id, card.briefing);
+    },
+});
+function wrCaseFoundKey(placementId) { return 'wr_case_found_' + WR_MY_USER_ID + '_' + placementId; }
+function wrCaseFoundLocally(placementId) {
+    try { return localStorage.getItem(wrCaseFoundKey(placementId)) === '1'; } catch (e) { return false; }
+}
+function wrCaseFindToast(text) {
+    const el = document.createElement('div');
+    el.setAttribute('role', 'status');
+    el.className = 'alert alert-success shadow position-fixed start-50 translate-middle-x fw-semibold py-2 px-3';
+    el.style.cssText = 'top:calc(var(--app-clock-h, 0px) + 12px);z-index:100001;max-width:90vw;';
+    el.textContent = text;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+}
+function wrCaseFindStart() {
+    if (caseFindWatchId !== null || !navigator.geolocation) return;
+    caseFindWatchId = navigator.geolocation.watchPosition(
+        pos => caseFindTracker.check(caseFindCards, {lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy}),
+        () => {},
+        {enableHighAccuracy: true, maximumAge: 2000, timeout: 20000}
+    );
+}
+function wrCaseFindStop() {
+    if (caseFindWatchId === null) return;
+    navigator.geolocation.clearWatch(caseFindWatchId);
+    caseFindWatchId = null;
+}
+// Called with every dispatch list the page renders (the poll). Starts or stops the watcher, and keeps the documents of the
+// watched cases on the phone so a find with no signal still opens and plays them.
+function wrCaseFindSync(items) {
+    if (!window.VoCaseFind || !window.VoTrainingCase) return;
+    caseFindCards = VoCaseFind.watchList(items).filter(c => !wrCaseFoundLocally(c.placement_id));
+    caseFindCards.forEach(c => VoTrainingCase.prefetch({placementId: c.placement_id, missionId: WR_MISSION_ID, userId: WR_MY_USER_ID}));
+    if (caseFindCards.length && !document.hidden) wrCaseFindStart(); else wrCaseFindStop();
+}
+document.addEventListener('visibilitychange', () => { if (typeof dispatches !== 'undefined') wrCaseFindSync(dispatches); });
 
 // Both answers go through here, from the popup, a card or a map popup. The
 // reply carries this person's four order lists freshly loaded, redrawn with the
@@ -15930,9 +15992,12 @@ function myOrderEntriesFromDispatches(items) {
                 const caseLabel = cs.state === 'done'
                     ? t('case.btn_done', {percent: cs.percent})
                     : (cs.state === 'running' ? t('case.btn_resume') : t('case.btn_open'));
-                caseHtml = d.my_ack || cs.available
+                // Open: my team found the victim (the server's word, or this phone's own until the queue has landed it), or - a point
+                // order, whose victim is shown - my team has arrived.
+                const open = cs.available || wrCaseFoundLocally(cs.placement_id) || (!cs.hidden && d.my_ack);
+                caseHtml = open
                     ? `<button type="button" class="btn btn-sm btn-primary w-100 mt-1 vo-case-open-btn" data-placement="${Number(cs.placement_id)}" data-briefing="${escapeHtml(cs.briefing || '')}"><i class="bi bi-clipboard2-pulse me-1"></i>${escapeHtml(caseLabel)}</button>`
-                    : `<div class="small text-muted mt-1"><i class="bi bi-clipboard2-pulse me-1"></i>${escapeHtml(t('case.opens_on_arrival'))}</div>`;
+                    : `<div class="small text-muted mt-1"><i class="bi bi-clipboard2-pulse me-1"></i>${escapeHtml(t(cs.hidden ? 'case.opens_on_find' : 'case.opens_on_arrival'))}</div>`;
             }
             // «Δεν μπορώ» — my team's, like the steps above it.
             if (d.my_declined && !d.my_completed) {
@@ -17915,11 +17980,30 @@ function sendQueuedCaseAnswer(item) {
     });
 }
 
+// The team found the victim (v3.506.0): the same outcome rules as an answer. The server re-checks the distance; a refusal
+// (code 'refused': not the audience, too far, no spot) drops the report, everything else waits for the next tick.
+function sendQueuedCaseFound(item) {
+    if (!window.VoTrainingCase) return Promise.resolve({ok: false, networkError: true});
+    return postQueuedForm('training-case.php', {
+        mission_id: String(WR_MISSION_ID), action: 'found', placement_id: String(item.placementId),
+        lat: String(item.lat), lng: String(item.lng), accuracy: String(Math.round(item.acc || 0)), queued: '1'
+    }).then(result => {
+        const verdict = VoTrainingCase.queueOutcome(result);
+        if (verdict === 'retry') {
+            if (result && result.networkError) return result;
+            if (result && deferCaseAnswers(item)) setTimeout(flushQueue, 500);
+            return null;
+        }
+        return result;
+    });
+}
+
 function sendQueuedItem(item) {
     if (item.kind === 'media') return sendQueuedMedia(item);
     if (item.kind === 'chat') return sendQueuedChat(item);
     if (item.kind === 'ping') return sendQueuedPings();
     if (item.kind === 'case_answer') return sendQueuedCaseAnswer(item);
+    if (item.kind === 'case_found') return sendQueuedCaseFound(item);
     // Triage writes carry their own ids (victim / assessment / bulk uuid), so
     // a replay that already landed is recognised server-side and ignored.
     if (item.kind === 'triage') {

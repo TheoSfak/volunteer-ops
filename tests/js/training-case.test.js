@@ -307,3 +307,22 @@ test('previewOptions: a try-out neither queues answers nor loads from the server
     assert.deepEqual(TC.previewOptions(null), {enqueue: true, load: true});
     assert.deepEqual(TC.previewOptions({preview: 'yes'}), {enqueue: true, load: true}, 'only a real true previews');
 });
+
+test('prefetch keeps a valid document under the player\'s own key and refuses an invalid one', async () => {
+    const store = {};
+    global.localStorage = {getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = v; }};
+    const urls = [];
+    global.fetch = async url => { urls.push(url); return {json: async () => ({ok: true, document: doc})}; };
+    assert.equal(await TC.prefetch({placementId: 5, missionId: 9, userId: 3}), true);
+    assert.deepEqual(JSON.parse(store[TC.storageKeys(3, 5).doc]), doc);
+    assert.match(urls[0], /action=load&mission_id=9&placement_id=5/);
+    urls.length = 0;
+    assert.equal(await TC.prefetch({placementId: 5, missionId: 9, userId: 3}), true);
+    assert.equal(urls.length, 0, 'a document already kept is not fetched again');
+    global.fetch = async () => ({json: async () => ({ok: true, document: {nope: 1}})});
+    assert.equal(await TC.prefetch({placementId: 6, missionId: 9, userId: 3}), false);
+    global.fetch = async () => { throw new Error('offline'); };
+    assert.equal(await TC.prefetch({placementId: 7, missionId: 9, userId: 3}), false);
+    delete global.fetch;
+    delete global.localStorage;
+});

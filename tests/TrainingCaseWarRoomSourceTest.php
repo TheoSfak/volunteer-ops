@@ -62,7 +62,7 @@ final class TrainingCaseWarRoomSourceTest extends TestCase
 
     public function test_the_overlay_sos_looks_the_real_button_up_when_it_fires_and_the_viewer_scopes_the_cache(): void
     {
-        $start = strpos($this->page, "caseBtn = e.target.closest('.vo-case-open-btn')");
+        $start = strpos($this->page, 'function openTrainingCase(');
         $this->assertNotFalse($start);
         $handler = substr($this->page, $start, 1700);
         $this->assertStringContainsString('const findRealSos = () => document.querySelector(', $handler);

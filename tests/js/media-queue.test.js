@@ -292,3 +292,12 @@ test('caseAnswerDeferral: a route completion held for its own file is not "somet
     // The held completion cannot be sent by the fast lane (its photo is still ahead), so deferring for it would only spin.
     assert.equal(caseAnswerDeferral([answer('s1'), media, held], 7, 0, 1000), null);
 });
+
+test('caseAnswerDeferral keeps a placement\'s found report ahead of its answers', () => {
+    const found = {kind: 'case_found', placementId: 7};
+    const a1 = {kind: 'case_answer', placementId: 7, stepId: 's1'};
+    const sos = {kind: 'status', prId: 1, status: 'needs_help'};
+    const reordered = caseAnswerDeferral([found, a1, sos], 7, 0, 100000);
+    assert.deepEqual(reordered, [sos, found, a1], 'the SOS goes first; the found report stays before the answers');
+    assert.equal(caseAnswerDeferral([found, a1], 7, 0, 100000), null, 'nothing else to let through');
+});
