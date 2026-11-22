@@ -46,9 +46,21 @@ function trainingCaseCreatePlacement(int $missionId, int $itemId, int $dispatchI
     }
     $teamId = dbFetchValue("SELECT team_id FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$dispatchId, $missionId]);
     $caseId = (int) ($case['case_id'] ?? 0);
+    // The victim's spot (v3.506.0). A staged block carries it; an older staged POINT order (staged before this release) has
+    // none, and its own point is the spot. An area order without one gets none and keeps opening on arrival.
+    $spot = is_array($case['spot'] ?? null) && is_numeric($case['spot']['lat'] ?? null) && is_numeric($case['spot']['lng'] ?? null)
+        ? [(float) $case['spot']['lat'], (float) $case['spot']['lng']] : null;
+    $hidden = $spot !== null && !empty($case['spot_hidden']) ? 1 : 0;
+    if ($spot === null) {
+        $order = dbFetchOne("SELECT type, geo FROM mission_dispatch_points WHERE id = ? AND mission_id = ?", [$dispatchId, $missionId]);
+        $geo = $order ? json_decode((string) $order['geo'], true) : null;
+        if ($order && $order['type'] === 'point' && is_array($geo) && isset($geo['lat'], $geo['lng'])) {
+            $spot = [(float) $geo['lat'], (float) $geo['lng']];
+        }
+    }
     return (int) dbInsert(
-        "INSERT INTO mission_case_placements (mission_id, scenario_item_id, dispatch_id, case_id, title, snapshot, audience, team_id, briefing, draw_mode)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO mission_case_placements (mission_id, scenario_item_id, dispatch_id, case_id, title, snapshot, audience, team_id, briefing, draw_mode, spot_lat, spot_lng, spot_hidden)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         [
             $missionId, $itemId, $dispatchId,
             $caseId > 0 && dbFetchValue("SELECT 1 FROM training_cases WHERE id = ?", [$caseId]) ? $caseId : null,
@@ -58,6 +70,7 @@ function trainingCaseCreatePlacement(int $missionId, int $itemId, int $dispatchI
             $teamId !== null && $teamId !== false ? (int) $teamId : null,
             mb_substr((string) ($case['briefing'] ?? ''), 0, 300),
             ($case['draw_mode'] ?? '') === 'random' ? 'random' : 'chosen',
+            $spot ? round($spot[0], 6) : null, $spot ? round($spot[1], 6) : null, $hidden,
         ]
     );
 }

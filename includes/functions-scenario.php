@@ -932,29 +932,50 @@ function addScenarioDispatchItem(array $mission, int $phaseId, int $userId, arra
 }
 
 /**
- * Stages a training case at a point: the same order «Στο σενάριο» writes for a point, plus a `case` block holding a
+ * Stages a training case at a point or in an area: the same order «Στο σενάριο» writes, plus a `case` block holding a
  * SNAPSHOT of the library case (so a later library edit never changes a prepared drill). $input is the dispatch form
  * (team_id, type, label, geo, travel_mode) plus case_id, case_mode ('chosen'|'random', only recorded), case_pool (the
- * filter a random draw used, only recorded) and briefing (a short line the people receive with the order). Only in a
- * training mission, only at a POINT, and only a case that exists and is not archived. An empty label becomes the neutral
+ * filter a random draw used, only recorded), briefing (a short line the people receive with the order) and, for an AREA
+ * ('polygon'), spot_lat / spot_lng: the victim's hidden spot, required and inside the area (for a point they are ignored and
+ * the point is the spot). Only in a training mission, and only a case that exists and is not archived. An empty label becomes the neutral
  * «Περιστατικό», which never gives the case away. ['ok' => true, 'id' => n] or ['ok' => false, 'error' => text].
  */
 function addScenarioCaseItem(array $mission, int $phaseId, int $userId, array $input): array {
     if (!isTrainingMission($mission)) {
         return ['ok' => false, 'error' => t('case.err_not_training')];
     }
-    if (($input['type'] ?? '') !== 'point') {
-        return ['ok' => false, 'error' => t('case.err_needs_point')];
+    $type = $input['type'] ?? '';
+    if (!in_array($type, ['point', 'polygon'], true)) {
+        return ['ok' => false, 'error' => t('case.err_needs_point_or_area')];
     }
     $case = trainingCaseLoad((int) ($input['case_id'] ?? 0));
     if (!$case || $case['archived_at'] !== null || trainingCaseValidate($case['doc'])) {
         return ['ok' => false, 'error' => t('case.err_not_found')];
     }
+    // Where the victim is. A point order: the point itself. An area order: a hidden spot the commander pinned, which must lie
+    // inside the area (an area that cannot be read is left to prepareMissionDispatch(), which refuses it with its own message).
+    $geo = is_array($input['geo'] ?? null) ? $input['geo'] : json_decode((string) ($input['geo'] ?? ''), true);
+    $spot = null;
+    if ($type === 'point') {
+        if (is_array($geo) && isset($geo['lat'], $geo['lng']) && is_numeric($geo['lat']) && is_numeric($geo['lng'])) {
+            $spot = ['lat' => round((float) $geo['lat'], 6), 'lng' => round((float) $geo['lng'], 6)];
+        }
+    } elseif (is_array($geo) && count($geo) >= 3) {
+        $spotLat = $input['spot_lat'] ?? '';
+        $spotLng = $input['spot_lng'] ?? '';
+        if (!is_numeric($spotLat) || !is_numeric($spotLng) || abs((float) $spotLat) > 90 || abs((float) $spotLng) > 180) {
+            return ['ok' => false, 'error' => t('case.err_spot_needed')];
+        }
+        if (!pointInPolygon((float) $spotLat, (float) $spotLng, $geo)) {
+            return ['ok' => false, 'error' => t('case.err_spot_outside')];
+        }
+        $spot = ['lat' => round((float) $spotLat, 6), 'lng' => round((float) $spotLng, 6)];
+    }
     if (trim((string) ($input['label'] ?? '')) === '') {
         $input['label'] = t('case.default_label');
     }
     $pool = is_array($input['case_pool'] ?? null) ? array_intersect_key($input['case_pool'], array_flip(['type', 'difficulty', 'language'])) : [];
-    return addScenarioDispatchItem($mission, $phaseId, $userId, $input, ['case' => [
+    $block = [
         'case_id'        => (int) $case['id'],
         'format_version' => (int) $case['format_version'],
         'title'          => $case['title'],
@@ -966,7 +987,12 @@ function addScenarioCaseItem(array $mission, int $phaseId, int $userId, array $i
         'reviewed'       => !empty($case['reviewed']),
         'reviewed_at'    => $case['reviewed_at'] ?? null,
         'document'       => $case['doc'],
-    ]]);
+    ];
+    if ($spot !== null) {
+        $block['spot'] = $spot;
+        $block['spot_hidden'] = $type === 'polygon';
+    }
+    return addScenarioDispatchItem($mission, $phaseId, $userId, $input, ['case' => $block]);
 }
 
 /** The library ids of the cases already staged in this mission's scenario (so a random draw prefers others). */

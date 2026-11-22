@@ -134,6 +134,8 @@ if ($action === 'add_item') {
             'case_mode' => post('case_mode'),
             'case_pool' => is_array($pool) ? $pool : [],
             'briefing'  => post('briefing'),
+            'spot_lat'  => post('spot_lat'),
+            'spot_lng'  => post('spot_lng'),
         ]);
     } else {
         $result = addScenarioDispatchItem($mission, $phaseId, (int) $userId, $form);
