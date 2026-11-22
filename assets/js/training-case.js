@@ -192,7 +192,8 @@
         overlay.setAttribute('aria-modal', 'true');
         overlay.setAttribute('aria-label', t('case.dialog_label'));
         overlay.tabIndex = -1;
-        overlay.style.cssText = 'position:fixed;inset:0;z-index:2000;background:#fff;color:#212529;overflow-y:auto;-webkit-overflow-scrolling:touch;outline:none;';
+        // Above the AR screen (z-index 2100 in war-room.php): a victim found with the AR open must show over it.
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:2200;background:#fff;color:#212529;overflow-y:auto;-webkit-overflow-scrolling:touch;outline:none;';
         document.body.appendChild(overlay);
         document.body.style.overflow = 'hidden';
         try { overlay.focus({preventScroll: true}); } catch (e) { /* focus is a courtesy */ }

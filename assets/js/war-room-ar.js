@@ -356,6 +356,7 @@ function arElement() {
                 <button type="button" class="wr-ar-chip" data-ar-layer="poi" aria-pressed="true">${escapeHtml(t('ar.layer_poi'))}</button>
                 <button type="button" class="wr-ar-chip" data-ar-layer="cov" aria-pressed="true">${escapeHtml(t('ar.layer_cov'))}</button>
             </div>
+            <button type="button" class="wr-ar-go wr-ar-casebtn" data-ar="case" hidden>${escapeHtml(t('ar.case_open'))}</button>
             <button type="button" class="wr-ar-go" data-ar="go" hidden></button>
             <div class="wr-ar-links">
                 <button type="button" data-ar="compass"><i class="bi bi-compass me-1"></i>${escapeHtml(t('arrow.open_btn'))}</button>
@@ -400,6 +401,7 @@ function arElement() {
             case 'compass': { const m = opEntries.get(arState.key); arClose(); if (m) arrowOpen(m); break; }
             case 'decline': { const m = opEntries.get(arState.key); arClose(); if (m) opAct('decline', m, btn); break; }
             case 'poi': arCapturePoi(); break;
+            case 'case': { const m = opEntries.get(arState.key); if (m && m.case && typeof openTrainingCase === 'function') openTrainingCase(m.case.placement_id, m.case.briefing); break; }
         }
     });
     return el;
@@ -463,7 +465,8 @@ function arOpen(m) {
             .catch(() => {});
     }
     arStartMagnetometer();
-    arState.onKey = e => { if (e.key === 'Escape') arClose(); };
+    // The case player can sit over this screen (v3.507.0): its own close, not this one, answers the key then.
+    arState.onKey = e => { if (e.key === 'Escape' && !document.getElementById('voCaseOverlay')) arClose(); };
     document.addEventListener('keydown', arState.onKey);
     let seen = false;
     try { seen = !!localStorage.getItem(AR_SAFETY_KEY); } catch (e) { /* private window: ask every time */ }
@@ -1288,6 +1291,12 @@ function arUpdateStaticHud(el, m) {
     el.querySelector('[data-ar="decline"]').hidden = !(m && m.canDecline && m.outstanding);
     el.querySelector('[data-ar="compass"]').hidden = !m;
     el.querySelector('[data-ar-k="title"]').textContent = m ? (m.text ? String(m.text).split('\n')[0] : m.title) : t('ar.free_title');
+    // «Άνοιγμα περιστατικού» while this order's case may be played: found or reached by my team, or found on this phone and not yet in the poll.
+    const caseBtn = el.querySelector('[data-ar="case"]');
+    if (caseBtn) {
+        const found = m && m.case && typeof wrCaseFoundLocally === 'function' && wrCaseFoundLocally(m.case.placement_id);
+        caseBtn.hidden = !(m && m.case && typeof VoCaseFind !== 'undefined' && VoCaseFind.canOpen(m.case, !!found));
+    }
 }
 
 function arUpdateDynamicHud(el, m, S) {

@@ -50,6 +50,33 @@ final class TrainingCaseArSourceTest extends TestCase
         $this->assertStringContainsString("t('case.close_toast')", $this->ar);
         $this->assertMatchesRegularExpression('/\.wr-ar-casenear \{[^}]*pointer-events: none;/', $this->page);
         $this->assertStringContainsString('.wr-ar-dim .wr-ar-casenear', $this->page);
+        $this->assertMatchesRegularExpression('/\.wr-ar-dim \.wr-ar-casenear \{[^}]*animation: none;/', $this->page);
+    }
+
+    public function test_the_case_button_is_shown_by_canOpen_and_opens_the_same_player_as_the_order_row(): void
+    {
+        $this->assertStringContainsString('data-ar="case"', $this->ar);
+        $this->assertStringContainsString('VoCaseFind.canOpen(', $this->ar);
+        $this->assertStringContainsString('wrCaseFoundLocally', $this->ar);
+        $this->assertStringContainsString("case 'case':", $this->ar);
+        $this->assertStringContainsString('openTrainingCase(', $this->ar);
+        $this->assertStringContainsString("t('ar.case_open')", $this->ar);
+        $this->assertStringContainsString('.wr-ar-casebtn', $this->page);
+    }
+
+    public function test_the_case_player_sits_above_the_ar_screen(): void
+    {
+        preg_match('/\.wr-ar \{[^}]*z-index: (\d+);/', $this->page, $ar);
+        preg_match('/id = \'voCaseOverlay\'.*?z-index:(\d+);/s', $this->player, $player);
+        $this->assertNotEmpty($ar, 'the AR layer rule');
+        $this->assertNotEmpty($player, 'the player overlay rule');
+        $this->assertGreaterThan((int) $ar[1], (int) $player[1], 'a case found with the AR open must show over it');
+        $this->assertLessThan(100001, (int) $player[1], 'the find toast stays above the player');
+    }
+
+    public function test_escape_closes_the_case_player_not_the_ar_under_it(): void
+    {
+        $this->assertStringContainsString("e.key === 'Escape' && !document.getElementById('voCaseOverlay')", $this->ar);
     }
 
     public function test_the_new_texts_exist_in_both_languages(): void

@@ -2712,6 +2712,9 @@ include __DIR__ . '/includes/header.php';
     .wr-ar-casenear[hidden] { display: none; }
     @keyframes wr-ar-casenear { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
     @media (prefers-reduced-motion: reduce) { .wr-ar-casenear { animation: none; opacity: 1; } }
+    /* «Άνοιγμα περιστατικού» in the AR (v3.507.0): the same big button as «Ελήφθη», in red so the two are told apart at a glance. */
+    .wr-ar-casebtn { background: #f85149; color: #fff !important; }
+    .wr-ar-casebtn[hidden] { display: none; }
     .wr-ar-links { display: flex; justify-content: space-between; gap: 8px; }
     .wr-ar-links button { background: none; border: 0; color: #c5d1c9; font-size: 12px; text-decoration: underline; padding: 6px 2px; min-height: 36px; }
     .wr-ar-links [hidden] { display: none; }
@@ -2724,6 +2727,7 @@ include __DIR__ . '/includes/header.php';
     .wr-ar-offer-row { display: flex; align-items: center; gap: 6px; }
     .wr-ar-offer-x { margin-left: auto; width: 36px; height: 36px; border: 0; border-radius: 50%; background: rgba(255, 255, 255, .14); color: #fff; }
     .wr-ar-dim .wr-ar-world, .wr-ar-dim .wr-ar-top, .wr-ar-dim .wr-ar-rail, .wr-ar-dim .wr-ar-radar, .wr-ar-dim .wr-ar-bottom, .wr-ar-dim .wr-ar-warn, .wr-ar-dim .wr-ar-casenear { opacity: .08; }
+    .wr-ar-dim .wr-ar-casenear { animation: none; opacity: .08; }
     .wr-ar-dim::after, .wr-ar-lowered::before { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; font-size: 26px; font-weight: 700; pointer-events: none; text-shadow: 0 2px 12px #000; }
     .wr-ar-dim::after { content: attr(data-look); }
     .wr-ar-lowered::before { content: attr(data-lower); background: rgba(8, 12, 10, .8); }
