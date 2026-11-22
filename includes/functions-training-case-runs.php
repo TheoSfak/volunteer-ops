@@ -187,11 +187,12 @@ function trainingCaseStartRun(int $placementId, int $userId): array {
  * A volunteer's phone reports that the team has found the victim (v3.506.0). Needs a placement the volunteer may open (the gate,
  * without the arrival) and that has a spot. The server does not take the phone's word: it measures the reported position against
  * the spot with the same rule as the phone (trainingCaseProximity()), so a hand-made request from the sofa cannot open a hidden
- * case. A report for a team that already found it is a quiet duplicate. The first find is audited and the rest of the team told.
+ * case. $foundAtMs is when the phone found it (milliseconds since the epoch, for a report that waited offline): stored as the find's
+ * time, clamped between the placement's creation and now. A report for a team that already found it is a quiet duplicate. The first find is audited and the rest of the team told.
  * ['ok' => true, 'duplicate' => bool] or ['ok' => false, 'error' => text, 'code' => 'refused'|'not_found']. A refusal carries the
  * code 'refused' on purpose: that is what makes the phone's offline queue DROP the report instead of retrying it for ever.
  */
-function trainingCaseRecordFound(int $placementId, int $userId, float $lat, float $lng, ?float $accuracyM): array {
+function trainingCaseRecordFound(int $placementId, int $userId, float $lat, float $lng, ?float $accuracyM, ?int $foundAtMs = null): array {
     $placement = trainingCasePlacement($placementId);
     if (!$placement || !$placement['doc']) {
         return ['ok' => false, 'error' => t('case.err_gone'), 'code' => 'not_found'];
@@ -213,9 +214,20 @@ function trainingCaseRecordFound(int $placementId, int $userId, float $lat, floa
     if (trainingCaseProximity($distance, $accuracyM) !== 'found') {
         return ['ok' => false, 'error' => t('case.err_too_far'), 'code' => 'refused'];
     }
+    // When the phone found it, if it says (a report that waited in the offline queue): kept between the order's creation and now,
+    // so a wrong clock cannot put a find before the order or in the future. Without it, the time of this request.
+    $foundAt = null;
+    if ($foundAtMs !== null && $foundAtMs > 0) {
+        $ts = intdiv($foundAtMs, 1000);
+        $created = strtotime((string) ($placement['created_at'] ?? ''));
+        if ($created !== false) {
+            $ts = max($ts, $created);
+        }
+        $foundAt = date('Y-m-d H:i:s', min($ts, time()));
+    }
     $inserted = dbExecute(
-        "INSERT IGNORE INTO mission_case_finds (placement_id, scope_key, found_by, lat, lng, accuracy_m) VALUES (?, ?, ?, ?, ?, ?)",
-        [$placementId, $scopeKey, $userId, round($lat, 6), round($lng, 6), $accuracyM !== null ? (int) round(min(max($accuracyM, 0.0), 65000.0)) : null]
+        "INSERT IGNORE INTO mission_case_finds (placement_id, scope_key, found_by, found_at, lat, lng, accuracy_m) VALUES (?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?, ?, ?)",
+        [$placementId, $scopeKey, $userId, $foundAt, round($lat, 6), round($lng, 6), $accuracyM !== null ? (int) round(min(max($accuracyM, 0.0), 65000.0)) : null]
     );
     if ($inserted > 0) {
         // The find is recorded: an audit or notice that fails must not turn it into a server_error the phone would retry.

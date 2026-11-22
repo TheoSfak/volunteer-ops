@@ -8,7 +8,7 @@
  *   GET  ?action=load&mission_id=&placement_id=      the snapshot and my run (audience only, no arrival needed)
  *   POST action=start  mission_id, placement_id      start (or return) my run
  *   POST action=answer mission_id, placement_id, step_id, choice_id, ms_taken
- *   POST action=found  mission_id, placement_id, lat, lng, accuracy   the team found the victim (re-checked against the spot)
+ *   POST action=found  mission_id, placement_id, lat, lng, accuracy, at   the team found the victim (re-checked against the spot; at = when the phone found it, ms)
  *   GET  ?action=overview&mission_id=                command's view of every volunteer's run
  */
 
@@ -123,7 +123,9 @@ try {
             exit;
         }
         $accuracy = is_numeric(post('accuracy')) ? (float) post('accuracy') : null;
-        echo json_encode(trainingCaseRecordFound((int) $placement['id'], $userId, (float) post('lat'), (float) post('lng'), $accuracy), TRAINING_CASE_JSON_FLAGS);
+        // When the phone found it (milliseconds since the epoch), sent by a report that waited in the offline queue.
+        $foundAtMs = is_numeric(post('at')) && (float) post('at') > 0 && (float) post('at') < 4102444800000 ? (int) post('at') : null;
+        echo json_encode(trainingCaseRecordFound((int) $placement['id'], $userId, (float) post('lat'), (float) post('lng'), $accuracy, $foundAtMs), TRAINING_CASE_JSON_FLAGS);
         exit;
     }
 

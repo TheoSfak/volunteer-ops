@@ -463,6 +463,47 @@ final class TrainingCaseFindTest extends TestCase
         $this->assertTrue($after['available'], 'the find opens it for the whole team');
     }
 
+    /** The stored found_at of the area placement, as a unix time. */
+    private function storedFoundAt(): int
+    {
+        return (int) strtotime((string) dbFetchValue("SELECT found_at FROM mission_case_finds WHERE placement_id = ?", [$this->areaPlacement]));
+    }
+
+    public function test_an_offline_find_is_stored_with_the_time_the_phone_found_it(): void
+    {
+        dbExecute("UPDATE mission_case_placements SET created_at = ? WHERE id = ?", [date('Y-m-d H:i:s', time() - 7200), $this->areaPlacement]);
+        $tenMinutesAgo = time() - 600;
+        $r = trainingCaseRecordFound($this->areaPlacement, $this->member, 35.405, 25.205, 5.0, $tenMinutesAgo * 1000 + 250);
+        $this->assertTrue($r['ok'], (string) ($r['error'] ?? ''));
+        $this->assertSame($tenMinutesAgo, $this->storedFoundAt(), 'the phone\'s time, to the second');
+    }
+
+    public function test_the_phones_time_is_clamped_between_the_placement_and_now(): void
+    {
+        $created = time() - 3600;
+        dbExecute("UPDATE mission_case_placements SET created_at = ? WHERE id = ?", [date('Y-m-d H:i:s', $created), $this->areaPlacement]);
+        $forget = fn() => dbExecute("DELETE FROM mission_case_finds WHERE placement_id = ?", [$this->areaPlacement]);
+
+        // A clock that runs ahead: never later than now.
+        $this->assertTrue(trainingCaseRecordFound($this->areaPlacement, $this->member, 35.405, 25.205, 5.0, (time() + 86400) * 1000)['ok']);
+        $this->assertEqualsWithDelta(time(), $this->storedFoundAt(), 3);
+        $forget();
+
+        // A time before the order existed: not earlier than the placement.
+        $this->assertTrue(trainingCaseRecordFound($this->areaPlacement, $this->member, 35.405, 25.205, 5.0, (time() - 10800) * 1000)['ok']);
+        $this->assertSame($created, $this->storedFoundAt());
+        $forget();
+
+        // A time that is no time at all is ignored: now.
+        $this->assertTrue(trainingCaseRecordFound($this->areaPlacement, $this->member, 35.405, 25.205, 5.0, 0)['ok']);
+        $this->assertEqualsWithDelta(time(), $this->storedFoundAt(), 3);
+        $forget();
+
+        // Omitted: now, as before.
+        $this->assertTrue(trainingCaseRecordFound($this->areaPlacement, $this->member, 35.405, 25.205, 5.0)['ok']);
+        $this->assertEqualsWithDelta(time(), $this->storedFoundAt(), 3);
+    }
+
     public function test_the_overview_lists_who_found_each_case_and_when(): void
     {
         trainingCaseRecordFound($this->areaPlacement, $this->member, 35.405, 25.205, 5.0);

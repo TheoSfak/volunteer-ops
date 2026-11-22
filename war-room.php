@@ -17996,10 +17996,13 @@ function sendQueuedCaseAnswer(item) {
 // (code 'refused': not the audience, too far, no spot) drops the report, everything else waits for the next tick.
 function sendQueuedCaseFound(item) {
     if (!window.VoTrainingCase) return Promise.resolve({ok: false, networkError: true});
-    return postQueuedForm('training-case.php', {
+    const params = {
         mission_id: String(WR_MISSION_ID), action: 'found', placement_id: String(item.placementId),
         lat: String(item.lat), lng: String(item.lng), accuracy: item.acc != null && isFinite(item.acc) ? String(item.acc) : '', queued: '1'
-    }).then(result => {
+    };
+    // When the phone found it: a report that waited offline is recorded with that time, not the time it got through.
+    if (item.at != null && isFinite(item.at)) params.at = String(item.at);
+    return postQueuedForm('training-case.php', params).then(result => {
         const verdict = VoTrainingCase.queueOutcome(result);
         if (verdict === 'retry') {
             if (result && result.networkError) return result;

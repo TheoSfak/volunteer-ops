@@ -75,6 +75,17 @@ final class TrainingCaseFindSourceTest extends TestCase
         $this->assertStringContainsString('{check() {}, forget() {}}', $page, 'the fallback stub of a failed script load has forget() too');
     }
 
+    public function test_the_phone_reports_when_it_found_the_victim_and_the_endpoint_passes_it_on(): void
+    {
+        $src = $this->src('training-case.php');
+        $branch = substr($src, (int) strpos($src, "\$action === 'found' && isPost()"), 1500);
+        $this->assertStringContainsString("is_numeric(post('at'))", $branch);
+        $this->assertMatchesRegularExpression('/trainingCaseRecordFound\([^;]*\$foundAtMs\)/', $branch);
+        $page = str_replace("\r\n", "\n", (string) WarRoomSource::read('war-room.php'));
+        $body = substr($page, (int) strpos($page, 'function sendQueuedCaseFound('), 1400);
+        $this->assertStringContainsString('params.at = String(item.at)', $body);
+    }
+
     public function test_the_audit_and_the_notice_of_a_recorded_find_cannot_turn_it_into_a_server_error(): void
     {
         $src = $this->src('includes/functions-training-case-runs.php');
