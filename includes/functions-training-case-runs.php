@@ -427,12 +427,31 @@ function trainingCaseCardsForDispatches(array $dispatchIds, int $userId): array 
     try {
         $in = implode(',', array_fill(0, count($dispatchIds), '?'));
         $rows = dbFetchAll(
-            "SELECT p.id, p.dispatch_id, p.title, p.briefing, r.finished_at, r.current_step, r.score_points, r.score_max, r.id AS run_id
+            "SELECT p.id, p.dispatch_id, p.mission_id, p.title, p.briefing, p.spot_lat, p.spot_lng, p.spot_hidden,
+                    r.finished_at, r.current_step, r.score_points, r.score_max, r.id AS run_id
              FROM mission_case_placements p
              LEFT JOIN mission_case_runs r ON r.placement_id = p.id AND r.user_id = ?
              WHERE p.dispatch_id IN ($in)",
             array_merge([$userId], array_map('intval', $dispatchIds))
         );
+        // Which of these the volunteer's team has already found (v3.506.0): the scope is the team's of that mission.
+        $found = [];
+        $scopeOfPlacement = [];
+        $scopeByMission = [];
+        foreach ($rows as $r) {
+            $m = (int) $r['mission_id'];
+            $scopeByMission[$m] ??= dispatchProgressScopeKey(getUserTeamIdForMission($m, $userId) ?: null, $userId);
+            $scopeOfPlacement[(int) $r['id']] = $scopeByMission[$m];
+        }
+        if ($scopeOfPlacement) {
+            $placementIds = array_keys($scopeOfPlacement);
+            $inP = implode(',', array_fill(0, count($placementIds), '?'));
+            foreach (dbFetchAll("SELECT placement_id, found_at, scope_key FROM mission_case_finds WHERE placement_id IN ($inP)", $placementIds) as $f) {
+                if (($scopeOfPlacement[(int) $f['placement_id']] ?? null) === $f['scope_key']) {
+                    $found[(int) $f['placement_id']] = $f['found_at'];
+                }
+            }
+        }
     } catch (Throwable $e) {
         // A site that has not migrated yet has no case tables: that is expected and silent (the Action Room polls every
         // few seconds, and a per-process once-only log would still repeat on every request). Anything else is logged.
@@ -444,10 +463,17 @@ function trainingCaseCardsForDispatches(array $dispatchIds, int $userId): array 
     $out = [];
     foreach ($rows as $row) {
         $state = $row['run_id'] === null ? 'new' : ($row['finished_at'] !== null ? 'done' : 'running');
+        $hidden = (int) $row['spot_hidden'] === 1;
+        $foundAt = $found[(int) $row['id']] ?? null;
         $out[(int) $row['dispatch_id']] = [
-            'placement_id' => (int) $row['id'], 'title' => $row['title'], 'briefing' => (string) $row['briefing'], 'state' => $state,
+            'placement_id' => (int) $row['id'],
+            // A hidden victim's case title could give it away: the card says the neutral word until the team has found it.
+            'title' => $hidden && $foundAt === null ? t('case.default_label') : $row['title'],
+            'briefing' => (string) $row['briefing'], 'state' => $state,
             'percent' => $state === 'done' ? trainingCaseScorePercent((int) $row['score_points'], (int) $row['score_max']) : null,
             'label' => $state === 'done' ? trainingCaseScoreLabel((int) $row['score_points'], (int) $row['score_max']) : null,
+            'spot' => $row['spot_lat'] !== null && $row['spot_lng'] !== null ? ['lat' => (float) $row['spot_lat'], 'lng' => (float) $row['spot_lng']] : null,
+            'hidden' => $hidden, 'found' => $foundAt !== null, 'found_at' => $foundAt,
         ];
     }
     return $out;

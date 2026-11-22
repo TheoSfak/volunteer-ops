@@ -341,4 +341,38 @@ final class TrainingCaseFindTest extends TestCase
         $this->assertSame(0, $count($this->member));
         $this->assertSame(0, $count($this->stranger));
     }
+
+    public function test_the_card_carries_the_spot_the_found_state_and_a_neutral_title_while_hidden(): void
+    {
+        $cards = trainingCaseCardsForDispatches([$this->pointDispatch, $this->areaDispatch], $this->member);
+        $point = $cards[$this->pointDispatch];
+        $this->assertEqualsWithDelta(35.3, $point['spot']['lat'], 0.000001);
+        $this->assertFalse($point['hidden']);
+        $this->assertFalse($point['found']);
+        $this->assertSame('Σημείο', $point['title']);
+
+        $area = $cards[$this->areaDispatch];
+        $this->assertTrue($area['hidden']);
+        $this->assertSame(t('case.default_label'), $area['title'], 'the title never gives a hidden victim away');
+        $this->assertEqualsWithDelta(35.405, $area['spot']['lat'], 0.000001);
+
+        trainingCaseRecordFound($this->areaPlacement, $this->mate, 35.405, 25.205, 5.0);
+        $after = trainingCaseCardsForDispatches([$this->areaDispatch], $this->member)[$this->areaDispatch];
+        $this->assertTrue($after['found'], 'found is the team\'s: the other member sees it too');
+        $this->assertNotNull($after['found_at']);
+        $this->assertSame('Τομέας', $after['title'], 'the title comes back once found');
+        $other = trainingCaseCardsForDispatches([$this->areaDispatch], $this->stranger)[$this->areaDispatch];
+        $this->assertFalse($other['found'], 'another team has not found it');
+    }
+
+    public function test_the_poll_block_gives_the_spot_and_availability_only_to_those_who_may_play(): void
+    {
+        $src = str_replace("\r\n", "\n", (string) file_get_contents(dirname(__DIR__) . '/includes/functions-warroom.php'));
+        $at = strpos($src, "'case'         => isset(\$caseCards[\$dispatchId])");
+        $this->assertNotFalse($at);
+        $block = substr($src, $at, 900);
+        $this->assertStringContainsString("'spot' => \$isApprovedParticipant && \$eligible ? \$caseCards[\$dispatchId]['spot'] : null", $block);
+        $this->assertStringContainsString("\$caseCards[\$dispatchId]['found']", $block);
+        $this->assertStringContainsString("!\$caseCards[\$dispatchId]['hidden']", $block);
+    }
 }

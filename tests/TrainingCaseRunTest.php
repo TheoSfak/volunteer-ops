@@ -407,7 +407,7 @@ final class TrainingCaseRunTest extends TestCase
         $row = array_values(array_filter($rows, fn($r) => $r['id'] === $this->dispatchId))[0];
         $keys = array_keys($row['case']);
         sort($keys);
-        $expected = ['available', 'briefing', 'can_play', 'label', 'percent', 'placement_id', 'state', 'title'];
+        $expected = ['available', 'briefing', 'can_play', 'found', 'found_at', 'hidden', 'label', 'percent', 'placement_id', 'spot', 'state', 'title'];
         $this->assertSame($expected, $keys, 'no document, no ratings, no feedback ride on the poll');
     }
 

@@ -1572,11 +1572,18 @@ function loadMissionDispatchesForUser(int $missionId, int $userId, bool $canMana
             'can_depart'   => $isApprovedParticipant && $eligible && !$mine['departed'] && !$teamArrived && !$mine['completed'],
             'my_ack'       => $teamArrived,
             'can_ack'      => $isApprovedParticipant && $eligible && !$teamArrived && !$mine['completed'],
-            // A staged training case rides on this order (v3.505.0): the volunteer's own card for it. `available` is the TEAM's
-            // arrival (or finishing), the same fact the gate of training-case.php checks; the document itself is fetched once
+            // A staged training case rides on this order (v3.505.0): the volunteer's own card for it. `available` is the TEAM's find, or for a
+            // point order its arrival (or finishing) - the same facts the gate of training-case.php checks; the document itself is fetched once
             // by that endpoint, not carried by the poll.
             'case'         => isset($caseCards[$dispatchId])
-                ? $caseCards[$dispatchId] + ['can_play' => $isApprovedParticipant && $eligible, 'available' => $isApprovedParticipant && $eligible && (bool) ($teamArrived || $mine['completed'])]
+                ? array_merge($caseCards[$dispatchId], [
+                    'can_play' => $isApprovedParticipant && $eligible,
+                    // The victim's spot only goes to someone who may play it (v3.506.0); it is used by the phone's own GPS check and is never drawn for a hidden case.
+                    'spot' => $isApprovedParticipant && $eligible ? $caseCards[$dispatchId]['spot'] : null,
+                    // Open: my team has found the victim, or (a point order, whose victim is shown) has arrived or finished it.
+                    'available' => $isApprovedParticipant && $eligible && ($caseCards[$dispatchId]['found']
+                        || (!$caseCards[$dispatchId]['hidden'] && (bool) ($teamArrived || $mine['completed']))),
+                ])
                 : null,
             'my_completed' => $mine['completed'],
             // When the team this was sent to finished it (v3.439.0): the map fades it a few minutes
