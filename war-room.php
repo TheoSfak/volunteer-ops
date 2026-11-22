@@ -2713,7 +2713,7 @@ include __DIR__ . '/includes/header.php';
     @keyframes wr-ar-casenear { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
     @media (prefers-reduced-motion: reduce) { .wr-ar-casenear { animation: none; opacity: 1; } }
     /* «Άνοιγμα περιστατικού» in the AR (v3.507.0): the same big button as «Ελήφθη», in red so the two are told apart at a glance. */
-    .wr-ar-casebtn { background: #f85149; color: #fff !important; }
+    .wr-ar-casebtn { background: #c9302c; color: #fff !important; }
     .wr-ar-casebtn[hidden] { display: none; }
     .wr-ar-links { display: flex; justify-content: space-between; gap: 8px; }
     .wr-ar-links button { background: none; border: 0; color: #c5d1c9; font-size: 12px; text-decoration: underline; padding: 6px 2px; min-height: 36px; }

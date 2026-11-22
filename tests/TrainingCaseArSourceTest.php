@@ -74,7 +74,7 @@ final class TrainingCaseArSourceTest extends TestCase
         $this->assertLessThan(100001, (int) $player[1], 'the find toast stays above the player');
     }
 
-    public function test_escape_closes_the_case_player_not_the_ar_under_it(): void
+    public function test_escape_leaves_the_ar_open_while_the_case_player_is_up(): void
     {
         $this->assertStringContainsString("e.key === 'Escape' && !document.getElementById('voCaseOverlay')", $this->ar);
     }
