@@ -15621,7 +15621,8 @@ document.addEventListener('click', e => {
 // direction; «βρέθηκε» (10 m) queues the report, remembers it on this phone and opens the case.
 let caseFindCards = [];
 let caseFindWatchId = null;
-const caseFindTracker = VoCaseFind.createTracker({
+// (Guarded: a failed load of the find script must not stop the rest of this page script.)
+const caseFindTracker = window.VoCaseFind ? VoCaseFind.createTracker({
     onClose: () => { wrCaseFindToast(t('case.close_toast')); if (navigator.vibrate) navigator.vibrate(200); },
     onFound: (card, fix) => {
         if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
@@ -15634,7 +15635,10 @@ const caseFindTracker = VoCaseFind.createTracker({
         refreshMyOrdersCard();
         openTrainingCase(card.placement_id, card.briefing);
     },
-});
+}) : {check() {}};
+// Prefetch state per placement id: {ok: true} once kept, {busy: true} in flight, {failedAt} after a failure (retried after a
+// minute at the soonest: the poll runs every few seconds and every request here is a new connection on a rate-limited host).
+const caseFindPrefetch = {};
 function wrCaseFoundKey(placementId) { return 'wr_case_found_' + WR_MY_USER_ID + '_' + placementId; }
 function wrCaseFoundLocally(placementId) {
     try { return localStorage.getItem(wrCaseFoundKey(placementId)) === '1'; } catch (e) { return false; }
@@ -15666,7 +15670,14 @@ function wrCaseFindStop() {
 function wrCaseFindSync(items) {
     if (!window.VoCaseFind || !window.VoTrainingCase) return;
     caseFindCards = VoCaseFind.watchList(items).filter(c => !wrCaseFoundLocally(c.placement_id));
-    caseFindCards.forEach(c => VoTrainingCase.prefetch({placementId: c.placement_id, missionId: WR_MISSION_ID, userId: WR_MY_USER_ID}));
+    caseFindCards.forEach(c => {
+        const st = caseFindPrefetch[c.placement_id];
+        if (st && (st.ok || st.busy || Date.now() - st.failedAt < 60000)) return;
+        caseFindPrefetch[c.placement_id] = {busy: true};
+        VoTrainingCase.prefetch({placementId: c.placement_id, missionId: WR_MISSION_ID, userId: WR_MY_USER_ID}).then(ok => {
+            caseFindPrefetch[c.placement_id] = ok ? {ok: true} : {failedAt: Date.now()};
+        });
+    });
     if (caseFindCards.length && !document.hidden) wrCaseFindStart(); else wrCaseFindStop();
 }
 document.addEventListener('visibilitychange', () => { if (typeof dispatches !== 'undefined') wrCaseFindSync(dispatches); });
@@ -17993,6 +18004,13 @@ function sendQueuedCaseFound(item) {
             if (result && result.networkError) return result;
             if (result && deferCaseAnswers(item)) setTimeout(flushQueue, 500);
             return null;
+        }
+        if (verdict === 'drop') {
+            // Refused: the phone takes its own «found» back, as an answer's local copy goes (forgetLocalAnswer), so the row is
+            // locked again and the case is not played for answers the server will drop. The tracker's latch is per page load:
+            // this page load will not watch that placement again until it is reloaded, which is acceptable.
+            try { localStorage.removeItem(wrCaseFoundKey(item.placementId)); } catch (e) {}
+            refreshMyOrdersCard();
         }
         return result;
     });

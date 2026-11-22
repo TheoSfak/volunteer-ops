@@ -50,6 +50,27 @@ final class TrainingCaseFindSourceTest extends TestCase
         $this->assertStringContainsString('deferCaseAnswers(item)', $body);
     }
 
+    public function test_a_refused_found_report_takes_the_local_marker_back_and_relocks_the_row(): void
+    {
+        $page = str_replace("\r\n", "\n", (string) WarRoomSource::read('war-room.php'));
+        $start = strpos($page, 'function sendQueuedCaseFound(');
+        $this->assertNotFalse($start);
+        $body = substr($page, $start, 2200);
+        $this->assertStringContainsString("if (verdict === 'drop')", $body);
+        $this->assertStringContainsString('localStorage.removeItem(wrCaseFoundKey(item.placementId))', $body);
+        $this->assertStringContainsString('refreshMyOrdersCard();', substr($body, (int) strpos($body, "if (verdict === 'drop')")));
+    }
+
+    public function test_the_prefetch_is_guarded_and_the_tracker_survives_a_failed_script_load(): void
+    {
+        $page = str_replace("\r\n", "\n", (string) WarRoomSource::read('war-room.php'));
+        $this->assertStringContainsString('const caseFindPrefetch = {};', $page);
+        $sync = substr($page, (int) strpos($page, 'function wrCaseFindSync('), 1500);
+        $this->assertStringContainsString('caseFindPrefetch[', $sync);
+        $this->assertStringContainsString('60000', $sync);
+        $this->assertStringContainsString('const caseFindTracker = window.VoCaseFind ? VoCaseFind.createTracker({', $page);
+    }
+
     public function test_every_new_text_exists_in_both_languages(): void
     {
         $lang = (string) file_get_contents(dirname(__DIR__) . '/includes/lang/war-room.php');
