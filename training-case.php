@@ -8,6 +8,7 @@
  *   GET  ?action=load&mission_id=&placement_id=      the snapshot and my run (audience only, no arrival needed)
  *   POST action=start  mission_id, placement_id      start (or return) my run
  *   POST action=answer mission_id, placement_id, step_id, choice_id, ms_taken
+ *   POST action=found  mission_id, placement_id, lat, lng, accuracy   the team found the victim (re-checked against the spot)
  *   GET  ?action=overview&mission_id=                command's view of every volunteer's run
  */
 
@@ -112,6 +113,17 @@ try {
             }
         }
         echo json_encode($reply, TRAINING_CASE_JSON_FLAGS);
+        exit;
+    }
+
+    // The team found the victim (v3.506.0). The position is the phone's; the server measures it against the spot itself.
+    if ($action === 'found' && isPost()) {
+        if (!is_numeric(post('lat')) || !is_numeric(post('lng')) || abs((float) post('lat')) > 90 || abs((float) post('lng')) > 180) {
+            echo json_encode(['ok' => false, 'error' => t('common.invalid_request'), 'code' => 'refused'], TRAINING_CASE_JSON_FLAGS);
+            exit;
+        }
+        $accuracy = is_numeric(post('accuracy')) ? (float) post('accuracy') : null;
+        echo json_encode(trainingCaseRecordFound((int) $placement['id'], $userId, (float) post('lat'), (float) post('lng'), $accuracy), TRAINING_CASE_JSON_FLAGS);
         exit;
     }
 
