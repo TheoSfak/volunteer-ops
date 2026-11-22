@@ -647,7 +647,7 @@ return [
         'case.lib.col_minutes' => 'Λεπτά',
         'case.lib.col_status' => 'Κατάσταση',
         'case.lib.difficulty_n' => 'Δυσκολία {n} από 3',
-        'case.lib.badge_starter' => 'Έναρξη',
+        'case.lib.badge_starter' => 'Έτοιμο',
         'case.lib.badge_archived' => 'Αρχειοθετημένο',
         'case.lib.empty' => 'Δεν υπάρχουν περιστατικά.',
         'case.lib.act_edit' => 'Επεξεργασία',

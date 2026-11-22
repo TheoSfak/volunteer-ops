@@ -482,7 +482,12 @@ const TRAINING_CASES_SEEDED_KEY = 'training_cases_seeded_slugs';
  */
 function trainingCaseSeededSlugs(): array {
     $list = json_decode((string) dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = ?", [TRAINING_CASES_SEEDED_KEY]), true);
-    return is_array($list) ? array_values(array_unique(array_filter(array_map('strval', $list), static fn (string $s): bool => $s !== ''))) : [];
+    if (!is_array($list)) {
+        return [];
+    }
+    // Only strings count: a hand-edited value with anything else in it must not record a slug called "Array".
+    $slugs = array_filter($list, static fn ($s): bool => is_string($s) && $s !== '');
+    return array_values(array_unique($slugs));
 }
 
 function trainingCaseSaveSeededSlugs(array $slugs): void {

@@ -1,4 +1,4 @@
-# Training case library: sources and review status
+# Training case library: sources and notes
 
 The starter cases in `includes/training-cases/*.json` are practice material for volunteers. **All 24 shipped cases (the 3 from v3.505.0 and the 21 from v3.506.0) have been reviewed by a doctor offline.** The app does not track that review: there is no «ελεγμένο» mark, the random draw does not filter on it, and every case, a shipped one included, can be edited and deleted from the library. A shipped case is loaded into the library once per installation; after that it is an ordinary case, and neither an edit nor a deletion is undone by a later update.
 

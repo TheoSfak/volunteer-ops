@@ -29,7 +29,7 @@ function trainingCaseTypeLabel(string $tag): string {
 
 /** One small POST form with a single action button for a row of the list; with $confirm the browser asks first. Every value is escaped here. */
 function trainingCaseActionForm(string $action, int $id, string $label, string $icon, string $buttonClass, bool $showArchived, string $confirm = ''): string {
-    return '<form method="post" class="d-inline"' . ($confirm !== '' ? ' onsubmit="return confirm(' . h((string) json_encode($confirm, JSON_UNESCAPED_UNICODE)) . ')"' : '') . '>' . csrfField()
+    return '<form method="post" class="d-inline"' . ($confirm !== '' ? ' onsubmit="return confirm(' . h((string) json_encode($confirm, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE)) . ')"' : '') . '>' . csrfField()
         . '<input type="hidden" name="action" value="' . h($action) . '">'
         . '<input type="hidden" name="id" value="' . (int) $id . '">'
         . '<input type="hidden" name="archived" value="' . ($showArchived ? '1' : '0') . '">'
