@@ -61,29 +61,44 @@ final class TrainingCaseLibraryTest extends TestCase
         $this->assertSame($before, (int) dbFetchValue("SELECT COUNT(*) FROM training_cases"));
     }
 
-    public function test_editing_resets_the_reviewed_flag_and_a_starter_cannot_be_edited(): void
+    public function test_a_case_can_be_edited_and_so_can_a_starter(): void
     {
         $saved = trainingCaseSave(null, [], $this->doc(), $this->admin);
-        trainingCaseSetReviewed($saved['id'], true, $this->admin);
-        $this->assertSame(1, (int) trainingCaseLoad($saved['id'])['reviewed']);
         $this->assertTrue(trainingCaseSave($saved['id'], [], $this->doc('Νέος'), $this->admin)['ok']);
-        $this->assertSame(0, (int) trainingCaseLoad($saved['id'])['reviewed']);
+        $this->assertSame('Νέος', trainingCaseLoad($saved['id'])['title']);
 
         dbExecute("UPDATE training_cases SET is_starter = 1 WHERE id = ?", [$saved['id']]);
-        $locked = trainingCaseSave($saved['id'], [], $this->doc('Άλλος'), $this->admin);
-        $this->assertFalse($locked['ok']);
-        $this->assertSame('starter_locked', $locked['errors'][0]['code']);
+        $edited = trainingCaseSave($saved['id'], ['difficulty' => 3], $this->doc('Άλλος'), $this->admin);
+        $this->assertTrue($edited['ok'], 'a starter is edited in place like any other case');
+        $row = trainingCaseLoad($saved['id']);
+        $this->assertSame('Άλλος', $row['title']);
+        $this->assertSame(3, (int) $row['difficulty']);
+        $this->assertSame(1, (int) $row['is_starter'], 'editing keeps the «came with the app» mark');
+        $this->assertFalse(trainingCaseSave(999999, [], $this->doc(), $this->admin)['ok'], 'a case that does not exist is still refused');
     }
 
-    public function test_duplicate_makes_an_editable_unreviewed_copy(): void
+    public function test_duplicate_makes_an_editable_non_starter_copy(): void
     {
         $saved = trainingCaseSave(null, [], $this->doc('Πρωτότυπο'), $this->admin);
-        dbExecute("UPDATE training_cases SET is_starter = 1, reviewed = 1 WHERE id = ?", [$saved['id']]);
+        dbExecute("UPDATE training_cases SET is_starter = 1 WHERE id = ?", [$saved['id']]);
         $copy = trainingCaseDuplicate($saved['id'], $this->admin);
         $row = trainingCaseLoad($copy['id']);
         $this->assertSame(0, (int) $row['is_starter']);
-        $this->assertSame(0, (int) $row['reviewed']);
         $this->assertStringContainsString('Πρωτότυπο', $row['doc']['title']);
+    }
+
+    public function test_delete_removes_a_normal_case_and_a_starter_and_reports_a_missing_one(): void
+    {
+        $normal = trainingCaseSave(null, [], $this->doc('Κανονικό'), $this->admin);
+        $starter = trainingCaseSave(null, [], $this->doc('Εκκίνησης'), $this->admin);
+        dbExecute("UPDATE training_cases SET is_starter = 1 WHERE id = ?", [$starter['id']]);
+
+        $this->assertTrue(trainingCaseDelete($normal['id']));
+        $this->assertTrue(trainingCaseDelete($starter['id']), 'a starter is deleted like any other case');
+        $this->assertNull(trainingCaseLoad($normal['id']));
+        $this->assertNull(trainingCaseLoad($starter['id']));
+        $this->assertFalse(trainingCaseDelete($normal['id']), 'nothing left to delete');
+        $this->assertFalse(trainingCaseDelete(999999));
     }
 
     public function test_archive_hides_a_case_from_the_default_list(): void

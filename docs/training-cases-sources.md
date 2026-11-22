@@ -1,6 +1,6 @@
 # Training case library: sources and review status
 
-The starter cases in `includes/training-cases/*.json` are practice material for volunteers. **None of them has been reviewed by a medically qualified person.** They load as unreviewed (`reviewed = 0`), the random draw skips them unless the commander asks for «και μη ελεγμένα», and the library marks them «μη ελεγμένο». A reviewer marks a case «ελεγμένο» in the library only after reading it.
+The starter cases in `includes/training-cases/*.json` are practice material for volunteers. **All 24 shipped cases (the 3 from v3.505.0 and the 21 from v3.506.0) have been reviewed by a doctor offline.** The app does not track that review: there is no «ελεγμένο» mark, the random draw does not filter on it, and every case, a shipped one included, can be edited and deleted from the library. A shipped case is loaded into the library once per installation; after that it is an ordinary case, and neither an edit nor a deletion is undone by a later update.
 
 Each case follows the Greek emergency numbers used in the app (166 EKAB, 112) and is written for a lay rescuer, not a clinician. Cases model typical incident patterns found in first aid and wilderness medicine guidance. They are not reconstructions of named real incidents.
 
@@ -19,6 +19,8 @@ Each case follows the Greek emergency numbers used in the app (166 EKAB, 112) an
 
 ## What was checked and what was not
 
+These notes describe what was verified when the cases were written, before the doctor's offline review.
+
 Checked against a web search during preparation (secondary summaries and guideline pages, not the full guideline texts):
 
 - Burn cooling duration: sources agree on cooling with cool running water, about 20 minutes, minimum about 10, and warn against cooling much longer in children. The ERC 2025 figure itself was **not** confirmed.
@@ -31,6 +33,6 @@ Checked against a web search during preparation (secondary summaries and guideli
 
 Written from general first aid knowledge and not re-verified in that search: stroke FAST and no aspirin, seizure first aid, hypoglycaemia (15 to 20 g of fast sugar), in-line stabilisation after a fall, motorcycle helmet, carbon monoxide, electrical injury, asthma, infant choking and CPR, smoke inhalation, dementia and missing person care.
 
-## Before the cases are marked reviewed
+## Changing a case
 
-A reviewer with first aid or medical training should read each case and check the best answer, the «ικανοποιητικό» answers and every «επιβλαβές» feedback against the current ERC and local EKAB guidance, and edit the file if a statement is wrong. Editing a starter file resets its review mark on the next load, so the review is of the content as shipped.
+Anyone who reads a case and finds a statement that is wrong should correct it in the library editor, against the current ERC and local EKAB guidance: the best answer, the «ικανοποιητικό» answers and every «επιβλαβές» feedback. Editing a shipped file in `includes/training-cases/` only affects installations that have not loaded that case yet.

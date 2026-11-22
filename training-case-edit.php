@@ -1,8 +1,7 @@
 <?php
 /**
  * VolunteerOps - Training case editor (v3.505.0).
- * System admin only. ?id=N edits a case, no id creates one. A starter case is not edited in place (it is duplicated from
- * the library). One plain form: details, story, findings, step cards with their choices, closing lessons. The browser
+ * System admin only. ?id=N edits a case (a starter included), no id creates one. One plain form: details, story, findings, step cards with their choices, closing lessons. The browser
  * script (assets/js/training-case-editor.js) draws the findings and the steps and puts the whole document as JSON in the
  * hidden `document` field on submit; this page cuts that field to a size limit BEFORE it is decoded, then trainingCaseSave()
  * normalises and validates it (nothing the browser built is trusted) and a refused save re-draws the form with what was
@@ -28,10 +27,6 @@ if ($isEdit) {
     $row = trainingCaseLoad($id);
     if (!$row) {
         setFlash('error', t('case.err.not_found'));
-        redirect('training-cases.php');
-    }
-    if ((int) $row['is_starter'] === 1) {
-        setFlash('error', t('case.err.starter_locked'));
         redirect('training-cases.php');
     }
 }
@@ -113,10 +108,6 @@ include __DIR__ . '/includes/header.php';
 </div>
 
 <?= showFlash() ?>
-
-<?php if ($isEdit && (int) $row['reviewed'] === 1): ?>
-    <div class="alert alert-warning" role="alert"><i class="bi bi-exclamation-triangle me-1"></i><?= h(t('case.ed.reviewed_reset')) ?></div>
-<?php endif; ?>
 
 <?php if ($errors): ?>
     <div class="alert alert-danger" role="alert">

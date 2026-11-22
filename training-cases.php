@@ -1,13 +1,13 @@
 <?php
 /**
  * VolunteerOps - Training case library (v3.505.0).
- * System admin only. The list of cases (starters included) with their review state, and the actions on them: duplicate,
- * archive / restore, mark as reviewed (an explicit, confirmed claim that a medically qualified person checked the case),
- * export (one case, the selected ones or the whole list, as one JSON file) and import (upload, a validated preview, then
- * a confirm). Editing is on training-case-edit.php. The rules are in includes/functions-training-cases.php.
+ * System admin only. The list of cases (starters included) and the actions on every one of them: edit, duplicate,
+ * archive / restore, delete (confirmed; a starter too), export (one case, the selected ones or the whole list, as one JSON
+ * file) and import (upload, a validated preview, then a confirm). Editing is on training-case-edit.php. The rules are in
+ * includes/functions-training-cases.php.
  *
  * A case's text is untrusted plain text (an imported file can hold anything): every value is printed through h().
- * Archiving or editing never touches a snapshot already staged in a drill (the snapshot is a copy).
+ * Archiving, editing or deleting never touches a snapshot already staged in a drill (the snapshot is a copy).
  */
 
 require_once __DIR__ . '/bootstrap.php';
@@ -27,9 +27,9 @@ function trainingCaseTypeLabel(string $tag): string {
     return in_array($tag, TRAINING_CASE_TYPES, true) ? t('case.type.' . $tag) : $tag;
 }
 
-/** One small POST form with a single action button for a row of the list. Every value is escaped here. */
-function trainingCaseActionForm(string $action, int $id, string $label, string $icon, string $buttonClass, bool $showArchived): string {
-    return '<form method="post" class="d-inline">' . csrfField()
+/** One small POST form with a single action button for a row of the list; with $confirm the browser asks first. Every value is escaped here. */
+function trainingCaseActionForm(string $action, int $id, string $label, string $icon, string $buttonClass, bool $showArchived, string $confirm = ''): string {
+    return '<form method="post" class="d-inline"' . ($confirm !== '' ? ' onsubmit="return confirm(' . h((string) json_encode($confirm, JSON_UNESCAPED_UNICODE)) . ')"' : '') . '>' . csrfField()
         . '<input type="hidden" name="action" value="' . h($action) . '">'
         . '<input type="hidden" name="id" value="' . (int) $id . '">'
         . '<input type="hidden" name="archived" value="' . ($showArchived ? '1' : '0') . '">'
@@ -41,7 +41,7 @@ function trainingCaseActionForm(string $action, int $id, string $label, string $
 if (isPost()) {
     verifyCsrf();
 }
-// The shipped starter cases are loaded (or refreshed) when the library opens; cheap, and a no-op when nothing changed.
+// The shipped starter cases are loaded when the library opens, each one once per installation (an edited or deleted one stays so).
 trainingCaseSeedStarters();
 
 $importPreview = null;   // ['json' => the file's text, 'cases' => the preview rows] after an upload
@@ -99,27 +99,15 @@ if (isPost()) {
                 setFlash('success', t($action === 'archive' ? 'case.lib.msg_archived' : 'case.lib.msg_unarchived'));
                 break;
 
-            case 'review':
-                // An explicit claim: only with the confirmation box ticked, which the form's text explains.
-                if (post('confirm_review') !== '1') {
-                    setFlash('error', t('case.lib.err_confirm_review'));
-                } elseif (!trainingCaseLoad($id)) {
-                    setFlash('error', t('case.err.not_found'));
-                } else {
-                    trainingCaseSetReviewed($id, true, $userId);
-                    logAudit('review_training_case', 'training_cases', $id);
-                    setFlash('success', t('case.lib.msg_reviewed'));
-                }
-                break;
-
-            case 'unreview':
-                if (!trainingCaseLoad($id)) {
+            case 'delete':
+                // For good, a starter included. A drill that already staged or played the case keeps its own copy.
+                $doomed = trainingCaseLoad($id);
+                if (!$doomed || !trainingCaseDelete($id)) {
                     setFlash('error', t('case.err.not_found'));
                     break;
                 }
-                trainingCaseSetReviewed($id, false, $userId);
-                logAudit('unreview_training_case', 'training_cases', $id);
-                setFlash('success', t('case.lib.msg_unreviewed'));
+                logAudit('delete_training_case', 'training_cases', $id, null, ['title' => $doomed['title'], 'slug' => $doomed['slug']]);
+                setFlash('success', t('case.lib.msg_deleted'));
                 break;
 
             case 'export':
@@ -178,10 +166,6 @@ if (isPost()) {
 }
 
 $cases = trainingCaseList(['include_archived' => $showArchived]);
-$reviewers = [];
-foreach (dbFetchAll("SELECT c.id, u.name FROM training_cases c JOIN users u ON u.id = c.reviewed_by WHERE c.reviewed = 1") as $reviewer) {
-    $reviewers[(int) $reviewer['id']] = (string) $reviewer['name'];
-}
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -310,7 +294,6 @@ include __DIR__ . '/includes/header.php';
                         $caseId = (int) $c['id'];
                         $isStarter = (int) $c['is_starter'] === 1;
                         $isArchived = !empty($c['archived_at']);
-                        $isReviewed = (int) $c['reviewed'] === 1;
                         $stars = max(1, min(3, (int) $c['difficulty']));
                         ?>
                         <tr class="<?= h($isArchived ? 'table-secondary text-muted' : '') ?>">
@@ -324,33 +307,18 @@ include __DIR__ . '/includes/header.php';
                             <td data-label="<?= h(t('case.lib.col_minutes')) ?>"><?= (int) $c['est_minutes'] ?></td>
                             <td data-label="<?= h(t('case.lib.col_status')) ?>">
                                 <?php if ($isStarter): ?><span class="badge bg-primary"><?= h(t('case.lib.badge_starter')) ?></span><?php endif; ?>
-                                <?php if ($isReviewed): ?>
-                                    <span class="badge bg-success"><?= h(t('case.lib.badge_reviewed')) ?></span>
-                                    <div class="small text-muted"><?= h(t('case.lib.reviewed_by', ['name' => $reviewers[$caseId] ?? '-', 'date' => !empty($c['reviewed_at']) ? formatDateTime($c['reviewed_at']) : '-'])) ?></div>
-                                <?php else: ?>
-                                    <span class="badge bg-warning text-dark"><?= h(t('case.lib.badge_not_reviewed')) ?></span>
-                                <?php endif; ?>
                                 <?php if ($isArchived): ?><span class="badge bg-secondary"><?= h(t('case.lib.badge_archived')) ?></span><?php endif; ?>
                             </td>
                             <td class="text-end text-nowrap">
-                                <?php if ($isStarter): ?>
-                                    <span class="small text-muted me-1" title="<?= h(t('case.lib.starter_note')) ?>"><i class="bi bi-lock" aria-hidden="true"></i></span>
-                                <?php else: ?>
-                                    <a class="btn btn-sm btn-outline-primary" href="training-case-edit.php?id=<?= (int) $caseId ?>"><i class="bi bi-pencil" aria-hidden="true"></i> <?= h(t('case.lib.act_edit')) ?></a>
-                                <?php endif; ?>
+                                <a class="btn btn-sm btn-outline-primary" href="training-case-edit.php?id=<?= (int) $caseId ?>"><i class="bi bi-pencil" aria-hidden="true"></i> <?= h(t('case.lib.act_edit')) ?></a>
                                 <?= trainingCaseActionForm('duplicate', $caseId, t('case.lib.act_duplicate'), 'bi-files', 'btn-outline-secondary', $showArchived) ?>
                                 <?= trainingCaseActionForm('export', $caseId, t('case.lib.act_export'), 'bi-download', 'btn-outline-secondary', $showArchived) ?>
-                                <?php if ($isReviewed): ?>
-                                    <?= trainingCaseActionForm('unreview', $caseId, t('case.lib.act_unreview'), 'bi-x-circle', 'btn-outline-warning', $showArchived) ?>
-                                <?php else: ?>
-                                    <button type="button" class="btn btn-sm btn-outline-success" data-bs-toggle="modal" data-bs-target="#reviewModal"
-                                            data-case-id="<?= (int) $caseId ?>" data-case-title="<?= h($c['title']) ?>"><i class="bi bi-patch-check" aria-hidden="true"></i> <?= h(t('case.lib.act_review')) ?></button>
-                                <?php endif; ?>
                                 <?php if ($isArchived): ?>
                                     <?= trainingCaseActionForm('unarchive', $caseId, t('case.lib.act_unarchive'), 'bi-arrow-counterclockwise', 'btn-outline-secondary', $showArchived) ?>
                                 <?php else: ?>
-                                    <?= trainingCaseActionForm('archive', $caseId, t('case.lib.act_archive'), 'bi-archive', 'btn-outline-danger', $showArchived) ?>
+                                    <?= trainingCaseActionForm('archive', $caseId, t('case.lib.act_archive'), 'bi-archive', 'btn-outline-secondary', $showArchived) ?>
                                 <?php endif; ?>
+                                <?= trainingCaseActionForm('delete', $caseId, t('case.lib.act_delete'), 'bi-trash', 'btn-outline-danger', $showArchived, t('case.lib.confirm_delete', ['title' => (string) $c['title']])) ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>
@@ -359,43 +327,5 @@ include __DIR__ . '/includes/header.php';
         </table>
     </div>
 </div>
-
-<!-- «Ελεγμένο»: an explicit claim, so it needs its own confirmation (the server refuses it without the ticked box). -->
-<div class="modal fade" id="reviewModal" tabindex="-1" aria-labelledby="reviewModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <form method="post" class="modal-content">
-            <?= csrfField() ?>
-            <input type="hidden" name="action" value="review">
-            <input type="hidden" name="id" id="reviewCaseId" value="0">
-            <input type="hidden" name="archived" value="<?= h($showArchived ? '1' : '0') ?>">
-            <div class="modal-header">
-                <h2 class="modal-title h5" id="reviewModalLabel"><?= h(t('case.lib.review_title')) ?></h2>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="<?= h(t('case.lib.cancel')) ?>"></button>
-            </div>
-            <div class="modal-body">
-                <p class="fw-semibold" id="reviewCaseTitle"></p>
-                <p><?= h(t('case.lib.review_text')) ?></p>
-                <div class="form-check">
-                    <input class="form-check-input" type="checkbox" name="confirm_review" value="1" id="reviewConfirm" required>
-                    <label class="form-check-label" for="reviewConfirm"><?= h(t('case.lib.review_check')) ?></label>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal"><?= h(t('case.lib.cancel')) ?></button>
-                <button type="submit" class="btn btn-success"><?= h(t('case.lib.review_submit')) ?></button>
-            </div>
-        </form>
-    </div>
-</div>
-
-<script>
-// Fills the review confirmation with the case that was clicked (set with textContent/value: case titles are untrusted).
-document.addEventListener('show.bs.modal', function (e) {
-    if (!e.target || e.target.id !== 'reviewModal' || !e.relatedTarget) return;
-    document.getElementById('reviewCaseId').value = e.relatedTarget.getAttribute('data-case-id') || '0';
-    document.getElementById('reviewCaseTitle').textContent = e.relatedTarget.getAttribute('data-case-title') || '';
-    document.getElementById('reviewConfirm').checked = false;
-});
-</script>
 
 <?php include __DIR__ . '/includes/footer.php'; ?>
