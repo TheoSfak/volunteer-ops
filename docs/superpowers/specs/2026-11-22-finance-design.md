@@ -64,7 +64,7 @@ The scanner uses the providers and keys already in **Ρυθμίσεις → AI**
 
 ## Pages and menu
 
-New sidebar section **Οικονομικά** in `includes/header.php`, after Επιχειρησιακό, visible only with `finance_manage`:
+New sidebar section **Οικονομικά** in `includes/header.php`, after Επιχειρησιακό. The section shows when the user has `finance_manage` **or** `subscriptions_manage`; each item keeps its own permission (Συνδρομές → `subscriptions_manage`, everything else → `finance_manage`), so a dues clerk keeps exactly the access they have today.
 
 | Page | File | What |
 |---|---|---|
@@ -72,8 +72,9 @@ New sidebar section **Οικονομικά** in `includes/header.php`, after Ε�
 | Κινήσεις | `finance-movements.php` | all movements, filters (period, account, direction, category), new movement / transfer |
 | Παραστατικά | `finance-documents.php`, `finance-document-form.php` | list with filters and paid status; create (scan/upload) and edit |
 | Υποχρεώσεις | `finance-payables.php` | as above |
+| Συνδρομές | `subscriptions.php` (existing) | **moved** here from the Διοίκηση section; the page itself is unchanged apart from the cash-book hook below |
 | Αναφορές | `finance-reports.php` | period summary by category, by account, VAT summary per rate (net / VAT / gross, IN and OUT separately), CSV export and print view for the accountant |
-| Ρυθμίσεις | `finance-settings.php` | accounts, categories, default VAT rate, dues → account |
+| Ρυθμίσεις | `finance-settings.php` | accounts, categories, default VAT rate, dues payment method → account, import of past dues |
 
 File access: `finance-file.php?id=` streams the stored file after a `finance_manage` check; files live in `uploads/finance/` protected by `ensurePrivateUploadDir()`, stored names random, like the subscription receipts.
 
@@ -81,7 +82,14 @@ Permission: new `finance_manage` («Οικονομικά», icon `bi-wallet2`) i
 
 ## Hooks into what exists
 
-- **Dues:** when `subscriptions.php` records a payment and the setting `finance_dues_account_id` is set, it also inserts an IN movement in that account (category «Συνδρομές μελών», `subscription_id` set, amount = the dues amount). Deleting that subscription payment deletes its movement. Unset setting → nothing changes.
+- **Dues (Συνδρομές) are part of the cash book.** The existing dues feature (`subscriptions.php`, `volunteer_subscriptions`, IRIS requests, receipts, expiry reminders) stays as it is and becomes the Οικονομικά source of «Συνδρομές μελών» income:
+  - **Record payment** with an amount → an IN movement is created in the same DB transaction: category «Συνδρομές μελών», `subscription_id` set, date = payment date, description «Συνδρομή — <όνομα εθελοντή>».
+  - **Which account** comes from the payment method already on the dues form, mapped in Ρυθμίσεις: Μετρητά → (default «Ταμείο μετρητών»), Τραπεζική κατάθεση → a BANK account, Κάρτα → a CARD account, Άλλο / κενό → the cash account. Settings `finance_dues_account_<method>`; an unmapped method falls back to the cash account, so a dues payment is never silently left out of the books.
+  - **Edit** of a dues payment updates its movement (amount, date, account); amount cleared → movement removed. **Delete** removes the movement.
+  - No amount → no movement (nothing to book).
+  - The movement row in Κινήσεις links to the dues payment and its receipt (`subscription-receipt.php`); dues movements are edited only from Συνδρομές, never from Κινήσεις, so the two never disagree.
+  - **Past dues:** the migration does not touch history. Ρυθμίσεις has «Εισαγωγή παλαιών συνδρομών από [ημερομηνία]», which creates the missing movements for dues payments on or after that date (idempotent: skips any with a movement already). The treasurer picks the same date as the accounts' opening date, so opening balance + imported dues don't double-count.
+  - PHPUnit: method→account mapping and fallback, create/edit/delete keeps exactly one movement per paid dues row, import is idempotent.
 - **Mission / vehicle:** optional selects on the document form; `vehicle-view.php` and `mission-view.php` are not changed in this release.
 - **Audit:** every create/update/delete of documents, movements, accounts, categories goes through `logAudit()`.
 
