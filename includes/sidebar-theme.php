@@ -26,6 +26,7 @@ function sidebarSections(): array
     return [
         'general'        => 'Κορυφή (χωρίς τίτλο)',
         'missions'       => 'Αποστολές',
+        'ops'            => 'Επιχειρησιακό',
         'manage'         => 'Διαχείριση',
         'training'       => 'Εκπαίδευση',
         'training-admin' => 'Διαχείριση Εκπαίδευσης',
@@ -47,6 +48,7 @@ function sidebarDefaultPalette(): array
     return [
         'general'        => '#e2e8f0',
         'missions'       => '#4ade80',
+        'ops'            => '#ef4444',
         'manage'         => '#2dd4bf',
         'training'       => '#fb923c',
         'training-admin' => '#d97706',
