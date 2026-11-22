@@ -266,11 +266,10 @@ test('renderOverview says when nothing has been placed', () => {
     assert.ok(TC.renderOverview(null, k => k).includes('case.overview_empty'));
 });
 
-test('caseOptionLabel names the case with its stars and flags an unchecked one; the title stays plain text', () => {
-    const t = overviewT;
-    assert.equal(TC.caseOptionLabel({title: 'Πνιγμός', difficulty: 2, reviewed: true}, t), '★★ Πνιγμός');
-    assert.equal(TC.caseOptionLabel({title: 'Πνιγμός', difficulty: 1, reviewed: false}, t), '★ Πνιγμός · case.picker_unreviewed_tag');
-    assert.equal(TC.caseOptionLabel({title: '<b>x</b>', difficulty: 0, reviewed: true}, t), '<b>x</b>', 'a label for textContent is not escaped');
+test('caseOptionLabel names the case with its stars, no review flag; the title stays plain text', () => {
+    assert.equal(TC.caseOptionLabel({title: 'Πνιγμός', difficulty: 2}), '★★ Πνιγμός');
+    assert.equal(TC.caseOptionLabel({title: 'Πνιγμός', difficulty: 1, reviewed: false}), '★ Πνιγμός', 'a stray reviewed flag from an old answer adds nothing');
+    assert.equal(TC.caseOptionLabel({title: '<b>x</b>', difficulty: 0}), '<b>x</b>', 'a label for textContent is not escaped');
 });
 
 test('caseStageFields adds nothing without a case and carries the choice, the draw and the briefing with one', () => {

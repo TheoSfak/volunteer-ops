@@ -96,7 +96,7 @@ final class TrainingCaseEditorModelTest extends TestCase
 
     public function test_every_save_error_code_has_text_in_greek_and_english(): void
     {
-        foreach (['starter_locked', 'not_found', 'unreadable', 'too_big'] as $code) {
+        foreach (['not_found', 'unreadable', 'too_big'] as $code) {
             foreach (['el', 'en'] as $lang) {
                 $this->assertNotSame('case.err.' . $code, t('case.err.' . $code, [], $lang), "case.err.{$code} has no {$lang} text");
             }
@@ -105,7 +105,6 @@ final class TrainingCaseEditorModelTest extends TestCase
 
     public function test_the_error_text_helper_covers_the_codes_the_save_returns(): void
     {
-        $this->assertNotSame('case.err.starter_locked', trainingCaseErrorText(['code' => 'starter_locked', 'where' => '']));
         $this->assertNotSame('case.err.not_found', trainingCaseErrorText(['code' => 'not_found', 'where' => '']));
     }
 }

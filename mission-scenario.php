@@ -474,7 +474,7 @@ if ($action === 'case_list') {
     trainingCaseSeedStarters();
     echo json_encode(['ok' => true, 'cases' => array_map(fn($c) => [
         'id' => (int) $c['id'], 'title' => $c['title'], 'type' => $c['type_tag'], 'difficulty' => (int) $c['difficulty'],
-        'language' => $c['language'], 'minutes' => (int) $c['est_minutes'], 'starter' => (bool) $c['is_starter'], 'reviewed' => (bool) $c['reviewed'],
+        'language' => $c['language'], 'minutes' => (int) $c['est_minutes'], 'starter' => (bool) $c['is_starter'],
     ], trainingCaseList()), 'training' => isTrainingMission($mission)]);
     exit;
 }
@@ -490,9 +490,9 @@ if ($action === 'case_draw') {
     $filter = array_filter([
         'type' => (string) post('type'), 'difficulty' => (int) post('difficulty'), 'language' => (string) post('language'),
     ]);
-    $case = trainingCaseDraw($filter, scenarioStagedCaseIds($missionId), post('allow_unreviewed') === '1');
+    $case = trainingCaseDraw($filter, scenarioStagedCaseIds($missionId));
     echo $case
-        ? json_encode(['ok' => true, 'case' => ['id' => (int) $case['id'], 'title' => $case['title'], 'type' => $case['type_tag'], 'difficulty' => (int) $case['difficulty'], 'reviewed' => (bool) $case['reviewed']]])
+        ? json_encode(['ok' => true, 'case' => ['id' => (int) $case['id'], 'title' => $case['title'], 'type' => $case['type_tag'], 'difficulty' => (int) $case['difficulty']]])
         : json_encode(['ok' => false, 'error' => t('case.err_pool_empty')]);
     exit;
 }

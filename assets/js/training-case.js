@@ -461,11 +461,10 @@
         }).join('');
     }
 
-    /** The text of one picker option (set with textContent / new Option, never as markup): stars, title, and a flag when unreviewed. */
-    function caseOptionLabel(c, t) {
+    /** The text of one picker option (set with textContent / new Option, never as markup): stars and title. */
+    function caseOptionLabel(c) {
         const stars = c.difficulty > 0 ? '★'.repeat(c.difficulty) + ' ' : '';
-        const flag = c.reviewed ? '' : ' · ' + t('case.picker_unreviewed_tag');
-        return [stars, String(c.title == null ? '' : c.title), flag].join('');
+        return stars + String(c.title == null ? '' : c.title);
     }
 
     /**

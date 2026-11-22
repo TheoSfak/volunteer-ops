@@ -47,14 +47,13 @@ final class TrainingCasePagesSourceTest extends TestCase
     public function test_every_post_checks_the_csrf_token_before_it_does_anything(): void
     {
         foreach ($this->pages() as $name => $src) {
-            $post = strpos($src, "
-if (isPost()) {");
+            $post = strpos($src, "\nif (isPost()) {");
             $csrf = strpos($src, 'verifyCsrf();');
             $this->assertNotFalse($post, $name);
             $this->assertNotFalse($csrf, $name);
             $this->assertGreaterThan($post, $csrf);
             $this->assertSame($csrf, strpos(substr($src, $post), 'verifyCsrf();') + $post, "$name: verifyCsrf() is the first thing in the POST block");
-            foreach (['trainingCaseSave(', 'trainingCaseDuplicate(', 'trainingCaseArchive(', 'trainingCaseSetReviewed(', 'trainingCaseImport(', 'trainingCaseExport(', 'trainingCaseImportRead('] as $call) {
+            foreach (['trainingCaseSave(', 'trainingCaseDuplicate(', 'trainingCaseArchive(', 'trainingCaseDelete(', 'trainingCaseImport(', 'trainingCaseExport(', 'trainingCaseImportRead('] as $call) {
                 // Every call outside the docblock and the page's own helper functions is inside the POST block.
                 $at = strpos($src, $call, $post);
                 if ($at !== false) {
@@ -66,7 +65,8 @@ if (isPost()) {");
         // Every form in the library carries the token (the row buttons come from one helper that adds it).
         $this->assertSame(substr_count($library, '<form'), substr_count($library, 'csrfField()'), 'every form prints csrfField()');
         $this->assertSame(substr_count($this->pages()['training-case-edit.php'], '<form'), substr_count($this->pages()['training-case-edit.php'], 'csrfField()'));
-        $this->assertStringContainsString("'<form method=\"post\" class=\"d-inline\">' . csrfField()", $library);
+        $this->assertStringContainsString("'<form method=\"post\" class=\"d-inline\"'", $library);
+        $this->assertStringContainsString("'>' . csrfField()", $library);
         $this->assertStringContainsString('<?= csrfField() ?>', $this->pages()['training-case-edit.php']);
     }
 
@@ -74,7 +74,7 @@ if (isPost()) {");
     {
         $src = $this->pages()['training-cases.php'];
         foreach (['trainingCaseSeedStarters(', 'trainingCaseList(', 'trainingCaseExport(', 'trainingCaseImportRead(', 'trainingCaseImport(',
-                  'trainingCaseDuplicate(', 'trainingCaseArchive(', 'trainingCaseSetReviewed('] as $call) {
+                  'trainingCaseDuplicate(', 'trainingCaseArchive(', 'trainingCaseDelete('] as $call) {
             $this->assertStringContainsString($call, $src, $call);
         }
         $this->assertLessThan(strpos($src, 'trainingCaseList('), strpos($src, 'trainingCaseSeedStarters('), 'the starters are seeded before the list is read');
@@ -153,31 +153,85 @@ if (isPost()) {");
         $this->assertStringContainsString('JSON_INVALID_UTF8_SUBSTITUTE', $src);
     }
 
-    public function test_starters_are_not_edited_in_place_and_editing_says_what_it_resets(): void
+    public function test_every_case_a_starter_included_is_edited_in_place_and_the_editor_says_nothing_about_review(): void
     {
         $edit = $this->pages()['training-case-edit.php'];
-        $this->assertMatchesRegularExpression("/is_starter'\\]\s*===\s*1\)\s*\{\s*setFlash\('error',\s*t\('case.err.starter_locked'\)\);\s*redirect\('training-cases.php'\);/", $edit);
-        $this->assertStringContainsString("case.ed.reviewed_reset", $edit);
+        $this->assertStringNotContainsString('starter_locked', $edit, 'the editor no longer turns a starter away');
+        $this->assertStringNotContainsString('is_starter', $edit);
+        $this->assertStringNotContainsString('reviewed', $edit);
         $library = $this->pages()['training-cases.php'];
-        $this->assertMatchesRegularExpression('/if \(\$isStarter\):.*?else:.*?training-case-edit\.php\?id=/s', $library, 'the Edit button is for non starters only');
+        $this->assertMatchesRegularExpression('/<a class="btn btn-sm btn-outline-primary" href="training-case-edit\.php\?id=<\?= \(int\) \$caseId \?>"/', $library, 'every row has an Edit button');
+        $this->assertStringNotContainsString('bi-lock', $library);
         $this->assertStringContainsString("trainingCaseActionForm('duplicate'", $library, 'every case, a starter included, can be duplicated');
+        $this->assertStringContainsString("t('case.lib.badge_starter')", $library, 'the «came with the app» badge stays');
     }
 
-    public function test_marking_a_case_reviewed_needs_an_explicit_confirmation_the_server_checks(): void
+    public function test_a_case_is_deleted_by_a_csrf_checked_post_action_with_a_confirm(): void
     {
         $src = $this->pages()['training-cases.php'];
-        $case = strpos($src, "case 'review':");
-        $this->assertNotFalse($case);
-        $check = strpos($src, "post('confirm_review') !== '1'", $case);
-        $this->assertNotFalse($check, 'the review action refuses a post without the ticked confirmation');
-        $this->assertLessThan(strpos($src, 'trainingCaseSetReviewed($id, true', $case), $check);
-        $this->assertStringContainsString('name="confirm_review" value="1"', $src);
-        $this->assertStringContainsString("t('case.lib.review_check')", $src);
+        $case = strpos($src, "case 'delete':");
+        $this->assertNotFalse($case, 'the library has a delete action');
+        $this->assertGreaterThan(strpos($src, 'verifyCsrf();'), $case, 'the delete action is behind the CSRF check');
+        $this->assertStringContainsString('trainingCaseDelete($id)', $src);
+        $this->assertGreaterThan(strpos($src, 'if (isPost()) {'), $case, 'it is only reachable through a POST');
+        $this->assertStringContainsString("logAudit('delete_training_case'", $src);
+        $this->assertStringContainsString("setFlash('success', t('case.lib.msg_deleted'))", $src);
+        // The row button asks first, through the one form helper (which also prints the token), for every row.
+        $this->assertStringContainsString("trainingCaseActionForm('delete', \$caseId, t('case.lib.act_delete'), 'bi-trash', 'btn-outline-danger', \$showArchived, t('case.lib.confirm_delete'", $src);
+        $this->assertStringContainsString("onsubmit=\"return confirm(", $src);
+        $this->assertGreaterThan(0, strpos($src, "' . csrfField()", strpos($src, 'function trainingCaseActionForm(')));
         foreach (['el', 'en'] as $lang) {
-            $text = $this->lang()[$lang]['case.lib.review_check'] . ' ' . $this->lang()[$lang]['case.lib.review_text'];
-            $this->assertMatchesRegularExpression($lang === 'el' ? '/ιατρικά καταρτισμένο άτομο/u' : '/medically qualified person/', $text, "$lang says who must have checked");
+            $strings = $this->lang()[$lang];
+            foreach (['case.lib.act_delete', 'case.lib.confirm_delete', 'case.lib.msg_deleted'] as $key) {
+                $this->assertArrayHasKey($key, $strings, "$key in $lang");
+            }
+            $this->assertStringContainsString('{title}', $strings['case.lib.confirm_delete']);
+            $this->assertMatchesRegularExpression($lang === 'el' ? '/αντίγραφο/u' : '/own copy/', $strings['case.lib.confirm_delete'], "$lang says drills keep their copy");
         }
-        $this->assertStringContainsString("'unreview'", $src, 'a mark can be taken back without a confirmation');
+    }
+
+    public function test_the_review_logic_is_gone_from_the_app_and_the_columns_are_only_left_in_the_schema(): void
+    {
+        $banned = ['trainingCaseSetReviewed', 'allow_unreviewed', 'dispatchCaseUnrev', 'case_reviewed', 'picker_unreviewed', 'starter_locked'];
+        $files = [];
+        foreach (glob(self::ROOT . '/*.php') ?: [] as $file) {
+            $files[] = $file;
+        }
+        foreach (['includes', 'assets/js'] as $dir) {
+            $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(self::ROOT . '/' . $dir, FilesystemIterator::SKIP_DOTS));
+            foreach ($it as $file) {
+                if (in_array($file->getExtension(), ['php', 'js'], true)) {
+                    $files[] = $file->getPathname();
+                }
+            }
+        }
+        $this->assertGreaterThan(50, count($files), 'the scan really covers the app');
+        foreach ($files as $file) {
+            // includes/migrations.php created the columns and stays as it was; tests, vendor and the schema are not app code.
+            if (str_ends_with(str_replace('\\', '/', $file), 'includes/migrations.php')) {
+                continue;
+            }
+            $text = (string) file_get_contents($file);
+            foreach ($banned as $word) {
+                $this->assertStringNotContainsString($word, $text, basename($file) . ' still mentions ' . $word);
+            }
+        }
+        // The training code does not read or write the three columns that are left in the table.
+        foreach (['includes/functions-training-cases.php', 'includes/functions-training-case-runs.php', 'includes/functions-scenario.php', 'training-cases.php',
+                  'training-case-edit.php', 'training-case.php', 'mission-scenario.php', 'assets/js/training-case.js', 'assets/js/training-case-editor.js',
+                  'assets/js/war-room-scenario.js'] as $file) {
+            if (is_file(self::ROOT . '/' . $file)) {
+                $this->assertDoesNotMatchRegularExpression('/\breviewed(_by|_at)?\b/', $this->src($file), "$file still touches a review column");
+            }
+        }
+        // No language key serves the removed logic (either language: the key sets are the same).
+        foreach (['el', 'en'] as $lang) {
+            foreach (array_keys($this->lang()[$lang]) as $key) {
+                $this->assertDoesNotMatchRegularExpression('/^case\..*(review|unrev)/i', $key, "$lang still has the key $key");
+            }
+            $this->assertArrayNotHasKey('case.err.starter_locked', $this->lang()[$lang]);
+            $this->assertArrayNotHasKey('case.lib.starter_note', $this->lang()[$lang]);
+        }
     }
 
     public function test_the_export_downloads_one_json_file(): void

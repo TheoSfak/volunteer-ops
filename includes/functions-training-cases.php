@@ -292,7 +292,7 @@ function trainingCaseUniqueSlug(string $title): string {
 
 /**
  * Creates ($id null) or edits a case. The document is normalised and validated first; nothing is written when it
- * has errors. Editing resets `reviewed` (the content changed) and a starter case cannot be edited, only duplicated.
+ * has errors. Every case can be edited, a starter included (it stays a starter: the mark only says the case came with the app).
  */
 function trainingCaseSave(?int $id, array $meta, $rawDoc, int $userId): array {
     $doc = trainingCaseNormalize($rawDoc);
@@ -307,24 +307,19 @@ function trainingCaseSave(?int $id, array $meta, $rawDoc, int $userId): array {
     $json = json_encode($doc, JSON_UNESCAPED_UNICODE);
     if ($id === null) {
         $newId = (int) dbInsert(
-            "INSERT INTO training_cases (slug, title, type_tag, difficulty, language, est_minutes, document, format_version, is_starter, reviewed, created_by)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)",
+            "INSERT INTO training_cases (slug, title, type_tag, difficulty, language, est_minutes, document, format_version, is_starter, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
             [trainingCaseUniqueSlug($doc['title']), $doc['title'], $fields['type_tag'], $fields['difficulty'], $fields['language'],
              $fields['est_minutes'], $json, TRAINING_CASE_FORMAT_VERSION, $userId]
         );
         logAudit('create_training_case', 'training_cases', $newId, null, ['title' => $doc['title']]);
         return ['ok' => true, 'id' => $newId];
     }
-    $row = dbFetchOne("SELECT id, is_starter FROM training_cases WHERE id = ?", [$id]);
-    if (!$row) {
+    if (!dbFetchValue("SELECT 1 FROM training_cases WHERE id = ?", [$id])) {
         return ['ok' => false, 'errors' => [['code' => 'not_found', 'where' => '']]];
     }
-    if ((int) $row['is_starter'] === 1) {
-        return ['ok' => false, 'errors' => [['code' => 'starter_locked', 'where' => '']]];
-    }
     dbExecute(
-        "UPDATE training_cases SET title = ?, type_tag = ?, difficulty = ?, language = ?, est_minutes = ?, document = ?, format_version = ?,
-                reviewed = 0, reviewed_by = NULL, reviewed_at = NULL
+        "UPDATE training_cases SET title = ?, type_tag = ?, difficulty = ?, language = ?, est_minutes = ?, document = ?, format_version = ?
          WHERE id = ?",
         [$doc['title'], $fields['type_tag'], $fields['difficulty'], $fields['language'], $fields['est_minutes'], $json, TRAINING_CASE_FORMAT_VERSION, $id]
     );
@@ -362,14 +357,14 @@ function trainingCaseList(array $filter = []): array {
         $args[] = (string) $filter['language'];
     }
     return dbFetchAll(
-        "SELECT id, slug, title, type_tag, difficulty, language, est_minutes, is_starter, reviewed, reviewed_at, archived_at
+        "SELECT id, slug, title, type_tag, difficulty, language, est_minutes, is_starter, archived_at
          FROM training_cases" . ($where ? ' WHERE ' . implode(' AND ', $where) : '') . "
          ORDER BY is_starter DESC, title, id",
         $args
     );
 }
 
-/** An editable, unreviewed copy of any case (a starter included). */
+/** A copy of any case (a starter included), saved as an ordinary, non-starter case. */
 function trainingCaseDuplicate(int $id, int $userId): array {
     $row = trainingCaseLoad($id);
     if (!$row) {
@@ -384,12 +379,13 @@ function trainingCaseArchive(int $id, bool $archive): void {
     dbExecute("UPDATE training_cases SET archived_at = " . ($archive ? 'NOW()' : 'NULL') . " WHERE id = ?", [$id]);
 }
 
-function trainingCaseSetReviewed(int $id, bool $reviewed, int $userId): void {
-    if ($reviewed) {
-        dbExecute("UPDATE training_cases SET reviewed = 1, reviewed_by = ?, reviewed_at = NOW() WHERE id = ?", [$userId, $id]);
-    } else {
-        dbExecute("UPDATE training_cases SET reviewed = 0, reviewed_by = NULL, reviewed_at = NULL WHERE id = ?", [$id]);
-    }
+/**
+ * Deletes a case from the library for good, a starter included (the seeder remembers a starter was seeded, so it does not
+ * come back). Safe for drills: a placement keeps its own snapshot and its case_id becomes NULL (ON DELETE SET NULL), and a
+ * staged scenario item carries its own copy of the document. True when a row was deleted, false when there was none.
+ */
+function trainingCaseDelete(int $id): bool {
+    return dbExecute("DELETE FROM training_cases WHERE id = ?", [$id]) > 0;
 }
 
 /** One file holding any number of cases: {format, format_version, cases: [{slug, type_tag, difficulty, language, est_minutes, document}]}. */
@@ -449,7 +445,7 @@ function trainingCaseImportRead(string $json): array {
     return ['ok' => true, 'cases' => $out];
 }
 
-/** Saves every valid case of an import file as a new, unreviewed, non-starter case. Returns ['saved' => n, 'skipped' => n, 'ids' => []]. */
+/** Saves every valid case of an import file as a new, non-starter case. Returns ['saved' => n, 'skipped' => n, 'ids' => []]. */
 function trainingCaseImport(string $json, int $userId): array {
     $read = trainingCaseImportRead($json);
     if (!$read['ok']) {
@@ -476,18 +472,48 @@ function trainingCaseImport(string $json, int $userId): array {
     return ['saved' => count($saved), 'skipped' => $skipped, 'ids' => $saved];
 }
 
+/** The settings key that remembers which shipped starter slugs have already been seeded on this installation (a JSON list). */
+const TRAINING_CASES_SEEDED_KEY = 'training_cases_seeded_slugs';
+
 /**
- * Loads the starter cases shipped in includes/training-cases/*.json into the library, by slug. A new slug is inserted
- * as an unreviewed starter; an existing starter whose document differs from the file is updated and goes back to
- * unreviewed (the content changed, so the medical check no longer applies); anything else is left alone. Never touches
- * a case that is not a starter (a starter slug that collides with one is skipped and logged). A change to the document or
- * to the title, type, difficulty, language or length counts as a change. Never unarchives a starter. Returns how many
- * rows were inserted or updated. Cheap enough to call when the library or the staging list opens. $dir overrides the
+ * The slugs already seeded here. Read straight from the database, not through getSetting() (which keeps its answer for the
+ * whole request): a slug recorded a moment ago by another request must be seen at once. A missing or unreadable value is an
+ * empty list.
+ */
+function trainingCaseSeededSlugs(): array {
+    $list = json_decode((string) dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = ?", [TRAINING_CASES_SEEDED_KEY]), true);
+    if (!is_array($list)) {
+        return [];
+    }
+    // Only strings count: a hand-edited value with anything else in it must not record a slug called "Array".
+    $slugs = array_filter($list, static fn ($s): bool => is_string($s) && $s !== '');
+    return array_values(array_unique($slugs));
+}
+
+function trainingCaseSaveSeededSlugs(array $slugs): void {
+    dbExecute(
+        "INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES (?, ?, NOW(), NOW())
+         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()",
+        [TRAINING_CASES_SEEDED_KEY, json_encode(array_values(array_unique($slugs)), JSON_UNESCAPED_UNICODE)]
+    );
+}
+
+/**
+ * Loads the starter cases shipped in includes/training-cases/*.json into the library, each ONE TIME. A shipped case is
+ * inserted only when its slug has never been seeded on this installation; the slugs that have been are kept as a JSON list in
+ * the settings table (TRAINING_CASES_SEEDED_KEY). It never updates an existing row (an edited starter stays as the admin left
+ * it) and never brings back a deleted one. Per file: slug on the list, skip; slug not on the list but a row with that slug
+ * exists (an installation that already has the starters from v3.505/3.506, or a slug that collides with a case of the
+ * admin's, which is logged), record the slug and leave the row alone; no row, insert it as a starter and record the slug.
+ * Returns how many rows were inserted. Cheap enough to call when the library or the staging list opens. $dir overrides the
  * shipped includes/training-cases folder (used by the tests).
  */
 function trainingCaseSeedStarters(?string $dir = null): int {
-    $changed = 0;
+    $inserted = 0;
+    $changedList = false;
     $dir = $dir === null ? __DIR__ . '/training-cases' : rtrim($dir, '/\\');
+    $seeded = trainingCaseSeededSlugs();
+    $known = array_flip($seeded);
     foreach (glob($dir . '/*.json') ?: [] as $file) {
         $entry = json_decode((string) file_get_contents($file), true);
         $doc = is_array($entry) ? trainingCaseNormalize($entry['document'] ?? null) : null;
@@ -496,50 +522,39 @@ function trainingCaseSeedStarters(?string $dir = null): int {
             error_log('[training-cases] starter file ' . basename($file) . ' is not a valid case');
             continue;
         }
-        $meta = trainingCaseMeta($entry);
-        $json = json_encode($doc, JSON_UNESCAPED_UNICODE);
-        $existing = dbFetchOne(
-            "SELECT id, is_starter, title, type_tag, difficulty, language, est_minutes, document FROM training_cases WHERE slug = ?",
-            [$slug]
-        );
-        if (!$existing) {
-            // False means a concurrent request inserted the slug between the check and here; it seeded it, so move on.
-            if (trainingCaseInsertStarter($slug, $doc, $meta, $json)) {
-                $changed++;
+        if (isset($known[$slug])) {
+            continue;
+        }
+        $existing = dbFetchOne("SELECT id, is_starter FROM training_cases WHERE slug = ?", [$slug]);
+        if ($existing) {
+            if ((int) $existing['is_starter'] !== 1) {
+                error_log('[training-cases] starter ' . $slug . ' (' . basename($file) . ') not loaded: the slug belongs to a case that is not a starter');
             }
-            continue;
+        } elseif (trainingCaseInsertStarter($slug, $doc, trainingCaseMeta($entry), (string) json_encode($doc, JSON_UNESCAPED_UNICODE))) {
+            $inserted++;
         }
-        if ((int) $existing['is_starter'] !== 1) {
-            error_log('[training-cases] starter ' . $slug . ' (' . basename($file) . ') skipped: the slug belongs to a case that is not a starter');
-            continue;
-        }
-        $differs = $existing['document'] !== $json
-            || $existing['title'] !== $doc['title']
-            || $existing['type_tag'] !== $meta['type_tag']
-            || (int) $existing['difficulty'] !== (int) $meta['difficulty']
-            || $existing['language'] !== $meta['language']
-            || (int) $existing['est_minutes'] !== (int) $meta['est_minutes'];
-        if ($differs) {
-            dbExecute(
-                "UPDATE training_cases SET title = ?, type_tag = ?, difficulty = ?, language = ?, est_minutes = ?, document = ?,
-                        format_version = ?, reviewed = 0, reviewed_by = NULL, reviewed_at = NULL WHERE id = ?",
-                [$doc['title'], $meta['type_tag'], $meta['difficulty'], $meta['language'], $meta['est_minutes'], $json, TRAINING_CASE_FORMAT_VERSION, (int) $existing['id']]
-            );
-            $changed++;
-        }
+        // Inserted now, already there, or inserted a moment ago by a concurrent request (insert returned false): in every
+        // case this slug has been dealt with once and is never looked at again.
+        $known[$slug] = true;
+        $seeded[] = $slug;
+        $changedList = true;
     }
-    return $changed;
+    if ($changedList) {
+        trainingCaseSaveSeededSlugs($seeded);
+    }
+    return $inserted;
 }
 
 /**
- * Inserts one starter row as an unreviewed starter. Returns false, without throwing, when the slug already exists
- * (duplicate key: another request seeded it first); any other database error still propagates.
+ * Inserts one starter row (the column default covers the old review columns, which the app no longer uses). Returns false,
+ * without throwing, when the slug already exists (duplicate key: another request seeded it first); any other database error
+ * still propagates.
  */
 function trainingCaseInsertStarter(string $slug, array $doc, array $meta, string $json): bool {
     try {
         dbInsert(
-            "INSERT INTO training_cases (slug, title, type_tag, difficulty, language, est_minutes, document, format_version, is_starter, reviewed)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0)",
+            "INSERT INTO training_cases (slug, title, type_tag, difficulty, language, est_minutes, document, format_version, is_starter)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)",
             [$slug, $doc['title'], $meta['type_tag'], $meta['difficulty'], $meta['language'], $meta['est_minutes'], $json, TRAINING_CASE_FORMAT_VERSION]
         );
         return true;
@@ -610,11 +625,10 @@ function trainingCaseEditorModel($raw): array {
 }
 
 /**
- * Picks one case from the library for "random": not archived, matching the filters (type, difficulty, language), reviewed
- * unless $allowUnreviewed. Cases already staged in this scenario ($excludeCaseIds) are avoided while others remain; when
+ * Picks one case from the library for "random": not archived, matching the filters (type, difficulty, language). Cases already staged in this scenario ($excludeCaseIds) are avoided while others remain; when
  * nothing else is left the whole pool is used. Returns a trainingCaseLoad() row, or null when the pool is empty.
  */
-function trainingCaseDraw(array $filter, array $excludeCaseIds = [], bool $allowUnreviewed = false): ?array {
+function trainingCaseDraw(array $filter, array $excludeCaseIds = []): ?array {
     $where = ['archived_at IS NULL'];
     $args = [];
     if (!empty($filter['type'])) {
@@ -628,9 +642,6 @@ function trainingCaseDraw(array $filter, array $excludeCaseIds = [], bool $allow
     if (!empty($filter['language'])) {
         $where[] = 'language = ?';
         $args[] = (string) $filter['language'];
-    }
-    if (!$allowUnreviewed) {
-        $where[] = 'reviewed = 1';
     }
     $ids = array_map('intval', array_column(dbFetchAll("SELECT id FROM training_cases WHERE " . implode(' AND ', $where), $args), 'id'));
     if (!$ids) {

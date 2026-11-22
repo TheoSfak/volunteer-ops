@@ -10,9 +10,22 @@ final class TrainingCaseStarterTest extends TestCase
     private const STARTER_COUNT = 24;
     private const ORIGINAL_STARTERS = ['starter-chest-pain', 'starter-heat-collapse', 'starter-unresponsive-adult'];
 
+    private const SEEDED_KEY = 'training_cases_seeded_slugs';
+
     protected function setUp(): void
     {
         db()->beginTransaction();
+        // The list of what was seeded lives in the settings table; start each test from "never seeded" (rolled back with the rest).
+        dbExecute("DELETE FROM settings WHERE setting_key = ?", [self::SEEDED_KEY]);
+    }
+
+    /** @return list<string> the slugs the seeder has recorded, sorted */
+    private function seededSlugs(): array
+    {
+        $list = json_decode((string) dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = ?", [self::SEEDED_KEY]), true);
+        $this->assertIsArray($list, 'the seeded slugs are stored as a JSON list');
+        sort($list);
+        return array_values($list);
     }
 
     protected function tearDown(): void
@@ -85,7 +98,8 @@ final class TrainingCaseStarterTest extends TestCase
     public function test_every_starter_is_listed_in_the_sources_note_and_says_what_it_is_based_on(): void
     {
         $note = (string) file_get_contents(__DIR__ . '/../docs/training-cases-sources.md');
-        $this->assertStringContainsString('None of them has been reviewed', $note, 'the note says plainly that no case is medically reviewed');
+        $this->assertStringContainsString('reviewed by a doctor offline', $note, 'the note says the doctor reviewed the shipped cases offline');
+        $this->assertStringNotContainsString('None of them has been reviewed', $note, 'the old claim that no case is reviewed is gone');
         foreach (glob(__DIR__ . '/../includes/training-cases/*.json') as $file) {
             $entry = json_decode((string) file_get_contents($file), true);
             if (in_array($entry['slug'], self::ORIGINAL_STARTERS, true)) {
@@ -158,17 +172,18 @@ final class TrainingCaseStarterTest extends TestCase
         $this->assertStringNotContainsString('νυσταγμέν', (string) json_encode($entry['document'], JSON_UNESCAPED_UNICODE));
     }
 
-    public function test_seeding_is_idempotent_and_marks_starters_unreviewed(): void
+    public function test_seeding_inserts_every_shipped_case_once_and_records_the_slugs(): void
     {
         $first = trainingCaseSeedStarters();
         $this->assertSame(self::STARTER_COUNT, $first);
         $this->assertSame(0, trainingCaseSeedStarters(), 'a second run changes nothing');
         foreach ($this->starterSlugs() as $slug) {
-            $row = dbFetchOne("SELECT is_starter, reviewed FROM training_cases WHERE slug = ?", [$slug]);
+            $row = dbFetchOne("SELECT is_starter, archived_at FROM training_cases WHERE slug = ?", [$slug]);
             $this->assertNotNull($row, "$slug is in the library");
             $this->assertSame(1, (int) $row['is_starter'], "$slug is a starter");
-            $this->assertSame(0, (int) $row['reviewed'], "$slug starts unreviewed");
+            $this->assertNull($row['archived_at'], "$slug is an ordinary active case");
         }
+        $this->assertSame($this->starterSlugs(), $this->seededSlugs(), 'the slugs that were seeded are remembered');
     }
 
     public function test_a_starter_insert_that_loses_the_race_does_not_throw(): void
@@ -212,22 +227,77 @@ final class TrainingCaseStarterTest extends TestCase
         $this->assertSame($before, $row['document']);
     }
 
-    public function test_a_metadata_only_change_in_a_starter_file_propagates(): void
+    public function test_an_edited_starter_is_kept_as_the_admin_left_it_when_seeding_runs_again(): void
     {
         trainingCaseSeedStarters();
         $slug = $this->starterSlugs()[0];
         $id = (int) dbFetchValue("SELECT id FROM training_cases WHERE slug = ?", [$slug]);
-        $original = dbFetchOne("SELECT type_tag, difficulty, est_minutes, title FROM training_cases WHERE id = ?", [$id]);
-        dbExecute("UPDATE training_cases SET reviewed = 1, type_tag = 'other', difficulty = 3, est_minutes = 99, title = 'old title' WHERE id = ?", [$id]);
+        $row = trainingCaseLoad($id);
+        $doc = $row['doc'];
+        $doc['title'] = 'Επεξεργασμένο εκκίνησης';
+        $doc['story'] = 'Η ιστορία που άφησε ο διαχειριστής.';
 
-        $this->assertSame(1, trainingCaseSeedStarters(), 'the file metadata wins again');
-        $row = dbFetchOne("SELECT type_tag, difficulty, est_minutes, title, reviewed FROM training_cases WHERE id = ?", [$id]);
-        $this->assertSame($original['type_tag'], $row['type_tag']);
-        $this->assertSame((int) $original['difficulty'], (int) $row['difficulty']);
-        $this->assertSame((int) $original['est_minutes'], (int) $row['est_minutes']);
-        $this->assertSame($original['title'], $row['title']);
-        $this->assertSame(0, (int) $row['reviewed'], 'a changed starter goes back to unreviewed');
-        $this->assertSame(0, trainingCaseSeedStarters());
+        $saved = trainingCaseSave($id, ['type_tag' => 'other', 'difficulty' => 3, 'language' => 'el', 'est_minutes' => 17], $doc, TrainingFixtures::user());
+        $this->assertTrue($saved['ok'], 'a starter is edited like any other case');
+
+        $this->assertSame(0, trainingCaseSeedStarters(), 'the shipped file does not overwrite the edit');
+        $after = trainingCaseLoad($id);
+        $this->assertSame('Επεξεργασμένο εκκίνησης', $after['title']);
+        $this->assertSame('Η ιστορία που άφησε ο διαχειριστής.', $after['doc']['story']);
+        $this->assertSame('other', $after['type_tag']);
+        $this->assertSame(17, (int) $after['est_minutes']);
+        $this->assertSame(1, (int) $after['is_starter'], 'it is still the case that came with the app');
+    }
+
+    public function test_a_starter_that_was_deleted_is_not_inserted_again(): void
+    {
+        trainingCaseSeedStarters();
+        $slug = $this->starterSlugs()[0];
+        $this->assertTrue(trainingCaseDelete((int) dbFetchValue("SELECT id FROM training_cases WHERE slug = ?", [$slug])));
+        $this->assertSame(0, trainingCaseSeedStarters(), 'a deleted starter is not resurrected');
+        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM training_cases WHERE slug = ?", [$slug]));
+        $this->assertSame(self::STARTER_COUNT - 1, (int) dbFetchValue("SELECT COUNT(*) FROM training_cases WHERE is_starter = 1"));
+    }
+
+    public function test_an_installation_that_already_has_the_starters_gets_the_slugs_recorded_and_the_rows_untouched(): void
+    {
+        trainingCaseSeedStarters();
+        $slug = $this->starterSlugs()[0];
+        // The state of a site that was updated from v3.505/3.506: the rows are there, the setting is not.
+        dbExecute("DELETE FROM settings WHERE setting_key = ?", [self::SEEDED_KEY]);
+        dbExecute("UPDATE training_cases SET title = 'Άλλαξε από διαχειριστή', difficulty = 3 WHERE slug = ?", [$slug]);
+
+        $this->assertSame(0, trainingCaseSeedStarters(), 'nothing is inserted or updated');
+        $row = dbFetchOne("SELECT title, difficulty FROM training_cases WHERE slug = ?", [$slug]);
+        $this->assertSame('Άλλαξε από διαχειριστή', $row['title']);
+        $this->assertSame(3, (int) $row['difficulty']);
+        $this->assertSame($this->starterSlugs(), $this->seededSlugs(), 'every shipped slug is now on the list');
+        $this->assertSame(self::STARTER_COUNT, (int) dbFetchValue("SELECT COUNT(*) FROM training_cases WHERE is_starter = 1"));
+    }
+
+    public function test_a_new_shipped_slug_is_inserted_on_such_an_installation_and_a_known_one_is_not_touched(): void
+    {
+        trainingCaseSeedStarters();
+        $known = $this->firstStarterEntry();
+        dbExecute("DELETE FROM settings WHERE setting_key = ?", [self::SEEDED_KEY]);
+        dbExecute("UPDATE training_cases SET title = 'Δικό μου' WHERE slug = ?", [$known['slug']]);
+
+        $dir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'tc-starters-' . bin2hex(random_bytes(4));
+        mkdir($dir);
+        $new = $known;
+        $new['slug'] = 'brand-new-' . bin2hex(random_bytes(4));
+        file_put_contents($dir . '/known.json', json_encode($known, JSON_UNESCAPED_UNICODE));
+        file_put_contents($dir . '/new.json', json_encode($new, JSON_UNESCAPED_UNICODE));
+        try {
+            $this->assertSame(1, trainingCaseSeedStarters($dir), 'only the new slug is inserted');
+            $this->assertSame(0, trainingCaseSeedStarters($dir), 'and only once');
+        } finally {
+            array_map('unlink', glob($dir . '/*.json'));
+            rmdir($dir);
+        }
+        $this->assertSame(1, (int) dbFetchValue("SELECT COUNT(*) FROM training_cases WHERE slug = ? AND is_starter = 1", [$new['slug']]));
+        $this->assertSame('Δικό μου', dbFetchValue("SELECT title FROM training_cases WHERE slug = ?", [$known['slug']]));
+        $this->assertEqualsCanonicalizing([$known['slug'], $new['slug']], $this->seededSlugs());
     }
 
     public function test_an_invalid_starter_file_is_skipped_without_stopping_the_others(): void
@@ -261,62 +331,45 @@ final class TrainingCaseStarterTest extends TestCase
         $this->assertStringContainsString('b-notjson.json', $logged);
     }
 
-    public function test_seeding_resets_review_when_a_starter_changes_but_not_otherwise(): void
-    {
-        trainingCaseSeedStarters();
-        $id = (int) dbFetchValue("SELECT id FROM training_cases WHERE is_starter = 1 ORDER BY id LIMIT 1");
-        dbExecute("UPDATE training_cases SET reviewed = 1 WHERE id = ?", [$id]);
-        $this->assertSame(0, trainingCaseSeedStarters());
-        $this->assertSame(1, (int) dbFetchValue("SELECT reviewed FROM training_cases WHERE id = ?", [$id]), 'unchanged content keeps its review');
-        dbExecute("UPDATE training_cases SET document = REPLACE(document, 'story', 'stor_') WHERE id = ?", [$id]);
-        $this->assertSame(1, trainingCaseSeedStarters(), 'the file wins again');
-        $this->assertSame(0, (int) dbFetchValue("SELECT reviewed FROM training_cases WHERE id = ?", [$id]));
-    }
-
-    public function test_a_starter_is_never_archived_by_seeding_and_user_cases_are_left_alone(): void
+    public function test_an_archived_starter_stays_archived_and_user_cases_are_left_alone(): void
     {
         $user = TrainingFixtures::user();
         $mine = trainingCaseSave(null, [], $this->firstStarterEntry()['document'], $user);
         trainingCaseSeedStarters();
         $this->assertSame(0, (int) dbFetchValue("SELECT is_starter FROM training_cases WHERE id = ?", [$mine['id']]));
 
-        // An archived starter stays archived, and an unchanged archived starter is not touched.
+        // An archived starter stays archived, whatever the seeder does afterwards.
         $id = (int) dbFetchValue("SELECT id FROM training_cases WHERE slug = ?", [$this->starterSlugs()[0]]);
         dbExecute("UPDATE training_cases SET archived_at = NOW() WHERE id = ?", [$id]);
         $this->assertSame(0, trainingCaseSeedStarters());
         $this->assertNotNull(dbFetchValue("SELECT archived_at FROM training_cases WHERE id = ?", [$id]), 'seeding does not unarchive');
-        // Even when the file wins a content change, the archive stays.
-        dbExecute("UPDATE training_cases SET title = 'changed' WHERE id = ?", [$id]);
-        $this->assertSame(1, trainingCaseSeedStarters());
-        $this->assertNotNull(dbFetchValue("SELECT archived_at FROM training_cases WHERE id = ?", [$id]), 'an updated starter stays archived');
     }
 
-    public function test_draw_skips_unreviewed_unless_allowed_and_prefers_fresh_cases(): void
+    public function test_draw_does_not_filter_on_review_and_prefers_fresh_cases(): void
     {
         trainingCaseSeedStarters();
-        $this->assertNull(trainingCaseDraw([], [], false), 'every starter is unreviewed');
-        $any = trainingCaseDraw([], [], true);
-        $this->assertNotNull($any);
+        $any = trainingCaseDraw([]);
+        $this->assertNotNull($any, 'a draw over the freshly seeded starters needs no flag');
+        $this->assertSame(2, (new ReflectionFunction('trainingCaseDraw'))->getNumberOfParameters(), 'the allow-unreviewed switch is gone');
 
         $ids = array_map('intval', array_column(dbFetchAll("SELECT id FROM training_cases WHERE is_starter = 1"), 'id'));
         $others = array_slice(array_diff($ids, [(int) $any['id']]), 0, 2);
         for ($i = 0; $i < 20; $i++) {
-            $draw = trainingCaseDraw([], $others, true);
+            $draw = trainingCaseDraw([], $others);
             $this->assertNotContains((int) $draw['id'], $others, 'cases already staged are avoided while others remain');
         }
         // When everything is excluded the draw falls back to the whole pool rather than failing.
-        $this->assertNotNull(trainingCaseDraw([], $ids, true));
+        $this->assertNotNull(trainingCaseDraw([], $ids));
     }
 
     public function test_draw_honours_the_filters_and_ignores_archived_cases(): void
     {
         trainingCaseSeedStarters();
-        dbExecute("UPDATE training_cases SET reviewed = 1");
-        $this->assertNull(trainingCaseDraw(['language' => 'en'], [], false));
+        $this->assertNull(trainingCaseDraw(['language' => 'en']));
         $row = dbFetchOne("SELECT id, type_tag FROM training_cases WHERE is_starter = 1 LIMIT 1");
-        $draw = trainingCaseDraw(['type' => $row['type_tag']], [], false);
+        $draw = trainingCaseDraw(['type' => $row['type_tag']]);
         $this->assertSame($row['type_tag'], $draw['type_tag']);
         dbExecute("UPDATE training_cases SET archived_at = NOW()");
-        $this->assertNull(trainingCaseDraw([], [], false));
+        $this->assertNull(trainingCaseDraw([]));
     }
 }

@@ -6346,7 +6346,6 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                     <select class="form-select form-select-sm d-none" id="dispatchCaseType" style="max-width:150px;" aria-label="<?= t('case.picker_any_type') ?>"></select>
                     <select class="form-select form-select-sm d-none" id="dispatchCaseDifficulty" style="max-width:150px;" aria-label="<?= t('case.picker_any_difficulty') ?>"></select>
                     <select class="form-select form-select-sm d-none" id="dispatchCaseLanguage" style="max-width:130px;" aria-label="<?= t('case.picker_any_language') ?>"></select>
-                    <label class="small d-none" id="dispatchCaseUnrevWrap"><input type="checkbox" id="dispatchCaseUnrev"> <?= t('case.picker_include_unreviewed') ?></label>
                     <span class="small fw-semibold text-primary d-none" id="dispatchCaseDrawn" role="status"></span>
                     <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="dispatchCaseRedraw"><i class="bi bi-shuffle me-1"></i><?= t('case.picker_redraw') ?></button>
                     <input type="text" id="dispatchCaseBriefing" class="form-control form-control-sm d-none" style="max-width:260px;" maxlength="300" placeholder="<?= t('case.picker_briefing') ?>">
@@ -29198,8 +29197,6 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
     const typeSel = document.getElementById('dispatchCaseType');
     const diffSel = document.getElementById('dispatchCaseDifficulty');
     const langSel = document.getElementById('dispatchCaseLanguage');
-    const unrev = document.getElementById('dispatchCaseUnrev');
-    const unrevWrap = document.getElementById('dispatchCaseUnrevWrap');
     const drawnEl = document.getElementById('dispatchCaseDrawn');
     const redrawBtn = document.getElementById('dispatchCaseRedraw');
     const briefing = document.getElementById('dispatchCaseBriefing');
@@ -29212,14 +29209,13 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
     let loading = false;
     let errorText = '';
     let drawToken = 0;
-    let state = {mode: null, caseId: '', reviewed: true, filter: {}};
+    let state = {mode: null, caseId: '', filter: {}};
 
     function show(el, on) { el.classList.toggle('d-none', !on); }
 
     function renderWarn() {
         const parts = [];
         if (errorText) parts.push(errorText);
-        if (state.mode && state.caseId && state.reviewed === false) parts.push('⚠ ' + t('case.picker_unreviewed_warning'));
         warn.textContent = parts.join(' ');
         show(warn, parts.length > 0);
     }
@@ -29229,7 +29225,7 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
         const random = state.mode === 'random';
         sendBtn.classList.toggle('d-none', wanted);
         show(briefing, wanted);
-        [typeSel, diffSel, langSel, unrevWrap, redrawBtn].forEach(el => show(el, random));
+        [typeSel, diffSel, langSel, redrawBtn].forEach(el => show(el, random));
         show(drawnEl, random && !!state.caseId);
         renderWarn();
         syncSpotButton();
@@ -29253,7 +29249,7 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
     function fillOptions() {
         while (select.options.length > 1) select.remove(1);
         select.add(new Option(t('case.picker_random'), 'random'));
-        cases.forEach(c => select.add(new Option(TC.caseOptionLabel(c, t), String(c.id))));
+        cases.forEach(c => select.add(new Option(TC.caseOptionLabel(c), String(c.id))));
         // A falsy value (a difficulty of 0, an empty tag) would make an option with a blank label: it is left out.
         const distinct = key => Array.from(new Set(cases.map(c => c[key]).filter(v => v !== '' && v != null && v !== 0 && v !== '0'))).sort();
         fillFilter(typeSel, 'case.picker_any_type', distinct('type'), v => v);
@@ -29283,16 +29279,16 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
         if (typeSel.value) filter.type = typeSel.value;
         if (diffSel.value) filter.difficulty = diffSel.value;
         if (langSel.value) filter.language = langSel.value;
-        state = {mode: 'random', caseId: '', reviewed: true, filter: filter};
+        state = {mode: 'random', caseId: '', filter: filter};
         errorText = '';
         redrawBtn.disabled = true;
         syncView();
-        window.wrScenario.caseDraw(unrev.checked ? Object.assign({allow_unreviewed: '1'}, filter) : filter).then(res => {
+        window.wrScenario.caseDraw(filter).then(res => {
             if (token !== drawToken) return;
             redrawBtn.disabled = false;
             if (res && res.ok && res.case) {
-                state = {mode: 'random', caseId: String(res.case.id), reviewed: !!res.case.reviewed, filter: filter};
-                drawnEl.textContent = t('case.picker_drawn', {title: TC.caseOptionLabel(res.case, t)});
+                state = {mode: 'random', caseId: String(res.case.id), filter: filter};
+                drawnEl.textContent = t('case.picker_drawn', {title: TC.caseOptionLabel(res.case)});
             } else {
                 errorText = (res && res.error) || t('case.picker_draw_failed');
             }
@@ -29307,17 +29303,16 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
         redrawBtn.disabled = false;
         if (value === 'random') { draw(); return; }
         if (value === '') {
-            state = {mode: null, caseId: '', reviewed: true, filter: {}};
+            state = {mode: null, caseId: '', filter: {}};
             if (window.wrDispatchCaseCancelPin) window.wrDispatchCaseCancelPin();
         } else {
-            const chosen = (cases || []).find(c => String(c.id) === value);
-            state = {mode: 'chosen', caseId: value, reviewed: !!(chosen && chosen.reviewed), filter: {}};
+            state = {mode: 'chosen', caseId: value, filter: {}};
         }
         syncView();
     }
 
     select.addEventListener('change', onSelect);
-    [typeSel, diffSel, langSel, unrev].forEach(el => el.addEventListener('change', draw));
+    [typeSel, diffSel, langSel].forEach(el => el.addEventListener('change', draw));
     redrawBtn.addEventListener('click', draw);
 
     window.wrDispatchCaseWanted = () => state.mode !== null;
@@ -29337,7 +29332,6 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
     modalEl.addEventListener('hidden.bs.modal', () => {
         select.value = '';
         [typeSel, diffSel, langSel].forEach(el => { el.value = ''; });
-        unrev.checked = false;
         briefing.value = '';
         onSelect();
     });

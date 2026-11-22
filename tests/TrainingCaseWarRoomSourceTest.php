@@ -115,7 +115,7 @@ final class TrainingCaseWarRoomSourceTest extends TestCase
 
     public function test_the_staging_picker_is_for_the_system_admin_in_a_drill_and_a_case_is_only_ever_staged(): void
     {
-        foreach (['dispatchCaseSelect', 'dispatchCaseRedraw', 'dispatchCaseUnrev', 'dispatchCaseBriefing', 'dispatchCaseWarn', 'wrDispatchCaseFields'] as $needle) {
+        foreach (['dispatchCaseSelect', 'dispatchCaseRedraw', 'dispatchCaseBriefing', 'dispatchCaseWarn', 'wrDispatchCaseFields'] as $needle) {
             $this->assertStringContainsString($needle, $this->page, $needle);
         }
         $at = strpos($this->page, 'id="dispatchCaseSelect"');
@@ -127,8 +127,10 @@ final class TrainingCaseWarRoomSourceTest extends TestCase
         $this->assertStringContainsString("alert(t('case.err_pick_first'))", $this->page);
         // «Αποστολή» is hidden while a case is chosen: a case is staged only.
         $this->assertStringContainsString("sendBtn.classList.toggle('d-none', wanted)", $this->page);
-        // An unreviewed case is warned about in the picker.
-        $this->assertStringContainsString("t('case.picker_unreviewed_warning')", $this->page);
+        // The picker has no review checkbox and no review warning.
+        foreach (['dispatchCaseUnrev', 'dispatchCaseUnrevWrap', 'case.picker_unreviewed_warning', 'case.picker_include_unreviewed', 'allow_unreviewed'] as $gone) {
+            $this->assertStringNotContainsString($gone, $this->page, $gone);
+        }
     }
 
     public function test_the_page_translator_inserts_a_value_literally_so_a_case_title_with_a_dollar_sign_is_not_mangled(): void
@@ -149,8 +151,11 @@ final class TrainingCaseWarRoomSourceTest extends TestCase
     public function test_the_plan_card_names_the_case_and_asks_the_endpoint_for_the_library(): void
     {
         $js = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../assets/js/war-room-scenario.js'));
-        foreach (['case_list', 'case_draw', 'case_title', 'case.plan_title', 'bi-clipboard2-pulse-fill', 'case_reviewed', 'case.badge_unreviewed', 'caseList: caseList', 'caseDraw: caseDraw'] as $needle) {
+        foreach (['case_list', 'case_draw', 'case_title', 'case.plan_title', 'bi-clipboard2-pulse-fill', 'caseList: caseList', 'caseDraw: caseDraw'] as $needle) {
             $this->assertStringContainsString($needle, $js, $needle);
+        }
+        foreach (['case_reviewed', 'case.badge_unreviewed', 'allow_unreviewed'] as $gone) {
+            $this->assertStringNotContainsString($gone, $js, $gone);
         }
         // The ghost's tooltip is read by Leaflet as markup: the case title must be escaped on the way.
         $this->assertStringContainsString("const tip = esc(", $js);

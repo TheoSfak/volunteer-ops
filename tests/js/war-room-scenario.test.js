@@ -1442,48 +1442,48 @@ test('switching the passive hint off hides an already-showing nudge at once, not
 });
 
 const caseItem = (id, over = {}) => Object.assign({}, TEAM, {
-    id, kind: 'dispatch', type: 'point', label: 'Περιστατικό', geo: [[35.3, 25.1]], case_title: 'Πνιγμός <b>', case_briefing: 'Ακούστηκε φωνή', case_reviewed: true,
+    id, kind: 'dispatch', type: 'point', label: 'Περιστατικό', geo: [[35.3, 25.1]], case_title: 'Πνιγμός <b>', case_briefing: 'Ακούστηκε φωνή',
 }, over);
 
-test('a staged case is named by the case with its own icon, escaped, and an unreviewed one carries the badge', async () => {
-    const {body} = await load(plan([caseItem(1), caseItem(2, {case_title: 'Άλλο', case_reviewed: false}), Object.assign({}, TEAM, {id: 3, kind: 'dispatch', type: 'point', label: 'Σημείο Α', geo: [[35, 25]], case_title: null})]));
+test('a staged case is named by the case with its own icon, escaped, and carries no review badge', async () => {
+    const {body} = await load(plan([caseItem(1), caseItem(2, {case_title: 'Άλλο'}), Object.assign({}, TEAM, {id: 3, kind: 'dispatch', type: 'point', label: 'Σημείο Α', geo: [[35, 25]], case_title: null})]));
     const html = body.innerHTML;
     assert.match(html, /case\.plan_title\{"title":"Πνιγμός &lt;b/, 'the title goes through the page\'s escapeHtml');
     assert.doesNotMatch(html, /Πνιγμός <b>/);
     assert.match(html, /bi-clipboard2-pulse-fill/);
-    assert.equal((html.match(/case\.badge_unreviewed/g) || []).length, 1, 'only the case that has not been reviewed');
+    assert.doesNotMatch(html, /badge_unreviewed|bi-exclamation-triangle-fill/, 'there is no review badge any more');
     assert.match(html, /scenario\.kind_point/, 'an ordinary order is unchanged');
 });
 
-test('a case with an empty title is still a case: its icon, the generic word and the badge', async () => {
-    const {body} = await load(plan([caseItem(1, {case_title: '', case_reviewed: false})]));
+test('a case with an empty title is still a case: its icon and the generic word', async () => {
+    const {body} = await load(plan([caseItem(1, {case_title: ''})]));
     const html = body.innerHTML;
     assert.match(html, /bi-clipboard2-pulse-fill/);
     assert.match(html, /case\.default_label/);
     assert.doesNotMatch(html, /case\.plan_title/);
-    assert.match(html, /case\.badge_unreviewed/);
 });
 
-test('a case staged before the review flag existed (no case_reviewed) shows no badge', async () => {
-    const {body} = await load(plan([caseItem(1, {case_reviewed: undefined}), caseItem(2, {case_reviewed: null})]));
+test('an item that still carries the old case_reviewed field (false or true) draws the same card and no badge', async () => {
+    const {body} = await load(plan([caseItem(1, {case_reviewed: false}), caseItem(2, {case_reviewed: true})]));
+    assert.match(body.innerHTML, /bi-clipboard2-pulse-fill/);
     assert.doesNotMatch(body.innerHTML, /case\.badge_unreviewed/);
 });
 
 test('the case picker asks case_list and case_draw through the plan endpoint and hands back the answer', async () => {
     const {api, calls} = await load(plan([]), {
-        case_list: {ok: true, cases: [{id: 5, title: 'T', type: 'airway', difficulty: 1, language: 'el', reviewed: false}]},
-        case_draw: {ok: true, case: {id: 5, title: 'T', reviewed: false}},
+        case_list: {ok: true, cases: [{id: 5, title: 'T', type: 'airway', difficulty: 1, language: 'el'}]},
+        case_draw: {ok: true, case: {id: 5, title: 'T'}},
     });
     const list = await api.caseList();
     assert.equal(list.cases[0].id, 5);
-    const drawn = await api.caseDraw({type: 'airway', allow_unreviewed: '1'});
+    const drawn = await api.caseDraw({type: 'airway'});
     assert.equal(drawn.case.id, 5);
     const posts = calls.filter(c => c[0] === 'fetch' && c[2]).map(c => new URLSearchParams(c[2]));
     const listPost = posts.find(p => p.get('action') === 'case_list');
     const drawPost = posts.find(p => p.get('action') === 'case_draw');
     assert.equal(listPost.get('csrf_token'), 'tok');
     assert.equal(drawPost.get('type'), 'airway');
-    assert.equal(drawPost.get('allow_unreviewed'), '1');
+    assert.equal(drawPost.get('allow_unreviewed'), null, 'there is no review switch to send');
     assert.equal(drawPost.get('mission_id'), '83');
 });
 
