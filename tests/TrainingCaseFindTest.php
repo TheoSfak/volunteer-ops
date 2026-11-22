@@ -420,6 +420,49 @@ final class TrainingCaseFindTest extends TestCase
         $this->assertStringContainsString("!\$caseCards[\$dispatchId]['hidden']", $block);
     }
 
+    /** The order list the poll gives $userId, through the real loader, keyed by dispatch id. */
+    private function pollFor(int $userId, bool $command): array
+    {
+        $out = [];
+        foreach (loadMissionDispatchesForUser($this->drill['mission'], $userId, $command, true) as $d) {
+            $out[$d['id']] = $d;
+        }
+        return $out;
+    }
+
+    public function test_the_poll_keeps_the_spot_from_a_volunteer_who_may_not_play_and_gives_it_to_the_audience(): void
+    {
+        // A volunteer of another team who sees the team A order (command sees every order) neither gets the spot nor may play.
+        $foreign = $this->pollFor($this->stranger, true)[$this->areaDispatch]['case'];
+        $this->assertNull($foreign['spot'], 'the hidden victim of another team\'s order is not sent to this phone');
+        $this->assertFalse($foreign['can_play']);
+        $this->assertFalse($foreign['available']);
+        $this->assertTrue($foreign['hidden']);
+        // The audience gets the spot (the phone's own GPS check needs it).
+        $mine = $this->pollFor($this->member, false)[$this->areaDispatch]['case'];
+        $this->assertTrue($mine['can_play']);
+        $this->assertEqualsWithDelta(35.405, $mine['spot']['lat'], 0.000001);
+        $this->assertEqualsWithDelta(25.205, $mine['spot']['lng'], 0.000001);
+        $this->assertSame($this->areaPlacement, $mine['placement_id']);
+        // A volunteer who is not an approved participant gets neither, whatever their team.
+        $notApproved = loadMissionDispatchesForUser($this->drill['mission'], $this->member, false, false)[0]['case'];
+        $this->assertNull($notApproved['spot']);
+        $this->assertFalse($notApproved['can_play']);
+    }
+
+    public function test_a_hidden_case_opens_only_on_a_find_and_a_point_case_on_arrival(): void
+    {
+        $this->arrive($this->areaDispatch, $this->teamId);
+        $this->arrive($this->pointDispatch, $this->teamId);
+        $poll = $this->pollFor($this->member, false);
+        $this->assertFalse($poll[$this->areaDispatch]['case']['available'], 'arriving does not open a hidden victim');
+        $this->assertTrue($poll[$this->pointDispatch]['case']['available'], 'a point order opens on arrival, as before');
+        $this->assertTrue(trainingCaseRecordFound($this->areaPlacement, $this->member, 35.405, 25.205, 5.0)['ok']);
+        $after = $this->pollFor($this->mate, false)[$this->areaDispatch]['case'];
+        $this->assertTrue($after['found']);
+        $this->assertTrue($after['available'], 'the find opens it for the whole team');
+    }
+
     public function test_the_overview_lists_who_found_each_case_and_when(): void
     {
         trainingCaseRecordFound($this->areaPlacement, $this->member, 35.405, 25.205, 5.0);
