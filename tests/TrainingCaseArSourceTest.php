@@ -66,12 +66,43 @@ final class TrainingCaseArSourceTest extends TestCase
 
     public function test_the_case_player_sits_above_the_ar_screen(): void
     {
+        // 2200 only while the AR screen is open; 2000 (as before v3.507.0) otherwise, so the SOS, return-to-base and
+        // restricted-area overlays (2000) and their mute/close buttons (2001) stay visible over a case outside the AR.
         preg_match('/\.wr-ar \{[^}]*z-index: (\d+);/', $this->page, $ar);
-        preg_match('/id = \'voCaseOverlay\'.*?z-index:(\d+);/s', $this->player, $player);
+        preg_match('/const overlayZ = [^;]*;/', $this->player, $zLine);
         $this->assertNotEmpty($ar, 'the AR layer rule');
-        $this->assertNotEmpty($player, 'the player overlay rule');
-        $this->assertGreaterThan((int) $ar[1], (int) $player[1], 'a case found with the AR open must show over it');
-        $this->assertLessThan(100001, (int) $player[1], 'the find toast stays above the player');
+        $this->assertNotEmpty($zLine, 'the player overlay z-index choice');
+        $this->assertStringContainsString('wr-ar-open', $zLine[0]);
+        $this->assertStringContainsString('2200', $zLine[0]);
+        $this->assertStringContainsString('2000', $zLine[0]);
+        $this->assertStringContainsString('z-index:\' + overlayZ', $this->player);
+        preg_match('/wr-ar-open\'\) \? (\d+) : (\d+)/', $zLine[0], $z);
+        $this->assertNotEmpty($z, 'the AR-open value then the default value');
+        preg_match('/#restrictedAreaOverlay \{[^}]*z-index: (\d+);/', $this->page, $alarm);
+        $this->assertNotEmpty($alarm, 'the alarm overlay rule');
+        $this->assertSame(2200, (int) $z[1]);
+        $this->assertSame(2000, (int) $z[2]);
+        $this->assertGreaterThan((int) $ar[1], (int) $z[1], 'a case found with the AR open must show over it');
+        $this->assertFalse((int) $z[2] > (int) $alarm[1], 'outside the AR the player is not above the alarm overlays');
+        $this->assertLessThan(100001, (int) $z[1], 'the find toast stays above the player');
+    }
+
+    public function test_a_find_on_this_phone_reaches_victimView_through_one_cached_read(): void
+    {
+        $this->assertStringContainsString('function arCaseFoundHere(', $this->ar);
+        $this->assertStringContainsString('VoCaseFind.victimView(m.case, me, arCaseFoundHere(m.case))', $this->ar);
+        $this->assertStringContainsString('arCaseFoundHere(m.case)', $this->ar);
+        // the storage read lives only inside the helper, not once per frame at its callers
+        $this->assertSame(1, substr_count($this->ar, 'wrCaseFoundLocally('));
+    }
+
+    public function test_the_near_state_is_reset_before_the_early_return_for_no_fix(): void
+    {
+        $reset = strpos($this->ar, 'arState.caseNear = false;');
+        $early = strpos($this->ar, '!me || !poseFresh');
+        $this->assertNotFalse($reset);
+        $this->assertNotFalse($early);
+        $this->assertLessThan($early, $reset, 'no fix or a stale compass must not keep the near frame lit');
     }
 
     public function test_escape_leaves_the_ar_open_while_the_case_player_is_up(): void

@@ -185,6 +185,19 @@ test('victimView: a hidden victim is "close" from 50 m (with the accuracy credit
     assert.deepEqual(Object.keys(F.victimView(hidden(), fixAt(300))), ['mode']);
 });
 
+test('victimView: a find on this phone ends the hidden-victim cue and marks a shown victim found', () => {
+    const hidden = (over) => card(Object.assign({hidden: true}, over || {}));
+    assert.deepEqual(F.victimView(hidden(), fixAt(30), true), {mode: 'none'}, 'found here, the poll has not caught up');
+    assert.deepEqual(F.victimView(hidden(), fixAt(30), false), {mode: 'close'});
+    assert.deepEqual(F.victimView(hidden(), fixAt(30), undefined), {mode: 'close'});
+    assert.deepEqual(F.victimView(hidden(), fixAt(30)), {mode: 'close'});
+    assert.deepEqual(Object.keys(F.victimView(hidden(), fixAt(30), true)), ['mode']);
+    assert.deepEqual(Object.keys(F.victimView(hidden(), fixAt(300), false)), ['mode']);
+    assert.deepEqual(F.victimView(card(), fixAt(400), true), {mode: 'marker', found: true});
+    assert.deepEqual(F.victimView(card(), fixAt(400), false), {mode: 'marker', found: false});
+    assert.deepEqual(F.victimView(card(), fixAt(400), undefined), {mode: 'marker', found: false});
+});
+
 test('canOpen: the case may be opened from the AR when it is playable, open to my team (or found on this phone) and not finished', () => {
     assert.equal(F.canOpen(card({available: true}), false), true);
     assert.equal(F.canOpen(card(), true), true, 'a find this phone has reported before the poll caught up');

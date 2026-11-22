@@ -12,7 +12,7 @@ Only for an order that carries a training case (`d.case`, which the poll already
 
 1. **Point order with a case (a known victim).** The order's place and the victim's spot are the same place. The big green beacon becomes a **red victim beacon**: same pillar, ring and label card, red, with the title «Θύμα», the distance and Δz, and the walking time. The order's triangle on the compass tape and its dot on the radar are red too. Nothing is added beside it: one place, one marker.
 2. **Area order with a hidden victim.** The AR **never draws the spot, and shows no distance or direction to it**. The area is drawn as for any area order. Within 50 m of the hidden spot (the 3a rule, with the accuracy credit) the screen gets a **red frame that pulses** and the top banner reads «Είσαι κοντά - ψάξτε γύρω σας» (the existing `case.close_toast`). The toast and the buzz are 3a's, from the page's own tracker, and are not repeated here. Once the team has found the victim the frame goes: there is nothing left to hunt for.
-3. **Found while the AR is open.** The page's tracker (3a) opens the case player; the player now sits **above** the AR (`z-index` 2200). The AR stays open underneath. Closing the case returns the volunteer to the AR.
+3. **Found while the AR is open.** The page's tracker (3a) opens the case player; the player now sits **above** the AR (`z-index` 2200) while the AR screen is open, and stays at 2000 otherwise, as before: the SOS, return-to-base and restricted-area overlays sit at 2000 and their mute/close buttons at 2001, and an alarm must stay visible and mutable over a case. The AR stays open underneath. Closing the case returns the volunteer to the AR.
 4. **«Άνοιγμα περιστατικού».** A button in the AR's bottom area, shown while the selected order's case may be played: the card says `can_play`, `available` (the team found the victim, or for a point order arrived), or this phone has already reported the find (`wrCaseFoundLocally`, which covers the minutes before the poll catches up or a find reported offline), and the volunteer's own run is not `done`. It opens the same player as the order row's button (`openTrainingCase`). It sits next to the existing «Ελήφθη» / «Έφτασα» button and does not replace it.
 5. **Readability, new elements only.** Text at least 13 px, a dark backing behind every new label, the new text never under the top or bottom bars at 360 px. Existing AR content is not touched. (The user's phone check of v3.505.1 is still outstanding; the rest of the AR polish waits for it.)
 
@@ -20,13 +20,13 @@ Only for an order that carries a training case (`d.case`, which the poll already
 
 ### One pure rule, tested in Node
 
-`assets/js/training-case-find.js` (already pure and Node-tested) gains `VoCaseFind.victimView(card, fix)`, so that the decision of what the AR may show lives where the hidden spot is already handled and is testable without a camera:
+`assets/js/training-case-find.js` (already pure and Node-tested) gains `VoCaseFind.victimView(card, fix, foundLocally)`, so that the decision of what the AR may show lives where the hidden spot is already handled and is testable without a camera:
 
 - `card` is the order's `case` object; `fix` is `{lat, lng, acc}` or null.
 - It returns `{mode: 'none'}` when there is no card, the volunteer cannot play it (`can_play` false), the run is `done`, or the card has no spot.
 - **Not hidden:** `{mode: 'marker', found: bool}`. The AR draws it at the order's own place, which for a point order is the spot, so no mode carries a spot or a distance.
 - **Hidden and not yet found:** `{mode: 'close'}` when `classify(distance, acc)` is `close` or `found`, else `{mode: 'none'}`. It never returns the spot or the distance.
-- **Hidden and found:** `{mode: 'none'}`.
+- **Hidden and found** (`card.found`, or `foundLocally`: this phone has already reported the find and the poll has not caught up): `{mode: 'none'}`. A shown victim is `found` when `card.found`, `card.available` or `foundLocally`.
 
 `VoCaseFind.canOpen(card, foundLocally)` returns whether the button shows: `can_play`, not `done`, and (`available` or `foundLocally`).
 
@@ -35,7 +35,7 @@ Only for an order that carries a training case (`d.case`, which the poll already
 `assets/js/war-room-ar.js`:
 
 - `arDrawWorld()` asks `victimView` once per frame for the selected order. `marker` switches the colour of the order's beacon, compass mark and radar dot from green to red and sets the label title to `t('ar.victim')`. `close` sets `arState.caseNear`.
-- `arFrame()` toggles a class `wr-ar-case-near` on the AR element from `arState.caseNear` (the pulsing frame, `pointer-events: none`, under the bars).
+- A child element `.wr-ar-casenear` (the pulsing frame, `pointer-events: none`, under the bars) is shown by `arUpdateDynamicHud()` from `arState.caseNear`.
 - `arUpdateDynamicHud()` puts `t('case.close_toast')` in the banner while `caseNear` is set.
 - A new button `data-ar="case"` calls `openTrainingCase(card.placement_id, card.briefing)`; it is shown by `canOpen`. The click handler guards `typeof openTrainingCase === 'function'`.
 - The Escape handler of the AR ignores the key while `#voCaseOverlay` is on screen, so closing the case does not also close the AR.
@@ -44,9 +44,9 @@ Only for an order that carries a training case (`d.case`, which the poll already
 `war-room.php`:
 
 - `opModelFromDispatch(d)` carries `case: d.case || null` into the order model, which the AR reads from `opEntries`.
-- Styles for `.wr-ar-case-near` (red inner frame, pulse) and the case button.
+- Styles for `.wr-ar-casenear` (red inner frame, pulse) and the case button (`#c9302c`, for contrast, not the red `#f85149`).
 
-`assets/js/training-case.js`: the overlay's `z-index` from 2000 to 2200. The toast stays above both (100001).
+`assets/js/training-case.js`: the overlay's `z-index` is 2200 only while the AR screen is open (`body.wr-ar-open`), otherwise 2000 as before. The toast stays above both (100001).
 
 ### Languages
 

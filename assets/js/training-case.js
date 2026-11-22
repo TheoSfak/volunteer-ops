@@ -192,8 +192,11 @@
         overlay.setAttribute('aria-modal', 'true');
         overlay.setAttribute('aria-label', t('case.dialog_label'));
         overlay.tabIndex = -1;
-        // Above the AR screen (z-index 2100 in war-room.php): a victim found with the AR open must show over it.
-        overlay.style.cssText = 'position:fixed;inset:0;z-index:2200;background:#fff;color:#212529;overflow-y:auto;-webkit-overflow-scrolling:touch;outline:none;';
+        // Above the AR screen (z-index 2100 in war-room.php) only while that screen is open: a victim found with the AR open must show over it.
+        // Otherwise 2000, as before: the SOS, return-to-base and restricted-area overlays sit at 2000 and their mute/close buttons at 2001,
+        // and an alarm must stay visible and mutable over an open case.
+        const overlayZ = document.body.classList.contains('wr-ar-open') ? 2200 : 2000;
+        overlay.style.cssText = 'position:fixed;inset:0;z-index:' + overlayZ + ';background:#fff;color:#212529;overflow-y:auto;-webkit-overflow-scrolling:touch;outline:none;';
         document.body.appendChild(overlay);
         document.body.style.overflow = 'hidden';
         try { overlay.focus({preventScroll: true}); } catch (e) { /* focus is a courtesy */ }

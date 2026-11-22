@@ -465,7 +465,7 @@ function arOpen(m) {
             .catch(() => {});
     }
     arStartMagnetometer();
-    // The case player can sit over this screen (v3.507.0): its own close, not this one, answers the key then.
+    // While the case player is on screen Escape does nothing here, so the AR stays open under it; the player closes with its own button.
     arState.onKey = e => { if (e.key === 'Escape' && !document.getElementById('voCaseOverlay')) arClose(); };
     document.addEventListener('keydown', arState.onKey);
     let seen = false;
@@ -1048,7 +1048,7 @@ function arDrawWorld(S, m, me) {
     const info = {dist: flatNav, dz: navV.z + AR_EYE_HEIGHT_M, near: flatNav <= ARROW_ARRIVE_RADIUS_M, inside: false, outM: 0, edge: null};
     // The victim of a training case on this order (v3.507.0). A known victim's place is the order's own place, so its beacon turns red;
     // a hidden one is never drawn at all, the screen only says the team is near. VoCaseFind.victimView decides, so no spot is read here.
-    const victim = m.case && typeof VoCaseFind !== 'undefined' ? VoCaseFind.victimView(m.case, me) : {mode: 'none'};
+    const victim = m.case && typeof VoCaseFind !== 'undefined' ? VoCaseFind.victimView(m.case, me, arCaseFoundHere(m.case)) : {mode: 'none'};
     arState.caseNear = victim.mode === 'close';
     const markCol = victim.mode === 'marker' && t0.kind === 'point' ? AR_COL.red : AR_COL.green;
     const pushMark = (az, col, shape) => S.marks.push({az: az, col: col, shape: shape});
@@ -1269,6 +1269,20 @@ function arSignedMetres(v) {
     return (v >= 0 ? '+' : '−') + Math.round(Math.abs(v)) + ' ' + t('common.unit_m');
 }
 
+// Whether this phone has already reported the find of the order's case (the poll may not show it yet). The answer comes from storage, so it
+// is read at most every 500 ms per case, not every frame; arState is recreated on open, which empties the cache.
+function arCaseFoundHere(card) {
+    if (!card || typeof wrCaseFoundLocally !== 'function') return false;
+    const cache = arState.caseHere || (arState.caseHere = {});
+    const id = card.placement_id;
+    const now = Date.now();
+    const hit = cache[id];
+    if (hit && now - hit.at < 500) return hit.v;
+    const v = !!wrCaseFoundLocally(id);
+    cache[id] = {v: v, at: now};
+    return v;
+}
+
 // The parts of the HUD that only change with the order, not with the frame.
 function arUpdateStaticHud(el, m) {
     const steps = el.querySelector('.wr-ar-steps');
@@ -1294,8 +1308,7 @@ function arUpdateStaticHud(el, m) {
     // «Άνοιγμα περιστατικού» while this order's case may be played: found or reached by my team, or found on this phone and not yet in the poll.
     const caseBtn = el.querySelector('[data-ar="case"]');
     if (caseBtn) {
-        const found = m && m.case && typeof wrCaseFoundLocally === 'function' && wrCaseFoundLocally(m.case.placement_id);
-        caseBtn.hidden = !(m && m.case && typeof VoCaseFind !== 'undefined' && VoCaseFind.canOpen(m.case, !!found));
+        caseBtn.hidden = !(m && m.case && typeof VoCaseFind !== 'undefined' && VoCaseFind.canOpen(m.case, arCaseFoundHere(m.case)));
     }
 }
 

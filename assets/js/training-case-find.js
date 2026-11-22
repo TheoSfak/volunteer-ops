@@ -98,16 +98,17 @@
      * What the AR screen may show for an order's case (v3.507.0). The one place that decides it, so the hidden spot of an area
      * order never reaches the drawing code. 'marker': the victim's place is shown (a point order), drawn at the order's own
      * place, and `found` says the team has found it or arrived; 'close': a hidden victim the volunteer is near, with no spot,
-     * distance or direction; 'none': draw nothing about it. card is the order's `case` object from the poll, fix {lat, lng, acc}.
+     * distance or direction; 'none': draw nothing about it. card is the order's `case` object from the poll, fix {lat, lng, acc};
+     * foundLocally: this phone has already reported the find (the poll may not show it yet), which ends the hidden cue.
      */
-    function victimView(card, fix) {
+    function victimView(card, fix, foundLocally) {
         const none = {mode: 'none'};
         if (!card || !card.can_play || card.state === 'done' || !card.spot) return none;
         const sLat = num(card.spot.lat);
         const sLng = num(card.spot.lng);
         if (sLat === null || sLng === null) return none;
-        if (!card.hidden) return {mode: 'marker', found: !!(card.found || card.available)};
-        if (card.found) return none;
+        if (!card.hidden) return {mode: 'marker', found: !!(card.found || card.available || foundLocally)};
+        if (card.found || foundLocally) return none;
         const lat = fix ? num(fix.lat) : null;
         const lng = fix ? num(fix.lng) : null;
         if (lat === null || lng === null) return none;
