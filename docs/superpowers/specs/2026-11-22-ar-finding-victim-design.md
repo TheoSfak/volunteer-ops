@@ -37,7 +37,7 @@ Fed by its **own** high-accuracy `watchPosition`, started only while at least on
 
 ### Staging
 
-`addScenarioCaseItem()` (`includes/functions-scenario.php`) accepts a **point or a polygon**; the `case.err_needs_point` refusal becomes `case.err_needs_point_or_area`. Its `$input` gains `spot` (`lat`, `lng`), required for a polygon, ignored for a point (the point is the spot). A polygon's spot is refused unless it lies **inside the polygon** (ray casting, in a small pure function `scenarioPointInPolygon()` with its own tests). The staged `case` block gains `spot` and `spot_hidden`. The staging UI (`mission-scenario.php` and its script) gets a «Κρυφό σημείο θύματος» step after the polygon is drawn: a tap on the map inside the polygon places a pin that only command sees; tapping outside is refused with a message. An empty label still becomes the neutral «Περιστατικό».
+`addScenarioCaseItem()` (`includes/functions-scenario.php`) accepts a **point or a polygon**; the `case.err_needs_point` refusal becomes `case.err_needs_point_or_area`. Its `$input` gains `spot` (`lat`, `lng`), required for a polygon, ignored for a point (the point is the spot). A polygon's spot is refused unless it lies **inside the polygon** (the existing `pointInPolygon()` of `includes/functions-warroom.php`; distances use the existing `gpsDistanceMeters()`). The staged `case` block gains `spot` and `spot_hidden`. The staging UI (`mission-scenario.php` and its script) gets a «Κρυφό σημείο θύματος» step after the polygon is drawn: a tap on the map inside the polygon places a pin that only command sees; tapping outside is refused with a message. An empty label still becomes the neutral «Περιστατικό».
 
 `trainingCaseCreatePlacement()` copies the spot into the placement (for a point order it copies the order's own point, `spot_hidden = 0`).
 
@@ -53,7 +53,7 @@ A helper `trainingCaseTeamFound(int $placementId, string $scopeKey): bool` reads
 
 ### Found action
 
-`training-case.php?action=found` (POST: `placement_id`, `lat`, `lng`, `accuracy`, `at`). It checks the gate **without** arrival, then re-checks the distance with the same rule as the phone (`FOUND_M`, `CLOSE_M`, `ACCURACY_CREDIT_M` as `TRAINING_CASE_*` constants in PHP): the report is refused with `code: 'too_far'` if `distance - min(accuracy, 15) > 10`, which stops a hand-made request from opening a hidden case from the sofa. A report for a placement the team already found succeeds with no change (idempotent, as `INSERT IGNORE` on the unique key). On the first find it writes the row, logs `team_found_case` to the audit log, and calls `trainingCaseNotifyFound()`, a sibling of `trainingCaseNotifyArrival()` sharing its recipient logic (a small shared helper, not a copy) with its own message `case.found_message`. Never throws to the caller, like the arrival notice.
+`training-case.php?action=found` (POST: `placement_id`, `lat`, `lng`, `accuracy`, `at`). It checks the gate **without** arrival, then re-checks the distance with the same rule as the phone (`FOUND_M`, `CLOSE_M`, `ACCURACY_CREDIT_M` as `TRAINING_CASE_*` constants in PHP): the report is refused (with `code: 'refused'`, which is what makes the phone's offline queue drop it instead of retrying it for ever) if `distance - min(accuracy, 15) > 10`, which stops a hand-made request from opening a hidden case from the sofa. A report for a placement the team already found succeeds with no change (idempotent, as `INSERT IGNORE` on the unique key). On the first find it writes the row, logs `team_found_case` to the audit log, and calls `trainingCaseNotifyFound()`, a sibling of `trainingCaseNotifyArrival()` sharing its recipient logic (a small shared helper, not a copy) with its own message `case.found_message`. Never throws to the caller, like the arrival notice.
 
 ### Poll card
 
@@ -71,7 +71,7 @@ A helper `trainingCaseTeamFound(int $placementId, string $scopeKey): bool` reads
 
 ## Languages
 
-New keys in `includes/lang/war-room.php`, Greek and English: `case.err_needs_point_or_area`, `case.err_spot_outside`, `case.err_too_far`, `case.close_toast`, `case.found_toast`, `case.found_title`, `case.found_message`, `case.spot_pin_help`, `case.overview_found`. Greek wording uses «βρέθηκε», «κοντά», «κρυφό σημείο».
+New keys in `includes/lang/war-room.php`, Greek and English: `case.err_needs_point_or_area`, `case.err_spot_needed`, `case.err_spot_outside`, `case.err_too_far`, `case.err_not_found_yet`, `case.err_no_spot`, `case.opens_on_find`, `case.spot_pin`, `case.spot_pinned`, `case.close_toast`, `case.found_toast`, `case.found_title`, `case.found_message`, `case.spot_pin_help`, `case.overview_found`. Greek wording uses «βρέθηκε», «κοντά», «κρυφό σημείο».
 
 ## Tests
 
@@ -83,7 +83,7 @@ PHPUnit (the CRLF-related baseline failures stay out of scope):
 - Found action: success inside 10 m; success at 14 m with accuracy 10 (credit); refusal at 30 m; refusal at 14 m with accuracy 100 (credit capped); idempotent second report; second member of the same team can then play; a member of another team cannot.
 - Poll card: `spot` and `found` present for an eligible volunteer, absent for a non-participant; a hidden placement withholds its title until found.
 - Notification: teammates (not the finder) are told once.
-- `scenarioPointInPolygon()` on convex, concave and degenerate polygons.
+- A spot inside, outside and missing for an area order (the polygon test itself is the existing `pointInPolygon()`'s).
 - Old placements (null spot) behave as v3.505.0.
 
 `node --test tests/js/*.test.js`: `classify` at the boundaries (9.9, 10, 10.1, 49.9, 50, 50.1 m), the accuracy credit and its cap, the latch (found never reverts, close fires once), and the constants match the PHP ones (read from the source, as the existing drift guards do).
