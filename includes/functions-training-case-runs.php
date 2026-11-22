@@ -534,7 +534,10 @@ function trainingCaseNotifyFound(int $missionId, int $dispatchId, ?int $teamId, 
  * (new / running at a step / done with a score) and, for each step, how many chose each option (for the group debrief).
  * ['placements' => [['id', 'title', 'label', 'audience', 'volunteers' => [['user_id', 'name', 'state', 'step', 'score_points',
  * 'score_max', 'percent', 'label', 'finished_at', 'answers' => [['step_id', 'choice_id', 'choice_label', 'rating', 'ms_taken']]]],
- * 'steps' => [['step_id', 'prompt', 'choices' => [['id', 'label', 'rating', 'count']]]]]]].
+ * 'steps' => [['step_id', 'prompt', 'choices' => [['id', 'label', 'rating', 'count']]]],
+ * 'hidden' => bool (the victim's spot is hidden: the case opens on a find),
+ * 'finds' => [['scope_key', 'found_at', 'by']] (one per team that found the victim; 'by' is the finder's name, or null when that
+ * user was deleted)]]].
  */
 function trainingCaseOverview(int $missionId): array {
     $out = [];

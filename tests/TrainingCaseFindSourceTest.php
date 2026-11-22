@@ -89,7 +89,7 @@ final class TrainingCaseFindSourceTest extends TestCase
     {
         $lang = (string) file_get_contents(dirname(__DIR__) . '/includes/lang/war-room.php');
         foreach (['case.close_toast', 'case.found_toast', 'case.opens_on_find', 'case.found_title', 'case.found_message', 'case.err_too_far',
-                  'case.err_not_found_yet', 'case.err_spot_needed', 'case.err_spot_outside', 'case.overview_found',
+                  'case.err_not_found_yet', 'case.err_spot_needed', 'case.err_spot_outside', 'case.overview_found', 'case.overview_found_unknown',
                   'case.spot_pin', 'case.spot_pin_help', 'case.spot_pinned'] as $key) {
             $this->assertSame(2, substr_count($lang, "'" . $key . "' =>"), $key . ' in el and en');
         }
