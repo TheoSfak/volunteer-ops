@@ -15636,7 +15636,7 @@ const caseFindTracker = window.VoCaseFind ? VoCaseFind.createTracker({
         refreshMyOrdersCard();
         openTrainingCase(card.placement_id, card.briefing);
     },
-}) : {check() {}};
+}) : {check() {}, forget() {}};
 // Prefetch state per placement id: {ok: true} once kept, {busy: true} in flight, {failedAt} after a failure (retried after a
 // minute at the soonest: the poll runs every few seconds and every request here is a new connection on a rate-limited host).
 const caseFindPrefetch = {};
@@ -18008,9 +18008,10 @@ function sendQueuedCaseFound(item) {
         }
         if (verdict === 'drop') {
             // Refused: the phone takes its own «found» back, as an answer's local copy goes (forgetLocalAnswer), so the row is
-            // locked again and the case is not played for answers the server will drop. The tracker's latch is per page load:
-            // this page load will not watch that placement again until it is reloaded, which is acceptable.
+            // locked again and the case is not played for answers the server will drop. The tracker's latches for it go too,
+            // so the phone watches that placement again at once instead of staying latched until a reload.
             try { localStorage.removeItem(wrCaseFoundKey(item.placementId)); } catch (e) {}
+            caseFindTracker.forget(item.placementId);
             refreshMyOrdersCard();
         }
         return result;

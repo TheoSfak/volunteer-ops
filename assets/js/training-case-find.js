@@ -54,6 +54,7 @@
     function createTracker(handlers) {
         const closeSent = {};
         const foundSent = {};
+        function report(e) { if (typeof console !== 'undefined' && console.error) console.error('[training-cases] find handler failed', e); }
         function check(cards, fix) {
             if (!Array.isArray(cards) || !fix) return;
             const lat = num(fix.lat);
@@ -66,16 +67,31 @@
                 if (sLat === null || sLng === null) return;
                 const d = distanceM({lat: lat, lng: lng}, {lat: sLat, lng: sLng});
                 const where = classify(d, fix.acc);
+                // A handler that throws (a full storage while queuing the report, say) must not abort the other cards.
                 if (where === 'found') {
                     foundSent[card.placement_id] = true;
-                    if (handlers && handlers.onFound) handlers.onFound(card, {lat: lat, lng: lng, acc: num(fix.acc)}, d);
+                    try {
+                        if (handlers && handlers.onFound) handlers.onFound(card, {lat: lat, lng: lng, acc: num(fix.acc)}, d);
+                    } catch (e) {
+                        delete foundSent[card.placement_id]; // nothing was recorded: the next fix tries again
+                        report(e);
+                    }
                 } else if (where === 'close' && !closeSent[card.placement_id]) {
                     closeSent[card.placement_id] = true;
-                    if (handlers && handlers.onClose) handlers.onClose(card, d);
+                    try {
+                        if (handlers && handlers.onClose) handlers.onClose(card, d);
+                    } catch (e) {
+                        report(e);
+                    }
                 }
             });
         }
-        return {check: check};
+        /** Takes back what was announced for one placement (the server refused the find): it is watched afresh. */
+        function forget(placementId) {
+            delete closeSent[placementId];
+            delete foundSent[placementId];
+        }
+        return {check: check, forget: forget};
     }
 
     const api = {FOUND_M, CLOSE_M, ACCURACY_CREDIT_M, distanceM, classify, watchList, createTracker};

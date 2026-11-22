@@ -92,3 +92,56 @@ test('the tracker ignores malformed input and keeps each placement apart', () =>
     tracker.check([{placement_id: 3, spot: {lat: 35.3, lng: 25.1}}, {placement_id: 4, spot: {lat: north(35.3, 1000), lng: 25.1}}], {lat: 35.3, lng: 25.1, acc: 5});
     assert.deepEqual(calls, [['found', 3]]);
 });
+
+test('forget(placementId) re-arms the found and close latches of that placement only', () => {
+    const calls = [];
+    const tracker = F.createTracker({onClose: c => calls.push(['close', c.placement_id]), onFound: c => calls.push(['found', c.placement_id])});
+    const spot = {lat: 35.3, lng: 25.1};
+    const cards = [{placement_id: 1, spot}, {placement_id: 2, spot}];
+    const here = {lat: 35.3, lng: 25.1, acc: 5};
+    tracker.check(cards, here);
+    assert.deepEqual(calls, [['found', 1], ['found', 2]]);
+    tracker.check(cards, here);
+    assert.equal(calls.length, 2, 'latched');
+    tracker.forget(1);
+    tracker.check(cards, here);
+    assert.deepEqual(calls.slice(2), [['found', 1]], 'only placement 1 is armed again');
+    // the close latch too
+    const near = {lat: north(35.3, 40), lng: 25.1, acc: 5};
+    const t2 = F.createTracker({onClose: c => calls.push(['close2', c.placement_id])});
+    t2.check([{placement_id: 7, spot}], near);
+    t2.check([{placement_id: 7, spot}], near);
+    t2.forget(7);
+    t2.check([{placement_id: 7, spot}], near);
+    assert.equal(calls.filter(c => c[0] === 'close2').length, 2);
+    tracker.forget(999); // unknown ids are harmless
+});
+
+test('a handler that throws cannot stop the other cards, and a failed onFound is retried on the next fix', () => {
+    const errors = [];
+    const realError = console.error;
+    console.error = (...a) => errors.push(a);
+    try {
+        const calls = [];
+        let failFirst = true;
+        const tracker = F.createTracker({
+            onFound: c => {
+                if (c.placement_id === 1 && failFirst) { failFirst = false; throw new Error('storage full'); }
+                calls.push(['found', c.placement_id]);
+            },
+            onClose: c => { if (c.placement_id === 3) throw new Error('boom'); calls.push(['close', c.placement_id]); },
+        });
+        const spot = {lat: 35.3, lng: 25.1};
+        const here = {lat: 35.3, lng: 25.1, acc: 5};
+        tracker.check([{placement_id: 1, spot}, {placement_id: 2, spot}], here);
+        assert.deepEqual(calls, [['found', 2]], 'card 2 was still processed');
+        tracker.check([{placement_id: 1, spot}, {placement_id: 2, spot}], here);
+        assert.deepEqual(calls, [['found', 2], ['found', 1]], 'card 1 retried, card 2 not repeated');
+        const near = {lat: north(35.3, 40), lng: 25.1, acc: 5};
+        tracker.check([{placement_id: 3, spot}, {placement_id: 4, spot}], near);
+        assert.deepEqual(calls.slice(2), [['close', 4]], 'a throwing onClose does not stop the next card');
+        assert.ok(errors.length >= 2, 'the throws were logged');
+    } finally {
+        console.error = realError;
+    }
+});

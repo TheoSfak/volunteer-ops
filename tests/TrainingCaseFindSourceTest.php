@@ -69,6 +69,9 @@ final class TrainingCaseFindSourceTest extends TestCase
         $this->assertStringContainsString("if (verdict === 'drop')", $body);
         $this->assertStringContainsString('localStorage.removeItem(wrCaseFoundKey(item.placementId))', $body);
         $this->assertStringContainsString('refreshMyOrdersCard();', substr($body, (int) strpos($body, "if (verdict === 'drop')")));
+        // ... and the tracker stops being latched on it, so the phone watches that placement again without a reload
+        $this->assertStringContainsString('caseFindTracker.forget(item.placementId)', substr($body, (int) strpos($body, "if (verdict === 'drop')")));
+        $this->assertStringContainsString('{check() {}, forget() {}}', $page, 'the fallback stub of a failed script load has forget() too');
     }
 
     public function test_the_prefetch_is_guarded_and_the_tracker_survives_a_failed_script_load(): void
