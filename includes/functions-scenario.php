@@ -269,30 +269,6 @@ function loadMissionScenario(int $missionId): array {
         }
     }
 
-    // Whether each staged training case had been checked by a medically qualified person: the order plays the SNAPSHOT taken
-    // at staging, so the answer is the flag recorded with that snapshot (see addScenarioCaseItem). Only an item staged before
-    // that flag was recorded (no `reviewed` key in its case block) falls back to the library row as it is NOW. One query, and
-    // only when such an item is staged. A case whose library row has been deleted is absent from the answer (see below).
-    $caseReviewed = [];
-    $caseIds = [];
-    foreach ($items as $row) {
-        if ($row['kind'] === 'dispatch' && strpos((string) $row['payload'], '"case":') !== false) {
-            $casePayload = json_decode((string) $row['payload'], true);
-            if (!is_array($casePayload) || !is_array($casePayload['case'] ?? null) || array_key_exists('reviewed', $casePayload['case'])) {
-                continue;
-            }
-            $caseId = (int) ($casePayload['case']['case_id'] ?? 0);
-            if ($caseId > 0) {
-                $caseIds[$caseId] = $caseId;
-            }
-        }
-    }
-    if ($caseIds) {
-        foreach (dbFetchAll("SELECT id, reviewed FROM training_cases WHERE id IN (" . implode(',', array_fill(0, count($caseIds), '?')) . ")", array_values($caseIds)) as $libraryRow) {
-            $caseReviewed[(int) $libraryRow['id']] = !empty($libraryRow['reviewed']);
-        }
-    }
-
     // How each order that was sent stands now (v3.456.0): finished, still under way, or taken back.
     $states = scenarioItemLiveStates($missionId, $items);
 
@@ -433,12 +409,6 @@ function loadMissionScenario(int $missionId): array {
             // A staged training case (v3.505.0): its title and the line the people receive; null for an ordinary order.
             'case_title'   => !empty($payload['case']) && is_array($payload['case']) ? (string) ($payload['case']['title'] ?? '') : null,
             'case_briefing' => !empty($payload['case']) && is_array($payload['case']) ? (string) ($payload['case']['briefing'] ?? '') : null,
-            // Had the case been reviewed when it was staged (the snapshot's own recorded flag; an older item with none reads the
-            // library row now): true / false for a staged case (false too when that row is gone: nothing shows it was checked),
-            // null for an ordinary order. The card badges «Ανέλεγκτο» on false.
-            'case_reviewed' => !empty($payload['case']) && is_array($payload['case'])
-                ? (array_key_exists('reviewed', $payload['case']) ? $payload['case']['reviewed'] === true : ($caseReviewed[(int) ($payload['case']['case_id'] ?? 0)] ?? false))
-                : null,
             'area_id'      => $isSector ? ($areaId ?: null) : null,
             'area_label'   => $areaLabel,
             'area_missing' => $areaMissing,
@@ -998,10 +968,6 @@ function addScenarioCaseItem(array $mission, int $phaseId, int $userId, array $i
         'draw_mode'      => ($input['case_mode'] ?? '') === 'random' ? 'random' : 'chosen',
         'pool'           => $pool,
         'briefing'       => trainingCasePlain($input['briefing'] ?? '', 300),
-        // Whether the case had been reviewed when it was staged, recorded beside the snapshot (never inside the document, and
-        // never copied to a placement): editing or re-reviewing the library case later does not change what this order plays.
-        'reviewed'       => !empty($case['reviewed']),
-        'reviewed_at'    => $case['reviewed_at'] ?? null,
         'document'       => $case['doc'],
     ];
     if ($spot !== null) {
@@ -2815,8 +2781,8 @@ function scenarioPageExtraStringKeys(): array {
         'common.send_failed', 'common.cancel', 'common.all_teams', 'common.close',
         'restricted_area.kind_danger', 'restricted_area.kind_cliff', 'restricted_area.kind_forbidden',
         'restricted_area.shape_polygon', 'restricted_area.shape_line',
-        // A staged training case on the card (v3.505.0): its name and the badge of one nobody qualified has checked.
-        'case.plan_title', 'case.default_label', 'case.badge_unreviewed', 'case.picker_unreviewed_warning',
+        // A staged training case on the card (v3.505.0): its name.
+        'case.plan_title', 'case.default_label',
     ];
 }
 

@@ -189,100 +189,96 @@ final class TrainingCaseScenarioTest extends TestCase
         return $items;
     }
 
-    /** Rewrites the staged item's case block as an older build wrote it: without the recorded review flag. */
-    private function makeLegacy(int $itemId): void
-    {
-        $payload = json_decode((string) dbFetchValue("SELECT payload FROM mission_scenario_items WHERE id = ?", [$itemId]), true);
-        unset($payload['case']['reviewed'], $payload['case']['reviewed_at']);
-        dbExecute("UPDATE mission_scenario_items SET payload = ? WHERE id = ?", [json_encode($payload, JSON_UNESCAPED_UNICODE), $itemId]);
-    }
-
-    public function test_the_plan_says_whether_a_staged_case_had_been_reviewed_when_it_was_staged(): void
+    public function test_the_plan_and_the_staged_block_carry_no_review_flag(): void
     {
         $phase = $this->phase($this->drill);
         $m = $this->mission($this->drill);
-        $plain = addScenarioDispatchItem($m, $phase, $this->admin, ['team_id' => (string) $this->teamId, 'type' => 'point', 'geo' => json_encode(['lat' => 35.3, 'lng' => 25.1]), 'label' => 'x']);
-
-        trainingCaseSetReviewed($this->caseId, false, $this->admin);
-        $unreviewed = addScenarioCaseItem($m, $phase, $this->admin, $this->form());
-        trainingCaseSetReviewed($this->caseId, true, $this->admin);
-        $reviewed = addScenarioCaseItem($m, $phase, $this->admin, $this->form());
-
-        $items = $this->planItems();
-        $this->assertFalse($items[$unreviewed['id']]['case_reviewed'], 'a starter is unreviewed until somebody has checked it');
-        $this->assertTrue($items[$reviewed['id']]['case_reviewed']);
-        $this->assertNull($items[$plain['id']]['case_reviewed'], 'an ordinary order has no such flag');
-    }
-
-    public function test_staging_records_the_review_flag_beside_the_snapshot_not_inside_the_document(): void
-    {
-        $phase = $this->phase($this->drill);
-        trainingCaseSetReviewed($this->caseId, true, $this->admin);
-        $result = addScenarioCaseItem($this->mission($this->drill), $phase, $this->admin, $this->form());
+        $result = addScenarioCaseItem($m, $phase, $this->admin, $this->form());
         $payload = json_decode((string) dbFetchValue("SELECT payload FROM mission_scenario_items WHERE id = ?", [$result['id']]), true);
-        $this->assertTrue($payload['case']['reviewed']);
-        $this->assertNotEmpty($payload['case']['reviewed_at']);
-        $this->assertArrayNotHasKey('reviewed', $payload['case']['document'], 'what the phone gets is the document, which must not carry the flag');
+        $this->assertArrayNotHasKey('reviewed', $payload['case']);
+        $this->assertArrayNotHasKey('reviewed_at', $payload['case']);
+
+        $item = $this->planItems()[$result['id']];
+        $this->assertArrayNotHasKey('case_reviewed', $item, 'the card has no «unreviewed» badge any more');
+        $this->assertNotSame('', $item['case_title']);
     }
 
-    public function test_an_unreviewed_snapshot_stays_unreviewed_when_the_library_case_is_edited_and_reviewed_later(): void
+    public function test_an_item_staged_by_an_older_build_with_a_reviewed_key_still_loads_and_plays(): void
     {
-        $phase = $this->phase($this->drill);
-        trainingCaseSetReviewed($this->caseId, false, $this->admin);
-        $case = addScenarioCaseItem($this->mission($this->drill), $phase, $this->admin, $this->form());
-
-        dbExecute("UPDATE training_cases SET document = REPLACE(document, 'story', 'sXXXX') WHERE id = ?", [$this->caseId]);
-        trainingCaseSetReviewed($this->caseId, true, $this->admin);
-
-        $this->assertFalse($this->planItems()[$case['id']]['case_reviewed'], 'the order plays the snapshot, which was never reviewed');
-    }
-
-    public function test_a_reviewed_snapshot_stays_reviewed_when_the_library_case_is_edited_afterwards(): void
-    {
-        $phase = $this->phase($this->drill);
-        trainingCaseSetReviewed($this->caseId, true, $this->admin);
-        $case = addScenarioCaseItem($this->mission($this->drill), $phase, $this->admin, $this->form());
-
-        // An edit resets the library case to unreviewed (what trainingCaseUpdate does); the staged snapshot is untouched.
-        dbExecute("UPDATE training_cases SET reviewed = 0, reviewed_by = NULL, reviewed_at = NULL WHERE id = ?", [$this->caseId]);
-
-        $this->assertTrue($this->planItems()[$case['id']]['case_reviewed']);
-    }
-
-    public function test_an_item_staged_before_the_flag_was_recorded_reads_the_library_now(): void
-    {
-        $phase = $this->phase($this->drill);
-        trainingCaseSetReviewed($this->caseId, false, $this->admin);
-        $case = addScenarioCaseItem($this->mission($this->drill), $phase, $this->admin, $this->form());
-        $this->makeLegacy((int) $case['id']);
-
-        $this->assertFalse($this->planItems()[$case['id']]['case_reviewed']);
-        trainingCaseSetReviewed($this->caseId, true, $this->admin);
-        $this->assertTrue($this->planItems()[$case['id']]['case_reviewed'], 'with no recorded flag the library row is all there is to go on');
-    }
-
-    public function test_the_plan_tolerates_a_staged_case_whose_library_row_is_gone(): void
-    {
-        $phase = $this->phase($this->drill);
+        $this->onDutyMember();
         $m = $this->mission($this->drill);
-        trainingCaseSetReviewed($this->caseId, true, $this->admin);
-        $legacy = addScenarioCaseItem($m, $phase, $this->admin, $this->form());
-        $this->makeLegacy((int) $legacy['id']);
-        $recorded = addScenarioCaseItem($m, $phase, $this->admin, $this->form());
-        dbExecute("DELETE FROM training_cases WHERE id = ?", [$this->caseId]);
+        $phase = $this->phase($this->drill);
+        $staged = addScenarioCaseItem($m, $phase, $this->admin, $this->form());
+        $payload = json_decode((string) dbFetchValue("SELECT payload FROM mission_scenario_items WHERE id = ?", [$staged['id']]), true);
+        $payload['case']['reviewed'] = false;
+        $payload['case']['reviewed_at'] = null;
+        dbExecute("UPDATE mission_scenario_items SET payload = ? WHERE id = ?", [json_encode($payload, JSON_UNESCAPED_UNICODE), $staged['id']]);
 
-        $items = $this->planItems();
-        $this->assertNotSame('', $items[$legacy['id']]['case_title'], 'the snapshot still names the case');
-        $this->assertFalse($items[$legacy['id']]['case_reviewed'], 'nothing can show it was checked, so it is not claimed');
-        $this->assertTrue($items[$recorded['id']]['case_reviewed'], 'a recorded flag does not need the library row');
+        $item = $this->planItems()[$staged['id']];
+        $this->assertNotSame('', $item['case_title'], 'the old key is ignored, the item loads');
+        $this->assertArrayNotHasKey('case_reviewed', $item);
+
+        $played = playScenarioPhase($m, $phase, $this->admin, 'Case Stager');
+        $this->assertTrue($played['ok'], (string) ($played['error'] ?? ''));
+        $this->assertSame(1, $played['sent']);
+    }
+
+    public function test_deleting_the_library_case_keeps_a_played_placement_and_its_snapshot(): void
+    {
+        $this->onDutyMember();
+        $m = $this->mission($this->drill);
+        $phase = $this->phase($this->drill);
+        $item = addScenarioCaseItem($m, $phase, $this->admin, $this->form(['briefing' => 'Πρώτο']));
+        $this->assertTrue(playScenarioPhase($m, $phase, $this->admin, 'Case Stager')['ok']);
+        $dispatchId = (int) dbFetchValue("SELECT sent_ref_id FROM mission_scenario_items WHERE id = ?", [$item['id']]);
+        $snapshot = dbFetchValue("SELECT snapshot FROM mission_case_placements WHERE dispatch_id = ?", [$dispatchId]);
+        $this->assertSame($this->caseId, (int) dbFetchValue("SELECT case_id FROM mission_case_placements WHERE dispatch_id = ?", [$dispatchId]));
+
+        $this->assertTrue(trainingCaseDelete($this->caseId), 'a starter case is deleted');
+
+        $placement = trainingCasePlacementForDispatch($dispatchId);
+        $this->assertNotNull($placement, 'the placement survives');
+        $this->assertNull($placement['case_id'], 'it just no longer points at a library case');
+        $this->assertSame($snapshot, dbFetchValue("SELECT snapshot FROM mission_case_placements WHERE dispatch_id = ?", [$dispatchId]), 'and keeps its own copy');
+        $this->assertNotEmpty($placement['doc']['steps']);
+        $this->assertArrayHasKey($item['id'], $this->planItems(), 'the played item stays in the plan');
+        $this->assertNotSame('', $this->planItems()[$item['id']]['case_title'], 'and the snapshot still names the case');
+    }
+
+    public function test_an_item_staged_from_a_case_that_is_deleted_before_it_is_played_still_plays_from_its_snapshot(): void
+    {
+        $this->onDutyMember();
+        $m = $this->mission($this->drill);
+        $phase = $this->phase($this->drill);
+        $item = addScenarioCaseItem($m, $phase, $this->admin, $this->form(['briefing' => 'Δεύτερο']));
+        $this->assertTrue(trainingCaseDelete($this->caseId));
+
+        $plan = $this->planItems();
+        $this->assertArrayHasKey($item['id'], $plan, 'the staged item is still in the plan');
+        $this->assertNotSame('', $plan[$item['id']]['case_title'], 'it still names the case');
+        $this->assertSame([$this->caseId], scenarioStagedCaseIds($this->drill['mission']), 'the staged list is read from the item itself');
+
+        $played = playScenarioPhase($m, $phase, $this->admin, 'Case Stager');
+        $this->assertTrue($played['ok'], (string) ($played['error'] ?? ''));
+        $this->assertSame(1, $played['sent']);
+        $placement = trainingCasePlacementForDispatch((int) dbFetchValue("SELECT sent_ref_id FROM mission_scenario_items WHERE id = ?", [$item['id']]));
+        $this->assertNotNull($placement, 'the order was sent and its placement recorded');
+        $this->assertNull($placement['case_id'], 'with no library case to point at');
+        $this->assertNotEmpty($placement['doc']['steps']);
+
+        // The same case cannot be staged again: it is gone from the library.
+        $this->assertFalse(addScenarioCaseItem($m, $phase, $this->admin, $this->form())['ok']);
     }
 
     public function test_the_scenario_page_gets_the_words_a_case_needs_on_its_card(): void
     {
         foreach (['el', 'en'] as $lang) {
             $strings = scenarioPageStrings($lang)['strings'];
-            foreach (['case.plan_title', 'case.default_label', 'case.badge_unreviewed', 'case.picker_unreviewed_warning'] as $key) {
+            foreach (['case.plan_title', 'case.default_label'] as $key) {
                 $this->assertArrayHasKey($key, $strings, "$key missing for $lang: the page would show the bare key");
+            }
+            foreach (['case.badge_unreviewed', 'case.picker_unreviewed_warning'] as $key) {
+                $this->assertArrayNotHasKey($key, $strings, "$key belonged to the review logic that is gone");
             }
         }
     }

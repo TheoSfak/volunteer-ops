@@ -568,7 +568,7 @@ final class TrainingCaseRunTest extends TestCase
         $this->assertNotNull(trainingCaseCreatePlacement($this->drill['mission'], 0, $drillDispatch, $payload));
     }
 
-    public function test_the_case_endpoints_refuse_a_mission_that_is_not_a_drill_and_allow_unreviewed_is_strict(): void
+    public function test_the_case_endpoints_refuse_a_mission_that_is_not_a_drill_and_have_no_review_switch(): void
     {
         $src = str_replace("\r\n", "\n", (string) \WarRoomSource::read('mission-scenario.php'));
         foreach (["if (\$action === 'case_list') {", "if (\$action === 'case_draw') {"] as $marker) {
@@ -580,7 +580,7 @@ final class TrainingCaseRunTest extends TestCase
                 $marker . ' must refuse a real mission before it answers anything'
             );
         }
-        $this->assertStringContainsString("post('allow_unreviewed') === '1'", $src);
-        $this->assertStringNotContainsString("!empty(post('allow_unreviewed'))", $src);
+        $this->assertStringNotContainsString('allow_unreviewed', $src, 'the draw has no review switch any more');
+        $this->assertStringContainsString("trainingCaseDraw(\$filter, scenarioStagedCaseIds(\$missionId))", $src);
     }
 }

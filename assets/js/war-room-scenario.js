@@ -517,11 +517,6 @@
                 : '';
             where = ` <span class="text-muted small">${esc([floors, inSector].filter(Boolean).join(' · '))}</span>`;
         }
-        // A staged case that nobody qualified has checked says so, on the card and not only in the picker where it was chosen.
-        // case_reviewed is the flag recorded when the case was staged; false also covers an older item whose library case is gone.
-        if (isCaseItem(item) && item.case_reviewed === false) {
-            where += ` <span class="badge bg-warning text-dark" title="${esc(t('case.picker_unreviewed_warning'))}"><i class="bi bi-exclamation-triangle-fill me-1"></i>${esc(t('case.badge_unreviewed'))}</span>`;
-        }
         // A search area is a boundary and not an order to anybody: no «→ προς:» for it. Until it is made it has «Τομείς»,
         // which opens the division window on it (the sectors cut there go into the scenario, against this area). A building
         // goes to nobody either: the team of its sector searches it.
@@ -1272,7 +1267,7 @@
     function caseList() {
         return request('case_list', {}).catch(() => ({ok: false}));
     }
-    // filter = {type, difficulty, language, allow_unreviewed: '1'}: any subset. Draws one case, preferring those not yet staged
+    // filter = {type, difficulty, language}: any subset. Draws one case, preferring those not yet staged
     // in this scenario; nothing is saved until the case is staged with the order.
     function caseDraw(filter) {
         return request('case_draw', filter || {}).catch(() => ({ok: false}));
