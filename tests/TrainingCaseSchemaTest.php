@@ -88,4 +88,47 @@ final class TrainingCaseSchemaTest extends TestCase
         $this->assertNotSame('', $fromSchema[1]);
         $this->assertSame($fromSchema[1], $fromMigration[1]);
     }
+
+    public function test_a_placement_holds_a_spot_and_a_team_finds_it_once(): void
+    {
+        $user = TrainingFixtures::user();
+        $drill = TrainingFixtures::mission(true);
+        $placement = (int) dbInsert(
+            "INSERT INTO mission_case_placements (mission_id, title, snapshot, audience, spot_lat, spot_lng, spot_hidden) VALUES (?, 'T', '{}', 'all', 35.300000, 25.100000, 1)",
+            [$drill['mission']]
+        );
+        $row = dbFetchOne("SELECT spot_lat, spot_lng, spot_hidden FROM mission_case_placements WHERE id = ?", [$placement]);
+        $this->assertEqualsWithDelta(35.3, (float) $row['spot_lat'], 0.000001);
+        $this->assertEqualsWithDelta(25.1, (float) $row['spot_lng'], 0.000001);
+        $this->assertSame(1, (int) $row['spot_hidden']);
+
+        dbExecute("INSERT INTO mission_case_finds (placement_id, scope_key, found_by, lat, lng, accuracy_m) VALUES (?, 't7', ?, 35.3, 25.1, 8)", [$placement, $user]);
+        $this->assertSame(0, dbExecute("INSERT IGNORE INTO mission_case_finds (placement_id, scope_key, found_by) VALUES (?, 't7', ?)", [$placement, $user]));
+        dbExecute("INSERT INTO mission_case_finds (placement_id, scope_key, found_by) VALUES (?, 't8', ?)", [$placement, $user]);
+        $this->assertSame(2, (int) dbFetchValue("SELECT COUNT(*) FROM mission_case_finds WHERE placement_id = ?", [$placement]));
+    }
+
+    public function test_a_placement_with_no_spot_is_valid_and_deleting_it_deletes_its_finds(): void
+    {
+        $drill = TrainingFixtures::mission(true);
+        $placement = (int) dbInsert("INSERT INTO mission_case_placements (mission_id, title, snapshot, audience) VALUES (?, 'T', '{}', 'all')", [$drill['mission']]);
+        $row = dbFetchOne("SELECT spot_lat, spot_hidden FROM mission_case_placements WHERE id = ?", [$placement]);
+        $this->assertNull($row['spot_lat']);
+        $this->assertSame(0, (int) $row['spot_hidden']);
+        dbExecute("INSERT INTO mission_case_finds (placement_id, scope_key) VALUES (?, 'u1')", [$placement]);
+        dbExecute("DELETE FROM mission_case_placements WHERE id = ?", [$placement]);
+        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_case_finds WHERE placement_id = ?", [$placement]));
+    }
+
+    public function test_the_migration_and_the_schema_agree_on_the_spot_columns(): void
+    {
+        $root = dirname(__DIR__);
+        $schema = (string) file_get_contents($root . '/sql/schema.sql');
+        $migrations = (string) file_get_contents($root . '/includes/migrations.php');
+        foreach (['spot_lat', 'spot_lng', 'spot_hidden', 'mission_case_finds', 'uq_case_find'] as $needle) {
+            $this->assertStringContainsString($needle, $schema, "schema.sql: $needle");
+            $this->assertStringContainsString($needle, $migrations, "migrations.php: $needle");
+        }
+        $this->assertSame(226, DB_SCHEMA_VERSION);
+    }
 }

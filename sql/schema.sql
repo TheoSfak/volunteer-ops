@@ -3847,6 +3847,9 @@ CREATE TABLE IF NOT EXISTS `mission_case_placements` (
     `team_id` INT UNSIGNED NULL,
     `briefing` VARCHAR(300) NULL,
     `draw_mode` ENUM('chosen','random') NOT NULL DEFAULT 'chosen',
+    `spot_lat` DECIMAL(9,6) NULL COMMENT 'Where the victim is: a point order = the point, an area order = the hidden spot',
+    `spot_lng` DECIMAL(9,6) NULL,
+    `spot_hidden` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = an area order: the spot is never shown, only found',
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE KEY `uq_case_placement_dispatch` (`dispatch_id`),
     INDEX `idx_case_placement_mission` (`mission_id`),
@@ -3879,6 +3882,20 @@ CREATE TABLE IF NOT EXISTS `mission_case_answers` (
     `ms_taken` INT UNSIGNED NULL,
     UNIQUE KEY `uq_case_answer` (`run_id`, `step_id`),
     FOREIGN KEY (`run_id`) REFERENCES `mission_case_runs`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS `mission_case_finds` (
+    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `placement_id` INT UNSIGNED NOT NULL,
+    `scope_key` VARCHAR(20) NOT NULL COMMENT 't<team_id>, or u<user_id> for a volunteer with no team',
+    `found_by` INT UNSIGNED NULL,
+    `found_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `lat` DECIMAL(9,6) NULL,
+    `lng` DECIMAL(9,6) NULL,
+    `accuracy_m` SMALLINT UNSIGNED NULL,
+    UNIQUE KEY `uq_case_find` (`placement_id`, `scope_key`),
+    FOREIGN KEY (`placement_id`) REFERENCES `mission_case_placements`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`found_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;
