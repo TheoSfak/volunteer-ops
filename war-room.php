@@ -6341,6 +6341,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                     <span class="small fw-semibold text-primary d-none" id="dispatchCaseDrawn" role="status"></span>
                     <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="dispatchCaseRedraw"><i class="bi bi-shuffle me-1"></i><?= t('case.picker_redraw') ?></button>
                     <input type="text" id="dispatchCaseBriefing" class="form-control form-control-sm d-none" style="max-width:260px;" maxlength="300" placeholder="<?= t('case.picker_briefing') ?>">
+                    <button type="button" class="btn btn-outline-danger btn-sm d-none" id="dispatchCaseSpotBtn" title="<?= t('case.spot_pin_help') ?>"><i class="bi bi-geo-alt-fill me-1"></i><span id="dispatchCaseSpotLabel"><?= t('case.spot_pin') ?></span></button>
                     <div class="w-100 small text-danger fw-semibold d-none" id="dispatchCaseWarn" role="alert"></div>
                     <?php endif; ?>
                 </div>
@@ -6989,6 +6990,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
 <?php endif; ?>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-ar.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-ar.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/training-case.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/training-case.js') ?>"></script>
+<script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/training-case-find.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/training-case-find.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-team-arcs.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-team-arcs.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-time-machine.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-time-machine.js') ?>"></script>
 <script src="<?= rtrim(BASE_URL, '/') ?>/assets/js/war-room-team-coverage.js?v=<?= APP_VERSION ?>.<?= (int) @filemtime(__DIR__ . '/assets/js/war-room-team-coverage.js') ?>"></script>
@@ -9604,6 +9606,7 @@ function dispatchIncidentHtml(inc) {
 // dispatch changed, including its live ETA.
 let dispatchesRenderedSig = null;
 function renderDispatches(items) {
+    try { wrCaseFindSync(items); } catch (e) { console.error('[training-cases] find sync failed', e); }
     refreshMyOrdersCard();
     // Back in the past with the scrubber of «Πορεία Ομάδων»: the orders as they stood then, read-only
     // (assets/js/war-room-time-machine.js). The list itself in the present.
@@ -15591,23 +15594,94 @@ document.addEventListener('click', e => {
     const back = e.target.closest('.wr-withdraw-btn');
     if (back && !back.disabled) postOrderDecline('withdraw', back.dataset.kind, back.dataset.id, null, back);
 });
-// The training case's button on an order's row (v3.505.0, assets/js/training-case.js). Answers are queued like every other
-// field action (sendQueuedItem() replays {kind:'case_answer'} to training-case.php), so the case plays with no signal.
-document.addEventListener('click', e => {
-    const caseBtn = e.target.closest('.vo-case-open-btn');
-    if (!caseBtn || !window.VoTrainingCase || document.getElementById('voCaseOverlay')) return;
+// The training case's player (v3.505.0, assets/js/training-case.js). Answers are queued like every other field action
+// (sendQueuedItem() replays {kind:'case_answer'} to training-case.php), so the case plays with no signal. Opened by the
+// button on an order's row and, since v3.506.0, by the phone itself the moment the team finds the victim.
+function openTrainingCase(placementId, briefing) {
+    if (!window.VoTrainingCase || document.getElementById('voCaseOverlay')) return;
     // The page's own SOS button (the volunteer's status row) sits under the overlay: the overlay's SOS forwards to it,
     // so the offline queue, the badge and the poll reconciliation stay the one code path. The button is looked up when
     // the SOS FIRES (the status row is redrawn by the poll, a node captured now may be gone by then); false = none.
     const findRealSos = () => document.querySelector('[onclick*="setFieldStatus"][onclick*="needs_help"]');
     window.VoTrainingCase.open({
-        placementId: Number(caseBtn.dataset.placement), missionId: WR_MISSION_ID, briefing: caseBtn.dataset.briefing || '',
+        placementId: Number(placementId), missionId: WR_MISSION_ID, briefing: briefing || '',
         userId: WR_MY_USER_ID, t: t, enqueue: enqueueAction, flush: flushQueue,
-        isQueued: (placementId, stepId) => loadQueue().some(q => q.kind === 'case_answer' && q.placementId === placementId && q.stepId === stepId),
+        isQueued: (pid, stepId) => loadQueue().some(q => q.kind === 'case_answer' && q.placementId === pid && q.stepId === stepId),
         onClose: () => { renderQueueStatus(); flushQueue(); refreshMyOrdersCard(); },
         onSos: findRealSos() ? () => { const sos = findRealSos(); if (sos) sos.click(); return !!sos; } : null,
     });
+}
+document.addEventListener('click', e => {
+    const caseBtn = e.target.closest('.vo-case-open-btn');
+    if (caseBtn) openTrainingCase(caseBtn.dataset.placement, caseBtn.dataset.briefing);
 });
+
+// Finding the victim (v3.506.0, assets/js/training-case-find.js). The phone watches its OWN high-accuracy GPS, only while a
+// case it may play has a spot its team has not found: the passive location capture can be switched off, is tied to a
+// three-minute send cadence and may run at a battery-saving accuracy. «Κοντά» (50 m) is a toast and a buzz, never a number or a
+// direction; «βρέθηκε» (10 m) queues the report, remembers it on this phone and opens the case.
+let caseFindCards = [];
+let caseFindWatchId = null;
+// (Guarded: a failed load of the find script must not stop the rest of this page script.)
+const caseFindTracker = window.VoCaseFind ? VoCaseFind.createTracker({
+    onClose: () => { wrCaseFindToast(t('case.close_toast')); if (navigator.vibrate) navigator.vibrate(200); },
+    onFound: (card, fix) => {
+        if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+        wrCaseFindToast(t('case.found_toast'));
+        try { localStorage.setItem(wrCaseFoundKey(card.placement_id), '1'); } catch (e) {}
+        if (!loadQueue().some(q => q.kind === 'case_found' && q.placementId === card.placement_id)) {
+            enqueueAction({kind: 'case_found', placementId: card.placement_id, lat: fix.lat, lng: fix.lng, acc: fix.acc, at: Date.now()});
+        }
+        flushQueue();
+        refreshMyOrdersCard();
+        openTrainingCase(card.placement_id, card.briefing);
+    },
+}) : {check() {}, forget() {}};
+// Prefetch state per placement id: {ok: true} once kept, {busy: true} in flight, {failedAt} after a failure (retried after a
+// minute at the soonest: the poll runs every few seconds and every request here is a new connection on a rate-limited host).
+const caseFindPrefetch = {};
+function wrCaseFoundKey(placementId) { return 'wr_case_found_' + WR_MY_USER_ID + '_' + placementId; }
+function wrCaseFoundLocally(placementId) {
+    try { return localStorage.getItem(wrCaseFoundKey(placementId)) === '1'; } catch (e) { return false; }
+}
+function wrCaseFindToast(text) {
+    const el = document.createElement('div');
+    el.setAttribute('role', 'status');
+    el.className = 'alert alert-success shadow position-fixed start-50 translate-middle-x fw-semibold py-2 px-3';
+    el.style.cssText = 'top:calc(var(--app-clock-h, 0px) + 12px);z-index:100001;max-width:90vw;';
+    el.textContent = text;
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+}
+function wrCaseFindStart() {
+    if (caseFindWatchId !== null || !navigator.geolocation) return;
+    caseFindWatchId = navigator.geolocation.watchPosition(
+        pos => caseFindTracker.check(caseFindCards, {lat: pos.coords.latitude, lng: pos.coords.longitude, acc: pos.coords.accuracy}),
+        () => {},
+        {enableHighAccuracy: true, maximumAge: 2000, timeout: 20000}
+    );
+}
+function wrCaseFindStop() {
+    if (caseFindWatchId === null) return;
+    navigator.geolocation.clearWatch(caseFindWatchId);
+    caseFindWatchId = null;
+}
+// Called with every dispatch list the page renders (the poll). Starts or stops the watcher, and keeps the documents of the
+// watched cases on the phone so a find with no signal still opens and plays them.
+function wrCaseFindSync(items) {
+    if (!window.VoCaseFind || !window.VoTrainingCase) return;
+    caseFindCards = VoCaseFind.watchList(items).filter(c => !wrCaseFoundLocally(c.placement_id));
+    caseFindCards.forEach(c => {
+        const st = caseFindPrefetch[c.placement_id];
+        if (st && (st.ok || st.busy || Date.now() - st.failedAt < 60000)) return;
+        caseFindPrefetch[c.placement_id] = {busy: true};
+        VoTrainingCase.prefetch({placementId: c.placement_id, missionId: WR_MISSION_ID, userId: WR_MY_USER_ID}).then(ok => {
+            caseFindPrefetch[c.placement_id] = ok ? {ok: true} : {failedAt: Date.now()};
+        });
+    });
+    if (caseFindCards.length && !document.hidden) wrCaseFindStart(); else wrCaseFindStop();
+}
+document.addEventListener('visibilitychange', () => { if (typeof dispatches !== 'undefined') wrCaseFindSync(dispatches); });
 
 // Both answers go through here, from the popup, a card or a map popup. The
 // reply carries this person's four order lists freshly loaded, redrawn with the
@@ -15930,9 +16004,12 @@ function myOrderEntriesFromDispatches(items) {
                 const caseLabel = cs.state === 'done'
                     ? t('case.btn_done', {percent: cs.percent})
                     : (cs.state === 'running' ? t('case.btn_resume') : t('case.btn_open'));
-                caseHtml = d.my_ack || cs.available
+                // Open: my team found the victim (the server's word, or this phone's own until the queue has landed it), or - a point
+                // order, whose victim is shown - my team has arrived.
+                const open = cs.available || wrCaseFoundLocally(cs.placement_id) || (!cs.hidden && d.my_ack);
+                caseHtml = open
                     ? `<button type="button" class="btn btn-sm btn-primary w-100 mt-1 vo-case-open-btn" data-placement="${Number(cs.placement_id)}" data-briefing="${escapeHtml(cs.briefing || '')}"><i class="bi bi-clipboard2-pulse me-1"></i>${escapeHtml(caseLabel)}</button>`
-                    : `<div class="small text-muted mt-1"><i class="bi bi-clipboard2-pulse me-1"></i>${escapeHtml(t('case.opens_on_arrival'))}</div>`;
+                    : `<div class="small text-muted mt-1"><i class="bi bi-clipboard2-pulse me-1"></i>${escapeHtml(t(cs.hidden ? 'case.opens_on_find' : 'case.opens_on_arrival'))}</div>`;
             }
             // «Δεν μπορώ» — my team's, like the steps above it.
             if (d.my_declined && !d.my_completed) {
@@ -17915,11 +17992,41 @@ function sendQueuedCaseAnswer(item) {
     });
 }
 
+// The team found the victim (v3.506.0): the same outcome rules as an answer. The server re-checks the distance; a refusal
+// (code 'refused': not the audience, too far, no spot) drops the report, everything else waits for the next tick.
+function sendQueuedCaseFound(item) {
+    if (!window.VoTrainingCase) return Promise.resolve({ok: false, networkError: true});
+    const params = {
+        mission_id: String(WR_MISSION_ID), action: 'found', placement_id: String(item.placementId),
+        lat: String(item.lat), lng: String(item.lng), accuracy: item.acc != null && isFinite(item.acc) ? String(item.acc) : '', queued: '1'
+    };
+    // When the phone found it: a report that waited offline is recorded with that time, not the time it got through.
+    if (item.at != null && isFinite(item.at)) params.at = String(item.at);
+    return postQueuedForm('training-case.php', params).then(result => {
+        const verdict = VoTrainingCase.queueOutcome(result);
+        if (verdict === 'retry') {
+            if (result && result.networkError) return result;
+            if (result && deferCaseAnswers(item)) setTimeout(flushQueue, 500);
+            return null;
+        }
+        if (verdict === 'drop') {
+            // Refused: the phone takes its own «found» back, as an answer's local copy goes (forgetLocalAnswer), so the row is
+            // locked again and the case is not played for answers the server will drop. The tracker's latches for it go too,
+            // so the phone watches that placement again at once instead of staying latched until a reload.
+            try { localStorage.removeItem(wrCaseFoundKey(item.placementId)); } catch (e) {}
+            caseFindTracker.forget(item.placementId);
+            refreshMyOrdersCard();
+        }
+        return result;
+    });
+}
+
 function sendQueuedItem(item) {
     if (item.kind === 'media') return sendQueuedMedia(item);
     if (item.kind === 'chat') return sendQueuedChat(item);
     if (item.kind === 'ping') return sendQueuedPings();
     if (item.kind === 'case_answer') return sendQueuedCaseAnswer(item);
+    if (item.kind === 'case_found') return sendQueuedCaseFound(item);
     // Triage writes carry their own ids (victim / assessment / bulk uuid), so
     // a replay that already landed is recognised server-side and ignored.
     if (item.kind === 'triage') {
@@ -28766,6 +28873,20 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
     let shapeLayer = null;
     let isClosed = false;
     let lastAddressLabel = '';
+    // The hidden victim spot of a training case staged on an AREA (v3.506.0): pinned with one tap inside the polygon, seen only here.
+    let casePinMode = false;
+    let caseSpot = null;
+    let caseSpotMarker = null;
+    function clearCaseSpot() {
+        casePinMode = false;
+        caseSpot = null;
+        if (caseSpotMarker) { dispatchMap.removeLayer(caseSpotMarker); caseSpotMarker = null; }
+        if (window.wrDispatchCaseSpotChanged) window.wrDispatchCaseSpotChanged();
+    }
+    window.wrDispatchCaseSpot = () => caseSpot ? {lat: caseSpot.lat, lng: caseSpot.lng} : null;
+    window.wrDispatchCaseStartPin = () => { casePinMode = true; };
+    window.wrDispatchCaseCancelPin = () => { casePinMode = false; };
+    window.wrDispatchAreaClosed = () => isClosed;
     // Set from pendingDispatchSeed.ringIndex when opened via a ring shortcut
     // (openDispatchForRing(), map block), null for the normal "New
     // Dispatch" sidebar-card flow — sent as-is either way so a hand-drawn
@@ -28793,6 +28914,7 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
     }
 
     function resetDrawing() {
+        if (dispatchMap) clearCaseSpot();
         drawPoints = [];
         isClosed = false;
         vertexMarkers.forEach(m => dispatchMap.removeLayer(m));
@@ -28800,6 +28922,7 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
         if (shapeLayer) { dispatchMap.removeLayer(shapeLayer); shapeLayer = null; }
         sendBtn.disabled = true;
         syncScenarioBtn();
+        if (window.wrDispatchCaseSpotChanged) window.wrDispatchCaseSpotChanged();
     }
 
     function updateShapePreview() {
@@ -28830,6 +28953,15 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
     }
 
     function onMapClick(e) {
+        if (casePinMode) {
+            casePinMode = false;
+            if (!isClosed || !pointInPolygon(e.latlng.lat, e.latlng.lng, drawPoints)) { alert(t('case.err_spot_outside')); if (window.wrDispatchCaseSpotChanged) window.wrDispatchCaseSpotChanged(); return; }
+            caseSpot = {lat: Number(e.latlng.lat.toFixed(6)), lng: Number(e.latlng.lng.toFixed(6))};
+            if (caseSpotMarker) dispatchMap.removeLayer(caseSpotMarker);
+            caseSpotMarker = L.circleMarker([caseSpot.lat, caseSpot.lng], {radius: 8, color: '#dc3545', fillColor: '#dc3545', fillOpacity: 0.9, weight: 2}).addTo(dispatchMap);
+            if (window.wrDispatchCaseSpotChanged) window.wrDispatchCaseSpotChanged();
+            return;
+        }
         if (isClosed) return;
         if (drawPoints.length >= 3) {
             const firstPoint = dispatchMap.latLngToContainerPoint(L.latLng(drawPoints[0]));
@@ -28838,6 +28970,7 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
                 isClosed = true;
                 updateShapePreview();
                 updateSendState();
+                if (window.wrDispatchCaseSpotChanged) window.wrDispatchCaseSpotChanged();
                 return;
             }
         }
@@ -28895,6 +29028,7 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
             isClosed = pendingDispatchSeed.closed !== false;
             updateShapePreview();
             updateSendState();
+            if (window.wrDispatchCaseSpotChanged) window.wrDispatchCaseSpotChanged();
             noteInput.value = pendingDispatchSeed.label || '';
             // Pre-select the team chosen in the ring popup itself, in this
             // same dropdown the normal "New Dispatch" sidebar card flow
@@ -28967,11 +29101,12 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
             // Ready is what «Στο σενάριο» says, not what «Αποστολή» says: a slot can be staged but never sent.
             if (!window.wrScenario || scenarioBtn.disabled) return;
             if (!teamSelect.value) { alert(t('dispatch.pick_team_first')); return; }
-            // A training case (v3.505.0, the picker below the recipients): it goes at a point, never an area, and a case that was
-            // asked for but not drawn yet is not staged as a plain point behind the commander's back.
+            // A training case (v3.505.0, the picker below the recipients): it goes at a point or, with a hidden spot, in an area, and
+            // a case that was asked for but not drawn yet is not staged as a plain point behind the commander's back.
             const wantsCase = !!(window.wrDispatchCaseWanted && window.wrDispatchCaseWanted());
             const caseFields = wantsCase && window.wrDispatchCaseFields ? window.wrDispatchCaseFields() : {};
-            if (wantsCase && isClosed) { alert(t('case.err_needs_point')); return; }
+            // An area takes a case too (v3.506.0), with the victim's hidden spot pinned inside it.
+            if (wantsCase && isClosed && !caseSpot) { alert(t('case.err_spot_needed')); return; }
             if (wantsCase && !caseFields.case_id) { alert(t('case.err_pick_first')); return; }
             const type = isClosed ? 'polygon' : 'point';
             const geo = type === 'point' ? {lat: drawPoints[0][0], lng: drawPoints[0][1]} : drawPoints;
@@ -29057,6 +29192,8 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
     const drawnEl = document.getElementById('dispatchCaseDrawn');
     const redrawBtn = document.getElementById('dispatchCaseRedraw');
     const briefing = document.getElementById('dispatchCaseBriefing');
+    const spotBtn = document.getElementById('dispatchCaseSpotBtn');
+    const spotLabel = document.getElementById('dispatchCaseSpotLabel');
     const warn = document.getElementById('dispatchCaseWarn');
     const sendBtn = document.getElementById('dispatchSendBtn');
     const scenarioGroup = document.getElementById('dispatchScenarioGroup');
@@ -29084,7 +29221,17 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
         [typeSel, diffSel, langSel, unrevWrap, redrawBtn].forEach(el => show(el, random));
         show(drawnEl, random && !!state.caseId);
         renderWarn();
+        syncSpotButton();
     }
+
+    // The hidden victim spot (v3.506.0): asked for only when a case is chosen and the shape drawn is an area.
+    function syncSpotButton() {
+        const need = state.mode !== null && !!(window.wrDispatchAreaClosed && window.wrDispatchAreaClosed());
+        show(spotBtn, need);
+        spotLabel.textContent = window.wrDispatchCaseSpot && window.wrDispatchCaseSpot() ? t('case.spot_pinned') : t('case.spot_pin');
+    }
+    spotBtn.addEventListener('click', () => { window.wrDispatchCaseStartPin(); alert(t('case.spot_pin_help')); });
+    window.wrDispatchCaseSpotChanged = syncSpotButton;
 
     function fillFilter(sel, anyKey, values, label) {
         sel.innerHTML = '';
@@ -29150,6 +29297,7 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
         if (value === 'random') { draw(); return; }
         if (value === '') {
             state = {mode: null, caseId: '', reviewed: true, filter: {}};
+            if (window.wrDispatchCaseCancelPin) window.wrDispatchCaseCancelPin();
         } else {
             const chosen = (cases || []).find(c => String(c.id) === value);
             state = {mode: 'chosen', caseId: value, reviewed: !!(chosen && chosen.reviewed), filter: {}};
@@ -29162,7 +29310,10 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
     redrawBtn.addEventListener('click', draw);
 
     window.wrDispatchCaseWanted = () => state.mode !== null;
-    window.wrDispatchCaseFields = () => TC.caseStageFields(state.mode ? {caseId: state.caseId, mode: state.mode, filter: state.filter, briefing: briefing.value} : null);
+    window.wrDispatchCaseFields = () => TC.caseStageFields(state.mode ? {
+        caseId: state.caseId, mode: state.mode, filter: state.filter, briefing: briefing.value,
+        spot: window.wrDispatchAreaClosed && window.wrDispatchAreaClosed() ? window.wrDispatchCaseSpot() : null,
+    } : null);
     window.wrDispatchCaseAfterStage = () => {
         briefing.value = '';
         if (state.mode === 'random') draw();

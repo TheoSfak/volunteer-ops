@@ -283,6 +283,29 @@ test('caseStageFields adds nothing without a case and carries the choice, the dr
     assert.equal(TC.caseStageFields({caseId: 7, mode: 'bogus'}).case_mode, 'chosen');
 });
 
+test('renderOverview says who found the victim and when, escaping the name', () => {
+    const t = (k, v) => k === 'case.overview_found' ? 'FOUND ' + v.time + ' ' + v.name : k;
+    const html = TC.renderOverview({placements: [{
+        id: 1, title: 'Τ', label: '', audience: 'all', volunteers: [], steps: [],
+        finds: [{scope_key: 't3', found_at: '2026-11-22 14:32:10', by: '<b>Ann</b>'}],
+    }]}, t);
+    assert.match(html, /FOUND 14:32 &lt;b&gt;Ann&lt;\/b&gt;/);
+    const none = TC.renderOverview({placements: [{id: 1, title: 'Τ', label: '', audience: 'all', volunteers: [], steps: [], finds: []}]}, t);
+    assert.doesNotMatch(none, /FOUND/);
+});
+
+test('renderOverview prints no dangling "by" when the finder is gone (a deleted user)', () => {
+    const t = (k, v) => k === 'case.overview_found' ? 'FOUND ' + v.time + ' by ' + v.name : (k === 'case.overview_found_unknown' ? 'FOUND ' + v.time : k);
+    const page = by => TC.renderOverview({placements: [{id: 1, title: 'T', label: '', audience: 'all', volunteers: [], steps: [],
+        finds: [{scope_key: 't3', found_at: '2026-11-22 14:32:10', by: by}]}]}, t);
+    [null, '', undefined].forEach(by => {
+        const html = page(by);
+        assert.match(html, /FOUND 14:32</);
+        assert.doesNotMatch(html, / by /);
+    });
+    assert.match(page('Ann'), /FOUND 14:32 by Ann/);
+});
+
 test('renderOverview gives each opening section a stable key, so a refresh can keep it open', () => {
     const html = TC.renderOverview({placements: [{id: 4, title: 'T', label: '', audience: 'all', steps: [],
         volunteers: [{user_id: 9, name: 'A', state: 'done', score_points: 1, score_max: 2, percent: 50, answers: [{step_id: 's1', choice_label: 'x', rating: 'best', ms_taken: 1000}]}]}]}, k => k);
@@ -295,4 +318,32 @@ test('previewOptions: a try-out neither queues answers nor loads from the server
     assert.deepEqual(TC.previewOptions({}), {enqueue: true, load: true});
     assert.deepEqual(TC.previewOptions(null), {enqueue: true, load: true});
     assert.deepEqual(TC.previewOptions({preview: 'yes'}), {enqueue: true, load: true}, 'only a real true previews');
+});
+
+test('prefetch keeps a valid document under the player\'s own key and refuses an invalid one', async () => {
+    const store = {};
+    global.localStorage = {getItem: k => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = v; }};
+    const urls = [];
+    global.fetch = async url => { urls.push(url); return {json: async () => ({ok: true, document: doc})}; };
+    assert.equal(await TC.prefetch({placementId: 5, missionId: 9, userId: 3}), true);
+    assert.deepEqual(JSON.parse(store[TC.storageKeys(3, 5).doc]), doc);
+    assert.match(urls[0], /action=load&mission_id=9&placement_id=5/);
+    urls.length = 0;
+    assert.equal(await TC.prefetch({placementId: 5, missionId: 9, userId: 3}), true);
+    assert.equal(urls.length, 0, 'a document already kept is not fetched again');
+    global.fetch = async () => ({json: async () => ({ok: true, document: {nope: 1}})});
+    assert.equal(await TC.prefetch({placementId: 6, missionId: 9, userId: 3}), false);
+    global.fetch = async () => { throw new Error('offline'); };
+    assert.equal(await TC.prefetch({placementId: 7, missionId: 9, userId: 3}), false);
+    delete global.fetch;
+    delete global.localStorage;
+});
+
+test('caseStageFields carries the hidden spot of an area order', () => {
+    const f = TC.caseStageFields({caseId: 4, mode: 'chosen', briefing: ' b ', spot: {lat: 35.405, lng: 25.205}});
+    assert.equal(f.spot_lat, '35.405');
+    assert.equal(f.spot_lng, '25.205');
+    const plain = TC.caseStageFields({caseId: 4, mode: 'chosen', briefing: ''});
+    assert.equal('spot_lat' in plain, false);
+    assert.deepEqual(TC.caseStageFields({spot: {lat: 1, lng: 2}}), {});
 });

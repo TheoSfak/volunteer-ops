@@ -8654,6 +8654,32 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
                 dbExecute("ALTER TABLE `mission_scenario_items` MODIFY COLUMN `payload` MEDIUMTEXT NOT NULL COMMENT 'JSON: audience (team|all|slot; a sector or a route never all), team_id, slot_id, type, geo, label, travel_mode; a sector: area_id (or area_item_id = a staged area of the scenario), area_label, label, geo; a route: label (its title), waypoints, is_closed_loop, add_return_waypoint, member_ids; an order: order_type, text; a search area: label, geo; a building: label, lat, lng, floor_count, sector_id (or sector_item_id = a staged sector of the scenario), sector_label'");
             },
         ],
+        [
+            'version'     => 226,
+            'description' => 'Training cases: finding the victim - where a placement\'s victim is (spot_lat, spot_lng, spot_hidden) ' .
+                'and which team found it (mission_case_finds, one row per placement and team).',
+            'up' => function () {
+                if (!dbFetchOne("SHOW COLUMNS FROM `mission_case_placements` LIKE 'spot_lat'")) {
+                    dbExecute("ALTER TABLE `mission_case_placements`
+                        ADD COLUMN `spot_lat` DECIMAL(9,6) NULL COMMENT 'Where the victim is: a point order = the point, an area order = the hidden spot' AFTER `draw_mode`,
+                        ADD COLUMN `spot_lng` DECIMAL(9,6) NULL AFTER `spot_lat`,
+                        ADD COLUMN `spot_hidden` TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = an area order: the spot is never shown, only found' AFTER `spot_lng`");
+                }
+                dbExecute("CREATE TABLE IF NOT EXISTS `mission_case_finds` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `placement_id` INT UNSIGNED NOT NULL,
+                    `scope_key` VARCHAR(20) NOT NULL COMMENT 't<team_id>, or u<user_id> for a volunteer with no team',
+                    `found_by` INT UNSIGNED NULL,
+                    `found_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    `lat` DECIMAL(9,6) NULL,
+                    `lng` DECIMAL(9,6) NULL,
+                    `accuracy_m` SMALLINT UNSIGNED NULL,
+                    UNIQUE KEY `uq_case_find` (`placement_id`, `scope_key`),
+                    FOREIGN KEY (`placement_id`) REFERENCES `mission_case_placements`(`id`) ON DELETE CASCADE,
+                    FOREIGN KEY (`found_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+            },
+        ],
 
     ];
     // ────────────────────────────────────────────────────────────────────────

@@ -233,8 +233,8 @@
     }
 
     // A training-case answer the server answered but cannot take now (closed mission, stale token, server error) is the
-    // fast lane's head and blocks everything behind it. Moving this placement's answers (in their own order: step N must
-    // reach the server before step N+1) behind the rest lets an SOS or an order go first. Returns the reordered queue, or
+    // fast lane's head and blocks everything behind it. Moving this placement's found report and answers (in their own
+    // order: the find, then step N before step N+1) behind the rest lets an SOS or an order go first. Returns the reordered queue, or
     // null when nothing should change - and then the caller must NOT schedule a re-flush:
     //   - only what the fast lane would actually send counts: files and positions have their own lanes (and a route
     //     completion held for its own file cannot go), so a queued photo next to a stuck answer must not make the page
@@ -245,11 +245,11 @@
     const CASE_DEFER_WINDOW_MS = 15000;
     function caseAnswerDeferral(queue, placementId, lastDeferredAt, now) {
         if (lastDeferredAt && now - lastDeferredAt < CASE_DEFER_WINDOW_MS) return null;
-        const isMine = q => q.kind === 'case_answer' && q.placementId === placementId;
+        const isMine = q => (q.kind === 'case_answer' || q.kind === 'case_found') && q.placementId === placementId;
         const mine = queue.filter(isMine);
         if (!mine.length) return null;
         const others = queue.filter(q => !isMine(q));
-        if (nextQueueIndex(others.filter(q => q.kind !== 'case_answer'), 'fast') === -1) return null;
+        if (nextQueueIndex(others.filter(q => q.kind !== 'case_answer' && q.kind !== 'case_found'), 'fast') === -1) return null;
         const reordered = others.concat(mine);
         return reordered.every((q, i) => q === queue[i]) ? null : reordered;
     }

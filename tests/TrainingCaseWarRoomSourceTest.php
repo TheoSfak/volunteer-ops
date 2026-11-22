@@ -62,7 +62,7 @@ final class TrainingCaseWarRoomSourceTest extends TestCase
 
     public function test_the_overlay_sos_looks_the_real_button_up_when_it_fires_and_the_viewer_scopes_the_cache(): void
     {
-        $start = strpos($this->page, "caseBtn = e.target.closest('.vo-case-open-btn')");
+        $start = strpos($this->page, 'function openTrainingCase(');
         $this->assertNotFalse($start);
         $handler = substr($this->page, $start, 1700);
         $this->assertStringContainsString('const findRealSos = () => document.querySelector(', $handler);
@@ -121,9 +121,9 @@ final class TrainingCaseWarRoomSourceTest extends TestCase
         $at = strpos($this->page, 'id="dispatchCaseSelect"');
         $this->assertNotFalse($at);
         $this->assertStringContainsString("<?php if (isSystemAdmin() && !empty(\$mission['is_training'])): ?>", substr($this->page, $at - 500, 500));
-        // The staging handler passes the case fields, refuses an area and an undrawn random pick.
+        // The staging handler passes the case fields, takes an area only with its hidden spot pinned, and refuses an undrawn random pick.
         $this->assertStringContainsString("}, caseFields)).then(res => {", $this->page);
-        $this->assertStringContainsString("alert(t('case.err_needs_point'))", $this->page);
+        $this->assertStringContainsString("alert(t('case.err_spot_needed'))", $this->page);
         $this->assertStringContainsString("alert(t('case.err_pick_first'))", $this->page);
         // «Αποστολή» is hidden while a case is chosen: a case is staged only.
         $this->assertStringContainsString("sendBtn.classList.toggle('d-none', wanted)", $this->page);

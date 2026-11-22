@@ -449,6 +449,9 @@
                     + (RATING_BADGE[c.rating] || 'bg-secondary') + '">' + escapeHtml(c.count) + '</span></div>').join('') + '</div>').join('');
             return '<div class="border rounded p-2 mb-2"><div class="fw-semibold">' + escapeHtml(p.title) + '</div>'
                 + (p.label ? '<div class="small text-muted mb-1">' + escapeHtml(p.label) + '</div>' : '')
+                + (p.finds || []).map(f => '<div class="small text-success"><i class="bi bi-geo-alt-fill me-1"></i>'
+                    + escapeHtml(f.by ? t('case.overview_found', {time: String(f.found_at || '').slice(11, 16), name: f.by})
+                        : t('case.overview_found_unknown', {time: String(f.found_at || '').slice(11, 16)})) + '</div>').join('')
                 + '<ul class="list-unstyled small mb-1">' + people + '</ul>'
                 + '<details data-k="s' + escapeHtml(p.id) + '"><summary class="small">' + escapeHtml(t('case.overview_breakdown')) + '</summary>' + stepHtml + '</details></div>';
         }).join('');
@@ -468,16 +471,40 @@
     function caseStageFields(sel) {
         if (!sel || sel.caseId === '' || sel.caseId == null) return {};
         const mode = sel.mode === 'random' ? 'random' : 'chosen';
-        return {
+        const fields = {
             case_id: String(sel.caseId), case_mode: mode,
             case_pool: JSON.stringify(mode === 'random' ? (sel.filter || {}) : {}),
             briefing: String(sel.briefing || '').trim(),
         };
+        // An area order's hidden victim spot (v3.506.0); a point order needs none (the point is the spot).
+        if (sel.spot && isFinite(Number(sel.spot.lat)) && isFinite(Number(sel.spot.lng))) {
+            fields.spot_lat = String(sel.spot.lat);
+            fields.spot_lng = String(sel.spot.lng);
+        }
+        return fields;
+    }
+
+    /**
+     * Keeps a placement's document on the phone before the team has found the victim, so the case opens and plays with no
+     * signal at the moment of the find (the load endpoint allows the audience before arrival). Resolves true when a valid
+     * document is kept (already or just now), false on any failure: it is a courtesy, never an error. {placementId, missionId, userId}.
+     */
+    function prefetch(o) {
+        const key = storageKeys(o.userId, o.placementId).doc;
+        try {
+            if (validDoc(JSON.parse(localStorage.getItem(key) || 'null'))) return Promise.resolve(true);
+        } catch (e) { /* unreadable: fetch it again */ }
+        const url = 'training-case.php?action=load&mission_id=' + encodeURIComponent(o.missionId) + '&placement_id=' + encodeURIComponent(o.placementId);
+        return Promise.resolve().then(() => fetch(url)).then(r => r.json()).then(res => {
+            if (!res || !res.ok || !validDoc(res.document)) return false;
+            try { localStorage.setItem(key, JSON.stringify(res.document)); } catch (e) { return false; }
+            return true;
+        }).catch(() => false);
     }
 
     const api = {
         escapeHtml, scoreLabel, choiceOutcome, runFromAnswers, bestPathLabels, mergeAnswers, withoutAnswer, answerQueueItem,
-        storageKeys, queueOutcome, replayCandidate, forgetLocalAnswer, validDoc, viewSignature, previewOptions, open,
+        storageKeys, queueOutcome, replayCandidate, forgetLocalAnswer, validDoc, viewSignature, previewOptions, prefetch, open,
         renderOverview, caseOptionLabel, caseStageFields, formatSeconds,
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
