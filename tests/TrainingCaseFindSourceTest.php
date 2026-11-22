@@ -30,7 +30,8 @@ final class TrainingCaseFindSourceTest extends TestCase
     {
         $page = str_replace("\r\n", "\n", (string) WarRoomSource::read('war-room.php'));
         $this->assertStringContainsString('assets/js/training-case-find.js', $page);
-        $this->assertStringContainsString('wrCaseFindSync(items);', substr($page, (int) strpos($page, 'function renderDispatches(items)'), 400));
+        // (guarded: a throw in the find sync must never blank the order list that is drawn right after it)
+        $this->assertStringContainsString("try { wrCaseFindSync(items); } catch (e) { console.error('[training-cases] find sync failed', e); }", substr($page, (int) strpos($page, 'function renderDispatches(items)'), 400));
         $this->assertStringContainsString("if (item.kind === 'case_found') return sendQueuedCaseFound(item);", $page);
         $this->assertStringContainsString('enableHighAccuracy: true', substr($page, (int) strpos($page, 'function wrCaseFindStart'), 900));
         $this->assertStringContainsString('function openTrainingCase(', $page);

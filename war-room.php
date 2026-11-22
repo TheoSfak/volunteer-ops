@@ -9606,7 +9606,7 @@ function dispatchIncidentHtml(inc) {
 // dispatch changed, including its live ETA.
 let dispatchesRenderedSig = null;
 function renderDispatches(items) {
-    wrCaseFindSync(items);
+    try { wrCaseFindSync(items); } catch (e) { console.error('[training-cases] find sync failed', e); }
     refreshMyOrdersCard();
     // Back in the past with the scrubber of «Πορεία Ομάδων»: the orders as they stood then, read-only
     // (assets/js/war-room-time-machine.js). The list itself in the present.
