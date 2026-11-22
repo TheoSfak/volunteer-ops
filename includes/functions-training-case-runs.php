@@ -200,6 +200,12 @@ function trainingCaseRecordFound(int $placementId, int $userId, float $lat, floa
     if ($gate !== null) {
         return ['ok' => false, 'error' => t($gate), 'code' => 'refused'];
     }
+    $missionId = (int) $placement['mission_id'];
+    $teamId = getUserTeamIdForMission($missionId, $userId) ?: null;
+    $scopeKey = dispatchProgressScopeKey($teamId, $userId);
+    if (trainingCaseTeamFound($placementId, $scopeKey)) {
+        return ['ok' => true, 'duplicate' => true]; // a late teammate's report, whatever its fix: nothing more to record
+    }
     if ($placement['spot_lat'] === null || $placement['spot_lng'] === null) {
         return ['ok' => false, 'error' => t('case.err_no_spot'), 'code' => 'refused'];
     }
@@ -207,11 +213,9 @@ function trainingCaseRecordFound(int $placementId, int $userId, float $lat, floa
     if (trainingCaseProximity($distance, $accuracyM) !== 'found') {
         return ['ok' => false, 'error' => t('case.err_too_far'), 'code' => 'refused'];
     }
-    $missionId = (int) $placement['mission_id'];
-    $teamId = getUserTeamIdForMission($missionId, $userId) ?: null;
     $inserted = dbExecute(
         "INSERT IGNORE INTO mission_case_finds (placement_id, scope_key, found_by, lat, lng, accuracy_m) VALUES (?, ?, ?, ?, ?, ?)",
-        [$placementId, dispatchProgressScopeKey($teamId, $userId), $userId, round($lat, 6), round($lng, 6), $accuracyM !== null ? (int) round(min(max($accuracyM, 0.0), 65000.0)) : null]
+        [$placementId, $scopeKey, $userId, round($lat, 6), round($lng, 6), $accuracyM !== null ? (int) round(min(max($accuracyM, 0.0), 65000.0)) : null]
     );
     if ($inserted > 0) {
         logAudit('team_found_case', 'mission_case_placements', $placementId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'user_id' => $userId]);
@@ -477,8 +481,20 @@ function trainingCaseNotifyTeam(int $missionId, int $dispatchId, ?int $teamId, i
     }
 }
 
-/** The team has just arrived at a case's order: tell its other on-duty members that the case is open. */
+/**
+ * The team has just arrived at a case's order: tell its other on-duty members that the case is open. A hidden victim is not
+ * opened by arriving (the gate says err_not_found_yet), so an area order sends nothing here; the find notice does that later.
+ */
 function trainingCaseNotifyArrival(int $missionId, int $dispatchId, ?int $teamId, int $arrivedUserId): void {
+    try {
+        $placement = trainingCasePlacementForDispatch($dispatchId);
+        if ($placement && !empty($placement['spot_hidden'])) {
+            return;
+        }
+    } catch (Throwable $e) {
+        error_log('[training-cases] team notice: ' . $e->getMessage());
+        return;
+    }
     trainingCaseNotifyTeam($missionId, $dispatchId, $teamId, $arrivedUserId, 'case.arrived_title', 'case.arrived_message');
 }
 

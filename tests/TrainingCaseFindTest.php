@@ -271,7 +271,7 @@ final class TrainingCaseFindTest extends TestCase
 
     public function test_a_second_report_is_a_quiet_duplicate_and_another_team_cannot_report(): void
     {
-        $first = trainingCaseRecordFound($this->areaPlacement, $this->member, 35.405, 25.205, 5.0);
+        $this->assertTrue(trainingCaseRecordFound($this->areaPlacement, $this->member, 35.405, 25.205, 5.0)['ok']);
         $again = trainingCaseRecordFound($this->areaPlacement, $this->mate, 35.405, 25.205, 5.0);
         $this->assertTrue($again['ok']);
         $this->assertTrue($again['duplicate']);
@@ -286,7 +286,38 @@ final class TrainingCaseFindTest extends TestCase
         dbExecute("UPDATE missions SET is_training = 0 WHERE id = ?", [$this->drill['mission']]);
         $this->assertFalse(trainingCaseRecordFound($this->areaPlacement, $this->member, 35.405, 25.205, 5.0)['ok']);
         dbExecute("UPDATE missions SET is_training = 1 WHERE id = ?", [$this->drill['mission']]);
-        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_case_finds"));
+        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_case_finds WHERE placement_id = ?", [$this->areaPlacement]));
+    }
+
+    public function test_a_find_on_a_point_placement_opens_the_gate_without_an_arrival(): void
+    {
+        $p = trainingCasePlacement($this->pointPlacement);
+        $r = trainingCaseRecordFound($this->pointPlacement, $this->member, 35.3, 25.1, 5.0);
+        $this->assertTrue($r['ok'], (string) ($r['error'] ?? ''));
+        $this->assertNull(trainingCaseGate($p, $this->member, true));
+        $this->assertNull(trainingCaseGate($p, $this->mate, true));
+        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_dispatch_progress WHERE dispatch_id = ?", [$this->pointDispatch]));
+    }
+
+    public function test_a_late_teammate_report_with_a_poor_fix_is_a_quiet_duplicate(): void
+    {
+        $this->assertTrue(trainingCaseRecordFound($this->areaPlacement, $this->member, 35.405, 25.205, 5.0)['ok']);
+        $late = trainingCaseRecordFound($this->areaPlacement, $this->mate, $this->north(35.405, 200.0), 25.205, null);
+        $this->assertTrue($late['ok'], (string) ($late['error'] ?? ''));
+        $this->assertTrue($late['duplicate']);
+    }
+
+    public function test_the_arrival_notice_is_not_sent_for_a_hidden_victim(): void
+    {
+        dbExecute("UPDATE shifts SET start_time = ?, end_time = ? WHERE id = ?", [date('Y-m-d H:i:s', time() - 3600), date('Y-m-d H:i:s', time() + 3600), $this->drill['shift']]);
+        foreach ([$this->member, $this->mate] as $u) {
+            dbExecute("INSERT INTO mission_action_room_participants (mission_id, user_id) VALUES (?, ?)", [$this->drill['mission'], $u]);
+        }
+        $count = fn(int $placement): int => (int) dbFetchValue("SELECT COUNT(*) FROM notifications WHERE user_id = ? AND data LIKE ?", [$this->mate, '%case-' . $placement . '%']);
+        trainingCaseNotifyArrival($this->drill['mission'], $this->areaDispatch, $this->teamId, $this->member);
+        $this->assertSame(0, $count($this->areaPlacement), 'the gate refuses play until the victim is found, so no "open the case" notice');
+        trainingCaseNotifyArrival($this->drill['mission'], $this->pointDispatch, $this->teamId, $this->member);
+        $this->assertSame(1, $count($this->pointPlacement));
     }
 
     public function test_a_placement_with_no_spot_cannot_be_found(): void
