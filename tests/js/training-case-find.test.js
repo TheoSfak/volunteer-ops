@@ -145,3 +145,65 @@ test('a handler that throws cannot stop the other cards, and a failed onFound is
         console.error = realError;
     }
 });
+
+// ---- v3.507.0: what the AR screen may show --------------------------------------------------------
+
+const SPOT = {lat: 35.3, lng: 25.1};
+const card = (over) => Object.assign({placement_id: 7, can_play: true, available: false, found: false, hidden: false, state: 'new', spot: SPOT, briefing: ''}, over || {});
+const fixAt = (metres, acc) => ({lat: north(SPOT.lat, metres), lng: SPOT.lng, acc: acc === undefined ? 5 : acc});
+
+test('victimView: nothing for no card, a card I cannot play, a finished run or a card without a spot', () => {
+    assert.deepEqual(F.victimView(null, fixAt(5)), {mode: 'none'});
+    assert.deepEqual(F.victimView(card({can_play: false}), fixAt(5)), {mode: 'none'});
+    assert.deepEqual(F.victimView(card({state: 'done'}), fixAt(5)), {mode: 'none'});
+    assert.deepEqual(F.victimView(card({spot: null}), fixAt(5)), {mode: 'none'});
+    assert.deepEqual(F.victimView(card({spot: {lat: 'x', lng: 25.1}}), fixAt(5)), {mode: 'none'});
+});
+
+test('victimView: a victim whose place is shown (a point order) is a marker whatever the distance, and says whether it is found', () => {
+    assert.deepEqual(F.victimView(card(), fixAt(400)), {mode: 'marker', found: false});
+    assert.deepEqual(F.victimView(card(), null), {mode: 'marker', found: false}, 'no GPS fix yet: still drawn at the order\'s place');
+    assert.deepEqual(F.victimView(card({found: true}), fixAt(400)), {mode: 'marker', found: true});
+    assert.deepEqual(F.victimView(card({available: true}), fixAt(400)), {mode: 'marker', found: true});
+});
+
+test('victimView: a hidden victim is "close" from 50 m (with the accuracy credit) and never carries a spot or a distance', () => {
+    const hidden = (over) => card(Object.assign({hidden: true}, over || {}));
+    assert.deepEqual(F.victimView(hidden(), fixAt(200)), {mode: 'none'});
+    assert.deepEqual(F.victimView(hidden(), fixAt(60)), {mode: 'none'});
+    assert.deepEqual(F.victimView(hidden(), fixAt(49)), {mode: 'close'});
+    assert.deepEqual(F.victimView(hidden(), fixAt(30)), {mode: 'close'});
+    assert.deepEqual(F.victimView(hidden(), fixAt(8)), {mode: 'close'}, 'within 10 m and not yet found: still only "close"');
+    assert.deepEqual(F.victimView(hidden(), fixAt(60, 15)), {mode: 'close'}, '60 m with the full 15 m credit is 45 m effective: close');
+    assert.deepEqual(F.victimView(hidden(), fixAt(66, 15)), {mode: 'none'}, '66 m less the 15 m credit is 51 m: still far');
+    assert.deepEqual(F.victimView(hidden(), fixAt(66, 100)), {mode: 'none'}, 'the credit is capped at 15 m, whatever the reported accuracy');
+    assert.deepEqual(F.victimView(hidden(), fixAt(120, 100)), {mode: 'none'}, 'a vague fix cannot make a far victim close');
+    assert.deepEqual(F.victimView(hidden(), null), {mode: 'none'});
+    assert.deepEqual(F.victimView(hidden({found: true}), fixAt(8)), {mode: 'none'}, 'found: nothing left to hunt for');
+    const close = F.victimView(hidden(), fixAt(30));
+    assert.deepEqual(Object.keys(close), ['mode'], 'no spot, no distance, no direction');
+    assert.deepEqual(Object.keys(F.victimView(hidden(), fixAt(300))), ['mode']);
+});
+
+test('victimView: a find on this phone ends the hidden-victim cue and marks a shown victim found', () => {
+    const hidden = (over) => card(Object.assign({hidden: true}, over || {}));
+    assert.deepEqual(F.victimView(hidden(), fixAt(30), true), {mode: 'none'}, 'found here, the poll has not caught up');
+    assert.deepEqual(F.victimView(hidden(), fixAt(30), false), {mode: 'close'});
+    assert.deepEqual(F.victimView(hidden(), fixAt(30), undefined), {mode: 'close'});
+    assert.deepEqual(F.victimView(hidden(), fixAt(30)), {mode: 'close'});
+    assert.deepEqual(Object.keys(F.victimView(hidden(), fixAt(30), true)), ['mode']);
+    assert.deepEqual(Object.keys(F.victimView(hidden(), fixAt(300), false)), ['mode']);
+    assert.deepEqual(F.victimView(card(), fixAt(400), true), {mode: 'marker', found: true});
+    assert.deepEqual(F.victimView(card(), fixAt(400), false), {mode: 'marker', found: false});
+    assert.deepEqual(F.victimView(card(), fixAt(400), undefined), {mode: 'marker', found: false});
+});
+
+test('canOpen: the case may be opened from the AR when it is playable, open to my team (or found on this phone) and not finished', () => {
+    assert.equal(F.canOpen(card({available: true}), false), true);
+    assert.equal(F.canOpen(card(), true), true, 'a find this phone has reported before the poll caught up');
+    assert.equal(F.canOpen(card(), false), false);
+    assert.equal(F.canOpen(card({available: true, can_play: false}), false), false);
+    assert.equal(F.canOpen(card({available: true, state: 'done'}), false), false);
+    assert.equal(F.canOpen(null, true), false);
+    assert.equal(F.canOpen(card({state: 'running', available: true}), false), true, 'a run in progress can be resumed');
+});

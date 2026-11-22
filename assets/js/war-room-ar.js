@@ -322,6 +322,7 @@ function arElement() {
     // Translated strings only; everything from an order is set as text below.
     el.innerHTML = `<video class="wr-ar-video" playsinline muted autoplay></video>
         <canvas class="wr-ar-world"></canvas>
+        <div class="wr-ar-casenear" hidden></div>
         <div class="wr-ar-top">
             <div class="wr-ar-toprow">
                 <button type="button" class="wr-ar-x" data-ar="close" aria-label="${escapeHtml(t('arrow.close'))}"><i class="bi bi-x-lg"></i></button>
@@ -355,6 +356,7 @@ function arElement() {
                 <button type="button" class="wr-ar-chip" data-ar-layer="poi" aria-pressed="true">${escapeHtml(t('ar.layer_poi'))}</button>
                 <button type="button" class="wr-ar-chip" data-ar-layer="cov" aria-pressed="true">${escapeHtml(t('ar.layer_cov'))}</button>
             </div>
+            <button type="button" class="wr-ar-go wr-ar-casebtn" data-ar="case" hidden>${escapeHtml(t('ar.case_open'))}</button>
             <button type="button" class="wr-ar-go" data-ar="go" hidden></button>
             <div class="wr-ar-links">
                 <button type="button" data-ar="compass"><i class="bi bi-compass me-1"></i>${escapeHtml(t('arrow.open_btn'))}</button>
@@ -399,6 +401,7 @@ function arElement() {
             case 'compass': { const m = opEntries.get(arState.key); arClose(); if (m) arrowOpen(m); break; }
             case 'decline': { const m = opEntries.get(arState.key); arClose(); if (m) opAct('decline', m, btn); break; }
             case 'poi': arCapturePoi(); break;
+            case 'case': { const m = opEntries.get(arState.key); if (m && m.case && typeof openTrainingCase === 'function') openTrainingCase(m.case.placement_id, m.case.briefing); break; }
         }
     });
     return el;
@@ -462,7 +465,8 @@ function arOpen(m) {
             .catch(() => {});
     }
     arStartMagnetometer();
-    arState.onKey = e => { if (e.key === 'Escape') arClose(); };
+    // While the case player is on screen Escape does nothing here, so the AR stays open under it; the player closes with its own button.
+    arState.onKey = e => { if (e.key === 'Escape' && !document.getElementById('voCaseOverlay')) arClose(); };
     document.addEventListener('keydown', arState.onKey);
     let seen = false;
     try { seen = !!localStorage.getItem(AR_SAFETY_KEY); } catch (e) { /* private window: ask every time */ }
@@ -1008,6 +1012,7 @@ function arFrame(now) {
         arState.timedOut = true;
         arShowMessage(t('ar.timeout'), t('ar.continue'));
     }
+    arState.caseNear = false;
     if (!me || !poseFresh) {
         arUpdateDynamicHud(el, m, null);
         const note = !arState.pose ? t('ar.no_compass') : t('ar.compass_lost');
@@ -1041,6 +1046,11 @@ function arDrawWorld(S, m, me) {
     const navV = arVec(me, nav.lat, nav.lng);
     const flatNav = Math.hypot(navV.x, navV.y);
     const info = {dist: flatNav, dz: navV.z + AR_EYE_HEIGHT_M, near: flatNav <= ARROW_ARRIVE_RADIUS_M, inside: false, outM: 0, edge: null};
+    // The victim of a training case on this order (v3.507.0). A known victim's place is the order's own place, so its beacon turns red;
+    // a hidden one is never drawn at all, the screen only says the team is near. VoCaseFind.victimView decides, so no spot is read here.
+    const victim = m.case && typeof VoCaseFind !== 'undefined' ? VoCaseFind.victimView(m.case, me, arCaseFoundHere(m.case)) : {mode: 'none'};
+    arState.caseNear = victim.mode === 'close';
+    const markCol = victim.mode === 'marker' && t0.kind === 'point' ? AR_COL.red : AR_COL.green;
     const pushMark = (az, col, shape) => S.marks.push({az: az, col: col, shape: shape});
     const navAngles = arBearingElevation([navV.x, navV.y, navV.z]);
     const eta = naismithMinutes(flatNav, Math.max(0, info.dz));
@@ -1107,12 +1117,12 @@ function arDrawWorld(S, m, me) {
         else S.edges.push({turn: arTurnTo(S.heading, navAngles.az), label: title + ' · ' + formatDistanceMeters(flatNav), col: AR_COL.green});
     } else {
         const p = arProject([navV.x, navV.y, navV.z], S.basis, S.focal, S.cw, S.ch);
-        const title = String(m.text || m.title).split('\n')[0];
-        if (p && p.x > -20 && p.x < S.cw + 20) arDrawBeacon(S, p, {color: AR_COL.green, big: true, ring: true, lines: targetLines(title)});
-        else S.edges.push({turn: arTurnTo(S.heading, navAngles.az), label: formatDistanceMeters(flatNav), col: AR_COL.green});
+        const title = markCol === AR_COL.red ? t('ar.victim') : String(m.text || m.title).split('\n')[0];
+        if (p && p.x > -20 && p.x < S.cw + 20) arDrawBeacon(S, p, {color: markCol, big: true, ring: true, lines: targetLines(title)});
+        else S.edges.push({turn: arTurnTo(S.heading, navAngles.az), label: formatDistanceMeters(flatNav), col: markCol});
     }
-    pushMark(navAngles.az, AR_COL.green, 'tri');
-    if (t0.kind !== 'line') S.radar.push({poly: null, lat: nav.lat, lng: nav.lng, col: AR_COL.green, size: 4});
+    pushMark(navAngles.az, markCol, 'tri');
+    if (t0.kind !== 'line') S.radar.push({poly: null, lat: nav.lat, lng: nav.lng, col: markCol, size: 4});
 
     arDrawLayers(S, me, info);
     return info;
@@ -1259,6 +1269,20 @@ function arSignedMetres(v) {
     return (v >= 0 ? '+' : '−') + Math.round(Math.abs(v)) + ' ' + t('common.unit_m');
 }
 
+// Whether this phone has already reported the find of the order's case (the poll may not show it yet). The answer comes from storage, so it
+// is read at most every 500 ms per case, not every frame; arState is recreated on open, which empties the cache.
+function arCaseFoundHere(card) {
+    if (!card || typeof wrCaseFoundLocally !== 'function') return false;
+    const cache = arState.caseHere || (arState.caseHere = {});
+    const id = card.placement_id;
+    const now = Date.now();
+    const hit = cache[id];
+    if (hit && now - hit.at < 500) return hit.v;
+    const v = !!wrCaseFoundLocally(id);
+    cache[id] = {v: v, at: now};
+    return v;
+}
+
 // The parts of the HUD that only change with the order, not with the frame.
 function arUpdateStaticHud(el, m) {
     const steps = el.querySelector('.wr-ar-steps');
@@ -1281,10 +1305,17 @@ function arUpdateStaticHud(el, m) {
     el.querySelector('[data-ar="decline"]').hidden = !(m && m.canDecline && m.outstanding);
     el.querySelector('[data-ar="compass"]').hidden = !m;
     el.querySelector('[data-ar-k="title"]').textContent = m ? (m.text ? String(m.text).split('\n')[0] : m.title) : t('ar.free_title');
+    // «Άνοιγμα περιστατικού» while this order's case may be played: found or reached by my team, or found on this phone and not yet in the poll.
+    const caseBtn = el.querySelector('[data-ar="case"]');
+    if (caseBtn) {
+        caseBtn.hidden = !(m && m.case && typeof VoCaseFind !== 'undefined' && VoCaseFind.canOpen(m.case, arCaseFoundHere(m.case)));
+    }
 }
 
 function arUpdateDynamicHud(el, m, S) {
     const info = arState.scene;
+    const nearFrame = el.querySelector('.wr-ar-casenear');
+    if (nearFrame) nearFrame.hidden = !arState.caseNear;
     const set = (k, v) => { const e = el.querySelector('[data-ar-k="' + k + '"]'); if (e && e.textContent !== v) e.textContent = v; };
     const me = arMe();
     set('gps', me && typeof me.acc === 'number' ? '±' + Math.round(me.acc) + ' ' + t('common.unit_m') : '—');
@@ -1321,6 +1352,7 @@ function arUpdateDynamicHud(el, m, S) {
     else if (act.needNear && info.near) banner = t('ar.banner_here');
     else if (act.needNear) banner = arGuideText(S, m, info);
     else banner = t('ar.banner_finish');
+    if (arState.caseNear) banner = t('case.close_toast');
     el.querySelector('.wr-ar-banner').textContent = banner;
     arUpdateWarning(el, S, info);
 }
