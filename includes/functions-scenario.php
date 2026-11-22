@@ -932,6 +932,22 @@ function addScenarioDispatchItem(array $mission, int $phaseId, int $userId, arra
 }
 
 /**
+ * Whether an area's geo is a list of at least three [lat, lng] pairs of numbers: the shape pointInPolygon() reads. Anything else
+ * is left to prepareMissionDispatch(), which refuses the order with its own message.
+ */
+function scenarioPolygonGeoReadable(array $geo): bool {
+    if (count($geo) < 3) {
+        return false;
+    }
+    foreach ($geo as $vertex) {
+        if (!is_array($vertex) || !isset($vertex[0], $vertex[1]) || !is_numeric($vertex[0]) || !is_numeric($vertex[1])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
  * Stages a training case at a point or in an area: the same order «Στο σενάριο» writes, plus a `case` block holding a
  * SNAPSHOT of the library case (so a later library edit never changes a prepared drill). $input is the dispatch form
  * (team_id, type, label, geo, travel_mode) plus case_id, case_mode ('chosen'|'random', only recorded), case_pool (the
@@ -960,13 +976,13 @@ function addScenarioCaseItem(array $mission, int $phaseId, int $userId, array $i
         if (is_array($geo) && isset($geo['lat'], $geo['lng']) && is_numeric($geo['lat']) && is_numeric($geo['lng'])) {
             $spot = ['lat' => round((float) $geo['lat'], 6), 'lng' => round((float) $geo['lng'], 6)];
         }
-    } elseif (is_array($geo) && count($geo) >= 3) {
+    } elseif (is_array($geo) && scenarioPolygonGeoReadable($geo)) {
         $spotLat = $input['spot_lat'] ?? '';
         $spotLng = $input['spot_lng'] ?? '';
         if (!is_numeric($spotLat) || !is_numeric($spotLng) || abs((float) $spotLat) > 90 || abs((float) $spotLng) > 180) {
             return ['ok' => false, 'error' => t('case.err_spot_needed')];
         }
-        if (!pointInPolygon((float) $spotLat, (float) $spotLng, $geo)) {
+        if (!pointInPolygon((float) $spotLat, (float) $spotLng, array_values($geo))) {
             return ['ok' => false, 'error' => t('case.err_spot_outside')];
         }
         $spot = ['lat' => round((float) $spotLat, 6), 'lng' => round((float) $spotLng, 6)];

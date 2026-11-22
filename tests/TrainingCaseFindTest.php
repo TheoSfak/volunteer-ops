@@ -142,7 +142,51 @@ final class TrainingCaseFindTest extends TestCase
         $case = $this->stagedCase($ok['id']);
         $this->assertTrue($case['spot_hidden']);
         $this->assertEqualsWithDelta(35.405, $case['spot']['lat'], 0.000001);
-        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_scenario_items WHERE phase_id = ? AND payload LIKE '%35.5%'", [$phase]), 'a refused spot leaves nothing behind');
+        // three refusals and one staging: only the staging is in the plan
+        $this->assertSame(1, (int) dbFetchValue("SELECT COUNT(*) FROM mission_scenario_items WHERE phase_id = ?", [$phase]), 'a refused spot leaves nothing behind');
+    }
+
+    public function test_a_spot_that_is_not_a_position_is_refused_as_needed(): void
+    {
+        $m = $this->mission($this->drill);
+        $phase = $this->phase($this->drill);
+        foreach ([
+            'not a number' => ['spot_lat' => 'abc', 'spot_lng' => '25.205'],
+            'latitude out of range' => ['spot_lat' => '95', 'spot_lng' => '25.205'],
+            'longitude out of range' => ['spot_lat' => '35.405', 'spot_lng' => '185'],
+            'latitude missing' => ['spot_lng' => '25.205'],
+            'longitude missing' => ['spot_lat' => '35.405'],
+            'empty' => ['spot_lat' => '', 'spot_lng' => ''],
+        ] as $why => $spot) {
+            $r = addScenarioCaseItem($m, $phase, $this->admin, $this->areaForm($spot));
+            $this->assertFalse($r['ok'], $why);
+            $this->assertSame(t('case.err_spot_needed'), $r['error'], $why);
+        }
+        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_scenario_items WHERE phase_id = ?", [$phase]), 'nothing was staged');
+    }
+
+    public function test_a_malformed_area_is_refused_by_the_order_check_without_a_php_warning(): void
+    {
+        $m = $this->mission($this->drill);
+        $phase = $this->phase($this->drill);
+        $warnings = [];
+        set_error_handler(function (int $no, string $str) use (&$warnings): bool {
+            $warnings[] = $str;
+            return true;
+        });
+        try {
+            foreach ([[1, 2, 3], [[1], [2], [3]], [[35.40, 25.20], [35.41], [35.41, 25.20]], [['a', 'b'], ['c', 'd'], ['e', 'f']], ['a' => 1, 'b' => 2, 'c' => 3]] as $geo) {
+                foreach ([['spot_lat' => '35.405', 'spot_lng' => '25.205'], []] as $spot) {
+                    $r = addScenarioCaseItem($m, $phase, $this->admin, $this->areaForm(['geo' => json_encode($geo)] + $spot));
+                    $this->assertFalse($r['ok'], json_encode($geo));
+                    $this->assertSame(t('dispatch.invalid_point'), $r['error'], json_encode($geo));
+                }
+            }
+        } finally {
+            restore_error_handler();
+        }
+        $this->assertSame([], $warnings, 'a malformed area makes no PHP warning');
+        $this->assertSame(0, (int) dbFetchValue("SELECT COUNT(*) FROM mission_scenario_items WHERE phase_id = ?", [$phase]), 'nothing was staged');
     }
 
     public function test_a_spot_given_for_a_point_is_ignored(): void

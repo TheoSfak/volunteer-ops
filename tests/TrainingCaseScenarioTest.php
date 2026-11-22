@@ -167,7 +167,11 @@ final class TrainingCaseScenarioTest extends TestCase
     {
         $phase = $this->phase($this->drill);
         $m = $this->mission($this->drill);
-        $this->assertFalse(addScenarioCaseItem($m, $phase, $this->admin, $this->form(['type' => 'polygon']))['ok']);
+        // A real area with no hidden spot is refused for the spot (the point-shaped geo of form() is not an area at all).
+        $square = json_encode([[35.40, 25.20], [35.40, 25.21], [35.41, 25.21], [35.41, 25.20]]);
+        $noSpot = addScenarioCaseItem($m, $phase, $this->admin, $this->form(['type' => 'polygon', 'geo' => $square]));
+        $this->assertFalse($noSpot['ok']);
+        $this->assertSame(t('case.err_spot_needed'), $noSpot['error']);
         $this->assertFalse(addScenarioCaseItem($m, $phase, $this->admin, $this->form(['case_id' => 999999]))['ok']);
         trainingCaseArchive($this->caseId, true);
         $this->assertFalse(addScenarioCaseItem($m, $phase, $this->admin, $this->form())['ok']);
