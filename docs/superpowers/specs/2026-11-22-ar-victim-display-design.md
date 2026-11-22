@@ -24,7 +24,7 @@ Only for an order that carries a training case (`d.case`, which the poll already
 
 - `card` is the order's `case` object; `fix` is `{lat, lng, acc}` or null.
 - It returns `{mode: 'none'}` when there is no card, the volunteer cannot play it (`can_play` false), the run is `done`, or the card has no spot.
-- **Not hidden:** `{mode: 'marker', spot: {lat, lng}, found: bool}`. The only mode that ever carries a spot.
+- **Not hidden:** `{mode: 'marker', found: bool}`. The AR draws it at the order's own place, which for a point order is the spot, so no mode carries a spot or a distance.
 - **Hidden and not yet found:** `{mode: 'close'}` when `classify(distance, acc)` is `close` or `found`, else `{mode: 'none'}`. It never returns the spot or the distance.
 - **Hidden and found:** `{mode: 'none'}`.
 
