@@ -74,10 +74,23 @@ final class TrainingCaseFindSourceTest extends TestCase
     public function test_every_new_text_exists_in_both_languages(): void
     {
         $lang = (string) file_get_contents(dirname(__DIR__) . '/includes/lang/war-room.php');
-        // case.spot_pin, case.spot_pin_help and case.spot_pinned join this list with the pin control (Task 10).
         foreach (['case.close_toast', 'case.found_toast', 'case.opens_on_find', 'case.found_title', 'case.found_message', 'case.err_too_far',
-                  'case.err_not_found_yet', 'case.err_spot_needed', 'case.err_spot_outside', 'case.overview_found'] as $key) {
+                  'case.err_not_found_yet', 'case.err_spot_needed', 'case.err_spot_outside', 'case.overview_found',
+                  'case.spot_pin', 'case.spot_pin_help', 'case.spot_pinned'] as $key) {
             $this->assertSame(2, substr_count($lang, "'" . $key . "' =>"), $key . ' in el and en');
         }
+    }
+
+    public function test_the_dispatch_window_stages_a_case_on_an_area_with_a_pinned_spot(): void
+    {
+        $page = str_replace("\r\n", "\n", (string) WarRoomSource::read('war-room.php'));
+        $this->assertStringNotContainsString("if (wantsCase && isClosed) { alert(t('case.err_needs_point')); return; }", $page);
+        $this->assertStringContainsString("t('case.err_spot_needed')", $page);
+        $this->assertStringContainsString('pointInPolygon(', substr($page, (int) strpos($page, 'dispatchCaseSpotBtn')));
+        $this->assertStringContainsString('id="dispatchCaseSpotBtn"', $page);
+        $mission = str_replace("\r\n", "\n", (string) file_get_contents(dirname(__DIR__) . '/mission-scenario.php'));
+        // (the array is column-aligned, so allow any run of spaces before the arrow)
+        $this->assertMatchesRegularExpression("/'spot_lat'\\s+=> post\\('spot_lat'\\)/", $mission);
+        $this->assertMatchesRegularExpression("/'spot_lng'\\s+=> post\\('spot_lng'\\)/", $mission);
     }
 }

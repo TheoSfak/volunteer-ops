@@ -121,9 +121,9 @@ final class TrainingCaseWarRoomSourceTest extends TestCase
         $at = strpos($this->page, 'id="dispatchCaseSelect"');
         $this->assertNotFalse($at);
         $this->assertStringContainsString("<?php if (isSystemAdmin() && !empty(\$mission['is_training'])): ?>", substr($this->page, $at - 500, 500));
-        // The staging handler passes the case fields, refuses an area and an undrawn random pick.
+        // The staging handler passes the case fields, takes an area only with its hidden spot pinned, and refuses an undrawn random pick.
         $this->assertStringContainsString("}, caseFields)).then(res => {", $this->page);
-        $this->assertStringContainsString("alert(t('case.err_needs_point'))", $this->page);
+        $this->assertStringContainsString("alert(t('case.err_spot_needed'))", $this->page);
         $this->assertStringContainsString("alert(t('case.err_pick_first'))", $this->page);
         // «Αποστολή» is hidden while a case is chosen: a case is staged only.
         $this->assertStringContainsString("sendBtn.classList.toggle('d-none', wanted)", $this->page);

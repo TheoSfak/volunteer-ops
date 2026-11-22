@@ -326,3 +326,12 @@ test('prefetch keeps a valid document under the player\'s own key and refuses an
     delete global.fetch;
     delete global.localStorage;
 });
+
+test('caseStageFields carries the hidden spot of an area order', () => {
+    const f = TC.caseStageFields({caseId: 4, mode: 'chosen', briefing: ' b ', spot: {lat: 35.405, lng: 25.205}});
+    assert.equal(f.spot_lat, '35.405');
+    assert.equal(f.spot_lng, '25.205');
+    const plain = TC.caseStageFields({caseId: 4, mode: 'chosen', briefing: ''});
+    assert.equal('spot_lat' in plain, false);
+    assert.deepEqual(TC.caseStageFields({spot: {lat: 1, lng: 2}}), {});
+});

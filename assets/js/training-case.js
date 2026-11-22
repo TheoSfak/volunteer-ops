@@ -470,11 +470,17 @@
     function caseStageFields(sel) {
         if (!sel || sel.caseId === '' || sel.caseId == null) return {};
         const mode = sel.mode === 'random' ? 'random' : 'chosen';
-        return {
+        const fields = {
             case_id: String(sel.caseId), case_mode: mode,
             case_pool: JSON.stringify(mode === 'random' ? (sel.filter || {}) : {}),
             briefing: String(sel.briefing || '').trim(),
         };
+        // An area order's hidden victim spot (v3.506.0); a point order needs none (the point is the spot).
+        if (sel.spot && isFinite(Number(sel.spot.lat)) && isFinite(Number(sel.spot.lng))) {
+            fields.spot_lat = String(sel.spot.lat);
+            fields.spot_lng = String(sel.spot.lng);
+        }
+        return fields;
     }
 
     /**

@@ -6341,6 +6341,7 @@ $actionRoomListColClass = $canManageWarRoom ? 'col-12 col-md-4' : 'col-12 col-md
                     <span class="small fw-semibold text-primary d-none" id="dispatchCaseDrawn" role="status"></span>
                     <button type="button" class="btn btn-outline-secondary btn-sm d-none" id="dispatchCaseRedraw"><i class="bi bi-shuffle me-1"></i><?= t('case.picker_redraw') ?></button>
                     <input type="text" id="dispatchCaseBriefing" class="form-control form-control-sm d-none" style="max-width:260px;" maxlength="300" placeholder="<?= t('case.picker_briefing') ?>">
+                    <button type="button" class="btn btn-outline-danger btn-sm d-none" id="dispatchCaseSpotBtn" title="<?= t('case.spot_pin_help') ?>"><i class="bi bi-geo-alt-fill me-1"></i><span id="dispatchCaseSpotLabel"><?= t('case.spot_pin') ?></span></button>
                     <div class="w-100 small text-danger fw-semibold d-none" id="dispatchCaseWarn" role="alert"></div>
                     <?php endif; ?>
                 </div>
@@ -28868,6 +28869,19 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
     let shapeLayer = null;
     let isClosed = false;
     let lastAddressLabel = '';
+    // The hidden victim spot of a training case staged on an AREA (v3.506.0): pinned with one tap inside the polygon, seen only here.
+    let casePinMode = false;
+    let caseSpot = null;
+    let caseSpotMarker = null;
+    function clearCaseSpot() {
+        casePinMode = false;
+        caseSpot = null;
+        if (caseSpotMarker) { dispatchMap.removeLayer(caseSpotMarker); caseSpotMarker = null; }
+        if (window.wrDispatchCaseSpotChanged) window.wrDispatchCaseSpotChanged();
+    }
+    window.wrDispatchCaseSpot = () => caseSpot ? {lat: caseSpot.lat, lng: caseSpot.lng} : null;
+    window.wrDispatchCaseStartPin = () => { casePinMode = true; };
+    window.wrDispatchAreaClosed = () => isClosed;
     // Set from pendingDispatchSeed.ringIndex when opened via a ring shortcut
     // (openDispatchForRing(), map block), null for the normal "New
     // Dispatch" sidebar-card flow — sent as-is either way so a hand-drawn
@@ -28895,6 +28909,7 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
     }
 
     function resetDrawing() {
+        if (dispatchMap) clearCaseSpot();
         drawPoints = [];
         isClosed = false;
         vertexMarkers.forEach(m => dispatchMap.removeLayer(m));
@@ -28902,6 +28917,7 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
         if (shapeLayer) { dispatchMap.removeLayer(shapeLayer); shapeLayer = null; }
         sendBtn.disabled = true;
         syncScenarioBtn();
+        if (window.wrDispatchCaseSpotChanged) window.wrDispatchCaseSpotChanged();
     }
 
     function updateShapePreview() {
@@ -28932,6 +28948,15 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
     }
 
     function onMapClick(e) {
+        if (casePinMode) {
+            casePinMode = false;
+            if (!isClosed || !pointInPolygon(e.latlng.lat, e.latlng.lng, drawPoints)) { alert(t('case.err_spot_outside')); if (window.wrDispatchCaseSpotChanged) window.wrDispatchCaseSpotChanged(); return; }
+            caseSpot = {lat: Number(e.latlng.lat.toFixed(6)), lng: Number(e.latlng.lng.toFixed(6))};
+            if (caseSpotMarker) dispatchMap.removeLayer(caseSpotMarker);
+            caseSpotMarker = L.circleMarker([caseSpot.lat, caseSpot.lng], {radius: 8, color: '#dc3545', fillColor: '#dc3545', fillOpacity: 0.9, weight: 2}).addTo(dispatchMap);
+            if (window.wrDispatchCaseSpotChanged) window.wrDispatchCaseSpotChanged();
+            return;
+        }
         if (isClosed) return;
         if (drawPoints.length >= 3) {
             const firstPoint = dispatchMap.latLngToContainerPoint(L.latLng(drawPoints[0]));
@@ -28940,6 +28965,7 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
                 isClosed = true;
                 updateShapePreview();
                 updateSendState();
+                if (window.wrDispatchCaseSpotChanged) window.wrDispatchCaseSpotChanged();
                 return;
             }
         }
@@ -28997,6 +29023,7 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
             isClosed = pendingDispatchSeed.closed !== false;
             updateShapePreview();
             updateSendState();
+            if (window.wrDispatchCaseSpotChanged) window.wrDispatchCaseSpotChanged();
             noteInput.value = pendingDispatchSeed.label || '';
             // Pre-select the team chosen in the ring popup itself, in this
             // same dropdown the normal "New Dispatch" sidebar card flow
@@ -29069,11 +29096,12 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
             // Ready is what «Στο σενάριο» says, not what «Αποστολή» says: a slot can be staged but never sent.
             if (!window.wrScenario || scenarioBtn.disabled) return;
             if (!teamSelect.value) { alert(t('dispatch.pick_team_first')); return; }
-            // A training case (v3.505.0, the picker below the recipients): it goes at a point, never an area, and a case that was
-            // asked for but not drawn yet is not staged as a plain point behind the commander's back.
+            // A training case (v3.505.0, the picker below the recipients): it goes at a point or, with a hidden spot, in an area, and
+            // a case that was asked for but not drawn yet is not staged as a plain point behind the commander's back.
             const wantsCase = !!(window.wrDispatchCaseWanted && window.wrDispatchCaseWanted());
             const caseFields = wantsCase && window.wrDispatchCaseFields ? window.wrDispatchCaseFields() : {};
-            if (wantsCase && isClosed) { alert(t('case.err_needs_point')); return; }
+            // An area takes a case too (v3.506.0), with the victim's hidden spot pinned inside it.
+            if (wantsCase && isClosed && !caseSpot) { alert(t('case.err_spot_needed')); return; }
             if (wantsCase && !caseFields.case_id) { alert(t('case.err_pick_first')); return; }
             const type = isClosed ? 'polygon' : 'point';
             const geo = type === 'point' ? {lat: drawPoints[0][0], lng: drawPoints[0][1]} : drawPoints;
@@ -29159,6 +29187,8 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
     const drawnEl = document.getElementById('dispatchCaseDrawn');
     const redrawBtn = document.getElementById('dispatchCaseRedraw');
     const briefing = document.getElementById('dispatchCaseBriefing');
+    const spotBtn = document.getElementById('dispatchCaseSpotBtn');
+    const spotLabel = document.getElementById('dispatchCaseSpotLabel');
     const warn = document.getElementById('dispatchCaseWarn');
     const sendBtn = document.getElementById('dispatchSendBtn');
     const scenarioGroup = document.getElementById('dispatchScenarioGroup');
@@ -29186,7 +29216,17 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
         [typeSel, diffSel, langSel, unrevWrap, redrawBtn].forEach(el => show(el, random));
         show(drawnEl, random && !!state.caseId);
         renderWarn();
+        syncSpotButton();
     }
+
+    // The hidden victim spot (v3.506.0): asked for only when a case is chosen and the shape drawn is an area.
+    function syncSpotButton() {
+        const need = state.mode !== null && !!(window.wrDispatchAreaClosed && window.wrDispatchAreaClosed());
+        show(spotBtn, need);
+        spotLabel.textContent = window.wrDispatchCaseSpot && window.wrDispatchCaseSpot() ? t('case.spot_pinned') : t('case.spot_pin');
+    }
+    spotBtn.addEventListener('click', () => { window.wrDispatchCaseStartPin(); alert(t('case.spot_pin_help')); });
+    window.wrDispatchCaseSpotChanged = syncSpotButton;
 
     function fillFilter(sel, anyKey, values, label) {
         sel.innerHTML = '';
@@ -29264,7 +29304,10 @@ window.addEventListener('online', () => { if (!document.hidden) restartPoll(); }
     redrawBtn.addEventListener('click', draw);
 
     window.wrDispatchCaseWanted = () => state.mode !== null;
-    window.wrDispatchCaseFields = () => TC.caseStageFields(state.mode ? {caseId: state.caseId, mode: state.mode, filter: state.filter, briefing: briefing.value} : null);
+    window.wrDispatchCaseFields = () => TC.caseStageFields(state.mode ? {
+        caseId: state.caseId, mode: state.mode, filter: state.filter, briefing: briefing.value,
+        spot: window.wrDispatchAreaClosed && window.wrDispatchAreaClosed() ? window.wrDispatchCaseSpot() : null,
+    } : null);
     window.wrDispatchCaseAfterStage = () => {
         briefing.value = '';
         if (state.mode === 'random') draw();
