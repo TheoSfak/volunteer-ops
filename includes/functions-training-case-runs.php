@@ -218,9 +218,14 @@ function trainingCaseRecordFound(int $placementId, int $userId, float $lat, floa
         [$placementId, $scopeKey, $userId, round($lat, 6), round($lng, 6), $accuracyM !== null ? (int) round(min(max($accuracyM, 0.0), 65000.0)) : null]
     );
     if ($inserted > 0) {
-        logAudit('team_found_case', 'mission_case_placements', $placementId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'user_id' => $userId]);
-        if ($placement['dispatch_id'] !== null) {
-            trainingCaseNotifyFound($missionId, (int) $placement['dispatch_id'], $teamId, $userId);
+        // The find is recorded: an audit or notice that fails must not turn it into a server_error the phone would retry.
+        try {
+            logAudit('team_found_case', 'mission_case_placements', $placementId, null, ['mission_id' => $missionId, 'team_id' => $teamId, 'user_id' => $userId]);
+            if ($placement['dispatch_id'] !== null) {
+                trainingCaseNotifyFound($missionId, (int) $placement['dispatch_id'], $teamId, $userId);
+            }
+        } catch (Throwable $e) {
+            error_log('[training-cases] found audit/notice failed: ' . $e->getMessage());
         }
     }
     return ['ok' => true, 'duplicate' => $inserted === 0];

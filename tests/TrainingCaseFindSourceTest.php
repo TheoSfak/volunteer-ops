@@ -75,6 +75,26 @@ final class TrainingCaseFindSourceTest extends TestCase
         $this->assertStringContainsString('{check() {}, forget() {}}', $page, 'the fallback stub of a failed script load has forget() too');
     }
 
+    public function test_the_audit_and_the_notice_of_a_recorded_find_cannot_turn_it_into_a_server_error(): void
+    {
+        $src = $this->src('includes/functions-training-case-runs.php');
+        $start = strpos($src, 'function trainingCaseRecordFound(');
+        $this->assertNotFalse($start);
+        $body = substr($src, $start, (int) strpos($src, "\n}\n", $start) - $start);
+        $insert = (int) strpos($body, 'INSERT IGNORE INTO mission_case_finds');
+        $try = strpos($body, 'try {', $insert);
+        $audit = strpos($body, "logAudit('team_found_case'");
+        $notify = strpos($body, 'trainingCaseNotifyFound(');
+        $catch = strpos($body, 'catch (Throwable $e)');
+        $this->assertNotFalse($try, 'a try block after the insert');
+        $this->assertGreaterThan($try, $audit);
+        $this->assertGreaterThan($try, $notify);
+        $this->assertGreaterThan($audit, $catch);
+        $this->assertGreaterThan($notify, $catch);
+        $this->assertStringContainsString("error_log('[training-cases]", substr($body, $catch));
+        $this->assertStringContainsString("return ['ok' => true, 'duplicate' => \$inserted === 0];", substr($body, $catch), 'the recorded find is still reported as ok');
+    }
+
     public function test_the_prefetch_is_guarded_and_the_tracker_survives_a_failed_script_load(): void
     {
         $page = str_replace("\r\n", "\n", (string) WarRoomSource::read('war-room.php'));
