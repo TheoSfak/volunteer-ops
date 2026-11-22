@@ -17998,7 +17998,7 @@ function sendQueuedCaseFound(item) {
     if (!window.VoTrainingCase) return Promise.resolve({ok: false, networkError: true});
     return postQueuedForm('training-case.php', {
         mission_id: String(WR_MISSION_ID), action: 'found', placement_id: String(item.placementId),
-        lat: String(item.lat), lng: String(item.lng), accuracy: String(Math.round(item.acc || 0)), queued: '1'
+        lat: String(item.lat), lng: String(item.lng), accuracy: item.acc != null && isFinite(item.acc) ? String(item.acc) : '', queued: '1'
     }).then(result => {
         const verdict = VoTrainingCase.queueOutcome(result);
         if (verdict === 'retry') {

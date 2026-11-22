@@ -50,6 +50,16 @@ final class TrainingCaseFindSourceTest extends TestCase
         $this->assertStringContainsString('deferCaseAnswers(item)', $body);
     }
 
+    public function test_the_queued_found_report_sends_the_raw_accuracy_the_tracker_classified_with(): void
+    {
+        $page = str_replace("\r\n", "\n", (string) WarRoomSource::read('war-room.php'));
+        $start = strpos($page, 'function sendQueuedCaseFound(');
+        $this->assertNotFalse($start);
+        $body = substr($page, $start, 900);
+        $this->assertStringContainsString("accuracy: item.acc != null && isFinite(item.acc) ? String(item.acc) : ''", $body);
+        $this->assertStringNotContainsString('Math.round', $body, 'rounding the accuracy lets the server disagree with the phone by up to half a metre');
+    }
+
     public function test_a_refused_found_report_takes_the_local_marker_back_and_relocks_the_row(): void
     {
         $page = str_replace("\r\n", "\n", (string) WarRoomSource::read('war-room.php'));
