@@ -94,7 +94,32 @@
         return {check: check, forget: forget};
     }
 
-    const api = {FOUND_M, CLOSE_M, ACCURACY_CREDIT_M, distanceM, classify, watchList, createTracker};
+    /**
+     * What the AR screen may show for an order's case (v3.507.0). The one place that decides it, so the hidden spot of an area
+     * order never reaches the drawing code. 'marker': the victim's place is shown (a point order), drawn at the order's own
+     * place, and `found` says the team has found it or arrived; 'close': a hidden victim the volunteer is near, with no spot,
+     * distance or direction; 'none': draw nothing about it. card is the order's `case` object from the poll, fix {lat, lng, acc}.
+     */
+    function victimView(card, fix) {
+        const none = {mode: 'none'};
+        if (!card || !card.can_play || card.state === 'done' || !card.spot) return none;
+        const sLat = num(card.spot.lat);
+        const sLng = num(card.spot.lng);
+        if (sLat === null || sLng === null) return none;
+        if (!card.hidden) return {mode: 'marker', found: !!(card.found || card.available)};
+        if (card.found) return none;
+        const lat = fix ? num(fix.lat) : null;
+        const lng = fix ? num(fix.lng) : null;
+        if (lat === null || lng === null) return none;
+        return classify(distanceM({lat: lat, lng: lng}, {lat: sLat, lng: sLng}), fix.acc) === 'far' ? none : {mode: 'close'};
+    }
+
+    /** Whether the AR shows «Άνοιγμα περιστατικού»: playable, open to my team or found on this phone, and not finished. */
+    function canOpen(card, foundLocally) {
+        return !!(card && card.can_play && card.state !== 'done' && (card.available || foundLocally));
+    }
+
+    const api = {FOUND_M, CLOSE_M, ACCURACY_CREDIT_M, distanceM, classify, watchList, createTracker, victimView, canOpen};
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.VoCaseFind = api;
 })(typeof window !== 'undefined' ? window : globalThis);
