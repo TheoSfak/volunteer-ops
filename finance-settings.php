@@ -186,9 +186,12 @@ include __DIR__ . '/includes/header.php';
         <div class="col-md-4"><label class="form-label">Έναρξη βιβλίων</label><input type="date" class="form-control" name="books_start" value="<?= h(financeSetting('finance_books_start', '')) ?>">
             <div class="form-text">Συνδρομές που πληρώθηκαν πριν από αυτή την ημερομηνία δεν γράφονται ως νέα έσοδα (το αρχικό υπόλοιπο τις περιλαμβάνει ήδη). Αν μείνει κενή, ισχύει η παλαιότερη ημερομηνία αρχικού υπολοίπου των ενεργών λογαριασμών.</div></div>
         <div class="col-12"><p class="mb-1">Σε ποιον λογαριασμό γράφεται κάθε πληρωμή συνδρομής, ανάλογα με τον τρόπο πληρωμής:</p></div>
-        <?php foreach ($duesLabels as $k => $l): $cur = (int) financeSetting('finance_dues_account_' . $k, '0'); ?>
+        <?php foreach ($duesLabels as $k => $l):
+            // Unset (0) or a deleted account falls back to the cash account anyway, so show that account selected
+            // instead of a separate «(προεπιλογή)» entry that looked like a second cash account.
+            $cur = (int) financeSetting('finance_dues_account_' . $k, '0');
+            if (!in_array($cur, array_map('intval', array_column($allAccountsList, 'id')), true)) $cur = financeCashAccountId(); ?>
         <div class="col-md-4"><label class="form-label small"><?= $l ?></label><select class="form-select" name="dues_account_<?= $k ?>">
-            <option value="0">Ταμείο μετρητών (προεπιλογή)</option>
             <?php foreach ($allAccountsList as $a): if (!$a['is_active'] && $cur !== (int) $a['id']) continue; ?><option value="<?= (int) $a['id'] ?>" <?= $cur === (int) $a['id'] ? 'selected' : '' ?>><?= h($a['name']) ?><?= $a['is_active'] ? '' : ' (ανενεργός)' ?></option><?php endforeach; ?></select></div>
         <?php endforeach; ?>
         <div class="col-12"><button class="btn btn-primary">Αποθήκευση</button></div>
