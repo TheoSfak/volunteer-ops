@@ -90,6 +90,15 @@
         return String(state.due || '').trim() !== '' && !!state.checked && !state.handled && !state.userSet;
     }
 
+    /** The document type a new form starts with for a direction (what the server renders first). */
+    function defaultDocType(direction) { return direction === 'IN' ? 'DONATION' : 'RECEIPT'; }
+    /** Labels that depend on the direction. */
+    function directionTexts(direction) {
+        return direction === 'IN'
+            ? {badge: 'Έσοδο', counterparty: 'Από (δωρητής / πληρωτής) *', payNow: 'Εισπράχθηκε ήδη'}
+            : {badge: 'Έξοδο', counterparty: 'Εκδότης *', payNow: 'Πληρώθηκε ήδη'};
+    }
+
     /** ISO yyyy-mm-dd → dd/mm/yyyy; anything else comes back unchanged. */
     function formatDmy(iso) {
         const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso));
@@ -239,6 +248,33 @@
             }
         });
 
+        // ── Έσοδο / Έξοδο toggle: swaps the category list and the labels; typed values and a scan stay as they are ──
+        const dirField = $('#directionField'), dirRadios = [...form.querySelectorAll('[name="direction_choice"]')];
+        let categoryLists = null;
+        try { categoryLists = JSON.parse(document.getElementById('financeCategories').textContent); } catch (e) { categoryLists = null; }
+        function setDirection(dir) {
+            if (dir !== 'IN' && dir !== 'OUT') return;
+            const old = form.dataset.direction;
+            dirField.value = dir; // the hidden field is what is posted
+            form.dataset.direction = dir;
+            const t = directionTexts(dir);
+            const badge = document.getElementById('dirBadge');
+            if (badge) { badge.textContent = t.badge; badge.classList.toggle('bg-success', dir === 'IN'); badge.classList.toggle('bg-danger', dir === 'OUT'); }
+            const cl = document.getElementById('counterpartyLabel'); if (cl) cl.textContent = t.counterparty;
+            const pl = document.getElementById('payNowLabel'); if (pl) pl.textContent = t.payNow;
+            const type = $('#docType');
+            if (type && type.value === defaultDocType(old)) type.value = defaultDocType(dir);
+            const sel = $('#categoryId');
+            if (sel && categoryLists && Array.isArray(categoryLists[dir])) {
+                const keep = sel.value;
+                while (sel.options.length > 1) sel.remove(1); // option 0 is «—»
+                categoryLists[dir].forEach(c => { const o = document.createElement('option'); o.value = String(c.id); o.textContent = c.name; sel.appendChild(o); });
+                sel.value = categoryLists[dir].some(c => String(c.id) === keep) ? keep : '';
+            }
+            dirRadios.forEach(r => { r.checked = r.value === dir; });
+        }
+        dirRadios.forEach(r => r.addEventListener('change', () => { if (r.checked) setDirection(r.value); }));
+
         // ── Pay-now date follows the document date until the user types their own ──
         const docDateEl = $('#docDate'), payDateEl = $('#payDate');
         let payFollows = !!payDateEl && payDateEl.dataset.follow === '1';
@@ -288,7 +324,7 @@
                 const json = await postScan(form, dataUrl);
                 const d = json.data;
                 if (d.direction && d.direction !== form.dataset.direction) {
-                    say('text-warning', 'Το AI πιστεύει ότι είναι ' + (d.direction === 'IN' ? 'έσοδο' : 'έξοδο') + '. Ελέγξτε το είδος.');
+                    say('text-warning', 'Το AI πιστεύει ότι είναι ' + (d.direction === 'IN' ? 'έσοδο' : 'έξοδο') + '. Ελέγξτε το είδος' + (dirRadios.length ? ' (διακόπτης Έσοδο / Έξοδο στην κορυφή).' : '.'));
                 }
                 set('counterpartyName', d.counterparty_name); set('counterpartyVat', d.counterparty_vat);
                 set('docNumber', d.doc_number); set('docDate', d.doc_date); set('dueDate', d.due_date);
@@ -337,7 +373,7 @@
         });
     }
 
-    const api = {VAT_RATES, TOLERANCE_CENTS, toCents, fromCents, display, splitGross, splitNet, parseCents, totals, mismatch, cleanVat, validVat, nextPayDate, shouldUntickPaid, formatDmy, paidBeforeOpening, openingWarning, prepareImage, initForm, initOpeningWarnings};
+    const api = {VAT_RATES, TOLERANCE_CENTS, toCents, fromCents, display, splitGross, splitNet, parseCents, totals, mismatch, cleanVat, validVat, defaultDocType, directionTexts, nextPayDate, shouldUntickPaid, formatDmy, paidBeforeOpening, openingWarning, prepareImage, initForm, initOpeningWarnings};
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.VoFinance = api;
     if (typeof document !== 'undefined') {

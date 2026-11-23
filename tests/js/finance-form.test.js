@@ -121,3 +121,10 @@ test('shouldUntickPaid: a due date unticks «Πληρώθηκε ήδη» once, n
     assert.equal(F.shouldUntickPaid({...base, handled: true}), false, 'only once: a second due date does not untick again');
     assert.equal(F.shouldUntickPaid({...base, userSet: true}), false, 'the user re-ticked it (or ticked it themselves)');
 });
+
+test('direction toggle helpers: document type default and Greek labels per direction', () => {
+    assert.equal(F.defaultDocType('IN'), 'DONATION');
+    assert.equal(F.defaultDocType('OUT'), 'RECEIPT');
+    assert.deepEqual(F.directionTexts('IN'), {badge: 'Έσοδο', counterparty: 'Από (δωρητής / πληρωτής) *', payNow: 'Εισπράχθηκε ήδη'});
+    assert.deepEqual(F.directionTexts('OUT'), {badge: 'Έξοδο', counterparty: 'Εκδότης *', payNow: 'Πληρώθηκε ήδη'});
+});

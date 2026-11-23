@@ -281,4 +281,31 @@ final class FinanceLedgerTest extends TestCase
             foreach ($active as $id) dbExecute("UPDATE finance_accounts SET is_active = 1 WHERE id = ?", [$id]);
         }
     }
+
+    public function test_the_direction_of_an_unpaid_document_can_change_but_not_once_it_has_payments(): void
+    {
+        $inCat = $this->category('TESTFIN donation cat', 'IN');
+        $doc = $this->outDoc(1240);
+        financeSaveDocument(['direction' => 'IN', 'doc_type' => 'DONATION', 'counterparty_name' => 'TESTFIN Donor', 'doc_date' => '2026-11-10', 'category_id' => $inCat],
+            [financeSplitGross(1240, 0)], self::$userId, $doc);
+        $this->assertSame('IN', dbFetchValue("SELECT direction FROM finance_documents WHERE id = ?", [$doc]));
+        $this->assertSame($inCat, (int) dbFetchValue("SELECT category_id FROM finance_documents WHERE id = ?", [$doc]));
+
+        // The category must belong to the new direction.
+        $outCat = $this->category('TESTFIN out cat', 'OUT');
+        try {
+            financeSaveDocument(['direction' => 'IN', 'counterparty_name' => 'TESTFIN Donor', 'doc_date' => '2026-11-10', 'category_id' => $outCat],
+                [financeSplitGross(1240, 0)], self::$userId, $doc);
+            $this->fail('an OUT category on an IN document must be refused');
+        } catch (InvalidArgumentException $e) {
+            $this->assertStringContainsString('κατηγορία', $e->getMessage());
+        }
+
+        $acc = $this->account('TESTFIN cash');
+        financeAddMovement(['account_id' => $acc, 'direction' => 'IN', 'amount' => 500, 'movement_date' => '2026-11-12', 'document_id' => $doc], self::$userId);
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Δεν αλλάζει το είδος');
+        financeSaveDocument(['direction' => 'OUT', 'counterparty_name' => 'TESTFIN Donor', 'doc_date' => '2026-11-10'],
+            [financeSplitGross(1240, 0)], self::$userId, $doc);
+    }
 }

@@ -224,4 +224,17 @@ final class FinancePagesSourceTest extends TestCase
         $this->assertStringContainsString('applyDueDate();', $js);
         $this->assertStringContainsString('shouldUntickPaid(', $js);
     }
+
+    public function test_the_document_form_has_an_income_expense_toggle_that_posts_the_hidden_direction_field(): void
+    {
+        $s = self::src('finance-document-form.php');
+        $this->assertSame(1, substr_count($s, 'name="direction"'), 'exactly one posted direction: the hidden field');
+        $this->assertStringContainsString('<input type="hidden" name="direction" id="directionField"', $s);
+        $this->assertSame(2, substr_count($s, 'name="direction_choice"'), 'the radios are not what is posted');
+        $this->assertStringContainsString('$canSwitchDirection = !$existing || (int) $existing[\'paid\'] === 0;', $s);
+        $this->assertStringContainsString('id="financeCategories"', $s);
+        $this->assertStringContainsString('JSON_HEX_TAG', $s);
+        $js = self::src('assets/js/finance-form.js');
+        $this->assertStringContainsString("dirField.value = dir;", $js);
+    }
 }

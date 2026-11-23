@@ -9,7 +9,15 @@ $uid = (int) getCurrentUserId();
 $id = (int) (get('id') ?: post('id'));
 $existing = $id > 0 ? financeDocumentStatus($id) : null;
 if ($id > 0 && !$existing) { setFlash('error', 'Το παραστατικό δεν βρέθηκε.'); redirect('finance-documents.php'); }
-$direction = $existing['direction'] ?? (in_array(get('direction') ?: post('direction'), FINANCE_DIRECTIONS, true) ? (get('direction') ?: post('direction')) : 'OUT');
+// The direction can be switched on the form while nothing has been paid (the lib refuses it otherwise). The POSTED value
+// wins over ?direction= in the URL, because the form posts to the URL it was opened with.
+$postedDirection = in_array(post('direction'), FINANCE_DIRECTIONS, true) ? post('direction') : null;
+$canSwitchDirection = !$existing || (int) $existing['paid'] === 0;
+if ($existing) {
+    $direction = ($canSwitchDirection && isPost() && post('action') === 'save' && $postedDirection) ? $postedDirection : $existing['direction'];
+} else {
+    $direction = $postedDirection ?? (in_array(get('direction'), FINANCE_DIRECTIONS, true) ? get('direction') : 'OUT');
+}
 $back = 'finance-documents.php?direction=' . $direction;
 
 // A refused save re-renders the form with what was typed (and the chosen file kept) instead of redirecting.
@@ -104,12 +112,15 @@ if (isPost()) {
 }
 
 $pageTitle = $existing ? 'Παραστατικό' : ($direction === 'IN' ? 'Νέο έσοδο' : 'Νέο έξοδο');
-$categories = financeCategories($direction);
+$categoryLists = ['IN' => financeCategories('IN'), 'OUT' => financeCategories('OUT')]; // both go to the page as data: the toggle swaps them in JS
 $accounts = financeAccounts();
-if (!empty($existing['category_id']) && !in_array((int) $existing['category_id'], array_map('intval', array_column($categories, 'id')), true)) {
+if (!empty($existing['category_id']) && !in_array((int) $existing['category_id'], array_map('intval', array_merge(array_column($categoryLists['IN'], 'id'), array_column($categoryLists['OUT'], 'id'))), true)) {
     $cur = dbFetchOne("SELECT id, name, direction FROM finance_categories WHERE id = ?", [(int) $existing['category_id']]);
-    if ($cur) { $cur['name'] .= ' (ανενεργή)'; $categories[] = $cur; }
+    if ($cur && isset($categoryLists[$cur['direction']])) { $cur['name'] .= ' (ανενεργή)'; $categoryLists[$cur['direction']][] = $cur; }
 }
+$categories = $categoryLists[$direction];
+$categoryJson = json_encode(array_map(fn($list) => array_map(fn($c) => ['id' => (int) $c['id'], 'name' => $c['name']], $list), $categoryLists),
+    JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE);
 $missions = dbFetchAll("SELECT id, title FROM missions WHERE (deleted_at IS NULL OR id = ?) ORDER BY id DESC LIMIT 100", [(int) ($existing['mission_id'] ?? 0)]);
 // Keep a saved mission that fell outside the newest 100 (or was soft-deleted) so an edit does not drop the link.
 if (!empty($existing['mission_id']) && !in_array((int) $existing['mission_id'], array_map('intval', array_column($missions, 'id')), true)) {
@@ -159,19 +170,26 @@ include __DIR__ . '/includes/header.php';
 ?>
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h3 mb-0"><i class="bi bi-receipt me-2"></i><?= h($pageTitle) ?>
-        <span class="badge <?= $direction === 'IN' ? 'bg-success' : 'bg-danger' ?> align-middle"><?= $direction === 'IN' ? 'Έσοδο' : 'Έξοδο' ?></span>
+        <span id="dirBadge" class="badge <?= $direction === 'IN' ? 'bg-success' : 'bg-danger' ?> align-middle"><?= $direction === 'IN' ? 'Έσοδο' : 'Έξοδο' ?></span>
         <?php if ($existing): ?><?= financeStatusBadge($existing['status'], $direction) ?><?php endif; ?></h1>
     <a class="btn btn-outline-secondary" href="<?= h($back) ?>"><i class="bi bi-arrow-left me-1"></i>Πίσω</a>
 </div>
 <?php displayFlash(); ?>
 <?php if ($refused !== null): ?><div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-1"></i><?= h($refused) ?> <span class="small">Τα στοιχεία που συμπληρώσατε διατηρήθηκαν.</span></div><?php endif; ?>
 
-<form id="financeDocumentForm" method="post" enctype="multipart/form-data"
+<form id="financeDocumentForm" method="post" enctype="multipart/form-data" data-can-switch="<?= $canSwitchDirection ? '1' : '0' ?>"
       data-scan-url="finance-scan.php" data-csrf="<?= h(csrfToken()) ?>" data-default-rate="<?= $defaultRate ?>" data-direction="<?= h($direction) ?>">
     <?= csrfField() ?>
     <input type="hidden" name="action" value="save">
     <input type="hidden" name="id" value="<?= (int) $id ?>">
-    <input type="hidden" name="direction" value="<?= h($direction) ?>">
+    <input type="hidden" name="direction" id="directionField" value="<?= h($direction) ?>">
+    <script type="application/json" id="financeCategories"><?= $categoryJson ?></script>
+    <?php if ($canSwitchDirection): ?>
+    <div class="btn-group mb-3" role="group" aria-label="Είδος παραστατικού" id="directionToggle">
+        <input type="radio" class="btn-check" name="direction_choice" id="dirIn" value="IN" autocomplete="off"<?= $direction === 'IN' ? ' checked' : '' ?>><label class="btn btn-outline-success" for="dirIn"><i class="bi bi-arrow-down-circle me-1"></i>Έσοδο</label>
+        <input type="radio" class="btn-check" name="direction_choice" id="dirOut" value="OUT" autocomplete="off"<?= $direction === 'OUT' ? ' checked' : '' ?>><label class="btn btn-outline-danger" for="dirOut"><i class="bi bi-arrow-up-circle me-1"></i>Έξοδο</label>
+    </div>
+    <?php endif; ?>
     <input type="hidden" name="scan_source" id="scanSource" value="<?= h($sticky && post('scan_source') !== '' ? post('scan_source') : 'MANUAL') ?>">
     <input type="hidden" name="scan_provider" id="scanProvider" value="<?= $sticky ? h(post('scan_provider')) : '' ?>">
     <?php if ($pendingFile): ?><input type="hidden" name="pending_upload" value="<?= h($pendingToken) ?>"><?php endif; ?>
@@ -198,7 +216,7 @@ include __DIR__ . '/includes/header.php';
     <div class="card mb-3"><div class="card-body"><div class="row g-3">
         <div class="col-md-3"><label class="form-label">Τύπος</label><select class="form-select" name="doc_type" id="docType">
             <?php foreach ($docTypes as $k => $label): ?><option value="<?= $k ?>" <?= ($sticky ? post('doc_type') : ($existing['doc_type'] ?? ($direction === 'IN' ? 'DONATION' : 'RECEIPT'))) === $k ? 'selected' : '' ?>><?= $label ?></option><?php endforeach; ?></select></div>
-        <div class="col-md-5"><label class="form-label"><?= $direction === 'IN' ? 'Από (δωρητής / πληρωτής)' : 'Εκδότης' ?> *</label><input class="form-control" name="counterparty_name" id="counterpartyName" maxlength="200" required value="<?= $val('counterparty_name') ?>"></div>
+        <div class="col-md-5"><label class="form-label" id="counterpartyLabel"><?= $direction === 'IN' ? 'Από (δωρητής / πληρωτής)' : 'Εκδότης' ?> *</label><input class="form-control" name="counterparty_name" id="counterpartyName" maxlength="200" required value="<?= $val('counterparty_name') ?>"></div>
         <div class="col-md-4"><label class="form-label">ΑΦΜ</label><input class="form-control" name="counterparty_vat" id="counterpartyVat" inputmode="numeric" maxlength="9" value="<?= $val('counterparty_vat') ?>"></div>
         <div class="col-md-3"><label class="form-label">Αριθμός</label><input class="form-control" name="doc_number" id="docNumber" maxlength="50" value="<?= $val('doc_number') ?>"></div>
         <div class="col-md-3"><label class="form-label">Ημερομηνία *</label><input type="date" class="form-control" name="doc_date" id="docDate" required value="<?= $existing || $sticky ? $val('doc_date') : date('Y-m-d') ?>"></div>
@@ -237,7 +255,7 @@ include __DIR__ . '/includes/header.php';
     <?php if (!$existing): ?>
     <div class="card mb-3"><div class="card-body" data-opening-warning data-date-fallback="#docDate">
         <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="pay_now" value="1" id="payNow" data-user-set="<?= $sticky ? '1' : '0' ?>" <?= $accounts ? (!$sticky || post('pay_now') === '1' ? 'checked' : '') : 'disabled' ?>>
-            <label class="form-check-label" for="payNow"><?= $direction === 'IN' ? 'Εισπράχθηκε ήδη' : 'Πληρώθηκε ήδη' ?></label></div>
+            <label class="form-check-label" for="payNow" id="payNowLabel"><?= $direction === 'IN' ? 'Εισπράχθηκε ήδη' : 'Πληρώθηκε ήδη' ?></label></div>
         <div class="row g-2 mt-1">
             <div class="col-md-4"><select class="form-select" name="pay_account_id"><?php foreach ($accounts as $a): ?><option value="<?= (int) $a['id'] ?>" data-opening-date="<?= h((string) ($a['opening_date'] ?? '')) ?>"<?= $sticky && (int) post('pay_account_id') === (int) $a['id'] ? ' selected' : '' ?>><?= h($a['name']) ?></option><?php endforeach; ?></select></div>
             <?php // The payment date is the document date until the treasurer types a different one (JS keeps them in step, scan included).
