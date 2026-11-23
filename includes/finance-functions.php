@@ -17,6 +17,7 @@ const FINANCE_DIRECTIONS = ['IN', 'OUT'];
 const FINANCE_DOC_TYPES = ['INVOICE', 'RECEIPT', 'DONATION', 'DEPOSIT', 'OTHER'];
 const FINANCE_ACCOUNT_KINDS = ['CASH', 'BANK', 'CARD', 'OTHER'];
 const FINANCE_DUES_CATEGORY = 'Συνδρομές μελών';
+const FINANCE_NOT_BOOKED_NOTE = '(Δεν καταχωρήθηκε στο ταμείο: η ημερομηνία είναι πριν από την έναρξη βιβλίων.)';
 
 // ─── Pure helpers ────────────────────────────────────────────────────────────
 
@@ -36,7 +37,7 @@ function financeParseDecimalCents(string $s): ?int {
  * any other single dot is the decimal mark. Mirrored by parseCents() in assets/js/finance-form.js.
  */
 function financeParseCents(string $value): ?int {
-    $s = preg_replace('/[\s\x{00A0}]+/u', '', $value);
+    $s = preg_replace('/[\s\x{00A0}€]+/u', '', $value); // spaces, NBSP and a pasted € sign
     if ($s === null || $s === '') return null;
     $sign = '';
     if ($s[0] === '-') { $sign = '-'; $s = substr($s, 1); }
@@ -527,34 +528,45 @@ function financeDuesCategoryId(): ?int {
 /**
  * Make the cash book agree with one dues row: a paid amount → exactly one IN movement; no amount, or the row is
  * gone → no movement. Called after every insert/update/delete in subscriptions.php. Safe before migration 227 ran.
+ * Returns what happened: 'booked', 'updated', 'deleted', 'skipped' (dated before the books start: nothing is, or stays, booked), 'none'.
  */
-function financeSyncSubscriptionMovement(int $subscriptionId, int $userId, ?string $previousMethod = null): void {
-    if (!dbTableExists('finance_movements')) return;
+function financeSyncSubscriptionMovement(int $subscriptionId, int $userId, ?string $previousMethod = null): string {
+    if (!dbTableExists('finance_movements')) return 'none';
     $sub = dbFetchOne("SELECT vs.id, vs.amount, vs.payment_date, vs.payment_method, u.name
                        FROM volunteer_subscriptions vs JOIN users u ON u.id = vs.user_id WHERE vs.id = ?", [$subscriptionId]);
     $existing = dbFetchOne("SELECT id, account_id FROM finance_movements WHERE subscription_id = ?", [$subscriptionId]);
     $cents = $sub ? financeToCents($sub['amount']) : 0;
     if ($cents <= 0) {
-        if ($existing) dbExecute("DELETE FROM finance_movements WHERE id = ?", [$existing['id']]);
-        return;
+        if ($existing) { dbExecute("DELETE FROM finance_movements WHERE id = ?", [$existing['id']]); return 'deleted'; }
+        return 'none';
     }
-    // Dues paid before the books start are already inside the opening balances: a NEW movement would count them twice.
-    // (An existing movement is still updated below, or deleted above.)
+    // Dues paid before the books start are already inside the opening balances: booking them (or keeping a movement
+    // that was moved there by an edit) would count them twice, so an existing movement is deleted.
     $booksStart = financeBooksStart();
-    if (!$existing && $booksStart !== null && (string) $sub['payment_date'] < $booksStart) return;
+    if ($booksStart !== null && (string) $sub['payment_date'] < $booksStart) {
+        if ($existing) dbExecute("DELETE FROM finance_movements WHERE id = ?", [$existing['id']]);
+        return 'skipped';
+    }
     // An existing movement keeps the account the treasurer left it in; only a changed payment method re-resolves it.
     $methodChanged = $previousMethod !== null && trim($previousMethod) !== trim((string) $sub['payment_method']);
     $accountId = ($existing && !$methodChanged) ? (int) $existing['account_id'] : financeDuesAccountFor($sub['payment_method']);
-    if ($accountId === 0) return; // no active account at all: nothing to book into
+    if ($accountId === 0) return 'none'; // no active account at all: nothing to book into
     $desc = mb_substr('Συνδρομή — ' . $sub['name'], 0, 255);
     $params = [$accountId, financeFromCents($cents), $sub['payment_date'], financeDuesCategoryId(), $desc];
     if ($existing) {
         dbExecute("UPDATE finance_movements SET account_id = ?, amount = ?, movement_date = ?, category_id = ?, description = ? WHERE id = ?",
             array_merge($params, [$existing['id']]));
-    } else {
-        dbExecute("INSERT INTO finance_movements (account_id, amount, movement_date, category_id, description, direction, subscription_id, created_by)
-                   VALUES (?, ?, ?, ?, ?, 'IN', ?, ?)", array_merge($params, [$subscriptionId, $userId]));
+        return 'updated';
     }
+    dbExecute("INSERT INTO finance_movements (account_id, amount, movement_date, category_id, description, direction, subscription_id, created_by)
+               VALUES (?, ?, ?, ?, ?, 'IN', ?, ?)", array_merge($params, [$subscriptionId, $userId]));
+    return 'booked';
+}
+
+/** Why the cash book may double count dues: no books-start date can be derived. null when all is well (or finance is not installed). */
+function financeBooksStartWarning(): ?string {
+    if (!dbTableExists('finance_accounts') || financeBooksStart() !== null) return null;
+    return 'Ορίστε «Έναρξη βιβλίων» (Οικονομικά → Ρυθμίσεις) ή ημερομηνία στο αρχικό υπόλοιπο ενός λογαριασμού: μέχρι τότε οι παλιές συνδρομές που διορθώνονται στις Ετήσιες Συνδρομές γράφονται ως νέα έσοδα και μπορεί να μετρηθούν δύο φορές.';
 }
 
 /** One-off: book the dues paid on/after $fromDate that have no movement yet. Returns how many were booked. */

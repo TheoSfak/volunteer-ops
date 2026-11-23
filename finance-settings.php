@@ -20,7 +20,8 @@ if (isPost()) {
                 $openingDate = post('opening_date') !== '' ? post('opening_date') : null;
                 if ($openingDate !== null && !financeValidDate($openingDate)) throw new InvalidArgumentException('Μη έγκυρη ημερομηνία αρχικού υπολοίπου.');
                 $rawOpening = str_replace(' ', '', trim(post('opening_balance')));
-                $openingCents = financeRequireCents($rawOpening); // refuses «1.2.3», «abc»; accepts 1.500 / 1.234,56 / 1500.00
+                $openingCents = financeRequireCents($rawOpening);
+                if ($openingCents !== 0 && $openingDate === null) throw new InvalidArgumentException('Συμπληρώστε και την ημερομηνία του αρχικού υπολοίπου: από αυτήν ξεκινούν τα βιβλία και δεν μετρώνται δύο φορές οι παλιές συνδρομές.'); // refuses «1.2.3», «abc»; accepts 1.500 / 1.234,56 / 1500.00
                 $oldAccount = $id > 0 ? dbFetchOne("SELECT name, kind, iban, opening_balance, opening_date, is_active FROM finance_accounts WHERE id = ?", [$id]) : null;
                 if ($id > 0 && !$oldAccount) throw new InvalidArgumentException('Ο λογαριασμός δεν βρέθηκε.');
                 $params = [$name, $kind, strtoupper(preg_replace('/\s+/', '', post('iban'))) ?: null,
@@ -35,7 +36,8 @@ if (isPost()) {
                     $id = (int) dbInsert("INSERT INTO finance_accounts (name, kind, iban, opening_balance, opening_date, is_active, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)", array_merge($params, [$next]));
                     logAudit('finance_create_account', 'finance_accounts', $id, null, $newAccount);
                 }
-                setFlash('success', 'Ο λογαριασμός αποθηκεύτηκε.');
+                if ($openingDate !== null && !financeValidDate(financeSetting('finance_books_start', ''))) financeSaveSetting('finance_books_start', $openingDate); // the first opening date starts the books
+                setFlash('success', 'Ο λογαριασμός αποθηκεύτηκε' . ($openingCents !== 0 ? ' (αρχικό υπόλοιπο ' . financeFormat($openingCents) . ').' : '.'));
                 break;
             case 'delete_account':
                 $id = (int) post('id');
@@ -122,6 +124,7 @@ include __DIR__ . '/includes/header.php';
 ?>
 <h1 class="h3 mb-3"><i class="bi bi-gear me-2"></i>Ρυθμίσεις Οικονομικών</h1>
 <?php displayFlash(); ?>
+<?php if ($booksWarning = financeBooksStartWarning()): ?><div class="alert alert-warning" role="alert"><i class="bi bi-exclamation-triangle me-1"></i><?= h($booksWarning) ?></div><?php endif; ?>
 
 <div class="card mb-4"><div class="card-body">
     <h2 class="h5">Λογαριασμοί</h2>

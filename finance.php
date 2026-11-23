@@ -24,6 +24,7 @@ include __DIR__ . '/includes/header.php';
     </div>
 </div>
 <?php displayFlash(); ?>
+<?php if ($booksWarning = financeBooksStartWarning()): ?><div class="alert alert-warning" role="alert"><i class="bi bi-exclamation-triangle me-1"></i><?= h($booksWarning) ?> <a href="finance-settings.php">Ρυθμίσεις</a></div><?php endif; ?>
 <div class="row g-3 mb-3">
     <?php foreach ($balances as $a): ?>
     <div class="col-6 col-lg-3"><div class="card card-body h-100"><div class="text-muted small"><?= h($a['name']) ?></div><div class="fs-4 fw-semibold <?= $a['balance'] < 0 ? 'text-danger' : '' ?>"><?= financeFormat($a['balance']) ?></div></div></div>

@@ -25,7 +25,7 @@
      * groups («1.000.000»); any other single dot is the decimal mark («12.5»).
      */
     function parseCents(value) {
-        let s = String(value == null ? '' : value).replace(/[\s\u00A0]+/g, '');
+        let s = String(value == null ? '' : value).replace(/[\s\u00A0€]+/g, ''); // spaces, NBSP and a pasted € sign
         if (s === '') return null;
         let sign = '';
         if (s[0] === '-') { sign = '-'; s = s.slice(1); }
@@ -95,8 +95,8 @@
     /** Labels that depend on the direction. */
     function directionTexts(direction) {
         return direction === 'IN'
-            ? {badge: 'Έσοδο', counterparty: 'Από (δωρητής / πληρωτής) *', payNow: 'Εισπράχθηκε ήδη'}
-            : {badge: 'Έξοδο', counterparty: 'Εκδότης *', payNow: 'Πληρώθηκε ήδη'};
+            ? {badge: 'Έσοδο', counterparty: 'Από (δωρητής / πληρωτής) *', payNow: 'Εισπράχθηκε ήδη', dueNote: 'Με προθεσμία είσπραξης: σημειώθηκε ως ανείσπρακτο. Τσεκάρετε αν έχει ήδη εισπραχθεί.'}
+            : {badge: 'Έξοδο', counterparty: 'Εκδότης *', payNow: 'Πληρώθηκε ήδη', dueNote: 'Με προθεσμία πληρωμής: σημειώθηκε ως απλήρωτο. Τσεκάρετε αν έχει ήδη πληρωθεί.'};
     }
 
     /** ISO yyyy-mm-dd → dd/mm/yyyy; anything else comes back unchanged. */
@@ -262,6 +262,7 @@
             if (badge) { badge.textContent = t.badge; badge.classList.toggle('bg-success', dir === 'IN'); badge.classList.toggle('bg-danger', dir === 'OUT'); }
             const cl = document.getElementById('counterpartyLabel'); if (cl) cl.textContent = t.counterparty;
             const pl = document.getElementById('payNowLabel'); if (pl) pl.textContent = t.payNow;
+            const dn = document.getElementById('payNowDueNote'); if (dn) dn.textContent = t.dueNote;
             const type = $('#docType');
             if (type && type.value === defaultDocType(old)) type.value = defaultDocType(dir);
             const sel = $('#categoryId');
@@ -277,14 +278,18 @@
 
         // ── Pay-now date follows the document date until the user types their own ──
         const docDateEl = $('#docDate'), payDateEl = $('#payDate');
-        let payFollows = !!payDateEl && payDateEl.dataset.follow === '1';
+        let payFollows = !!payDateEl && payDateEl.dataset.follow === '1', syncing = false;
         function syncPayDate() {
             if (!payDateEl || !docDateEl) return;
             const next = nextPayDate(payFollows, docDateEl.value, payDateEl.value);
-            if (next !== payDateEl.value) { payDateEl.value = next; payDateEl.dispatchEvent(new Event('change', {bubbles: true})); }
+            if (next !== payDateEl.value) {
+                payDateEl.value = next;
+                syncing = true; // our own 'change' is not the user's choice
+                try { payDateEl.dispatchEvent(new Event('change', {bubbles: true})); } finally { syncing = false; }
+            }
         }
         if (payDateEl && docDateEl) {
-            payDateEl.addEventListener('input', () => { payFollows = false; }); // only a person typing fires 'input'; syncPayDate fires 'change'
+            ['input', 'change'].forEach(n => payDateEl.addEventListener(n, () => { if (!syncing) payFollows = false; })); // a picker or a mobile browser may fire only 'change'
             ['input', 'change'].forEach(n => docDateEl.addEventListener(n, syncPayDate));
             syncPayDate();
         }

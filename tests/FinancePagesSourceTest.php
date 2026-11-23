@@ -263,4 +263,24 @@ final class FinancePagesSourceTest extends TestCase
         }
         $this->assertStringNotContainsString('ό,τι άλλο απορρίπτεται', $m);
     }
+
+    public function test_round_two_review_fixes_are_in_the_pages(): void
+    {
+        $set = self::src('finance-settings.php');
+        $this->assertStringContainsString('$openingCents !== 0 && $openingDate === null', $set);
+        $this->assertStringContainsString("financeSaveSetting('finance_books_start', \$openingDate)", $set);
+        $this->assertStringContainsString('financeBooksStartWarning()', $set);
+        $this->assertStringContainsString('financeBooksStartWarning()', self::src('finance.php'));
+        $subs = self::src('subscriptions.php');
+        $this->assertStringContainsString("hasPagePermission('finance_manage') && (\$booksWarning = financeBooksStartWarning())", $subs);
+        $this->assertSame(2, substr_count($subs, "\$financeSyncResult === 'skipped' ? ' ' . FINANCE_NOT_BOOKED_NOTE"));
+        $this->assertStringContainsString('(Δεν καταχωρήθηκε στο ταμείο: η ημερομηνία είναι πριν από την έναρξη βιβλίων.)', self::src('includes/finance-functions.php'));
+        $mov = self::src('finance-movements.php');
+        $this->assertStringContainsString("'Η κίνηση καταχωρήθηκε: ' . financeFormat(\$new['amount'])", $mov);
+        $this->assertStringContainsString("'Η μεταφορά καταχωρήθηκε: ' . financeFormat(\$cents)", $mov);
+        $form = self::src('finance-document-form.php');
+        $this->assertStringContainsString('Με προθεσμία είσπραξης: σημειώθηκε ως ανείσπρακτο. Τσεκάρετε αν έχει ήδη εισπραχθεί.', $form);
+        $js = self::src('assets/js/finance-form.js');
+        $this->assertStringContainsString("['input', 'change'].forEach(n => payDateEl.addEventListener(n, () => { if (!syncing) payFollows = false; }))", $js);
+    }
 }

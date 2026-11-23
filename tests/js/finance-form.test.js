@@ -31,6 +31,7 @@ test('parseCents reads el-GR amounts (same table as FinanceMoneyTest::amountExam
         ['1.500', 150000], ['1.234,56', 123456], ['12,40', 1240], ['1500.00', 150000], ['12.5', 1250],
         ['12.000', 1200000], ['1.000.000', 100000000], ['1500', 150000], ['0,5', 50], ['0.500', 50],
         ['1000.500', 100050], ['-1.500,25', -150025], [' 1 234,50 ', 123450],
+        ['1.500 €', 150000], ['€ 12,40', 1240], ['12,40\u00A0€', 1240], ['€', null],
         ['1.23.4', null], ['abc', null], ['1,2,3', null], ['', null], ['1.2345,6', null], ['1,5.0', null], ['--5', null],
     ];
     for (const [input, cents] of table) {
@@ -125,6 +126,6 @@ test('shouldUntickPaid: a due date unticks «Πληρώθηκε ήδη» once, n
 test('direction toggle helpers: document type default and Greek labels per direction', () => {
     assert.equal(F.defaultDocType('IN'), 'DONATION');
     assert.equal(F.defaultDocType('OUT'), 'RECEIPT');
-    assert.deepEqual(F.directionTexts('IN'), {badge: 'Έσοδο', counterparty: 'Από (δωρητής / πληρωτής) *', payNow: 'Εισπράχθηκε ήδη'});
-    assert.deepEqual(F.directionTexts('OUT'), {badge: 'Έξοδο', counterparty: 'Εκδότης *', payNow: 'Πληρώθηκε ήδη'});
+    assert.deepEqual(F.directionTexts('IN'), {badge: 'Έσοδο', counterparty: 'Από (δωρητής / πληρωτής) *', payNow: 'Εισπράχθηκε ήδη', dueNote: 'Με προθεσμία είσπραξης: σημειώθηκε ως ανείσπρακτο. Τσεκάρετε αν έχει ήδη εισπραχθεί.'});
+    assert.deepEqual(F.directionTexts('OUT'), {badge: 'Έξοδο', counterparty: 'Εκδότης *', payNow: 'Πληρώθηκε ήδη', dueNote: 'Με προθεσμία πληρωμής: σημειώθηκε ως απλήρωτο. Τσεκάρετε αν έχει ήδη πληρωθεί.'});
 });

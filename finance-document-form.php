@@ -262,7 +262,7 @@ include __DIR__ . '/includes/header.php';
                 $payDateValue = $sticky && post('pay_date') !== '' ? post('pay_date') : (($sticky ? post('doc_date') : '') ?: date('Y-m-d')); ?>
             <div class="col-md-4"><input type="date" class="form-control" name="pay_date" id="payDate" value="<?= h($payDateValue) ?>" data-follow="<?= !$sticky || $payDateValue === post('doc_date') || post('pay_date') === '' ? '1' : '0' ?>" aria-label="Ημερομηνία πληρωμής"></div>
         </div>
-        <div class="alert alert-info py-1 px-2 mt-2 mb-0 small d-none" id="payNowDueNote" role="status">Με προθεσμία πληρωμής: σημειώθηκε ως απλήρωτο. Τσεκάρετε αν έχει ήδη πληρωθεί.</div>
+        <div class="alert alert-info py-1 px-2 mt-2 mb-0 small d-none" id="payNowDueNote" role="status"><?= $direction === 'IN' ? 'Με προθεσμία είσπραξης: σημειώθηκε ως ανείσπρακτο. Τσεκάρετε αν έχει ήδη εισπραχθεί.' : 'Με προθεσμία πληρωμής: σημειώθηκε ως απλήρωτο. Τσεκάρετε αν έχει ήδη πληρωθεί.' ?></div>
         <div class="alert alert-warning py-1 px-2 mt-2 mb-0 small d-none opening-warning" role="alert"></div>
         <div class="form-text">Η ημερομηνία πληρωμής ακολουθεί την ημερομηνία του παραστατικού, εκτός αν την αλλάξετε εσείς. Ξετσεκάρετε για τιμολόγιο που οφείλεται ακόμα: θα εμφανιστεί στις Υποχρεώσεις.</div>
     </div></div>

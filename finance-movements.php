@@ -16,7 +16,7 @@ if (isPost()) {
                 ];
                 $mid = financeAddMovement($new, $uid);
                 logAudit('finance_create_movement', 'finance_movements', $mid, null, $new);
-                setFlash('success', 'Η κίνηση καταχωρήθηκε.');
+                setFlash('success', 'Η κίνηση καταχωρήθηκε: ' . financeFormat($new['amount']) . '.');
                 break;
             case 'transfer':
                 $from = (int) post('from_account_id'); $to = (int) post('to_account_id'); $cents = financeRequireCents(post('amount'));
@@ -25,7 +25,7 @@ if (isPost()) {
                     'transfer_group' => $group, 'from_account_id' => $from, 'to_account_id' => $to, 'amount' => $cents,
                     'movement_date' => post('movement_date'), 'description' => post('description'),
                 ]);
-                setFlash('success', 'Η μεταφορά καταχωρήθηκε.');
+                setFlash('success', 'Η μεταφορά καταχωρήθηκε: ' . financeFormat($cents) . '.');
                 break;
             case 'delete':
                 $rows = financeDeleteMovement((int) post('movement_id'));

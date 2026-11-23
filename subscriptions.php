@@ -258,14 +258,15 @@ if (isPost()) {
             }
 
             try {
-            $subscriptionId = financeTransaction(function () use ($userId, $paymentDate, $expiryDate, $isReactivation, $coverageYears, $amount, $method, $receiptNumber, $receiptOriginal, $receiptStored, $notes) {
+            $financeSyncResult = 'none';
+            $subscriptionId = financeTransaction(function () use ($userId, $paymentDate, $expiryDate, $isReactivation, $coverageYears, $amount, $method, $receiptNumber, $receiptOriginal, $receiptStored, $notes, &$financeSyncResult) {
                 $newId = (int) dbInsert("INSERT INTO volunteer_subscriptions
                     (user_id, payment_date, expiry_date, renewal_kind, coverage_years, amount, payment_method, receipt_number, receipt_original_name, receipt_stored_name, notes, created_by)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
                     $userId, $paymentDate, $expiryDate, $isReactivation ? 'REACTIVATION' : 'RENEWAL', $coverageYears, $amount === '' ? null : $amount,
                     $method ?: null, $receiptNumber ?: null, $receiptOriginal, $receiptStored, $notes ?: null, getCurrentUserId()
                 ]);
-                financeSyncSubscriptionMovement($newId, (int) getCurrentUserId());
+                $financeSyncResult = financeSyncSubscriptionMovement($newId, (int) getCurrentUserId());
                 return $newId;
             });
             } catch (Throwable $e) {
@@ -287,7 +288,7 @@ if (isPost()) {
                 'renewal_kind' => $isReactivation ? 'REACTIVATION' : 'RENEWAL',
                 'historical' => $isHistorical,
             ]);
-            setFlash('success', ($isHistorical ? 'Η παλιά πληρωμή καταχωρήθηκε στο ιστορικό. ' : ($isReactivation ? 'Η συνδρομή επανενεργοποιήθηκε. ' : 'Η πληρωμή καταχωρήθηκε. ')) . 'Η περίοδος λήγει στις ' . formatDate($expiryDate) . '.');
+            setFlash('success', ($isHistorical ? 'Η παλιά πληρωμή καταχωρήθηκε στο ιστορικό. ' : ($isReactivation ? 'Η συνδρομή επανενεργοποιήθηκε. ' : 'Η πληρωμή καταχωρήθηκε. ')) . 'Η περίοδος λήγει στις ' . formatDate($expiryDate) . '.' . ($financeSyncResult === 'skipped' ? ' ' . FINANCE_NOT_BOOKED_NOTE : ''));
             if ($isHistorical) {
                 redirect('subscriptions.php?show_history=1&history_user_id=' . $userId . '#subscriptionPaymentHistory');
             }
@@ -339,9 +340,10 @@ if (isPost()) {
                     redirect('subscriptions.php?edit=' . $subscriptionId);
                 }
                 try {
-                financeTransaction(function () use ($paymentDate, $expiryDate, $amount, $receiptNumber, $receiptOriginal, $receiptStored, $reset, $old, $subscriptionId) {
+                $financeSyncResult = 'none';
+                financeTransaction(function () use ($paymentDate, $expiryDate, $amount, $receiptNumber, $receiptOriginal, $receiptStored, $reset, $old, $subscriptionId, &$financeSyncResult) {
                     dbExecute("UPDATE volunteer_subscriptions SET payment_date = ?, expiry_date = ?, amount = ?, payment_method = ?, receipt_number = ?, receipt_original_name = ?, receipt_stored_name = ?, notes = ?, renewal_kind = ?, reminder_sent_3m = ?, reminder_sent_1m = ?, reminder_sent_1w = ?, reminder_sent_expired = ? WHERE id = ?", [$paymentDate, $expiryDate, $amount === '' ? null : $amount, trim(post('payment_method')) ?: null, $receiptNumber ?: null, $receiptOriginal, $receiptStored, trim(post('notes')) ?: null, post('renewal_kind') === 'REACTIVATION' ? 'REACTIVATION' : 'RENEWAL', $reset ? 0 : $old['reminder_sent_3m'], $reset ? 0 : $old['reminder_sent_1m'], $reset ? 0 : $old['reminder_sent_1w'], $reset ? 0 : $old['reminder_sent_expired'], $subscriptionId]);
-                    financeSyncSubscriptionMovement($subscriptionId, (int) getCurrentUserId(), $old['payment_method']);
+                    $financeSyncResult = financeSyncSubscriptionMovement($subscriptionId, (int) getCurrentUserId(), $old['payment_method']);
                 });
                 } catch (Throwable $e) {
                     error_log('subscriptions edit: ' . $e->getMessage());
@@ -367,7 +369,7 @@ if (isPost()) {
                     'receipt_number' => $receiptNumber ?: null,
                     'renewal_kind' => post('renewal_kind') === 'REACTIVATION' ? 'REACTIVATION' : 'RENEWAL',
                 ]);
-                setFlash('success', 'Η συνδρομή ενημερώθηκε.');
+                setFlash('success', 'Η συνδρομή ενημερώθηκε.' . ($financeSyncResult === 'skipped' ? ' ' . FINANCE_NOT_BOOKED_NOTE : ''));
             }
         }
         redirect('subscriptions.php');
@@ -602,6 +604,7 @@ include __DIR__ . '/includes/header.php';
     <h1 class="h3 mb-0"><i class="bi bi-cash-coin me-2"></i>Ετήσιες Συνδρομές</h1>
     <div class="d-flex flex-wrap gap-2"><a class="btn btn-outline-secondary" href="subscriptions.php?<?= h(http_build_query(array_filter(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'page' => $subscriptionPage, 'show_history' => $showPaymentHistory ? null : 1], static fn($value) => $value !== null))) ?><?= $showPaymentHistory ? '' : '#subscriptionPaymentHistory' ?>"><i class="bi bi-clock-history me-1"></i><?= $showPaymentHistory ? 'Απόκρυψη ιστορικού' : 'Ιστορικό πληρωμών' ?> <span class="badge text-bg-secondary ms-1"><?= $historyTotal ?></span></a><a class="btn btn-outline-success" href="subscriptions.php?<?= h(http_build_query(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'export' => 'excel'])) ?>"><i class="bi bi-file-earmark-excel me-1"></i>Εξαγωγή Excel</a><button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg me-1"></i>Καταχώρηση πληρωμής</button></div>
 </div>
+<?php if (hasPagePermission('finance_manage') && ($booksWarning = financeBooksStartWarning())): ?><div class="alert alert-warning" role="alert"><i class="bi bi-exclamation-triangle me-1"></i><?= h($booksWarning) ?> <a href="finance-settings.php">Ρυθμίσεις Οικονομικών</a></div><?php endif; ?>
 <?php if ($editing): ?>
 <div class="card border-primary mb-3">
     <div class="card-header"><strong>Επεξεργασία συνδρομής: <?= h($editing['volunteer_name']) ?></strong></div>

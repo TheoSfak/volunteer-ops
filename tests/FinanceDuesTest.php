@@ -134,12 +134,39 @@ final class FinanceDuesTest extends TestCase
         $sub = $this->sub('2026-03-01', '30.00', 'Μετρητά');
         financeSyncSubscriptionMovement($sub, self::$userId);
         financeSaveSetting('finance_books_start', '2026-06-01');
-        dbExecute("UPDATE volunteer_subscriptions SET amount = '45.00' WHERE id = ?", [$sub]);
-        financeSyncSubscriptionMovement($sub, self::$userId);
+        dbExecute("UPDATE volunteer_subscriptions SET amount = '45.00', payment_date = '2026-06-02' WHERE id = ?", [$sub]);
+        $this->assertSame('updated', financeSyncSubscriptionMovement($sub, self::$userId));
         $this->assertSame('45.00', $this->movement($sub)['amount']);
         dbExecute("UPDATE volunteer_subscriptions SET amount = NULL WHERE id = ?", [$sub]);
         financeSyncSubscriptionMovement($sub, self::$userId);
         $this->assertNull($this->movement($sub));
+    }
+
+    public function test_editing_a_booked_row_to_a_date_before_the_books_start_deletes_its_movement(): void
+    {
+        financeSaveSetting('finance_books_start', '2026-01-01');
+        $sub = $this->sub('2026-03-01', '30.00', 'Μετρητά');
+        $this->assertSame('booked', financeSyncSubscriptionMovement($sub, self::$userId));
+        dbExecute("UPDATE volunteer_subscriptions SET payment_date = '2025-12-31' WHERE id = ?", [$sub]);
+        $this->assertSame('skipped', financeSyncSubscriptionMovement($sub, self::$userId));
+        $this->assertNull($this->movement($sub), 'it must not be moved behind the opening balance');
+        $old = $this->sub('2025-05-05', '30.00', 'Μετρητά');
+        $this->assertSame('skipped', financeSyncSubscriptionMovement($old, self::$userId));
+        dbExecute("UPDATE volunteer_subscriptions SET amount = NULL WHERE id = ?", [$old]);
+        $this->assertSame('none', financeSyncSubscriptionMovement($old, self::$userId));
+    }
+
+    public function test_the_books_start_warning_shows_only_while_no_start_can_be_derived(): void
+    {
+        dbExecute("UPDATE finance_accounts SET is_active = 0 WHERE name NOT LIKE 'TESTFIN%'"); // hide the seeded accounts for this test
+        try {
+            financeSaveSetting('finance_books_start', '');
+            $this->assertStringContainsString('Έναρξη βιβλίων', (string) financeBooksStartWarning());
+            financeSaveSetting('finance_books_start', '2026-01-01');
+            $this->assertNull(financeBooksStartWarning());
+        } finally {
+            dbExecute("UPDATE finance_accounts SET is_active = 1 WHERE name NOT LIKE 'TESTFIN%'");
+        }
     }
 
     public function test_without_a_books_start_setting_the_earliest_active_opening_date_guards(): void
