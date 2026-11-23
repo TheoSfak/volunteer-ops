@@ -109,7 +109,7 @@ function financeTransaction(callable $fn) {
         $pdo->commit();
         return $result;
     } catch (Throwable $e) {
-        $pdo->rollBack();
+        if ($pdo->inTransaction()) $pdo->rollBack();
         throw $e;
     }
 }
@@ -187,7 +187,8 @@ function financeSaveDocument(array $doc, array $vatLines, int $userId, ?int $id 
         if (!in_array($rate, FINANCE_VAT_RATES, true)) throw new InvalidArgumentException('Μη έγκυρος συντελεστής ΦΠΑ.');
         $net = (int) ($l['net'] ?? 0);
         $vat = (int) ($l['vat'] ?? 0);
-        if ($net < 0 || $vat < 0 || $net + $vat <= 0) continue;
+        if ($net < 0 || $vat < 0) throw new InvalidArgumentException('Τα ποσά του ΦΠΑ δεν μπορούν να είναι αρνητικά.');
+        if ($net + $vat === 0) continue; // an empty row of the form
         $lines[] = ['rate' => $rate, 'net' => $net, 'vat' => $vat];
     }
     if (!$lines) throw new InvalidArgumentException('Συμπληρώστε τουλάχιστον ένα ποσό.');
@@ -196,13 +197,6 @@ function financeSaveDocument(array $doc, array $vatLines, int $userId, ?int $id 
     $categoryId = !empty($doc['category_id']) ? (int) $doc['category_id'] : null;
     if ($categoryId !== null && !dbFetchOne("SELECT id FROM finance_categories WHERE id = ? AND direction = ?", [$categoryId, $direction])) {
         throw new InvalidArgumentException('Η κατηγορία δεν ταιριάζει με το είδος του παραστατικού.');
-    }
-    if ($id !== null) {
-        $existing = dbFetchOne("SELECT direction FROM finance_documents WHERE id = ?", [$id]);
-        if (!$existing) throw new InvalidArgumentException('Το παραστατικό δεν βρέθηκε.');
-        $paid = financeDocumentPaidCents($id);
-        if ($paid > 0 && $existing['direction'] !== $direction) throw new InvalidArgumentException('Δεν αλλάζει το είδος ενός παραστατικού που έχει πληρωμές.');
-        if ($paid > $t['gross']) throw new InvalidArgumentException('Το σύνολο δεν μπορεί να είναι μικρότερο από όσα έχουν ήδη πληρωθεί (' . financeFormat($paid) . ').');
     }
 
     $values = [
@@ -216,7 +210,15 @@ function financeSaveDocument(array $doc, array $vatLines, int $userId, ?int $id 
         ($notes = trim((string) ($doc['notes'] ?? ''))) !== '' ? $notes : null,
     ];
 
-    return financeTransaction(function () use ($doc, $values, $lines, $userId, $id, $due) {
+    return financeTransaction(function () use ($doc, $values, $lines, $userId, $id, $due, $direction, $t) {
+        if ($id !== null) {
+            // Lock the row so a payment arriving at the same moment cannot slip past these checks.
+            $existing = dbFetchOne("SELECT direction FROM finance_documents WHERE id = ? FOR UPDATE", [$id]);
+            if (!$existing) throw new InvalidArgumentException('Το παραστατικό δεν βρέθηκε.');
+            $paid = financeDocumentPaidCents($id);
+            if ($paid > 0 && $existing['direction'] !== $direction) throw new InvalidArgumentException('Δεν αλλάζει το είδος ενός παραστατικού που έχει πληρωμές.');
+            if ($paid > $t['gross']) throw new InvalidArgumentException('Το σύνολο δεν μπορεί να είναι μικρότερο από όσα έχουν ήδη πληρωθεί (' . financeFormat($paid) . ').');
+        }
         if ($id === null) {
             $id = (int) dbInsert("INSERT INTO finance_documents
                 (direction, doc_type, counterparty_name, counterparty_vat, doc_number, doc_date, due_date, net_total, vat_total, gross_total,
@@ -272,32 +274,39 @@ function financeAddMovement(array $m, int $userId): int {
     if (!financeValidDate($m['movement_date'] ?? null)) throw new InvalidArgumentException('Μη έγκυρη ημερομηνία κίνησης.');
     $documentId = !empty($m['document_id']) ? (int) $m['document_id'] : null;
     $categoryId = null;
-    if ($documentId !== null) {
-        $doc = dbFetchOne("SELECT direction FROM finance_documents WHERE id = ?", [$documentId]);
-        if (!$doc) throw new InvalidArgumentException('Το παραστατικό δεν βρέθηκε.');
-        if ($doc['direction'] !== $direction) throw new InvalidArgumentException('Η κίνηση πρέπει να έχει το ίδιο είδος (έσοδο/έξοδο) με το παραστατικό.');
-    } elseif (!empty($m['category_id'])) {
+    if ($documentId === null && !empty($m['category_id'])) {
         $categoryId = (int) $m['category_id'];
         if (!dbFetchOne("SELECT id FROM finance_categories WHERE id = ? AND direction = ?", [$categoryId, $direction])) {
             throw new InvalidArgumentException('Η κατηγορία δεν ταιριάζει με το είδος της κίνησης.');
         }
     }
-    return (int) dbInsert("INSERT INTO finance_movements
-        (account_id, direction, amount, movement_date, document_id, category_id, transfer_group, subscription_id, description, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
-        $accountId, $direction, financeFromCents($amount), $m['movement_date'], $documentId, $categoryId,
-        $m['transfer_group'] ?? null, !empty($m['subscription_id']) ? (int) $m['subscription_id'] : null,
-        ($d = mb_substr(trim((string) ($m['description'] ?? '')), 0, 255)) !== '' ? $d : null, $userId,
-    ]);
+    return financeTransaction(function () use ($accountId, $direction, $amount, $m, $documentId, $categoryId, $userId) {
+        if ($documentId !== null) {
+            // Lock the document row: concurrent payments of the same document queue up here, so the remaining amount
+            // read below is the real one.
+            $doc = dbFetchOne("SELECT direction, gross_total FROM finance_documents WHERE id = ? FOR UPDATE", [$documentId]);
+            if (!$doc) throw new InvalidArgumentException('Το παραστατικό δεν βρέθηκε.');
+            if ($doc['direction'] !== $direction) throw new InvalidArgumentException('Η κίνηση πρέπει να έχει το ίδιο είδος (έσοδο/έξοδο) με το παραστατικό.');
+            $remaining = max(0, financeToCents($doc['gross_total']) - financeDocumentPaidCents($documentId));
+            if ($amount > $remaining) throw new InvalidArgumentException('Το ποσό ξεπερνά το υπόλοιπο (' . financeFormat($remaining) . ').');
+        }
+        return (int) dbInsert("INSERT INTO finance_movements
+            (account_id, direction, amount, movement_date, document_id, category_id, transfer_group, subscription_id, description, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+            $accountId, $direction, financeFromCents($amount), $m['movement_date'], $documentId, $categoryId,
+            $m['transfer_group'] ?? null, !empty($m['subscription_id']) ? (int) $m['subscription_id'] : null,
+            ($d = mb_substr(trim((string) ($m['description'] ?? '')), 0, 255)) !== '' ? $d : null, $userId,
+        ]);
+    });
 }
 
 function financePayDocument(int $documentId, int $accountId, string $date, int $amountCents, int $userId): int {
-    $st = financeDocumentStatus($documentId);
-    if (!$st) throw new InvalidArgumentException('Το παραστατικό δεν βρέθηκε.');
-    if ($amountCents > $st['remaining']) throw new InvalidArgumentException('Το ποσό ξεπερνά το υπόλοιπο (' . financeFormat($st['remaining']) . ').');
+    $doc = dbFetchOne("SELECT direction, counterparty_name FROM finance_documents WHERE id = ?", [$documentId]);
+    if (!$doc) throw new InvalidArgumentException('Το παραστατικό δεν βρέθηκε.');
+    // The remaining-amount check (under a row lock) lives in financeAddMovement.
     return financeAddMovement([
-        'account_id' => $accountId, 'direction' => $st['direction'], 'amount' => $amountCents, 'movement_date' => $date,
-        'document_id' => $documentId, 'description' => ($st['direction'] === 'OUT' ? 'Πληρωμή ' : 'Είσπραξη ') . $st['counterparty_name'],
+        'account_id' => $accountId, 'direction' => $doc['direction'], 'amount' => $amountCents, 'movement_date' => $date,
+        'document_id' => $documentId, 'description' => ($doc['direction'] === 'OUT' ? 'Πληρωμή ' : 'Είσπραξη ') . $doc['counterparty_name'],
     ], $userId);
 }
 
@@ -364,14 +373,14 @@ function financePeriodTotals(string $from, string $to): array {
 
 /** Cash basis: what actually moved in the period, by the document's category (or the movement's own). */
 function financeReportByCategory(string $from, string $to): array {
-    $rows = dbFetchAll("SELECT m.direction, COALESCE(c1.name, c2.name, 'Χωρίς κατηγορία') AS category, SUM(m.amount) AS total
+    $rows = dbFetchAll("SELECT m.direction, COALESCE(c1.id, c2.id) AS category_id, COALESCE(c1.name, c2.name, 'Χωρίς κατηγορία') AS category, SUM(m.amount) AS total
         FROM finance_movements m
         LEFT JOIN finance_documents d ON d.id = m.document_id
         LEFT JOIN finance_categories c1 ON c1.id = d.category_id
         LEFT JOIN finance_categories c2 ON c2.id = m.category_id
         WHERE m.movement_date BETWEEN ? AND ? AND m.transfer_group IS NULL
-        GROUP BY m.direction, category ORDER BY m.direction, total DESC", [$from, $to]);
-    return array_map(fn($r) => ['direction' => $r['direction'], 'category' => $r['category'], 'total' => financeToCents($r['total'])], $rows);
+        GROUP BY m.direction, category_id, category ORDER BY m.direction, total DESC", [$from, $to]);
+    return array_map(fn($r) => ['direction' => $r['direction'], 'category_id' => $r['category_id'] !== null ? (int) $r['category_id'] : null, 'category' => $r['category'], 'total' => financeToCents($r['total'])], $rows);
 }
 
 function financeReportByAccount(string $from, string $to): array {

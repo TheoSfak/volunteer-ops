@@ -66,6 +66,8 @@ final class FinanceLedgerTest extends TestCase
             [['counterparty_vat' => '090000046'] + $base, [financeSplitGross(100, 24)]],
             [$base, [['rate' => 23, 'net' => 100, 'vat' => 23]]],
             [$base, [['rate' => 24, 'net' => 0, 'vat' => 0]]],
+            [$base, [['rate' => 24, 'net' => -100, 'vat' => 24], financeSplitGross(500, 24)]],
+            [$base, [['rate' => 24, 'net' => 100, 'vat' => -5], financeSplitGross(500, 24)]],
         ] as $i => [$doc, $lines]) {
             try {
                 financeSaveDocument($doc, $lines, self::$userId);
@@ -98,6 +100,39 @@ final class FinanceLedgerTest extends TestCase
         $this->assertSame('PAID', financeDocumentStatus($doc)['status']);
     }
 
+    public function test_a_direct_movement_cannot_overpay_a_document(): void
+    {
+        $acc = $this->account('TESTFIN cash');
+        $doc = $this->outDoc(1240);
+        financePayDocument($doc, $acc, '2026-11-12', 1000, self::$userId);
+        try {
+            financeAddMovement(['account_id' => $acc, 'direction' => 'OUT', 'amount' => 241, 'movement_date' => '2026-11-12', 'document_id' => $doc], self::$userId);
+            $this->fail('overpayment accepted');
+        } catch (InvalidArgumentException $e) {
+            $this->assertStringContainsString('υπόλοιπο', $e->getMessage());
+        }
+        $this->assertSame(1000, financeDocumentPaidCents($doc));
+        financeAddMovement(['account_id' => $acc, 'direction' => 'OUT', 'amount' => 240, 'movement_date' => '2026-11-12', 'document_id' => $doc], self::$userId);
+        $this->assertSame('PAID', financeDocumentStatus($doc)['status']);
+    }
+
+    public function test_a_direct_movement_inside_an_outer_transaction_still_works_and_rolls_back_with_it(): void
+    {
+        $acc = $this->account('TESTFIN cash');
+        $doc = $this->outDoc(1000);
+        try {
+            financeTransaction(function () use ($acc, $doc) {
+                financeAddMovement(['account_id' => $acc, 'direction' => 'OUT', 'amount' => 600, 'movement_date' => '2026-11-12', 'document_id' => $doc], self::$userId);
+                financeAddMovement(['account_id' => $acc, 'direction' => 'OUT', 'amount' => 600, 'movement_date' => '2026-11-12', 'document_id' => $doc], self::$userId);
+            });
+            $this->fail('second overpaying movement accepted');
+        } catch (InvalidArgumentException $e) {
+            $this->assertStringContainsString('υπόλοιπο', $e->getMessage());
+        }
+        $this->assertSame(0, financeDocumentPaidCents($doc));
+        $this->assertFalse(db()->inTransaction());
+    }
+
     public function test_a_movement_must_match_its_documents_direction(): void
     {
         $acc = $this->account('TESTFIN cash');
@@ -120,6 +155,7 @@ final class FinanceLedgerTest extends TestCase
     {
         $cash = $this->account('TESTFIN cash', '100.00');
         $bank = $this->account('TESTFIN bank');
+        $before = financePeriodTotals('2026-11-01', '2026-11-30');
         financeAddMovement(['account_id' => $cash, 'direction' => 'IN', 'amount' => 5000, 'movement_date' => '2026-11-01', 'description' => 'TESTFIN donation'], self::$userId);
         financeAddMovement(['account_id' => $cash, 'direction' => 'OUT', 'amount' => 2030, 'movement_date' => '2026-11-02', 'description' => 'TESTFIN fuel'], self::$userId);
         $group = financeTransfer($cash, $bank, 3000, '2026-11-03', 'TESTFIN deposit', self::$userId);
@@ -129,7 +165,9 @@ final class FinanceLedgerTest extends TestCase
         $this->assertSame(3000, $bal[$bank]);
 
         $totals = financePeriodTotals('2026-11-01', '2026-11-30');
-        $this->assertGreaterThanOrEqual(5000, $totals['in']);
+        // the transfer (3000 out of cash, 3000 into bank) must not show up in either total
+        $this->assertSame(5000, $totals['in'] - $before['in']);
+        $this->assertSame(2030, $totals['out'] - $before['out']);
 
         $deleted = financeDeleteMovement((int) dbFetchValue("SELECT id FROM finance_movements WHERE transfer_group = ? LIMIT 1", [$group]));
         $this->assertCount(2, $deleted);
