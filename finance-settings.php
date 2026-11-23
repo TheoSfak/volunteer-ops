@@ -20,11 +20,12 @@ if (isPost()) {
                 $openingDate = post('opening_date') !== '' ? post('opening_date') : null;
                 if ($openingDate !== null && !financeValidDate($openingDate)) throw new InvalidArgumentException('Μη έγκυρη ημερομηνία αρχικού υπολοίπου.');
                 $rawOpening = str_replace(' ', '', trim(post('opening_balance')));
-                if ($rawOpening !== '' && !preg_match('/^-?\d{1,10}(?:[.,]\d+)?$/D', $rawOpening)) throw new InvalidArgumentException('Μη έγκυρο αρχικό υπόλοιπο. Γράψτε π.χ. 1500.00');
+                $openingCents = financeRequireCents($rawOpening);
+                if ($openingCents !== 0 && $openingDate === null) throw new InvalidArgumentException('Συμπληρώστε και την ημερομηνία του αρχικού υπολοίπου: από αυτήν ξεκινούν τα βιβλία και δεν μετρώνται δύο φορές οι παλιές συνδρομές.'); // refuses «1.2.3», «abc»; accepts 1.500 / 1.234,56 / 1500.00
                 $oldAccount = $id > 0 ? dbFetchOne("SELECT name, kind, iban, opening_balance, opening_date, is_active FROM finance_accounts WHERE id = ?", [$id]) : null;
                 if ($id > 0 && !$oldAccount) throw new InvalidArgumentException('Ο λογαριασμός δεν βρέθηκε.');
                 $params = [$name, $kind, strtoupper(preg_replace('/\s+/', '', post('iban'))) ?: null,
-                           financeFromCents(financeToCents($rawOpening)), $openingDate, post('is_active', '1') === '1' ? 1 : 0];
+                           financeFromCents($openingCents), $openingDate, post('is_active', '1') === '1' ? 1 : 0];
                 $newAccount = ['name' => $params[0], 'kind' => $params[1], 'iban' => $params[2], 'opening_balance' => $params[3], 'opening_date' => $params[4], 'is_active' => $params[5]];
                 if ($id > 0) {
                     if ($params[5] === 0 && financeIsLastActiveAccount($id)) throw new InvalidArgumentException('Πρέπει να μείνει τουλάχιστον ένας ενεργός λογαριασμός.');
@@ -35,7 +36,8 @@ if (isPost()) {
                     $id = (int) dbInsert("INSERT INTO finance_accounts (name, kind, iban, opening_balance, opening_date, is_active, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)", array_merge($params, [$next]));
                     logAudit('finance_create_account', 'finance_accounts', $id, null, $newAccount);
                 }
-                setFlash('success', 'Ο λογαριασμός αποθηκεύτηκε.');
+                if ($openingDate !== null && !financeValidDate(financeSetting('finance_books_start', ''))) financeSaveSetting('finance_books_start', $openingDate); // the first opening date starts the books
+                setFlash('success', 'Ο λογαριασμός αποθηκεύτηκε' . ($openingCents !== 0 ? ' (αρχικό υπόλοιπο ' . financeFormat($openingCents) . ').' : '.'));
                 break;
             case 'delete_account':
                 $id = (int) post('id');
@@ -85,6 +87,9 @@ if (isPost()) {
                 $rate = (int) post('default_vat_rate');
                 $keys = ['finance_default_vat_rate' => (string) (in_array($rate, FINANCE_VAT_RATES, true) ? $rate : 24)];
                 foreach (['cash', 'bank', 'card'] as $k) $keys['finance_dues_account_' . $k] = (string) (int) post('dues_account_' . $k);
+                $start = trim(post('books_start'));
+                if ($start !== '' && !financeValidDate($start)) throw new InvalidArgumentException('Μη έγκυρη ημερομηνία έναρξης βιβλίων.');
+                $keys['finance_books_start'] = $start;
                 $before = [];
                 foreach ($keys as $k => $v) { $before[$k] = financeSetting($k, ''); financeSaveSetting($k, $v); }
                 logAudit('finance_update_settings', 'settings', null, $before, $keys);
@@ -119,6 +124,7 @@ include __DIR__ . '/includes/header.php';
 ?>
 <h1 class="h3 mb-3"><i class="bi bi-gear me-2"></i>Ρυθμίσεις Οικονομικών</h1>
 <?php displayFlash(); ?>
+<?php if ($booksWarning = financeBooksStartWarning()): ?><div class="alert alert-warning" role="alert"><i class="bi bi-exclamation-triangle me-1"></i><?= h($booksWarning) ?></div><?php endif; ?>
 
 <div class="card mb-4"><div class="card-body">
     <h2 class="h5">Λογαριασμοί</h2>
@@ -177,6 +183,8 @@ include __DIR__ . '/includes/header.php';
         <?= csrfField() ?><input type="hidden" name="action" value="save_general">
         <div class="col-md-3"><label class="form-label">Προεπιλεγμένος ΦΠΑ</label><select class="form-select" name="default_vat_rate">
             <?php foreach (FINANCE_VAT_RATES as $r): ?><option value="<?= $r ?>" <?= $r === $defaultRate ? 'selected' : '' ?>><?= $r ?>%</option><?php endforeach; ?></select></div>
+        <div class="col-md-4"><label class="form-label">Έναρξη βιβλίων</label><input type="date" class="form-control" name="books_start" value="<?= h(financeSetting('finance_books_start', '')) ?>">
+            <div class="form-text">Συνδρομές που πληρώθηκαν πριν από αυτή την ημερομηνία δεν γράφονται ως νέα έσοδα (το αρχικό υπόλοιπο τις περιλαμβάνει ήδη). Αν μείνει κενή, ισχύει η παλαιότερη ημερομηνία αρχικού υπολοίπου των ενεργών λογαριασμών.</div></div>
         <div class="col-12"><p class="mb-1">Σε ποιον λογαριασμό γράφεται κάθε πληρωμή συνδρομής, ανάλογα με τον τρόπο πληρωμής:</p></div>
         <?php foreach ($duesLabels as $k => $l): $cur = (int) financeSetting('finance_dues_account_' . $k, '0'); ?>
         <div class="col-md-4"><label class="form-label small"><?= $l ?></label><select class="form-select" name="dues_account_<?= $k ?>">
@@ -188,7 +196,7 @@ include __DIR__ . '/includes/header.php';
     <hr>
     <form method="post" class="row g-2 align-items-end" onsubmit="return confirm('Καταχώρηση των παλαιών συνδρομών ως έσοδα;');">
         <?= csrfField() ?><input type="hidden" name="action" value="import_dues">
-        <div class="col-12"><p class="mb-1">Εισαγωγή παλαιών συνδρομών: γράφει ως έσοδα τις συνδρομές που πληρώθηκαν από την ημερομηνία αυτή και μετά και δεν έχουν ήδη κίνηση. Βάλτε την ίδια ημερομηνία με το αρχικό υπόλοιπο των λογαριασμών, για να μη μετρηθούν δύο φορές.</p></div>
+        <div class="col-12"><p class="mb-1">Εισαγωγή παλαιών συνδρομών: γράφει ως έσοδα τις συνδρομές που πληρώθηκαν από την ημερομηνία αυτή και μετά και δεν έχουν ήδη κίνηση. Βάλτε την ίδια ημερομηνία με το αρχικό υπόλοιπο των λογαριασμών, για να μη μετρηθούν δύο φορές. Αν δεν έχει οριστεί «Έναρξη βιβλίων», ορίζεται αυτόματα με αυτή την ημερομηνία.</p></div>
         <div class="col-md-3"><input type="date" class="form-control" name="from_date" required></div>
         <div class="col-md-3"><button class="btn btn-outline-primary">Εισαγωγή παλαιών συνδρομών</button></div>
     </form>

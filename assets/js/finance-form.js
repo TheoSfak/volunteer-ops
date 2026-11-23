@@ -11,14 +11,43 @@
     const PDFJS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/';
     const MAX_EDGE = 2000;
 
-    function toCents(value) {
-        const s = String(value == null ? '' : value).trim().replace(/\s/g, '').replace(',', '.');
-        const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(s);
-        if (!m) return 0;
+    function decimalCents(s) {
+        const m = /^(-?)(\d{1,10})(?:\.(\d+))?$/.exec(s);
+        if (!m) return null;
         const frac = ((m[3] || '') + '000').slice(0, 3);
         const cents = parseInt(m[2], 10) * 100 + parseInt(frac.slice(0, 2), 10) + (parseInt(frac[2], 10) >= 5 ? 1 : 0);
         return m[1] === '-' ? -cents : cents;
     }
+    /**
+     * Mirror of financeParseCents(): Greek-style amount → cents, or null when it does not parse. With a comma the dots
+     * are thousands separators and the comma is the decimal mark. Without one, a single dot followed by exactly three
+     * digits after a 1-3 digit integer part (not 0) is a thousands separator («1.500»); several dots must be valid
+     * groups («1.000.000»); any other single dot is the decimal mark («12.5»).
+     */
+    function parseCents(value) {
+        let s = String(value == null ? '' : value).replace(/[\s\u00A0€]+/g, ''); // spaces, NBSP and a pasted € sign
+        if (s === '') return null;
+        let sign = '';
+        if (s[0] === '-') { sign = '-'; s = s.slice(1); }
+        const group = /^\d{1,3}(?:\.\d{3})+$/;
+        if (s.includes(',')) {
+            const parts = s.split(',');
+            if (parts.length !== 2 || !/^\d+$/.test(parts[1])) return null;
+            let int = parts[0];
+            if (int.includes('.')) {
+                if (!group.test(int)) return null;
+                int = int.replace(/\./g, '');
+            }
+            return decimalCents(sign + int + '.' + parts[1]);
+        }
+        const dots = s.split('.').length - 1;
+        if (dots >= 2) return group.test(s) ? decimalCents(sign + s.replace(/\./g, '')) : null;
+        const t = /^([1-9]\d{0,2})\.(\d{3})$/.exec(s);
+        if (dots === 1 && t) return decimalCents(sign + t[1] + t[2]);
+        return decimalCents(sign + s);
+    }
+    /** 0 for anything invalid, like financeToCents() (the form only previews; the server refuses invalid input). */
+    function toCents(value) { const c = parseCents(value); return c === null ? 0 : c; }
     function fromCents(c) {
         const a = Math.abs(c);
         return (c < 0 ? '-' : '') + Math.floor(a / 100) + '.' + String(a % 100).padStart(2, '0');
@@ -46,6 +75,28 @@
         let sum = 0;
         for (let i = 0; i < 8; i++) sum += Number(afm[i]) * Math.pow(2, 8 - i);
         return (sum % 11) % 10 === Number(afm[8]);
+    }
+
+    /** The pay-now date: the document date while it still follows it (the user has not typed their own), else what is there. */
+    function nextPayDate(follows, docDate, payDate) {
+        return follows && /^\d{4}-\d{2}-\d{2}$/.test(String(docDate)) ? String(docDate) : String(payDate);
+    }
+
+    /**
+     * A due date on a new document means the bill is still owed: untick «Πληρώθηκε ήδη» — once, and never after the
+     * person has touched the switch themselves (so re-ticking it is final).
+     */
+    function shouldUntickPaid(state) {
+        return String(state.due || '').trim() !== '' && !!state.checked && !state.handled && !state.userSet;
+    }
+
+    /** The document type a new form starts with for a direction (what the server renders first). */
+    function defaultDocType(direction) { return direction === 'IN' ? 'DONATION' : 'RECEIPT'; }
+    /** Labels that depend on the direction. */
+    function directionTexts(direction) {
+        return direction === 'IN'
+            ? {badge: 'Έσοδο', counterparty: 'Από (δωρητής / πληρωτής) *', payNow: 'Εισπράχθηκε ήδη', dueNote: 'Με προθεσμία είσπραξης: σημειώθηκε ως ανείσπρακτο. Τσεκάρετε αν έχει ήδη εισπραχθεί.'}
+            : {badge: 'Έξοδο', counterparty: 'Εκδότης *', payNow: 'Πληρώθηκε ήδη', dueNote: 'Με προθεσμία πληρωμής: σημειώθηκε ως απλήρωτο. Τσεκάρετε αν έχει ήδη πληρωθεί.'};
     }
 
     /** ISO yyyy-mm-dd → dd/mm/yyyy; anything else comes back unchanged. */
@@ -180,6 +231,10 @@
         refresh();
         // Catch the two refusals here: a server round trip would lose the chosen file and everything the scan filled.
         form.addEventListener('submit', ev => {
+            const badAmount = [...form.querySelectorAll('[name="vat_net[]"], [name="vat_vat[]"], #grossTyped')].find(el => el.value.trim() !== '' && parseCents(el.value) === null);
+            if (badAmount) {
+                ev.preventDefault(); badAmount.focus(); alert('Μη έγκυρο ποσό «' + badAmount.value.trim() + '». Γράψτε π.χ. 1.234,56'); return;
+            }
             if (totals(readLines()).gross <= 0) {
                 ev.preventDefault(); alert('Συμπληρώστε τουλάχιστον ένα ποσό.'); return;
             }
@@ -193,6 +248,70 @@
             }
         });
 
+        // ── Έσοδο / Έξοδο toggle: swaps the category list and the labels; typed values and a scan stay as they are ──
+        const dirField = $('#directionField'), dirRadios = [...form.querySelectorAll('[name="direction_choice"]')];
+        let categoryLists = null;
+        try { categoryLists = JSON.parse(document.getElementById('financeCategories').textContent); } catch (e) { categoryLists = null; }
+        function setDirection(dir) {
+            if (dir !== 'IN' && dir !== 'OUT') return;
+            const old = form.dataset.direction;
+            dirField.value = dir; // the hidden field is what is posted
+            form.dataset.direction = dir;
+            const t = directionTexts(dir);
+            const badge = document.getElementById('dirBadge');
+            if (badge) { badge.textContent = t.badge; badge.classList.toggle('bg-success', dir === 'IN'); badge.classList.toggle('bg-danger', dir === 'OUT'); }
+            const pt = document.getElementById('docPageTitle'); // only a new document's title names the direction
+            if (pt && Number(form.querySelector('[name="id"]')?.value || 0) === 0) { pt.textContent = dir === 'IN' ? 'Νέο έσοδο' : 'Νέο έξοδο'; document.title = document.title.replace(/^Νέο (έσοδο|έξοδο)/, pt.textContent); }
+            const cl = document.getElementById('counterpartyLabel'); if (cl) cl.textContent = t.counterparty;
+            const pl = document.getElementById('payNowLabel'); if (pl) pl.textContent = t.payNow;
+            const dn = document.getElementById('payNowDueNote'); if (dn) dn.textContent = t.dueNote;
+            const type = $('#docType');
+            if (type && type.value === defaultDocType(old)) type.value = defaultDocType(dir);
+            const sel = $('#categoryId');
+            if (sel && categoryLists && Array.isArray(categoryLists[dir])) {
+                const keep = sel.value;
+                while (sel.options.length > 1) sel.remove(1); // option 0 is «—»
+                categoryLists[dir].forEach(c => { const o = document.createElement('option'); o.value = String(c.id); o.textContent = c.name; sel.appendChild(o); });
+                sel.value = categoryLists[dir].some(c => String(c.id) === keep) ? keep : '';
+            }
+            dirRadios.forEach(r => { r.checked = r.value === dir; });
+        }
+        dirRadios.forEach(r => r.addEventListener('change', () => { if (r.checked) setDirection(r.value); }));
+
+        // ── Pay-now date follows the document date until the user types their own ──
+        const docDateEl = $('#docDate'), payDateEl = $('#payDate');
+        let payFollows = !!payDateEl && payDateEl.dataset.follow === '1', syncing = false;
+        function syncPayDate() {
+            if (!payDateEl || !docDateEl) return;
+            const next = nextPayDate(payFollows, docDateEl.value, payDateEl.value);
+            if (next !== payDateEl.value) {
+                payDateEl.value = next;
+                syncing = true; // our own 'change' is not the user's choice
+                try { payDateEl.dispatchEvent(new Event('change', {bubbles: true})); } finally { syncing = false; }
+            }
+        }
+        if (payDateEl && docDateEl) {
+            ['input', 'change'].forEach(n => payDateEl.addEventListener(n, () => { if (!syncing) payFollows = false; })); // a picker or a mobile browser may fire only 'change'
+            ['input', 'change'].forEach(n => docDateEl.addEventListener(n, syncPayDate));
+            syncPayDate();
+        }
+
+        // ── A due date means «unpaid»: untick «Πληρώθηκε ήδη» once, with a note ──
+        const payNowEl = $('#payNow'), dueEl = $('#dueDate'), dueNote = $('#payNowDueNote');
+        let dueHandled = false, paidTouched = !!payNowEl && payNowEl.dataset.userSet === '1';
+        function applyDueDate() {
+            if (!payNowEl || !dueEl) return;
+            if (!shouldUntickPaid({due: dueEl.value, checked: payNowEl.checked, handled: dueHandled, userSet: paidTouched})) return;
+            dueHandled = true;
+            payNowEl.checked = false;
+            payNowEl.dispatchEvent(new Event('input', {bubbles: true})); // refresh the opening warning; not a 'change', so it is not a user choice
+            if (dueNote) dueNote.classList.remove('d-none');
+        }
+        if (payNowEl && dueEl) {
+            payNowEl.addEventListener('change', () => { paidTouched = true; if (dueNote) dueNote.classList.add('d-none'); });
+            ['input', 'change'].forEach(n => dueEl.addEventListener(n, applyDueDate));
+        }
+
         // ── Scan ───────────────────────────────────────────────────────────
         // AI output is untrusted: it only ever goes through .value / .textContent, never HTML.
         const file = $('#docFile'), btnCam = $('#btnCamera'), btnScan = $('#btnScan'), status = $('#scanStatus');
@@ -204,7 +323,7 @@
         btnScan.addEventListener('click', async () => {
             if (!file.files.length) return;
             btnScan.disabled = true;
-            say('text-muted', 'Ανάγνωση με AI… (έως 1 λεπτό)');
+            say('text-muted', 'Ανάγνωση με AI… (έως ~1 λεπτό)');
             try {
                 let dataUrl;
                 try { dataUrl = await prepareImage(file.files[0]); }
@@ -212,7 +331,7 @@
                 const json = await postScan(form, dataUrl);
                 const d = json.data;
                 if (d.direction && d.direction !== form.dataset.direction) {
-                    say('text-warning', 'Το AI πιστεύει ότι είναι ' + (d.direction === 'IN' ? 'έσοδο' : 'έξοδο') + '. Ελέγξτε το είδος.');
+                    say('text-warning', 'Το AI πιστεύει ότι είναι ' + (d.direction === 'IN' ? 'έσοδο' : 'έξοδο') + '. Ελέγξτε το είδος' + (dirRadios.length ? ' (διακόπτης Έσοδο / Έξοδο στην κορυφή).' : '.'));
                 }
                 set('counterpartyName', d.counterparty_name); set('counterpartyVat', d.counterparty_vat);
                 set('docNumber', d.doc_number); set('docDate', d.doc_date); set('dueDate', d.due_date);
@@ -227,6 +346,8 @@
                     const map = {counterparty_name: 'counterpartyName', counterparty_vat: 'counterpartyVat', doc_number: 'docNumber', doc_date: 'docDate', due_date: 'dueDate', gross_total: 'grossTyped'};
                     if (map[f]) $('#' + map[f]).classList.add('border-warning', 'border-2');
                 });
+                syncPayDate();
+                applyDueDate();
                 $('#scanSource').value = 'AI';
                 $('#scanProvider').value = json.provider_label || '';
                 refresh();
@@ -259,7 +380,7 @@
         });
     }
 
-    const api = {VAT_RATES, TOLERANCE_CENTS, toCents, fromCents, display, splitGross, splitNet, totals, mismatch, cleanVat, validVat, formatDmy, paidBeforeOpening, openingWarning, prepareImage, initForm, initOpeningWarnings};
+    const api = {VAT_RATES, TOLERANCE_CENTS, toCents, fromCents, display, splitGross, splitNet, parseCents, totals, mismatch, cleanVat, validVat, defaultDocType, directionTexts, nextPayDate, shouldUntickPaid, formatDmy, paidBeforeOpening, openingWarning, prepareImage, initForm, initOpeningWarnings};
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.VoFinance = api;
     if (typeof document !== 'undefined') {

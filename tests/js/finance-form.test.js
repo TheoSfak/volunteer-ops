@@ -18,11 +18,26 @@ test('toCents / fromCents / display agree with financeToCents()', () => {
     assert.equal(F.toCents('12.5'), 1250);
     assert.equal(F.toCents(' 12 '), 1200);
     assert.equal(F.toCents('0.005'), 1);
-    assert.equal(F.toCents('1.234,56'), 0);
+    assert.equal(F.toCents('1.234,56'), 123456);
     assert.equal(F.toCents(''), 0);
     assert.equal(F.fromCents(1250), '12.50');
     assert.equal(F.fromCents(-5), '-0.05');
     assert.equal(F.display(123450), '1234,50');
+});
+
+
+test('parseCents reads el-GR amounts (same table as FinanceMoneyTest::amountExamples)', () => {
+    const table = [
+        ['1.500', 150000], ['1.234,56', 123456], ['12,40', 1240], ['1500.00', 150000], ['12.5', 1250],
+        ['12.000', 1200000], ['1.000.000', 100000000], ['1500', 150000], ['0,5', 50], ['0.500', 50],
+        ['1000.500', 100050], ['-1.500,25', -150025], [' 1 234,50 ', 123450],
+        ['1.500 €', 150000], ['€ 12,40', 1240], ['12,40\u00A0€', 1240], ['€', null],
+        ['1.23.4', null], ['abc', null], ['1,2,3', null], ['', null], ['1.2345,6', null], ['1,5.0', null], ['--5', null],
+    ];
+    for (const [input, cents] of table) {
+        assert.equal(F.parseCents(input), cents, input);
+        assert.equal(F.toCents(input), cents === null ? 0 : cents, input);
+    }
 });
 
 test('splits match the PHP results', () => {
@@ -90,4 +105,27 @@ test('the account name only reaches the page through textContent', () => {
     const block = src.slice(src.indexOf('function initOpeningWarnings'));
     assert.match(block, /box\.textContent = text/);
     assert.doesNotMatch(block, /innerHTML/);
+});
+test('nextPayDate follows the document date until the user takes over', () => {
+    assert.equal(F.nextPayDate(true, '2026-10-12', '2026-11-23'), '2026-10-12');
+    assert.equal(F.nextPayDate(false, '2026-10-12', '2026-11-23'), '2026-11-23');
+    assert.equal(F.nextPayDate(true, '', '2026-11-23'), '2026-11-23', 'a cleared document date leaves the pay date alone');
+    assert.equal(F.nextPayDate(true, 'garbage', '2026-11-23'), '2026-11-23');
+});
+
+test('shouldUntickPaid: a due date unticks «Πληρώθηκε ήδη» once, never against the user', () => {
+    const base = {due: '2026-12-01', checked: true, handled: false, userSet: false};
+    assert.equal(F.shouldUntickPaid(base), true);
+    assert.equal(F.shouldUntickPaid({...base, due: ''}), false, 'no due date');
+    assert.equal(F.shouldUntickPaid({...base, due: '  '}), false);
+    assert.equal(F.shouldUntickPaid({...base, checked: false}), false, 'already unticked');
+    assert.equal(F.shouldUntickPaid({...base, handled: true}), false, 'only once: a second due date does not untick again');
+    assert.equal(F.shouldUntickPaid({...base, userSet: true}), false, 'the user re-ticked it (or ticked it themselves)');
+});
+
+test('direction toggle helpers: document type default and Greek labels per direction', () => {
+    assert.equal(F.defaultDocType('IN'), 'DONATION');
+    assert.equal(F.defaultDocType('OUT'), 'RECEIPT');
+    assert.deepEqual(F.directionTexts('IN'), {badge: 'Έσοδο', counterparty: 'Από (δωρητής / πληρωτής) *', payNow: 'Εισπράχθηκε ήδη', dueNote: 'Με προθεσμία είσπραξης: σημειώθηκε ως ανείσπρακτο. Τσεκάρετε αν έχει ήδη εισπραχθεί.'});
+    assert.deepEqual(F.directionTexts('OUT'), {badge: 'Έξοδο', counterparty: 'Εκδότης *', payNow: 'Πληρώθηκε ήδη', dueNote: 'Με προθεσμία πληρωμής: σημειώθηκε ως απλήρωτο. Τσεκάρετε αν έχει ήδη πληρωθεί.'});
 });

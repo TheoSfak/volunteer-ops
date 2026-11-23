@@ -101,7 +101,7 @@ final class FinancePagesSourceTest extends TestCase
         $this->assertStringContainsString("'direction' => get('direction')", $m);
         $this->assertStringNotContainsString("\$tot[\$r['direction']] +=", $m);
         $s = self::src('finance-settings.php');
-        foreach (['Μη έγκυρο αρχικό υπόλοιπο. Γράψτε π.χ. 1500.00', 'AND id <> ?', "\$old['direction'] === 'IN'", "\$cat['direction'] === 'IN'",
+        foreach (['financeRequireCents($rawOpening)','AND id <> ?', "\$old['direction'] === 'IN'", "\$cat['direction'] === 'IN'",
                   'Ο λογαριασμός δεν βρέθηκε.', 'Η κατηγορία δεν βρέθηκε.', '$before, $keys'] as $needle) {
             $this->assertStringContainsString($needle, $s, $needle);
         }
@@ -200,5 +200,87 @@ final class FinancePagesSourceTest extends TestCase
         $this->assertSame(2, substr_count($s, 'class="alert alert-warning py-1 px-2'), 'one warning box per pay block, besides the totals alert');
         $this->assertSame(2, substr_count($s, 'opening-warning"'));
         $this->assertSame(2, substr_count($s, 'data-opening-warning'));
+    }
+
+    public function test_the_pay_now_date_follows_the_document_date_until_edited(): void
+    {
+        $s = self::src('finance-document-form.php');
+        $this->assertStringContainsString('name="pay_date" id="payDate"', $s);
+        $this->assertStringContainsString('data-follow=', $s);
+        $this->assertStringNotContainsString('name="pay_date" value="<?= $sticky && post(\'pay_date\') !== \'\' ? h(post(\'pay_date\')) : date(', $s, 'the pay-now date must not default to today independently of the document date');
+        $this->assertStringContainsString("post('pay_date') ?: \$doc['doc_date']", $s, 'server fallback stays the document date');
+        // The «Πληρωμές» box of an existing document keeps today as its default.
+        $this->assertStringContainsString('name="pay_date" value="<?= date(\'Y-m-d\') ?>"', $s);
+        $js = self::src('assets/js/finance-form.js');
+        $this->assertStringContainsString('syncPayDate();', $js);
+    }
+
+    public function test_a_due_date_unticks_paid_already_with_the_greek_note(): void
+    {
+        $s = self::src('finance-document-form.php');
+        $this->assertStringContainsString('Με προθεσμία πληρωμής: σημειώθηκε ως απλήρωτο. Τσεκάρετε αν έχει ήδη πληρωθεί.', $s);
+        $this->assertStringContainsString('id="payNowDueNote"', $s);
+        $js = self::src('assets/js/finance-form.js');
+        $this->assertStringContainsString('applyDueDate();', $js);
+        $this->assertStringContainsString('shouldUntickPaid(', $js);
+    }
+
+    public function test_the_document_form_has_an_income_expense_toggle_that_posts_the_hidden_direction_field(): void
+    {
+        $s = self::src('finance-document-form.php');
+        $this->assertSame(1, substr_count($s, 'name="direction"'), 'exactly one posted direction: the hidden field');
+        $this->assertStringContainsString('<input type="hidden" name="direction" id="directionField"', $s);
+        $this->assertSame(2, substr_count($s, 'name="direction_choice"'), 'the radios are not what is posted');
+        $this->assertStringContainsString('$canSwitchDirection = !$existing || (int) $existing[\'paid\'] === 0;', $s);
+        $this->assertStringContainsString('id="financeCategories"', $s);
+        $this->assertStringContainsString('JSON_HEX_TAG', $s);
+        $js = self::src('assets/js/finance-form.js');
+        $this->assertStringContainsString("dirField.value = dir;", $js);
+    }
+
+    public function test_the_subscription_edit_form_uses_a_method_select_that_keeps_a_legacy_value(): void
+    {
+        $s = self::src('subscriptions.php');
+        $this->assertStringNotContainsString('<input class="form-control" name="payment_method" value="<?= h($editing[\'payment_method\']) ?>">', $s);
+        $this->assertStringContainsString('$editMethods = [\'Μετρητά\', \'Τραπεζική κατάθεση\', \'Κάρτα\', \'IRIS\', \'Άλλο\'];', $s);
+        $this->assertStringContainsString('(παλιά τιμή)', $s);
+    }
+
+    public function test_the_scan_privacy_notice_names_the_provider_and_the_free_plan_retention(): void
+    {
+        $s = self::src('finance-document-form.php');
+        $this->assertStringContainsString('Η εικόνα αποστέλλεται στον πάροχο AI (<?= h($scanProviderText) ?>)', $s);
+        $this->assertStringContainsString('Στα δωρεάν πλάνα ο πάροχος μπορεί να την κρατήσει και να τη χρησιμοποιήσει σύμφωνα με τους όρους του', $s);
+        $this->assertStringContainsString('μη σαρώνετε παραστατικά με προσωπικά δεδομένα ιδιωτών', $s);
+    }
+
+    public function test_the_manual_describes_the_amount_formats_books_start_and_pay_date(): void
+    {
+        $m = self::src('docs/manual-admin.html');
+        foreach (['<code>1.500</code>', 'Έναρξη βιβλίων', 'Ληγμένο τιμολόγιο', 'Έσοδο / Έξοδο', 'ημερομηνία πληρωμής</strong> είναι η ημερομηνία του παραστατικού',
+                  'Στα δωρεάν πλάνα ο πάροχος μπορεί να την κρατήσει'] as $needle) {
+            $this->assertStringContainsString($needle, $m, $needle);
+        }
+        $this->assertStringNotContainsString('ό,τι άλλο απορρίπτεται', $m);
+    }
+
+    public function test_round_two_review_fixes_are_in_the_pages(): void
+    {
+        $set = self::src('finance-settings.php');
+        $this->assertStringContainsString('$openingCents !== 0 && $openingDate === null', $set);
+        $this->assertStringContainsString("financeSaveSetting('finance_books_start', \$openingDate)", $set);
+        $this->assertStringContainsString('financeBooksStartWarning()', $set);
+        $this->assertStringContainsString('financeBooksStartWarning()', self::src('finance.php'));
+        $subs = self::src('subscriptions.php');
+        $this->assertStringContainsString("hasPagePermission('finance_manage') && (\$booksWarning = financeBooksStartWarning())", $subs);
+        $this->assertSame(2, substr_count($subs, "\$financeSyncResult === 'skipped' ? ' ' . FINANCE_NOT_BOOKED_NOTE"));
+        $this->assertStringContainsString('(Δεν καταχωρήθηκε στο ταμείο: η ημερομηνία είναι πριν από την έναρξη βιβλίων.)', self::src('includes/finance-functions.php'));
+        $mov = self::src('finance-movements.php');
+        $this->assertStringContainsString("'Η κίνηση καταχωρήθηκε: ' . financeFormat(\$new['amount'])", $mov);
+        $this->assertStringContainsString("'Η μεταφορά καταχωρήθηκε: ' . financeFormat(\$cents)", $mov);
+        $form = self::src('finance-document-form.php');
+        $this->assertStringContainsString('Με προθεσμία είσπραξης: σημειώθηκε ως ανείσπρακτο. Τσεκάρετε αν έχει ήδη εισπραχθεί.', $form);
+        $js = self::src('assets/js/finance-form.js');
+        $this->assertStringContainsString("['input', 'change'].forEach(n => payDateEl.addEventListener(n, () => { if (!syncing) payFollows = false; }))", $js);
     }
 }

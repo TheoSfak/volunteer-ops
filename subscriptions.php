@@ -258,14 +258,15 @@ if (isPost()) {
             }
 
             try {
-            $subscriptionId = financeTransaction(function () use ($userId, $paymentDate, $expiryDate, $isReactivation, $coverageYears, $amount, $method, $receiptNumber, $receiptOriginal, $receiptStored, $notes) {
+            $financeSyncResult = 'none';
+            $subscriptionId = financeTransaction(function () use ($userId, $paymentDate, $expiryDate, $isReactivation, $coverageYears, $amount, $method, $receiptNumber, $receiptOriginal, $receiptStored, $notes, &$financeSyncResult) {
                 $newId = (int) dbInsert("INSERT INTO volunteer_subscriptions
                     (user_id, payment_date, expiry_date, renewal_kind, coverage_years, amount, payment_method, receipt_number, receipt_original_name, receipt_stored_name, notes, created_by)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
                     $userId, $paymentDate, $expiryDate, $isReactivation ? 'REACTIVATION' : 'RENEWAL', $coverageYears, $amount === '' ? null : $amount,
                     $method ?: null, $receiptNumber ?: null, $receiptOriginal, $receiptStored, $notes ?: null, getCurrentUserId()
                 ]);
-                financeSyncSubscriptionMovement($newId, (int) getCurrentUserId());
+                $financeSyncResult = financeSyncSubscriptionMovement($newId, (int) getCurrentUserId());
                 return $newId;
             });
             } catch (Throwable $e) {
@@ -287,7 +288,7 @@ if (isPost()) {
                 'renewal_kind' => $isReactivation ? 'REACTIVATION' : 'RENEWAL',
                 'historical' => $isHistorical,
             ]);
-            setFlash('success', ($isHistorical ? 'Η παλιά πληρωμή καταχωρήθηκε στο ιστορικό. ' : ($isReactivation ? 'Η συνδρομή επανενεργοποιήθηκε. ' : 'Η πληρωμή καταχωρήθηκε. ')) . 'Η περίοδος λήγει στις ' . formatDate($expiryDate) . '.');
+            setFlash('success', ($isHistorical ? 'Η παλιά πληρωμή καταχωρήθηκε στο ιστορικό. ' : ($isReactivation ? 'Η συνδρομή επανενεργοποιήθηκε. ' : 'Η πληρωμή καταχωρήθηκε. ')) . 'Η περίοδος λήγει στις ' . formatDate($expiryDate) . '.' . ($financeSyncResult === 'skipped' ? ' ' . FINANCE_NOT_BOOKED_NOTE : ''));
             if ($isHistorical) {
                 redirect('subscriptions.php?show_history=1&history_user_id=' . $userId . '#subscriptionPaymentHistory');
             }
@@ -339,9 +340,10 @@ if (isPost()) {
                     redirect('subscriptions.php?edit=' . $subscriptionId);
                 }
                 try {
-                financeTransaction(function () use ($paymentDate, $expiryDate, $amount, $receiptNumber, $receiptOriginal, $receiptStored, $reset, $old, $subscriptionId) {
+                $financeSyncResult = 'none';
+                financeTransaction(function () use ($paymentDate, $expiryDate, $amount, $receiptNumber, $receiptOriginal, $receiptStored, $reset, $old, $subscriptionId, &$financeSyncResult) {
                     dbExecute("UPDATE volunteer_subscriptions SET payment_date = ?, expiry_date = ?, amount = ?, payment_method = ?, receipt_number = ?, receipt_original_name = ?, receipt_stored_name = ?, notes = ?, renewal_kind = ?, reminder_sent_3m = ?, reminder_sent_1m = ?, reminder_sent_1w = ?, reminder_sent_expired = ? WHERE id = ?", [$paymentDate, $expiryDate, $amount === '' ? null : $amount, trim(post('payment_method')) ?: null, $receiptNumber ?: null, $receiptOriginal, $receiptStored, trim(post('notes')) ?: null, post('renewal_kind') === 'REACTIVATION' ? 'REACTIVATION' : 'RENEWAL', $reset ? 0 : $old['reminder_sent_3m'], $reset ? 0 : $old['reminder_sent_1m'], $reset ? 0 : $old['reminder_sent_1w'], $reset ? 0 : $old['reminder_sent_expired'], $subscriptionId]);
-                    financeSyncSubscriptionMovement($subscriptionId, (int) getCurrentUserId(), $old['payment_method']);
+                    $financeSyncResult = financeSyncSubscriptionMovement($subscriptionId, (int) getCurrentUserId(), $old['payment_method']);
                 });
                 } catch (Throwable $e) {
                     error_log('subscriptions edit: ' . $e->getMessage());
@@ -367,7 +369,7 @@ if (isPost()) {
                     'receipt_number' => $receiptNumber ?: null,
                     'renewal_kind' => post('renewal_kind') === 'REACTIVATION' ? 'REACTIVATION' : 'RENEWAL',
                 ]);
-                setFlash('success', 'Η συνδρομή ενημερώθηκε.');
+                setFlash('success', 'Η συνδρομή ενημερώθηκε.' . ($financeSyncResult === 'skipped' ? ' ' . FINANCE_NOT_BOOKED_NOTE : ''));
             }
         }
         redirect('subscriptions.php');
@@ -602,6 +604,7 @@ include __DIR__ . '/includes/header.php';
     <h1 class="h3 mb-0"><i class="bi bi-cash-coin me-2"></i>Ετήσιες Συνδρομές</h1>
     <div class="d-flex flex-wrap gap-2"><a class="btn btn-outline-secondary" href="subscriptions.php?<?= h(http_build_query(array_filter(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'page' => $subscriptionPage, 'show_history' => $showPaymentHistory ? null : 1], static fn($value) => $value !== null))) ?><?= $showPaymentHistory ? '' : '#subscriptionPaymentHistory' ?>"><i class="bi bi-clock-history me-1"></i><?= $showPaymentHistory ? 'Απόκρυψη ιστορικού' : 'Ιστορικό πληρωμών' ?> <span class="badge text-bg-secondary ms-1"><?= $historyTotal ?></span></a><a class="btn btn-outline-success" href="subscriptions.php?<?= h(http_build_query(['filter' => $filter, 'sort' => $sort, 'dir' => $sortDirection, 'per_page' => $perPage, 'export' => 'excel'])) ?>"><i class="bi bi-file-earmark-excel me-1"></i>Εξαγωγή Excel</a><button class="btn btn-primary" type="button" data-bs-toggle="modal" data-bs-target="#paymentModal"><i class="bi bi-plus-lg me-1"></i>Καταχώρηση πληρωμής</button></div>
 </div>
+<?php if (hasPagePermission('finance_manage') && ($booksWarning = financeBooksStartWarning())): ?><div class="alert alert-warning" role="alert"><i class="bi bi-exclamation-triangle me-1"></i><?= h($booksWarning) ?> <a href="finance-settings.php">Ρυθμίσεις Οικονομικών</a></div><?php endif; ?>
 <?php if ($editing): ?>
 <div class="card border-primary mb-3">
     <div class="card-header"><strong>Επεξεργασία συνδρομής: <?= h($editing['volunteer_name']) ?></strong></div>
@@ -614,7 +617,12 @@ include __DIR__ . '/includes/header.php';
             <div class="col-md-3"><label class="form-label">Λήξη</label><input class="form-control subscription-datepicker" type="text" name="expiry_date" value="<?= h($editing['expiry_date']) ?>" required><div class="form-text" id="editExpiryHint"></div></div>
             <div class="col-md-2"><label class="form-label">Ποσό</label><input class="form-control" type="number" step="0.01" name="amount" value="<?= h($editing['amount']) ?>"></div>
             <div class="col-md-2"><label class="form-label">Τύπος</label><select class="form-select" name="renewal_kind"><option value="RENEWAL" <?= $editing['renewal_kind'] === 'RENEWAL' ? 'selected' : '' ?>>Ανανέωση</option><option value="REACTIVATION" <?= $editing['renewal_kind'] === 'REACTIVATION' ? 'selected' : '' ?>>Επανενεργοποίηση</option></select></div>
-            <div class="col-md-2"><label class="form-label">Τρόπος</label><input class="form-control" name="payment_method" value="<?= h($editing['payment_method']) ?>"></div>
+            <?php // The same listed methods as the record form: free text used to land in the cash account when it was not spelled exactly.
+                $editMethods = ['Μετρητά', 'Τραπεζική κατάθεση', 'Κάρτα', 'IRIS', 'Άλλο'];
+                $editMethodNow = trim((string) $editing['payment_method']); ?>
+            <div class="col-md-2"><label class="form-label">Τρόπος</label><select class="form-select" name="payment_method"><option value="">—</option>
+                <?php foreach ($editMethods as $editMethod): ?><option value="<?= h($editMethod) ?>" <?= $editMethodNow === $editMethod ? 'selected' : '' ?>><?= h($editMethod) ?></option><?php endforeach; ?>
+                <?php if ($editMethodNow !== '' && !in_array($editMethodNow, $editMethods, true)): ?><option value="<?= h($editMethodNow) ?>" selected><?= h($editMethodNow) ?> (παλιά τιμή)</option><?php endif; ?></select></div>
             <div class="col-md-3"><label class="form-label">Αριθμός απόδειξης</label><input class="form-control" name="receipt_number" maxlength="100" value="<?= h($editing['receipt_number'] ?? '') ?>"></div>
             <div class="col-md-6" id="editReceiptUpload"><label class="form-label">Αντικατάσταση απόδειξης</label><input type="file" class="form-control" name="receipt" accept=".pdf,.jpg,.jpeg,.png"><div class="form-text">PDF, JPG ή PNG έως 10MB. Οι εικόνες περιορίζονται αυτόματα έως 1920×1080. Η νέα απόδειξη αντικαθιστά την καταχωρημένη.</div></div>
             <div class="col-12"><label class="form-label">Σημειώσεις</label><textarea class="form-control" name="notes" rows="2"><?= h($editing['notes']) ?></textarea></div>

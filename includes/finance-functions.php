@@ -17,17 +17,65 @@ const FINANCE_DIRECTIONS = ['IN', 'OUT'];
 const FINANCE_DOC_TYPES = ['INVOICE', 'RECEIPT', 'DONATION', 'DEPOSIT', 'OTHER'];
 const FINANCE_ACCOUNT_KINDS = ['CASH', 'BANK', 'CARD', 'OTHER'];
 const FINANCE_DUES_CATEGORY = 'Συνδρομές μελών';
+const FINANCE_NOT_BOOKED_NOTE = '(Δεν καταχωρήθηκε στο ταμείο: η ημερομηνία είναι πριν από την έναρξη βιβλίων.)';
 
 // ─── Pure helpers ────────────────────────────────────────────────────────────
 
-/** "12,50" / "12.5" / 12.5 → 1250. Anything else (thousands separators included) → 0. */
-function financeToCents($value): int {
-    if ($value === null || is_bool($value)) return 0;
-    $s = str_replace([' ', ','], ['', '.'], trim((string) $value));
-    if (!preg_match('/^(-?)(\d{1,10})(?:\.(\d+))?$/D', $s, $m)) return 0;
+/** Plain decimal ("12.5", "1500.00") → cents, dot as the only separator; null when it is not that. Rounds half up. */
+function financeParseDecimalCents(string $s): ?int {
+    if (!preg_match('/^(-?)(\d{1,10})(?:\.(\d+))?$/D', $s, $m)) return null;
     $frac = str_pad($m[3] ?? '', 3, '0');
     $cents = (int) $m[2] * 100 + (int) substr($frac, 0, 2) + ((int) $frac[2] >= 5 ? 1 : 0);
     return $m[1] === '-' ? -$cents : $cents;
+}
+
+/**
+ * Greek-style amount typed by a person → cents; null when it does not parse (so callers can refuse it instead of
+ * silently booking 0). «1.234,56», «1.500», «12,40», «1500.00», «12.5». With a comma, the dots are thousands
+ * separators and the comma is the decimal mark. Without one, a single dot followed by exactly three digits after a
+ * 1–3 digit integer part (not 0) is a thousands separator («1.500»); several dots must be valid groups («1.000.000»);
+ * any other single dot is the decimal mark. Mirrored by parseCents() in assets/js/finance-form.js.
+ */
+function financeParseCents(string $value): ?int {
+    $s = preg_replace('/[\s\x{00A0}€]+/u', '', $value); // spaces, NBSP and a pasted € sign
+    if ($s === null || $s === '') return null;
+    $sign = '';
+    if ($s[0] === '-') { $sign = '-'; $s = substr($s, 1); }
+    $group = '/^\d{1,3}(?:\.\d{3})+$/D';
+    if (str_contains($s, ',')) {
+        if (substr_count($s, ',') !== 1) return null;
+        [$int, $frac] = explode(',', $s);
+        if (!preg_match('/^\d+$/D', $frac)) return null;
+        if (str_contains($int, '.')) {
+            if (!preg_match($group, $int)) return null;
+            $int = str_replace('.', '', $int);
+        }
+        return financeParseDecimalCents($sign . $int . '.' . $frac);
+    }
+    $dots = substr_count($s, '.');
+    if ($dots >= 2) {
+        return preg_match($group, $s) ? financeParseDecimalCents($sign . str_replace('.', '', $s)) : null;
+    }
+    if ($dots === 1 && preg_match('/^([1-9]\d{0,2})\.(\d{3})$/D', $s, $m)) {
+        return financeParseDecimalCents($sign . $m[1] . $m[2]);
+    }
+    return financeParseDecimalCents($sign . $s);
+}
+
+/** Existing callers (database values, computed numbers): same parser, 0 for anything invalid. Pages that read what a person typed use financeParseCents()/financeRequireCents() instead. */
+function financeToCents($value): int {
+    if ($value === null || is_bool($value) || is_array($value)) return 0;
+    if (is_int($value) || is_float($value)) return financeParseDecimalCents(trim((string) $value)) ?? 0;
+    return financeParseCents((string) $value) ?? 0;
+}
+
+/** Amount typed on a page: empty → 0 (the usual "must be positive" checks then speak); non-empty and unparseable → refused in Greek. */
+function financeRequireCents($value): int {
+    $raw = trim((string) $value);
+    if ($raw === '') return 0;
+    $cents = financeParseCents($raw);
+    if ($cents === null) throw new InvalidArgumentException('Μη έγκυρο ποσό «' . mb_substr($raw, 0, 30) . '». Γράψτε π.χ. 1.234,56');
+    return $cents;
 }
 
 function financeFromCents(int $cents): string {
@@ -424,8 +472,41 @@ function financeIsLastActiveAccount(int $id): bool {
     return (int) dbFetchValue("SELECT COUNT(*) FROM finance_accounts WHERE is_active = 1 AND id <> ?", [$id]) === 0;
 }
 
+/**
+ * The date the books start (setting «Έναρξη βιβλίων»), else the earliest opening date of an active account, else null.
+ * Dues paid before it are not booked as new movements.
+ */
+function financeBooksStart(): ?string {
+    $s = financeSetting('finance_books_start', '');
+    if (financeValidDate($s)) return $s;
+    if (!dbTableExists('finance_accounts')) return null;
+    $d = dbFetchValue("SELECT MIN(opening_date) FROM finance_accounts WHERE is_active = 1 AND opening_date IS NOT NULL");
+    return financeValidDate($d) ? (string) $d : null;
+}
+
+/** Lower case, no Greek accents, one space between words: «Τράπεζα», «ΤΡΑΠΕΖΑ» and «τραπεζα» are the same thing. */
+function financeNormalizeMethod(?string $method): string {
+    $s = mb_strtolower(trim((string) $method), 'UTF-8');
+    $s = strtr($s, ['ά' => 'α', 'έ' => 'ε', 'ή' => 'η', 'ί' => 'ι', 'ό' => 'ο', 'ύ' => 'υ', 'ώ' => 'ω', 'ϊ' => 'ι', 'ΐ' => 'ι', 'ϋ' => 'υ', 'ΰ' => 'υ', 'ς' => 'σ']);
+    return trim((string) preg_replace('/\s+/u', ' ', $s));
+}
+
+/**
+ * cash / bank / card for a free-text or listed payment method. Case, accents and spaces do not matter; «τράπεζα»,
+ * «κατάθεση», «IRIS» → bank, «κάρτα», «POS» → card, anything else (μετρητά, άλλο, a typo) → cash.
+ */
 function financeDuesMethodKey(?string $method): string {
-    return FINANCE_DUES_METHOD_KEYS[trim((string) $method)] ?? 'cash';
+    $n = financeNormalizeMethod($method);
+    foreach (FINANCE_DUES_METHOD_KEYS as $label => $key) {
+        if ($n === financeNormalizeMethod($label)) return $key;
+    }
+    foreach (preg_split('/[^\p{L}\p{N}]+/u', $n, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $word) {
+        if (str_starts_with($word, 'τραπεζ') || str_starts_with($word, 'καταθεσ') || $word === 'iris') return 'bank';
+    }
+    foreach (preg_split('/[^\p{L}\p{N}]+/u', $n, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $word) {
+        if (str_starts_with($word, 'καρτ') || $word === 'pos') return 'card';
+    }
+    return 'cash';
 }
 
 function financeCashAccountId(): int {
@@ -447,35 +528,51 @@ function financeDuesCategoryId(): ?int {
 /**
  * Make the cash book agree with one dues row: a paid amount → exactly one IN movement; no amount, or the row is
  * gone → no movement. Called after every insert/update/delete in subscriptions.php. Safe before migration 227 ran.
+ * Returns what happened: 'booked', 'updated', 'deleted', 'skipped' (dated before the books start: nothing is, or stays, booked), 'none'.
  */
-function financeSyncSubscriptionMovement(int $subscriptionId, int $userId, ?string $previousMethod = null): void {
-    if (!dbTableExists('finance_movements')) return;
+function financeSyncSubscriptionMovement(int $subscriptionId, int $userId, ?string $previousMethod = null): string {
+    if (!dbTableExists('finance_movements')) return 'none';
     $sub = dbFetchOne("SELECT vs.id, vs.amount, vs.payment_date, vs.payment_method, u.name
                        FROM volunteer_subscriptions vs JOIN users u ON u.id = vs.user_id WHERE vs.id = ?", [$subscriptionId]);
     $existing = dbFetchOne("SELECT id, account_id FROM finance_movements WHERE subscription_id = ?", [$subscriptionId]);
     $cents = $sub ? financeToCents($sub['amount']) : 0;
     if ($cents <= 0) {
+        if ($existing) { dbExecute("DELETE FROM finance_movements WHERE id = ?", [$existing['id']]); return 'deleted'; }
+        return 'none';
+    }
+    // Dues paid before the books start are already inside the opening balances: booking them (or keeping a movement
+    // that was moved there by an edit) would count them twice, so an existing movement is deleted.
+    $booksStart = financeBooksStart();
+    if ($booksStart !== null && (string) $sub['payment_date'] < $booksStart) {
         if ($existing) dbExecute("DELETE FROM finance_movements WHERE id = ?", [$existing['id']]);
-        return;
+        return 'skipped';
     }
     // An existing movement keeps the account the treasurer left it in; only a changed payment method re-resolves it.
     $methodChanged = $previousMethod !== null && trim($previousMethod) !== trim((string) $sub['payment_method']);
     $accountId = ($existing && !$methodChanged) ? (int) $existing['account_id'] : financeDuesAccountFor($sub['payment_method']);
-    if ($accountId === 0) return; // no active account at all: nothing to book into
+    if ($accountId === 0) return 'none'; // no active account at all: nothing to book into
     $desc = mb_substr('Συνδρομή — ' . $sub['name'], 0, 255);
     $params = [$accountId, financeFromCents($cents), $sub['payment_date'], financeDuesCategoryId(), $desc];
     if ($existing) {
         dbExecute("UPDATE finance_movements SET account_id = ?, amount = ?, movement_date = ?, category_id = ?, description = ? WHERE id = ?",
             array_merge($params, [$existing['id']]));
-    } else {
-        dbExecute("INSERT INTO finance_movements (account_id, amount, movement_date, category_id, description, direction, subscription_id, created_by)
-                   VALUES (?, ?, ?, ?, ?, 'IN', ?, ?)", array_merge($params, [$subscriptionId, $userId]));
+        return 'updated';
     }
+    dbExecute("INSERT INTO finance_movements (account_id, amount, movement_date, category_id, description, direction, subscription_id, created_by)
+               VALUES (?, ?, ?, ?, ?, 'IN', ?, ?)", array_merge($params, [$subscriptionId, $userId]));
+    return 'booked';
+}
+
+/** Why the cash book may double count dues: no books-start date can be derived. null when all is well (or finance is not installed). */
+function financeBooksStartWarning(): ?string {
+    if (!dbTableExists('finance_accounts') || financeBooksStart() !== null) return null;
+    return 'Ορίστε «Έναρξη βιβλίων» (Οικονομικά → Ρυθμίσεις) ή ημερομηνία στο αρχικό υπόλοιπο ενός λογαριασμού: μέχρι τότε οι παλιές συνδρομές που διορθώνονται στις Ετήσιες Συνδρομές γράφονται ως νέα έσοδα και μπορεί να μετρηθούν δύο φορές.';
 }
 
 /** One-off: book the dues paid on/after $fromDate that have no movement yet. Returns how many were booked. */
 function financeImportPastDues(string $fromDate, int $userId): int {
     if (!financeValidDate($fromDate)) throw new InvalidArgumentException('Μη έγκυρη ημερομηνία.');
+    if (!financeValidDate(financeSetting('finance_books_start', ''))) financeSaveSetting('finance_books_start', $fromDate); // the first import fixes the start of the books
     $ids = dbFetchAll("SELECT vs.id FROM volunteer_subscriptions vs LEFT JOIN finance_movements m ON m.subscription_id = vs.id
                        WHERE vs.payment_date >= ? AND vs.amount > 0 AND m.id IS NULL ORDER BY vs.payment_date", [$fromDate]);
     if (financeCashAccountId() === 0) return 0; // no active account: nothing can be booked
