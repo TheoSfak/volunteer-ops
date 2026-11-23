@@ -43,17 +43,40 @@ function aiVisionAvailable(): bool {
     return getSetting('ai_enabled', '0') === '1' && aiVisionChain() !== [];
 }
 
+const AI_VISION_DEADLINE_SECONDS = 75;
+const AI_VISION_CALL_MAX_SECONDS = 35;
+const AI_VISION_MIN_REMAINING_SECONDS = 8;
+
+/**
+ * Timeout for the next provider call given the overall deadline (a unix time, float): the per-call maximum, shrunk to
+ * what is left; null when less than the minimum remains, which is the signal to stop trying further providers.
+ */
+function aiVisionCallTimeout(float $deadline, float $now, int $perCallMax = AI_VISION_CALL_MAX_SECONDS, int $minRemaining = AI_VISION_MIN_REMAINING_SECONDS): ?int {
+    $left = $deadline - $now;
+    if ($left < $minRemaining) return null;
+    return max(1, min($perCallMax, (int) floor($left)));
+}
+
+/**
+ * Walks the chain, but within ONE overall deadline ($opts['deadline'] seconds, default 75): each call gets a shrinking
+ * timeout (at most 35 s) and no further provider is tried when under ~8 s remain, so a request never outlives the web
+ * server's own limit and a slow chain cannot run for minutes.
+ */
 function aiVisionChat(array $messages, array $opts = []): array {
     $none = ['ok' => false, 'content' => '', 'json' => null, 'usage' => [], 'ms' => 0, 'model' => '', 'provider' => '', 'provider_label' => '', 'attempts' => []];
     if (getSetting('ai_enabled', '0') !== '1') return ['error' => 'Η τεχνητή νοημοσύνη είναι απενεργοποιημένη στις Ρυθμίσεις.'] + $none;
     $chain = aiVisionChain();
     if (!$chain) return ['error' => 'Δεν υπάρχει πάροχος AI με κλειδί που να διαβάζει εικόνες (Gemini, Groq ή Grok).'] + $none;
 
+    $deadline = microtime(true) + (float) ($opts['deadline'] ?? AI_VISION_DEADLINE_SECONDS);
+    unset($opts['deadline']);
     $attempts = [];
     $last = null;
     foreach ($chain as $provider) {
+        $timeout = aiVisionCallTimeout($deadline, microtime(true));
+        if ($timeout === null) break; // out of time: stop here rather than start a call that cannot finish
         $cfg = aiVisionProviderConfig($provider);
-        $result = aiChatOnce($messages, $opts, $cfg);
+        $result = aiChatOnce($messages, ['timeout' => $timeout] + $opts, $cfg);
         $result['provider_label'] = $cfg['provider_label'];
         if ($result['ok']) {
             $result['attempts'] = $attempts;
@@ -63,6 +86,7 @@ function aiVisionChat(array $messages, array $opts = []): array {
         $last = $result;
         if (empty($result['retryable'])) break;
     }
+    if ($last === null) return ['error' => 'Το AI δεν πρόλαβε να απαντήσει. Δοκιμάστε ξανά.'] + $none;
     $last['attempts'] = $attempts;
     if (count($attempts) > 1) {
         $last['error'] = 'Κανένας πάροχος δεν απάντησε (' . implode(', ', array_column($attempts, 'provider_label')) . '). Τελευταίο σφάλμα: ' . $last['error'];

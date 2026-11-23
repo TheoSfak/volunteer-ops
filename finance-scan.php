@@ -19,10 +19,10 @@ $image = (string) ($_POST['image'] ?? '');
 if (!financeScanImageOk($image)) jsonResponse(['ok' => false, 'error' => 'Μη έγκυρη εικόνα.'], 400);
 if (!aiVisionAvailable()) jsonResponse(['ok' => false, 'error' => 'Δεν υπάρχει ρυθμισμένος πάροχος AI που διαβάζει εικόνες (Gemini, Groq ή Grok).'], 409);
 
-@set_time_limit(240);
+@set_time_limit(90); // the chain itself stops at 75 s (aiVisionChat)
 $categories = financeCategories(null);
 $result = aiVisionChat(financeScanMessages($image, array_column($categories, 'name')),
-    ['json' => true, 'temperature' => 0.1, 'max_tokens' => 3000, 'timeout' => 90]);
+    ['json' => true, 'temperature' => 0.1, 'max_tokens' => 3000, 'deadline' => 75]);
 if (empty($result['ok']) || !is_array($result['json'] ?? null)) {
     jsonResponse(['ok' => false, 'error' => $result['error'] ?: 'Το AI δεν επέστρεψε αναγνώσιμα στοιχεία.'], 502);
 }

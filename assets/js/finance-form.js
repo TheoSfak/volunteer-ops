@@ -237,7 +237,7 @@
         btnScan.addEventListener('click', async () => {
             if (!file.files.length) return;
             btnScan.disabled = true;
-            say('text-muted', 'Ανάγνωση με AI… (έως 1 λεπτό)');
+            say('text-muted', 'Ανάγνωση με AI… (έως ~1 λεπτό)');
             try {
                 let dataUrl;
                 try { dataUrl = await prepareImage(file.files[0]); }
