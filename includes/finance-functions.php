@@ -505,6 +505,32 @@ function financeStoreUpload(array $file): ?array {
     return ['original' => mb_substr(basename((string) ($file['name'] ?? $stored)), 0, 255), 'stored' => $stored, 'mime' => $mime];
 }
 
+/**
+ * A file uploaded in a request the server then refused stays in the private folder, remembered only in the session
+ * under a random token. The client sends the token back, never a file name; these helpers are the only way it is resolved.
+ */
+function financePendingUploadResolve(string $token): ?array {
+    if (!preg_match('/^[a-f0-9]{32}$/', $token)) return null;
+    $e = $_SESSION['finance_pending_upload'][$token] ?? null;
+    if (!is_array($e) || !preg_match('/^doc-\d{8}-[a-f0-9]{16}\.(pdf|jpg|png|webp)$/', (string) ($e['stored'] ?? ''))) return null;
+    if (!is_file(financeUploadDir() . $e['stored'])) return null;
+    return ['original' => (string) ($e['original'] ?? $e['stored']), 'stored' => $e['stored'], 'mime' => (string) ($e['mime'] ?? '')];
+}
+
+/** Remember a stored upload under a fresh random token and return the token. */
+function financePendingUploadRemember(array $upload): string {
+    $token = bin2hex(random_bytes(16));
+    $_SESSION['finance_pending_upload'][$token] = ['original' => $upload['original'], 'stored' => $upload['stored'], 'mime' => $upload['mime']];
+    return $token;
+}
+
+/** Forget a pending upload; $deleteFile also removes the file (a replaced one), not when it was attached to a document. */
+function financePendingUploadForget(string $token, bool $deleteFile): void {
+    $e = financePendingUploadResolve($token);
+    if ($e && $deleteFile) @unlink(financeUploadDir() . $e['stored']);
+    unset($_SESSION['finance_pending_upload'][$token]);
+}
+
 // ─── Reminders ───────────────────────────────────────────────────────────────
 
 /** Active system admins plus active users whose custom role grants finance_manage. */

@@ -139,7 +139,7 @@ final class FinancePagesSourceTest extends TestCase
         $this->assertLessThan(strpos($s, 'catch (InvalidArgumentException'), strpos($s, 'catch (PDOException'), 'PDOException must be caught first');
         $this->assertStringContainsString("'#pay'", $s);
         $this->assertStringContainsString("\$existing ?: null, \$doc + ['vat_lines'", $s);
-        $this->assertStringContainsString("\$accounts ? 'checked' : 'disabled'", $s);
+        $this->assertStringContainsString("\$accounts ? (!\$sticky || post('pay_now') === '1' ? 'checked' : '') : 'disabled'", $s);
     }
     public function test_the_menu_has_an_oikonomika_section_holding_the_dues(): void
     {
