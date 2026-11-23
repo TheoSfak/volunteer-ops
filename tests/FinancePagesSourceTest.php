@@ -63,6 +63,7 @@ final class FinancePagesSourceTest extends TestCase
         $this->assertStringContainsString('deleted_at IS NULL OR id = ?', $s);
         $this->assertStringContainsString('catch (PDOException', $s);
         $this->assertStringContainsString('error_log(', $s);
+        $this->assertLessThan(strpos($s, 'catch (InvalidArgumentException'), strpos($s, 'catch (PDOException'), 'PDOException must be caught first');
         $this->assertStringContainsString("'#pay'", $s);
         $this->assertStringContainsString("\$existing ?: null, \$doc + ['vat_lines'", $s);
         $this->assertStringContainsString("\$accounts ? 'checked' : 'disabled'", $s);

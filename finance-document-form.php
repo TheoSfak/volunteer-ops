@@ -70,12 +70,12 @@ if (isPost()) {
             setFlash('success', $existing ? 'Το παραστατικό ενημερώθηκε.' : 'Το παραστατικό καταχωρήθηκε.');
             redirect($existing ? 'finance-document-form.php?id=' . $savedId : $back);
         }
-    } catch (InvalidArgumentException | RuntimeException $e) {
-        setFlash('error', $e->getMessage());
-        redirect($failUrl);
-    } catch (PDOException $e) {
+    } catch (PDOException $e) { // first: PDOException extends RuntimeException
         error_log('finance-document-form: ' . $e->getMessage());
         setFlash('error', 'Παρουσιάστηκε σφάλμα βάσης δεδομένων. Η ενέργεια δεν ολοκληρώθηκε.');
+        redirect($failUrl);
+    } catch (InvalidArgumentException | RuntimeException $e) {
+        setFlash('error', $e->getMessage());
         redirect($failUrl);
     }
 }

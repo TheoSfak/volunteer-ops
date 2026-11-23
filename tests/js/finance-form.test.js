@@ -49,3 +49,10 @@ test('validVat mirrors financeValidVatNumber() (same values as FinanceMoneyTest)
     assert.equal(F.validVat('09000004A'), false);
     assert.equal(F.validVat('090000045\n'), false);
 });
+
+test('the submit check strips non-digits like the server', () => {
+    assert.equal(F.validVat(F.cleanVat('EL090000045')), true);
+    assert.equal(F.validVat(F.cleanVat('090 000 045')), true);
+    assert.equal(F.validVat(F.cleanVat('EL090000046')), false);
+    assert.equal(F.cleanVat('EL'), '');
+});

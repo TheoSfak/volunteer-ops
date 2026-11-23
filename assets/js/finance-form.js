@@ -39,6 +39,8 @@
     }
     function mismatch(typed, linesGross) { return Math.abs(typed - linesGross) > TOLERANCE_CENTS; }
     /** Mirror of financeValidVatNumber(): 9 digits, weights 2^8..2^1, (sum mod 11) mod 10 = ninth digit. */
+    /** The server strips non-digits before checking (EL prefix, spaces). */
+    function cleanVat(v) { return String(v).replace(/\D/g, ''); }
     function validVat(afm) {
         if (!/^\d{9}$/.test(afm) || afm === '000000000') return false;
         let sum = 0;
@@ -162,7 +164,7 @@
                 ev.preventDefault(); alert('Συμπληρώστε τουλάχιστον ένα ποσό.'); return;
             }
             const vatEl = $('#counterpartyVat');
-            if (vatEl && vatEl.value.trim() !== '' && !validVat(vatEl.value.trim())) {
+            if (vatEl && cleanVat(vatEl.value) !== '' && !validVat(cleanVat(vatEl.value))) {
                 ev.preventDefault(); vatEl.focus(); alert('Το ΑΦΜ δεν είναι έγκυρο (έλεγχος ψηφίου). Διορθώστε το ή αφήστε το κενό.'); return;
             }
             const box = $('[name="total_confirmed"]');
@@ -218,7 +220,7 @@
         });
     }
 
-    const api = {VAT_RATES, TOLERANCE_CENTS, toCents, fromCents, display, splitGross, splitNet, totals, mismatch, validVat, prepareImage, initForm};
+    const api = {VAT_RATES, TOLERANCE_CENTS, toCents, fromCents, display, splitGross, splitNet, totals, mismatch, cleanVat, validVat, prepareImage, initForm};
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.VoFinance = api;
     if (typeof document !== 'undefined') {
