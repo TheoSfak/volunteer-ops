@@ -41,8 +41,9 @@ final class FinanceRemindersTest extends TestCase
     {
         $id = $this->doc('2026-11-25');
         $sent = [];
-        $notify = function (int $uid, string $title, string $msg, string $type) use (&$sent, $id) {
-            if (str_contains($msg, 'TESTFIN')) $sent[] = [$uid, $title, $type];
+        $urls = [];
+        $notify = function (int $uid, string $title, string $msg, string $type, array $push = []) use (&$sent, &$urls, $id) {
+            if (str_contains($msg, 'TESTFIN')) { $sent[] = [$uid, $title, $type]; $urls[] = $push['url'] ?? null; }
         };
 
         financeSendDueReminders('2026-11-10', $notify);
@@ -51,6 +52,7 @@ final class FinanceRemindersTest extends TestCase
         financeSendDueReminders('2026-11-20', $notify);
         $this->assertNotEmpty($sent);
         $this->assertStringContainsString('λήγει', $sent[0][1]);
+        $this->assertSame('finance-document-form.php?id=' . $id, $urls[0]);
         $count = count($sent);
         financeSendDueReminders('2026-11-21', $notify);
         $this->assertCount($count, $sent, 'same stage: not repeated');

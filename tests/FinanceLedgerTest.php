@@ -26,6 +26,7 @@ final class FinanceLedgerTest extends TestCase
         dbExecute("DELETE FROM finance_movements WHERE account_id IN (SELECT id FROM finance_accounts WHERE name LIKE 'TESTFIN%')");
         dbExecute("DELETE FROM finance_documents WHERE counterparty_name LIKE 'TESTFIN%'");
         dbExecute("DELETE FROM finance_accounts WHERE name LIKE 'TESTFIN%'");
+        dbExecute("DELETE FROM finance_categories WHERE name LIKE 'TESTFIN%'");
         dbExecute("DELETE FROM settings WHERE setting_key = 'finance_test_key'");
     }
 
@@ -222,5 +223,62 @@ final class FinanceLedgerTest extends TestCase
         financeSaveSetting('finance_test_key', 'two');
         $this->assertSame('two', financeSetting('finance_test_key'));
         $this->assertSame('dflt', financeSetting('finance_missing_key', 'dflt'));
+    }
+
+    private function category(string $name, string $direction = 'OUT'): int
+    {
+        return (int) dbInsert("INSERT INTO finance_categories (name, direction, sort_order) VALUES (?, ?, 999)", [$name, $direction]);
+    }
+
+    public function test_the_category_report_groups_by_document_category_then_movement_category(): void
+    {
+        $acc = $this->account('TESTFIN cash');
+        $catDoc = $this->category('TESTFIN doc cat');
+        $catMov = $this->category('TESTFIN mov cat');
+        $doc = $this->outDoc(1000, ['category_id' => $catDoc]);
+        financePayDocument($doc, $acc, '2026-11-12', 400, self::$userId);
+        financePayDocument($doc, $acc, '2026-11-13', 600, self::$userId);
+        financeAddMovement(['account_id' => $acc, 'direction' => 'OUT', 'amount' => 250, 'movement_date' => '2026-11-14', 'category_id' => $catMov], self::$userId);
+        financeAddMovement(['account_id' => $acc, 'direction' => 'OUT', 'amount' => 70, 'movement_date' => '2026-11-14'], self::$userId);
+        $rows = [];
+        foreach (financeReportByCategory('2026-11-01', '2026-11-30') as $r) {
+            if (str_starts_with((string) $r['category'], 'TESTFIN') || $r['category_id'] === null) $rows[$r['category_id'] ?? 'none'] = $r;
+        }
+        $this->assertSame(1000, $rows[$catDoc]['total']);
+        $this->assertSame($catDoc, $rows[$catDoc]['category_id']);
+        $this->assertSame('TESTFIN doc cat', $rows[$catDoc]['category']);
+        $this->assertSame(250, $rows[$catMov]['total']);
+        $this->assertGreaterThanOrEqual(70, $rows['none']['total']);
+    }
+
+    public function test_deleting_a_document_moves_its_category_onto_its_payments(): void
+    {
+        $acc = $this->account('TESTFIN cash');
+        $cat = $this->category('TESTFIN doc cat');
+        $doc = $this->outDoc(1240, ['category_id' => $cat]);
+        $mov = financePayDocument($doc, $acc, '2026-11-12', 1240, self::$userId);
+        $this->assertNull(dbFetchValue("SELECT category_id FROM finance_movements WHERE id = ?", [$mov]));
+        financeDeleteDocument($doc);
+        $this->assertSame($cat, (int) dbFetchValue("SELECT category_id FROM finance_movements WHERE id = ?", [$mov]));
+        $rows = array_values(array_filter(financeReportByCategory('2026-11-01', '2026-11-30'), fn($r) => $r['category_id'] === $cat));
+        $this->assertSame(1240, $rows[0]['total']);
+    }
+
+    public function test_the_last_active_account_is_detected(): void
+    {
+        $active = array_column(dbFetchAll("SELECT id FROM finance_accounts WHERE is_active = 1"), 'id');
+        dbExecute("UPDATE finance_accounts SET is_active = 0");
+        $a = $this->account('TESTFIN one');
+        try {
+            $this->assertTrue(financeIsLastActiveAccount($a));
+            $b = $this->account('TESTFIN two');
+            $this->assertFalse(financeIsLastActiveAccount($a));
+            dbExecute("UPDATE finance_accounts SET is_active = 0 WHERE id = ?", [$b]);
+            $this->assertTrue(financeIsLastActiveAccount($a));
+            $this->assertFalse(financeIsLastActiveAccount($b), 'an inactive account is never "the last active one"');
+        } finally {
+            dbExecute("DELETE FROM finance_accounts WHERE name LIKE 'TESTFIN%'");
+            foreach ($active as $id) dbExecute("UPDATE finance_accounts SET is_active = 1 WHERE id = ?", [$id]);
+        }
     }
 }

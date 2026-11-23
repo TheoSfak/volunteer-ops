@@ -87,6 +87,32 @@ final class FinanceDuesTest extends TestCase
         $this->assertNull($this->movement($sub));
     }
 
+    public function test_editing_a_dues_row_keeps_a_moved_account_unless_the_payment_method_changed(): void
+    {
+        $bank = (int) dbInsert("INSERT INTO finance_accounts (name, kind) VALUES ('TESTFIN bank', 'BANK')");
+        $other = (int) dbInsert("INSERT INTO finance_accounts (name, kind) VALUES ('TESTFIN other', 'BANK')");
+        financeSaveSetting('finance_dues_account_bank', (string) $bank);
+        $sub = $this->sub('2026-03-01', '30.00', 'Τραπεζική κατάθεση');
+        financeSyncSubscriptionMovement($sub, self::$userId);
+        $this->assertSame($bank, (int) $this->movement($sub)['account_id']);
+
+        // The treasurer moved the money elsewhere; an amount edit must not undo that.
+        dbExecute("UPDATE finance_movements SET account_id = ? WHERE subscription_id = ?", [$other, $sub]);
+        dbExecute("UPDATE volunteer_subscriptions SET amount = '40.00' WHERE id = ?", [$sub]);
+        financeSyncSubscriptionMovement($sub, self::$userId, 'Τραπεζική κατάθεση');
+        $this->assertSame($other, (int) $this->movement($sub)['account_id']);
+        $this->assertSame('40.00', $this->movement($sub)['amount']);
+
+        // Same with the method unknown to the caller.
+        financeSyncSubscriptionMovement($sub, self::$userId);
+        $this->assertSame($other, (int) $this->movement($sub)['account_id']);
+
+        // A changed method re-resolves from the mapping.
+        dbExecute("UPDATE volunteer_subscriptions SET payment_method = 'Μετρητά' WHERE id = ?", [$sub]);
+        financeSyncSubscriptionMovement($sub, self::$userId, 'Τραπεζική κατάθεση');
+        $this->assertSame(financeDuesAccountFor('Μετρητά'), (int) $this->movement($sub)['account_id']);
+    }
+
     public function test_a_dues_movement_cannot_be_deleted_from_the_cash_book(): void
     {
         $sub = $this->sub('2026-03-01', '30.00', 'Μετρητά');

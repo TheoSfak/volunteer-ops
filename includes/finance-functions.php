@@ -250,11 +250,19 @@ function financeSaveDocument(array $doc, array $vatLines, int $userId, ?int $id 
     });
 }
 
-/** Deletes the document, its VAT lines (FK cascade) and its file; its movements stay, unlinked (FK set null). */
+/**
+ * Deletes the document, its VAT lines (FK cascade) and its file; its movements stay, unlinked (FK set null) — and
+ * first take over the document's category, so past category reports keep the money where it was.
+ */
 function financeDeleteDocument(int $id): ?array {
     $row = dbFetchOne("SELECT * FROM finance_documents WHERE id = ?", [$id]);
     if (!$row) return null;
-    dbExecute("DELETE FROM finance_documents WHERE id = ?", [$id]);
+    financeTransaction(function () use ($id, $row) {
+        if (!empty($row['category_id'])) {
+            dbExecute("UPDATE finance_movements SET category_id = ? WHERE document_id = ? AND category_id IS NULL", [(int) $row['category_id'], $id]);
+        }
+        dbExecute("DELETE FROM finance_documents WHERE id = ?", [$id]);
+    });
     if (!empty($row['file_stored_name'])) {
         $path = financeUploadDir() . basename((string) $row['file_stored_name']);
         if (is_file($path)) @unlink($path);
@@ -375,14 +383,14 @@ function financePeriodTotals(string $from, string $to): array {
 
 /** Cash basis: what actually moved in the period, by the document's category (or the movement's own). */
 function financeReportByCategory(string $from, string $to): array {
-    $rows = dbFetchAll("SELECT m.direction, COALESCE(c1.id, c2.id) AS category_id, COALESCE(c1.name, c2.name, 'Χωρίς κατηγορία') AS category, SUM(m.amount) AS total
+    $rows = dbFetchAll("SELECT m.direction, COALESCE(c1.id, c2.id) AS cat_id, COALESCE(c1.name, c2.name, 'Χωρίς κατηγορία') AS cat_name, SUM(m.amount) AS total
         FROM finance_movements m
         LEFT JOIN finance_documents d ON d.id = m.document_id
         LEFT JOIN finance_categories c1 ON c1.id = d.category_id
         LEFT JOIN finance_categories c2 ON c2.id = m.category_id
         WHERE m.movement_date BETWEEN ? AND ? AND m.transfer_group IS NULL
-        GROUP BY m.direction, category_id, category ORDER BY m.direction, total DESC", [$from, $to]);
-    return array_map(fn($r) => ['direction' => $r['direction'], 'category_id' => $r['category_id'] !== null ? (int) $r['category_id'] : null, 'category' => $r['category'], 'total' => financeToCents($r['total'])], $rows);
+        GROUP BY m.direction, cat_id, cat_name ORDER BY m.direction, total DESC", [$from, $to]);
+    return array_map(fn($r) => ['direction' => $r['direction'], 'category_id' => $r['cat_id'] !== null ? (int) $r['cat_id'] : null, 'category' => $r['cat_name'], 'total' => financeToCents($r['total'])], $rows);
 }
 
 function financeReportByAccount(string $from, string $to): array {
@@ -410,6 +418,12 @@ function financeVatSummary(string $from, string $to): array {
 
 const FINANCE_DUES_METHOD_KEYS = ['Μετρητά' => 'cash', 'Τραπεζική κατάθεση' => 'bank', 'IRIS' => 'bank', 'Κάρτα' => 'card'];
 
+/** True when $id is the only active account — deactivating or deleting it would leave nowhere to book into. */
+function financeIsLastActiveAccount(int $id): bool {
+    if (!dbFetchOne("SELECT id FROM finance_accounts WHERE id = ? AND is_active = 1", [$id])) return false;
+    return (int) dbFetchValue("SELECT COUNT(*) FROM finance_accounts WHERE is_active = 1 AND id <> ?", [$id]) === 0;
+}
+
 function financeDuesMethodKey(?string $method): string {
     return FINANCE_DUES_METHOD_KEYS[trim((string) $method)] ?? 'cash';
 }
@@ -434,17 +448,19 @@ function financeDuesCategoryId(): ?int {
  * Make the cash book agree with one dues row: a paid amount → exactly one IN movement; no amount, or the row is
  * gone → no movement. Called after every insert/update/delete in subscriptions.php. Safe before migration 227 ran.
  */
-function financeSyncSubscriptionMovement(int $subscriptionId, int $userId): void {
+function financeSyncSubscriptionMovement(int $subscriptionId, int $userId, ?string $previousMethod = null): void {
     if (!dbTableExists('finance_movements')) return;
     $sub = dbFetchOne("SELECT vs.id, vs.amount, vs.payment_date, vs.payment_method, u.name
                        FROM volunteer_subscriptions vs JOIN users u ON u.id = vs.user_id WHERE vs.id = ?", [$subscriptionId]);
-    $existing = dbFetchOne("SELECT id FROM finance_movements WHERE subscription_id = ?", [$subscriptionId]);
+    $existing = dbFetchOne("SELECT id, account_id FROM finance_movements WHERE subscription_id = ?", [$subscriptionId]);
     $cents = $sub ? financeToCents($sub['amount']) : 0;
     if ($cents <= 0) {
         if ($existing) dbExecute("DELETE FROM finance_movements WHERE id = ?", [$existing['id']]);
         return;
     }
-    $accountId = financeDuesAccountFor($sub['payment_method']);
+    // An existing movement keeps the account the treasurer left it in; only a changed payment method re-resolves it.
+    $methodChanged = $previousMethod !== null && trim($previousMethod) !== trim((string) $sub['payment_method']);
+    $accountId = ($existing && !$methodChanged) ? (int) $existing['account_id'] : financeDuesAccountFor($sub['payment_method']);
     if ($accountId === 0) return; // no active account at all: nothing to book into
     $desc = mb_substr('Συνδρομή — ' . $sub['name'], 0, 255);
     $params = [$accountId, financeFromCents($cents), $sub['payment_date'], financeDuesCategoryId(), $desc];
@@ -506,7 +522,7 @@ function financeManagerIds(): array {
  */
 function financeSendDueReminders(string $today, ?callable $notify = null): int {
     if (!financeValidDate($today)) return 0;
-    $notify = $notify ?? fn(int $uid, string $title, string $msg, string $type) => sendNotification($uid, $title, $msg, $type);
+    $notify = $notify ?? fn(int $uid, string $title, string $msg, string $type, array $pushData = []) => sendNotification($uid, $title, $msg, $type, '', $pushData);
     $recipients = financeManagerIds();
     $sent = 0;
     foreach (financeOpenPayables($today) as $doc) {
@@ -519,7 +535,7 @@ function financeSendDueReminders(string $today, ?callable $notify = null): int {
         $delivered = 0;
         foreach ($recipients as $uid) {
             try {
-                $notify($uid, $title, $msg, $stage === 3 ? 'danger' : 'warning');
+                $notify($uid, $title, $msg, $stage === 3 ? 'danger' : 'warning', ['url' => 'finance-document-form.php?id=' . (int) $doc['id']]);
                 $delivered++;
             } catch (Throwable $e) {
                 error_log('financeSendDueReminders: notify failed for user ' . $uid . ': ' . $e->getMessage());
