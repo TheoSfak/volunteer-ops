@@ -287,7 +287,9 @@ function financeAddMovement(array $m, int $userId): int {
             $doc = dbFetchOne("SELECT direction, gross_total FROM finance_documents WHERE id = ? FOR UPDATE", [$documentId]);
             if (!$doc) throw new InvalidArgumentException('Το παραστατικό δεν βρέθηκε.');
             if ($doc['direction'] !== $direction) throw new InvalidArgumentException('Η κίνηση πρέπει να έχει το ίδιο είδος (έσοδο/έξοδο) με το παραστατικό.');
-            $remaining = max(0, financeToCents($doc['gross_total']) - financeDocumentPaidCents($documentId));
+            // Locking read: sees every committed payment even when the caller's outer transaction already holds a snapshot.
+            $paid = financeToCents(dbFetchValue("SELECT COALESCE(SUM(amount), 0) FROM finance_movements WHERE document_id = ? FOR UPDATE", [$documentId]));
+            $remaining = max(0, financeToCents($doc['gross_total']) - $paid);
             if ($amount > $remaining) throw new InvalidArgumentException('Το ποσό ξεπερνά το υπόλοιπο (' . financeFormat($remaining) . ').');
         }
         return (int) dbInsert("INSERT INTO finance_movements
