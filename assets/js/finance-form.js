@@ -77,6 +77,11 @@
         return (sum % 11) % 10 === Number(afm[8]);
     }
 
+    /** The pay-now date: the document date while it still follows it (the user has not typed their own), else what is there. */
+    function nextPayDate(follows, docDate, payDate) {
+        return follows && /^\d{4}-\d{2}-\d{2}$/.test(String(docDate)) ? String(docDate) : String(payDate);
+    }
+
     /** ISO yyyy-mm-dd → dd/mm/yyyy; anything else comes back unchanged. */
     function formatDmy(iso) {
         const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso));
@@ -226,6 +231,20 @@
             }
         });
 
+        // ── Pay-now date follows the document date until the user types their own ──
+        const docDateEl = $('#docDate'), payDateEl = $('#payDate');
+        let payFollows = !!payDateEl && payDateEl.dataset.follow === '1';
+        function syncPayDate() {
+            if (!payDateEl || !docDateEl) return;
+            const next = nextPayDate(payFollows, docDateEl.value, payDateEl.value);
+            if (next !== payDateEl.value) { payDateEl.value = next; payDateEl.dispatchEvent(new Event('change', {bubbles: true})); }
+        }
+        if (payDateEl && docDateEl) {
+            payDateEl.addEventListener('input', () => { payFollows = false; }); // only a person typing fires 'input'; syncPayDate fires 'change'
+            ['input', 'change'].forEach(n => docDateEl.addEventListener(n, syncPayDate));
+            syncPayDate();
+        }
+
         // ── Scan ───────────────────────────────────────────────────────────
         // AI output is untrusted: it only ever goes through .value / .textContent, never HTML.
         const file = $('#docFile'), btnCam = $('#btnCamera'), btnScan = $('#btnScan'), status = $('#scanStatus');
@@ -260,6 +279,7 @@
                     const map = {counterparty_name: 'counterpartyName', counterparty_vat: 'counterpartyVat', doc_number: 'docNumber', doc_date: 'docDate', due_date: 'dueDate', gross_total: 'grossTyped'};
                     if (map[f]) $('#' + map[f]).classList.add('border-warning', 'border-2');
                 });
+                syncPayDate();
                 $('#scanSource').value = 'AI';
                 $('#scanProvider').value = json.provider_label || '';
                 refresh();
@@ -292,7 +312,7 @@
         });
     }
 
-    const api = {VAT_RATES, TOLERANCE_CENTS, toCents, fromCents, display, splitGross, splitNet, parseCents, totals, mismatch, cleanVat, validVat, formatDmy, paidBeforeOpening, openingWarning, prepareImage, initForm, initOpeningWarnings};
+    const api = {VAT_RATES, TOLERANCE_CENTS, toCents, fromCents, display, splitGross, splitNet, parseCents, totals, mismatch, cleanVat, validVat, nextPayDate, formatDmy, paidBeforeOpening, openingWarning, prepareImage, initForm, initOpeningWarnings};
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.VoFinance = api;
     if (typeof document !== 'undefined') {

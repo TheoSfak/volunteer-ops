@@ -240,10 +240,12 @@ include __DIR__ . '/includes/header.php';
             <label class="form-check-label" for="payNow"><?= $direction === 'IN' ? 'Εισπράχθηκε ήδη' : 'Πληρώθηκε ήδη' ?></label></div>
         <div class="row g-2 mt-1">
             <div class="col-md-4"><select class="form-select" name="pay_account_id"><?php foreach ($accounts as $a): ?><option value="<?= (int) $a['id'] ?>" data-opening-date="<?= h((string) ($a['opening_date'] ?? '')) ?>"<?= $sticky && (int) post('pay_account_id') === (int) $a['id'] ? ' selected' : '' ?>><?= h($a['name']) ?></option><?php endforeach; ?></select></div>
-            <div class="col-md-4"><input type="date" class="form-control" name="pay_date" value="<?= $sticky && post('pay_date') !== '' ? h(post('pay_date')) : date('Y-m-d') ?>"></div>
+            <?php // The payment date is the document date until the treasurer types a different one (JS keeps them in step, scan included).
+                $payDateValue = $sticky && post('pay_date') !== '' ? post('pay_date') : (($sticky ? post('doc_date') : '') ?: date('Y-m-d')); ?>
+            <div class="col-md-4"><input type="date" class="form-control" name="pay_date" id="payDate" value="<?= h($payDateValue) ?>" data-follow="<?= !$sticky || $payDateValue === post('doc_date') || post('pay_date') === '' ? '1' : '0' ?>" aria-label="Ημερομηνία πληρωμής"></div>
         </div>
         <div class="alert alert-warning py-1 px-2 mt-2 mb-0 small d-none opening-warning" role="alert"></div>
-        <div class="form-text">Ξετσεκάρετε για τιμολόγιο που οφείλεται ακόμα: θα εμφανιστεί στις Υποχρεώσεις.</div>
+        <div class="form-text">Η ημερομηνία πληρωμής ακολουθεί την ημερομηνία του παραστατικού, εκτός αν την αλλάξετε εσείς. Ξετσεκάρετε για τιμολόγιο που οφείλεται ακόμα: θα εμφανιστεί στις Υποχρεώσεις.</div>
     </div></div>
     <?php endif; ?>
 

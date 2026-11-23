@@ -105,3 +105,9 @@ test('the account name only reaches the page through textContent', () => {
     assert.match(block, /box\.textContent = text/);
     assert.doesNotMatch(block, /innerHTML/);
 });
+test('nextPayDate follows the document date until the user takes over', () => {
+    assert.equal(F.nextPayDate(true, '2026-10-12', '2026-11-23'), '2026-10-12');
+    assert.equal(F.nextPayDate(false, '2026-10-12', '2026-11-23'), '2026-11-23');
+    assert.equal(F.nextPayDate(true, '', '2026-11-23'), '2026-11-23', 'a cleared document date leaves the pay date alone');
+    assert.equal(F.nextPayDate(true, 'garbage', '2026-11-23'), '2026-11-23');
+});

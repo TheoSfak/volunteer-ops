@@ -201,4 +201,17 @@ final class FinancePagesSourceTest extends TestCase
         $this->assertSame(2, substr_count($s, 'opening-warning"'));
         $this->assertSame(2, substr_count($s, 'data-opening-warning'));
     }
+
+    public function test_the_pay_now_date_follows_the_document_date_until_edited(): void
+    {
+        $s = self::src('finance-document-form.php');
+        $this->assertStringContainsString('name="pay_date" id="payDate"', $s);
+        $this->assertStringContainsString('data-follow=', $s);
+        $this->assertStringNotContainsString('name="pay_date" value="<?= $sticky && post(\'pay_date\') !== \'\' ? h(post(\'pay_date\')) : date(', $s, 'the pay-now date must not default to today independently of the document date');
+        $this->assertStringContainsString("post('pay_date') ?: \$doc['doc_date']", $s, 'server fallback stays the document date');
+        // The «Πληρωμές» box of an existing document keeps today as its default.
+        $this->assertStringContainsString('name="pay_date" value="<?= date(\'Y-m-d\') ?>"', $s);
+        $js = self::src('assets/js/finance-form.js');
+        $this->assertStringContainsString('syncPayDate();', $js);
+    }
 }
