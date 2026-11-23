@@ -96,3 +96,301 @@ function financeValidDate($value): bool {
     if (!is_string($value) || !preg_match('/^(\d{4})-(\d{2})-(\d{2})$/D', $value, $m)) return false;
     return checkdate((int) $m[2], (int) $m[3], (int) $m[1]);
 }
+
+// ─── Infrastructure ──────────────────────────────────────────────────────────
+
+/** Run $fn in a transaction, or inside the caller's when one is already open (PDO has no nesting). */
+function financeTransaction(callable $fn) {
+    $pdo = db();
+    if ($pdo->inTransaction()) return $fn();
+    $pdo->beginTransaction();
+    try {
+        $result = $fn();
+        $pdo->commit();
+        return $result;
+    } catch (Throwable $e) {
+        $pdo->rollBack();
+        throw $e;
+    }
+}
+
+/** Read straight from the table: getSetting() caches for the whole process, which would hide a value saved a moment ago. */
+function financeSetting(string $key, string $default = ''): string {
+    $v = dbFetchValue("SELECT setting_value FROM settings WHERE setting_key = ?", [$key]);
+    return $v === null || $v === false ? $default : (string) $v;
+}
+
+function financeSaveSetting(string $key, string $value): void {
+    dbExecute("INSERT INTO settings (setting_key, setting_value, updated_at) VALUES (?, ?, NOW())
+               ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()", [$key, $value]);
+}
+
+function financeUploadDir(): string {
+    return dirname(__DIR__) . '/uploads/finance/';
+}
+
+function financeAccounts(bool $activeOnly = true): array {
+    return dbFetchAll("SELECT * FROM finance_accounts" . ($activeOnly ? " WHERE is_active = 1" : "") . " ORDER BY sort_order, id");
+}
+
+function financeCategories(?string $direction = null, bool $activeOnly = true): array {
+    $where = [];
+    $params = [];
+    if ($direction !== null) { $where[] = "direction = ?"; $params[] = $direction; }
+    if ($activeOnly) $where[] = "is_active = 1";
+    return dbFetchAll("SELECT id, name, direction, is_active, sort_order FROM finance_categories"
+        . ($where ? " WHERE " . implode(' AND ', $where) : "") . " ORDER BY direction, sort_order, name", $params);
+}
+
+function financeStatusBadge(string $status, string $direction): string {
+    $in = $direction === 'IN';
+    return match ($status) {
+        'PAID'    => '<span class="badge bg-success">' . ($in ? 'Εισπράχθηκε' : 'Εξοφλημένο') . '</span>',
+        'PARTIAL' => '<span class="badge bg-warning text-dark">Μερικώς</span>',
+        default   => '<span class="badge bg-danger">' . ($in ? 'Ανείσπρακτο' : 'Απλήρωτο') . '</span>',
+    };
+}
+
+// ─── Documents ───────────────────────────────────────────────────────────────
+
+function financeDocumentPaidCents(int $documentId): int {
+    return financeToCents(dbFetchValue("SELECT COALESCE(SUM(amount), 0) FROM finance_movements WHERE document_id = ?", [$documentId]));
+}
+
+function financeDocumentStatus(int $documentId): ?array {
+    $doc = dbFetchOne("SELECT * FROM finance_documents WHERE id = ?", [$documentId]);
+    if (!$doc) return null;
+    $gross = financeToCents($doc['gross_total']);
+    $paid = financeDocumentPaidCents($documentId);
+    return $doc + ['gross' => $gross, 'paid' => $paid, 'remaining' => max(0, $gross - $paid), 'status' => financePaidStatus($gross, $paid)];
+}
+
+/**
+ * Create ($id null) or update a document and replace its VAT lines. File fields are written only when
+ * $doc['file_stored_name'] is given, so an edit without a new file keeps the old one.
+ */
+function financeSaveDocument(array $doc, array $vatLines, int $userId, ?int $id = null): int {
+    $direction = (string) ($doc['direction'] ?? '');
+    if (!in_array($direction, FINANCE_DIRECTIONS, true)) throw new InvalidArgumentException('Μη έγκυρο είδος παραστατικού (έσοδο/έξοδο).');
+    $docType = in_array($doc['doc_type'] ?? '', FINANCE_DOC_TYPES, true) ? $doc['doc_type'] : 'OTHER';
+    $name = mb_substr(trim((string) ($doc['counterparty_name'] ?? '')), 0, 200);
+    if ($name === '') throw new InvalidArgumentException('Συμπληρώστε τον εκδότη / αντισυμβαλλόμενο.');
+    if (!financeValidDate($doc['doc_date'] ?? null)) throw new InvalidArgumentException('Μη έγκυρη ημερομηνία παραστατικού.');
+    $due = (string) ($doc['due_date'] ?? '') !== '' ? (string) $doc['due_date'] : null;
+    if ($due !== null && !financeValidDate($due)) throw new InvalidArgumentException('Μη έγκυρη προθεσμία πληρωμής.');
+    $vatNo = preg_replace('/\D/', '', (string) ($doc['counterparty_vat'] ?? ''));
+    if ($vatNo !== '' && !financeValidVatNumber($vatNo)) throw new InvalidArgumentException('Ο ΑΦΜ δεν είναι έγκυρος.');
+
+    $lines = [];
+    foreach ($vatLines as $l) {
+        $rate = (int) ($l['rate'] ?? -1);
+        if (!in_array($rate, FINANCE_VAT_RATES, true)) throw new InvalidArgumentException('Μη έγκυρος συντελεστής ΦΠΑ.');
+        $net = (int) ($l['net'] ?? 0);
+        $vat = (int) ($l['vat'] ?? 0);
+        if ($net < 0 || $vat < 0 || $net + $vat <= 0) continue;
+        $lines[] = ['rate' => $rate, 'net' => $net, 'vat' => $vat];
+    }
+    if (!$lines) throw new InvalidArgumentException('Συμπληρώστε τουλάχιστον ένα ποσό.');
+    $t = financeDocumentTotals($lines);
+
+    $categoryId = !empty($doc['category_id']) ? (int) $doc['category_id'] : null;
+    if ($categoryId !== null && !dbFetchOne("SELECT id FROM finance_categories WHERE id = ? AND direction = ?", [$categoryId, $direction])) {
+        throw new InvalidArgumentException('Η κατηγορία δεν ταιριάζει με το είδος του παραστατικού.');
+    }
+    if ($id !== null) {
+        $existing = dbFetchOne("SELECT direction FROM finance_documents WHERE id = ?", [$id]);
+        if (!$existing) throw new InvalidArgumentException('Το παραστατικό δεν βρέθηκε.');
+        $paid = financeDocumentPaidCents($id);
+        if ($paid > 0 && $existing['direction'] !== $direction) throw new InvalidArgumentException('Δεν αλλάζει το είδος ενός παραστατικού που έχει πληρωμές.');
+        if ($paid > $t['gross']) throw new InvalidArgumentException('Το σύνολο δεν μπορεί να είναι μικρότερο από όσα έχουν ήδη πληρωθεί (' . financeFormat($paid) . ').');
+    }
+
+    $values = [
+        $direction, $docType, $name, $vatNo !== '' ? $vatNo : null,
+        ($n = mb_substr(trim((string) ($doc['doc_number'] ?? '')), 0, 50)) !== '' ? $n : null,
+        $doc['doc_date'], $due,
+        financeFromCents($t['net']), financeFromCents($t['vat']), financeFromCents($t['gross']),
+        $categoryId,
+        !empty($doc['mission_id']) ? (int) $doc['mission_id'] : null,
+        !empty($doc['vehicle_id']) ? (int) $doc['vehicle_id'] : null,
+        ($notes = trim((string) ($doc['notes'] ?? ''))) !== '' ? $notes : null,
+    ];
+
+    return financeTransaction(function () use ($doc, $values, $lines, $userId, $id, $due) {
+        if ($id === null) {
+            $id = (int) dbInsert("INSERT INTO finance_documents
+                (direction, doc_type, counterparty_name, counterparty_vat, doc_number, doc_date, due_date, net_total, vat_total, gross_total,
+                 category_id, mission_id, vehicle_id, notes, file_original_name, file_stored_name, file_mime, scan_source, scan_provider, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", array_merge($values, [
+                $doc['file_original_name'] ?? null, $doc['file_stored_name'] ?? null, $doc['file_mime'] ?? null,
+                ($doc['scan_source'] ?? '') === 'AI' ? 'AI' : 'MANUAL',
+                ($p = trim((string) ($doc['scan_provider'] ?? ''))) !== '' ? mb_substr($p, 0, 50) : null,
+                $userId,
+            ]));
+        } else {
+            // reminder_stage FIRST: MySQL evaluates SET left to right on the new values, so the due_date comparison
+            // must run before due_date is overwritten. A moved due date earns its reminders again.
+            dbExecute("UPDATE finance_documents SET reminder_stage = IF(due_date <=> ?, reminder_stage, 0),
+                direction = ?, doc_type = ?, counterparty_name = ?, counterparty_vat = ?, doc_number = ?, doc_date = ?, due_date = ?,
+                net_total = ?, vat_total = ?, gross_total = ?, category_id = ?, mission_id = ?, vehicle_id = ?, notes = ?, updated_by = ?
+                WHERE id = ?", array_merge([$due], $values, [$userId, $id]));
+            if (!empty($doc['file_stored_name'])) {
+                dbExecute("UPDATE finance_documents SET file_original_name = ?, file_stored_name = ?, file_mime = ? WHERE id = ?",
+                    [$doc['file_original_name'] ?? null, $doc['file_stored_name'], $doc['file_mime'] ?? null, $id]);
+            }
+            dbExecute("DELETE FROM finance_document_vat WHERE document_id = ?", [$id]);
+        }
+        foreach ($lines as $l) {
+            dbExecute("INSERT INTO finance_document_vat (document_id, rate, net, vat) VALUES (?, ?, ?, ?)",
+                [$id, $l['rate'], financeFromCents($l['net']), financeFromCents($l['vat'])]);
+        }
+        return $id;
+    });
+}
+
+/** Deletes the document, its VAT lines (FK cascade) and its file; its movements stay, unlinked (FK set null). */
+function financeDeleteDocument(int $id): ?array {
+    $row = dbFetchOne("SELECT * FROM finance_documents WHERE id = ?", [$id]);
+    if (!$row) return null;
+    dbExecute("DELETE FROM finance_documents WHERE id = ?", [$id]);
+    if (!empty($row['file_stored_name'])) {
+        $path = financeUploadDir() . basename((string) $row['file_stored_name']);
+        if (is_file($path)) @unlink($path);
+    }
+    return $row;
+}
+
+// ─── Movements ───────────────────────────────────────────────────────────────
+
+function financeAddMovement(array $m, int $userId): int {
+    $accountId = (int) ($m['account_id'] ?? 0);
+    if (!dbFetchOne("SELECT id FROM finance_accounts WHERE id = ? AND is_active = 1", [$accountId])) throw new InvalidArgumentException('Επιλέξτε ενεργό λογαριασμό.');
+    $direction = (string) ($m['direction'] ?? '');
+    if (!in_array($direction, FINANCE_DIRECTIONS, true)) throw new InvalidArgumentException('Μη έγκυρο είδος κίνησης.');
+    $amount = (int) ($m['amount'] ?? 0);
+    if ($amount <= 0) throw new InvalidArgumentException('Το ποσό πρέπει να είναι θετικό.');
+    if (!financeValidDate($m['movement_date'] ?? null)) throw new InvalidArgumentException('Μη έγκυρη ημερομηνία κίνησης.');
+    $documentId = !empty($m['document_id']) ? (int) $m['document_id'] : null;
+    $categoryId = null;
+    if ($documentId !== null) {
+        $doc = dbFetchOne("SELECT direction FROM finance_documents WHERE id = ?", [$documentId]);
+        if (!$doc) throw new InvalidArgumentException('Το παραστατικό δεν βρέθηκε.');
+        if ($doc['direction'] !== $direction) throw new InvalidArgumentException('Η κίνηση πρέπει να έχει το ίδιο είδος (έσοδο/έξοδο) με το παραστατικό.');
+    } elseif (!empty($m['category_id'])) {
+        $categoryId = (int) $m['category_id'];
+        if (!dbFetchOne("SELECT id FROM finance_categories WHERE id = ? AND direction = ?", [$categoryId, $direction])) {
+            throw new InvalidArgumentException('Η κατηγορία δεν ταιριάζει με το είδος της κίνησης.');
+        }
+    }
+    return (int) dbInsert("INSERT INTO finance_movements
+        (account_id, direction, amount, movement_date, document_id, category_id, transfer_group, subscription_id, description, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+        $accountId, $direction, financeFromCents($amount), $m['movement_date'], $documentId, $categoryId,
+        $m['transfer_group'] ?? null, !empty($m['subscription_id']) ? (int) $m['subscription_id'] : null,
+        ($d = mb_substr(trim((string) ($m['description'] ?? '')), 0, 255)) !== '' ? $d : null, $userId,
+    ]);
+}
+
+function financePayDocument(int $documentId, int $accountId, string $date, int $amountCents, int $userId): int {
+    $st = financeDocumentStatus($documentId);
+    if (!$st) throw new InvalidArgumentException('Το παραστατικό δεν βρέθηκε.');
+    if ($amountCents > $st['remaining']) throw new InvalidArgumentException('Το ποσό ξεπερνά το υπόλοιπο (' . financeFormat($st['remaining']) . ').');
+    return financeAddMovement([
+        'account_id' => $accountId, 'direction' => $st['direction'], 'amount' => $amountCents, 'movement_date' => $date,
+        'document_id' => $documentId, 'description' => ($st['direction'] === 'OUT' ? 'Πληρωμή ' : 'Είσπραξη ') . $st['counterparty_name'],
+    ], $userId);
+}
+
+function financeTransfer(int $fromId, int $toId, int $amountCents, string $date, string $description, int $userId): string {
+    if ($fromId === $toId) throw new InvalidArgumentException('Επιλέξτε δύο διαφορετικούς λογαριασμούς.');
+    $group = bin2hex(random_bytes(8));
+    $desc = trim($description) !== '' ? trim($description) : 'Μεταφορά';
+    financeTransaction(function () use ($fromId, $toId, $amountCents, $date, $desc, $userId, $group) {
+        financeAddMovement(['account_id' => $fromId, 'direction' => 'OUT', 'amount' => $amountCents, 'movement_date' => $date, 'transfer_group' => $group, 'description' => $desc], $userId);
+        financeAddMovement(['account_id' => $toId, 'direction' => 'IN', 'amount' => $amountCents, 'movement_date' => $date, 'transfer_group' => $group, 'description' => $desc], $userId);
+    });
+    return $group;
+}
+
+/** Deletes a movement (both halves of a transfer). A dues movement belongs to Συνδρομές and is refused here. */
+function financeDeleteMovement(int $id): array {
+    $m = dbFetchOne("SELECT * FROM finance_movements WHERE id = ?", [$id]);
+    if (!$m) throw new InvalidArgumentException('Η κίνηση δεν βρέθηκε.');
+    if (!empty($m['subscription_id'])) throw new InvalidArgumentException('Οι κινήσεις συνδρομών αλλάζουν μόνο από τη σελίδα Ετήσιες Συνδρομές.');
+    if (!empty($m['transfer_group'])) {
+        $rows = dbFetchAll("SELECT * FROM finance_movements WHERE transfer_group = ?", [$m['transfer_group']]);
+        dbExecute("DELETE FROM finance_movements WHERE transfer_group = ?", [$m['transfer_group']]);
+        return $rows;
+    }
+    dbExecute("DELETE FROM finance_movements WHERE id = ?", [$id]);
+    return [$m];
+}
+
+// ─── Balances, payables, reports ─────────────────────────────────────────────
+
+function financeAccountBalances(): array {
+    $rows = dbFetchAll("SELECT a.*,
+            COALESCE(SUM(CASE WHEN m.direction = 'IN' THEN m.amount END), 0) AS total_in,
+            COALESCE(SUM(CASE WHEN m.direction = 'OUT' THEN m.amount END), 0) AS total_out
+        FROM finance_accounts a LEFT JOIN finance_movements m ON m.account_id = a.id
+        GROUP BY a.id ORDER BY a.is_active DESC, a.sort_order, a.id");
+    foreach ($rows as &$r) {
+        $r['balance'] = financeToCents($r['opening_balance']) + financeToCents($r['total_in']) - financeToCents($r['total_out']);
+    }
+    return $rows;
+}
+
+const FINANCE_PAID_JOIN = "LEFT JOIN (SELECT document_id, SUM(amount) AS paid FROM finance_movements WHERE document_id IS NOT NULL GROUP BY document_id) p ON p.document_id = d.id";
+
+function financeOpenPayables(string $today): array {
+    $rows = dbFetchAll("SELECT d.*, c.name AS category_name, COALESCE(p.paid, 0) AS paid_sum
+        FROM finance_documents d LEFT JOIN finance_categories c ON c.id = d.category_id " . FINANCE_PAID_JOIN . "
+        WHERE d.direction = 'OUT' AND COALESCE(p.paid, 0) < d.gross_total
+        ORDER BY d.due_date IS NULL, d.due_date, d.doc_date, d.id");
+    foreach ($rows as &$r) {
+        $r['paid'] = financeToCents($r['paid_sum']);
+        $r['remaining'] = financeToCents($r['gross_total']) - $r['paid'];
+        $r['urgency'] = financeDueUrgency($r['due_date'], $today);
+    }
+    return $rows;
+}
+
+function financePeriodTotals(string $from, string $to): array {
+    $r = dbFetchOne("SELECT COALESCE(SUM(CASE WHEN direction = 'IN' THEN amount END), 0) AS tin,
+                            COALESCE(SUM(CASE WHEN direction = 'OUT' THEN amount END), 0) AS tout
+                     FROM finance_movements WHERE movement_date BETWEEN ? AND ? AND transfer_group IS NULL", [$from, $to]);
+    return ['in' => financeToCents($r['tin']), 'out' => financeToCents($r['tout'])];
+}
+
+/** Cash basis: what actually moved in the period, by the document's category (or the movement's own). */
+function financeReportByCategory(string $from, string $to): array {
+    $rows = dbFetchAll("SELECT m.direction, COALESCE(c1.name, c2.name, 'Χωρίς κατηγορία') AS category, SUM(m.amount) AS total
+        FROM finance_movements m
+        LEFT JOIN finance_documents d ON d.id = m.document_id
+        LEFT JOIN finance_categories c1 ON c1.id = d.category_id
+        LEFT JOIN finance_categories c2 ON c2.id = m.category_id
+        WHERE m.movement_date BETWEEN ? AND ? AND m.transfer_group IS NULL
+        GROUP BY m.direction, category ORDER BY m.direction, total DESC", [$from, $to]);
+    return array_map(fn($r) => ['direction' => $r['direction'], 'category' => $r['category'], 'total' => financeToCents($r['total'])], $rows);
+}
+
+function financeReportByAccount(string $from, string $to): array {
+    $rows = dbFetchAll("SELECT a.id, a.name,
+            COALESCE(SUM(CASE WHEN m.direction = 'IN' THEN m.amount END), 0) AS tin,
+            COALESCE(SUM(CASE WHEN m.direction = 'OUT' THEN m.amount END), 0) AS tout
+        FROM finance_accounts a LEFT JOIN finance_movements m ON m.account_id = a.id AND m.movement_date BETWEEN ? AND ?
+        GROUP BY a.id ORDER BY a.sort_order, a.id", [$from, $to]);
+    return array_map(fn($r) => ['id' => (int) $r['id'], 'name' => $r['name'], 'total_in' => financeToCents($r['tin']), 'total_out' => financeToCents($r['tout'])], $rows);
+}
+
+/** Document basis (by document date): the VAT printed on the papers of the period, per rate. */
+function financeVatSummary(string $from, string $to): array {
+    $rows = dbFetchAll("SELECT d.direction, v.rate, SUM(v.net) AS net, SUM(v.vat) AS vat
+        FROM finance_document_vat v JOIN finance_documents d ON d.id = v.document_id
+        WHERE d.doc_date BETWEEN ? AND ? GROUP BY d.direction, v.rate ORDER BY d.direction, v.rate DESC", [$from, $to]);
+    return array_map(function ($r) {
+        $net = financeToCents($r['net']);
+        $vat = financeToCents($r['vat']);
+        return ['direction' => $r['direction'], 'rate' => (int) round((float) $r['rate']), 'net' => $net, 'vat' => $vat, 'gross' => $net + $vat];
+    }, $rows);
+}
