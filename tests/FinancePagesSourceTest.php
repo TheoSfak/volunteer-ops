@@ -283,4 +283,13 @@ final class FinancePagesSourceTest extends TestCase
         $js = self::src('assets/js/finance-form.js');
         $this->assertStringContainsString("['input', 'change'].forEach(n => payDateEl.addEventListener(n, () => { if (!syncing) payFollows = false; }))", $js);
     }
+
+    public function test_dues_list_and_accept_members_only_never_guests_or_mission_visitors(): void
+    {
+        $src = self::src('subscriptions.php');
+        $this->assertStringContainsString("const SUBSCRIPTION_MEMBER_WHERE = 'is_active = 1 AND deleted_at IS NULL AND is_external = 0 AND is_mission_visitor = 0';", $src);
+        $this->assertStringContainsString('$volunteers = dbFetchAll("SELECT id, name, email FROM users WHERE " . SUBSCRIPTION_MEMBER_WHERE . " ORDER BY name");', $src);
+        $this->assertStringContainsString('$volunteer = dbFetchOne("SELECT id, name FROM users WHERE id = ? AND " . SUBSCRIPTION_MEMBER_WHERE, [$userId]);', $src);
+        $this->assertStringNotContainsString('FROM users WHERE id = ? AND is_active = 1"', $src); // no check left that would accept a guest
+    }
 }
