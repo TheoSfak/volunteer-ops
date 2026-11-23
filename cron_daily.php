@@ -54,6 +54,11 @@ echo "[7/10] Processing Annual Subscription Expiry Reminders...\n";
 include __DIR__ . '/cron_subscription_expiry.php';
 echo "\n";
 
+// Finance: unpaid invoices nearing or past their due date
+echo "[+] Processing Finance Due-Date Reminders...\n";
+include __DIR__ . '/cron_finance_due.php';
+echo "\n";
+
 // 8. Rescuer Vitals Retention Sweep. A data purge rather than a reminder,
 // but this is the one daily cron there is - and a GDPR retention window
 // that only holds when an admin remembers to click something is not a

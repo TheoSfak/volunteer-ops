@@ -8680,6 +8680,106 @@ body{margin:0;padding:0;background:#0d1117;font-family:"Segoe UI",Roboto,"Helvet
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
             },
         ],
+        [
+            'version'     => 227,
+            'description' => 'Οικονομικά: accounts, categories, documents (+ VAT lines) and money movements, with seed account and categories.',
+            'up' => function () {
+                dbExecute("CREATE TABLE IF NOT EXISTS `finance_accounts` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `name` VARCHAR(100) NOT NULL,
+                    `kind` ENUM('CASH','BANK','CARD','OTHER') NOT NULL DEFAULT 'CASH',
+                    `iban` VARCHAR(34) NULL,
+                    `opening_balance` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                    `opening_date` DATE NULL,
+                    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                    `sort_order` INT NOT NULL DEFAULT 0,
+                    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                dbExecute("CREATE TABLE IF NOT EXISTS `finance_categories` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `name` VARCHAR(100) NOT NULL,
+                    `direction` ENUM('IN','OUT') NOT NULL,
+                    `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+                    `sort_order` INT NOT NULL DEFAULT 0,
+                    UNIQUE KEY `uq_finance_category` (`direction`, `name`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                dbExecute("CREATE TABLE IF NOT EXISTS `finance_documents` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `direction` ENUM('IN','OUT') NOT NULL,
+                    `doc_type` ENUM('INVOICE','RECEIPT','DONATION','DEPOSIT','OTHER') NOT NULL DEFAULT 'RECEIPT',
+                    `counterparty_name` VARCHAR(200) NOT NULL,
+                    `counterparty_vat` VARCHAR(9) NULL COMMENT 'ΑΦΜ, 9 digits',
+                    `doc_number` VARCHAR(50) NULL,
+                    `doc_date` DATE NOT NULL,
+                    `due_date` DATE NULL,
+                    `net_total` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                    `vat_total` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                    `gross_total` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                    `category_id` INT UNSIGNED NULL,
+                    `mission_id` INT UNSIGNED NULL,
+                    `vehicle_id` INT UNSIGNED NULL,
+                    `notes` TEXT NULL,
+                    `file_original_name` VARCHAR(255) NULL,
+                    `file_stored_name` VARCHAR(255) NULL,
+                    `file_mime` VARCHAR(100) NULL,
+                    `scan_source` ENUM('MANUAL','AI') NOT NULL DEFAULT 'MANUAL',
+                    `scan_provider` VARCHAR(50) NULL,
+                    `reminder_stage` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT '0 none, 1 due in 7 days, 2 due today, 3 overdue',
+                    `created_by` INT UNSIGNED NULL,
+                    `updated_by` INT UNSIGNED NULL,
+                    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX `idx_fd_direction_date` (`direction`, `doc_date`),
+                    INDEX `idx_fd_due` (`due_date`),
+                    FOREIGN KEY (`category_id`) REFERENCES `finance_categories`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`mission_id`) REFERENCES `missions`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`updated_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                dbExecute("CREATE TABLE IF NOT EXISTS `finance_document_vat` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `document_id` INT UNSIGNED NOT NULL,
+                    `rate` DECIMAL(5,2) NOT NULL,
+                    `net` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                    `vat` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
+                    FOREIGN KEY (`document_id`) REFERENCES `finance_documents`(`id`) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+                dbExecute("CREATE TABLE IF NOT EXISTS `finance_movements` (
+                    `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+                    `account_id` INT UNSIGNED NOT NULL,
+                    `direction` ENUM('IN','OUT') NOT NULL,
+                    `amount` DECIMAL(12,2) NOT NULL,
+                    `movement_date` DATE NOT NULL,
+                    `document_id` INT UNSIGNED NULL,
+                    `category_id` INT UNSIGNED NULL COMMENT 'Only for a movement with no document',
+                    `transfer_group` CHAR(16) NULL COMMENT 'Both halves of a transfer between accounts share it',
+                    `subscription_id` INT UNSIGNED NULL COMMENT 'volunteer_subscriptions.id; no FK: that table is not in schema.sql',
+                    `description` VARCHAR(255) NULL,
+                    `created_by` INT UNSIGNED NULL,
+                    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    `updated_at` TIMESTAMP NULL DEFAULT NULL ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX `idx_fm_account_date` (`account_id`, `movement_date`),
+                    INDEX `idx_fm_date` (`movement_date`),
+                    INDEX `idx_fm_transfer` (`transfer_group`),
+                    UNIQUE KEY `uq_fm_subscription` (`subscription_id`),
+                    FOREIGN KEY (`account_id`) REFERENCES `finance_accounts`(`id`) ON DELETE RESTRICT,
+                    FOREIGN KEY (`document_id`) REFERENCES `finance_documents`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`category_id`) REFERENCES `finance_categories`(`id`) ON DELETE SET NULL,
+                    FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE SET NULL
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+                if ((int) dbFetchValue("SELECT COUNT(*) FROM finance_accounts") === 0) {
+                    dbExecute("INSERT INTO finance_accounts (name, kind, sort_order) VALUES ('Ταμείο μετρητών', 'CASH', 1)");
+                }
+                dbExecute("INSERT IGNORE INTO finance_categories (name, direction, sort_order) VALUES
+                    ('Καύσιμα', 'OUT', 1), ('Συντήρηση οχημάτων', 'OUT', 2), ('Ασφάλειες οχημάτων', 'OUT', 3), ('Εξοπλισμός', 'OUT', 4),
+                    ('Αναλώσιμα / Φαρμακείο', 'OUT', 5), ('Ενοίκιο', 'OUT', 6), ('Λογαριασμοί κοινής ωφέλειας', 'OUT', 7), ('Εκπαίδευση', 'OUT', 8),
+                    ('Λοιπά έξοδα', 'OUT', 9),
+                    ('Συνδρομές μελών', 'IN', 1), ('Δωρεές', 'IN', 2), ('Χορηγίες', 'IN', 3), ('Επιχορηγήσεις', 'IN', 4), ('Λοιπά έσοδα', 'IN', 5)");
+            },
+        ],
 
     ];
     // ────────────────────────────────────────────────────────────────────────
