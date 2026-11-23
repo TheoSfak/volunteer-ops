@@ -101,7 +101,7 @@ final class FinancePagesSourceTest extends TestCase
         $this->assertStringContainsString("'direction' => get('direction')", $m);
         $this->assertStringNotContainsString("\$tot[\$r['direction']] +=", $m);
         $s = self::src('finance-settings.php');
-        foreach (['Μη έγκυρο αρχικό υπόλοιπο. Γράψτε π.χ. 1500.00', 'AND id <> ?', "\$old['direction'] === 'IN'", "\$cat['direction'] === 'IN'",
+        foreach (['financeRequireCents($rawOpening)','AND id <> ?', "\$old['direction'] === 'IN'", "\$cat['direction'] === 'IN'",
                   'Ο λογαριασμός δεν βρέθηκε.', 'Η κατηγορία δεν βρέθηκε.', '$before, $keys'] as $needle) {
             $this->assertStringContainsString($needle, $s, $needle);
         }

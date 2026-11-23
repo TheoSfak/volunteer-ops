@@ -30,7 +30,7 @@ if (isPost()) {
             redirect($back);
         }
         if ($action === 'pay' && $existing) {
-            $mov = financePayDocument($id, (int) post('pay_account_id'), post('pay_date'), financeToCents(post('pay_amount')), $uid);
+            $mov = financePayDocument($id, (int) post('pay_account_id'), post('pay_date'), financeRequireCents(post('pay_amount')), $uid);
             logAudit('finance_pay_document', 'finance_movements', $mov, null, ['document_id' => $id]);
             setFlash('success', 'Η πληρωμή καταχωρήθηκε.');
             redirect('finance-document-form.php?id=' . $id . '#pay');
@@ -40,10 +40,10 @@ if (isPost()) {
             if (financePendingUploadResolve($pendingToken) === null) $pendingToken = '';
             $lines = [];
             foreach ((array) ($_POST['vat_rate'] ?? []) as $i => $rate) {
-                $lines[] = ['rate' => (int) $rate, 'net' => financeToCents($_POST['vat_net'][$i] ?? ''), 'vat' => financeToCents($_POST['vat_vat'][$i] ?? '')];
+                $lines[] = ['rate' => (int) $rate, 'net' => financeRequireCents($_POST['vat_net'][$i] ?? ''), 'vat' => financeRequireCents($_POST['vat_vat'][$i] ?? '')];
             }
             $linesGross = financeDocumentTotals(array_filter($lines, fn($l) => $l['net'] >= 0 && $l['vat'] >= 0))['gross'];
-            $typed = financeToCents(post('gross_typed'));
+            $typed = financeRequireCents(post('gross_typed'));
             if (trim(post('gross_typed')) !== '' && financeTotalsMismatch($typed, $linesGross) && post('total_confirmed') !== '1') {
                 throw new InvalidArgumentException('Το σύνολο του παραστατικού (' . financeFormat($typed) . ') διαφέρει από το άθροισμα των γραμμών ΦΠΑ (' . financeFormat($linesGross) . '). Διορθώστε τα ποσά ή επιβεβαιώστε την απόκλιση.');
             }

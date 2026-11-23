@@ -11,14 +11,43 @@
     const PDFJS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/';
     const MAX_EDGE = 2000;
 
-    function toCents(value) {
-        const s = String(value == null ? '' : value).trim().replace(/\s/g, '').replace(',', '.');
-        const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(s);
-        if (!m) return 0;
+    function decimalCents(s) {
+        const m = /^(-?)(\d{1,10})(?:\.(\d+))?$/.exec(s);
+        if (!m) return null;
         const frac = ((m[3] || '') + '000').slice(0, 3);
         const cents = parseInt(m[2], 10) * 100 + parseInt(frac.slice(0, 2), 10) + (parseInt(frac[2], 10) >= 5 ? 1 : 0);
         return m[1] === '-' ? -cents : cents;
     }
+    /**
+     * Mirror of financeParseCents(): Greek-style amount → cents, or null when it does not parse. With a comma the dots
+     * are thousands separators and the comma is the decimal mark. Without one, a single dot followed by exactly three
+     * digits after a 1-3 digit integer part (not 0) is a thousands separator («1.500»); several dots must be valid
+     * groups («1.000.000»); any other single dot is the decimal mark («12.5»).
+     */
+    function parseCents(value) {
+        let s = String(value == null ? '' : value).replace(/[\s\u00A0]+/g, '');
+        if (s === '') return null;
+        let sign = '';
+        if (s[0] === '-') { sign = '-'; s = s.slice(1); }
+        const group = /^\d{1,3}(?:\.\d{3})+$/;
+        if (s.includes(',')) {
+            const parts = s.split(',');
+            if (parts.length !== 2 || !/^\d+$/.test(parts[1])) return null;
+            let int = parts[0];
+            if (int.includes('.')) {
+                if (!group.test(int)) return null;
+                int = int.replace(/\./g, '');
+            }
+            return decimalCents(sign + int + '.' + parts[1]);
+        }
+        const dots = s.split('.').length - 1;
+        if (dots >= 2) return group.test(s) ? decimalCents(sign + s.replace(/\./g, '')) : null;
+        const t = /^([1-9]\d{0,2})\.(\d{3})$/.exec(s);
+        if (dots === 1 && t) return decimalCents(sign + t[1] + t[2]);
+        return decimalCents(sign + s);
+    }
+    /** 0 for anything invalid, like financeToCents() (the form only previews; the server refuses invalid input). */
+    function toCents(value) { const c = parseCents(value); return c === null ? 0 : c; }
     function fromCents(c) {
         const a = Math.abs(c);
         return (c < 0 ? '-' : '') + Math.floor(a / 100) + '.' + String(a % 100).padStart(2, '0');
@@ -180,6 +209,10 @@
         refresh();
         // Catch the two refusals here: a server round trip would lose the chosen file and everything the scan filled.
         form.addEventListener('submit', ev => {
+            const badAmount = [...form.querySelectorAll('[name="vat_net[]"], [name="vat_vat[]"], #grossTyped')].find(el => el.value.trim() !== '' && parseCents(el.value) === null);
+            if (badAmount) {
+                ev.preventDefault(); badAmount.focus(); alert('Μη έγκυρο ποσό «' + badAmount.value.trim() + '». Γράψτε π.χ. 1.234,56'); return;
+            }
             if (totals(readLines()).gross <= 0) {
                 ev.preventDefault(); alert('Συμπληρώστε τουλάχιστον ένα ποσό.'); return;
             }
@@ -259,7 +292,7 @@
         });
     }
 
-    const api = {VAT_RATES, TOLERANCE_CENTS, toCents, fromCents, display, splitGross, splitNet, totals, mismatch, cleanVat, validVat, formatDmy, paidBeforeOpening, openingWarning, prepareImage, initForm, initOpeningWarnings};
+    const api = {VAT_RATES, TOLERANCE_CENTS, toCents, fromCents, display, splitGross, splitNet, parseCents, totals, mismatch, cleanVat, validVat, formatDmy, paidBeforeOpening, openingWarning, prepareImage, initForm, initOpeningWarnings};
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.VoFinance = api;
     if (typeof document !== 'undefined') {

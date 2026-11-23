@@ -54,7 +54,7 @@ function financeScanAmount($v): ?int {
     if ($v === null || is_array($v) || is_bool($v)) return null;
     $s = trim((string) $v);
     if ($s === '' || !preg_match('/^\d+([.,]\d+)?$/', $s)) return null;
-    return financeToCents($s);
+    return financeParseDecimalCents(str_replace(",", ".", $s)); // the AI is told to use a dot decimal: never read a dot as thousands
 }
 
 function financeValidateScan(array $raw, array $categories, string $today, int $defaultRate): array {

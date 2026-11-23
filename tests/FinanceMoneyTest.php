@@ -23,9 +23,48 @@ final class FinanceMoneyTest extends TestCase
         $this->assertSame(-505, financeToCents('-5.05'));
         $this->assertSame(0, financeToCents(''));
         $this->assertSame(0, financeToCents('abc'));
-        $this->assertSame(0, financeToCents('1.234,56'));
+        $this->assertSame(123456, financeToCents('1.234,56'));
         $this->assertSame(0, financeToCents(null));
         $this->assertSame(0, financeToCents('99999999999999999999'));
+    }
+
+
+    /** Same table as tests/js/finance-form.test.js (parseCents): keep the two in step. */
+    public static function amountExamples(): array
+    {
+        return [
+            ['1.500', 150000], ['1.234,56', 123456], ['12,40', 1240], ['1500.00', 150000], ['12.5', 1250],
+            ['12.000', 1200000], ['1.000.000', 100000000], ['1500', 150000], ['0,5', 50], ['0.500', 50],
+            ['1000.500', 100050], ['-1.500,25', -150025], [' 1 234,50 ', 123450],
+            ['1.23.4', null], ['abc', null], ['1,2,3', null], ['', null], ['1.2345,6', null], ['1,5.0', null], ['--5', null],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('amountExamples')]
+    public function test_greek_amounts_parse_and_garbage_is_null(string $in, ?int $cents): void
+    {
+        $this->assertSame($cents, financeParseCents($in), $in);
+        $this->assertSame($cents ?? 0, financeToCents($in), $in);
+    }
+
+    public function test_require_cents_refuses_garbage_in_greek_but_lets_empty_through(): void
+    {
+        $this->assertSame(150000, financeRequireCents('1.500'));
+        $this->assertSame(0, financeRequireCents('  '));
+        try {
+            financeRequireCents('1.23.4');
+            $this->fail('should refuse');
+        } catch (InvalidArgumentException $e) {
+            $this->assertStringContainsString('Μη έγκυρο ποσό «1.23.4»', $e->getMessage());
+        }
+    }
+
+    public function test_the_scan_amount_reader_keeps_a_dot_as_decimal(): void
+    {
+        require_once __DIR__ . '/../includes/finance-scan.php';
+        $this->assertSame(150, financeScanAmount('1.500'));
+        $this->assertSame(1240, financeScanAmount('12.40'));
+        $this->assertSame(1240, financeScanAmount('12,40'));
     }
 
     public function test_cents_format_back(): void

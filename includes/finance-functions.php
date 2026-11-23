@@ -20,14 +20,61 @@ const FINANCE_DUES_CATEGORY = 'Συνδρομές μελών';
 
 // ─── Pure helpers ────────────────────────────────────────────────────────────
 
-/** "12,50" / "12.5" / 12.5 → 1250. Anything else (thousands separators included) → 0. */
-function financeToCents($value): int {
-    if ($value === null || is_bool($value)) return 0;
-    $s = str_replace([' ', ','], ['', '.'], trim((string) $value));
-    if (!preg_match('/^(-?)(\d{1,10})(?:\.(\d+))?$/D', $s, $m)) return 0;
+/** Plain decimal ("12.5", "1500.00") → cents, dot as the only separator; null when it is not that. Rounds half up. */
+function financeParseDecimalCents(string $s): ?int {
+    if (!preg_match('/^(-?)(\d{1,10})(?:\.(\d+))?$/D', $s, $m)) return null;
     $frac = str_pad($m[3] ?? '', 3, '0');
     $cents = (int) $m[2] * 100 + (int) substr($frac, 0, 2) + ((int) $frac[2] >= 5 ? 1 : 0);
     return $m[1] === '-' ? -$cents : $cents;
+}
+
+/**
+ * Greek-style amount typed by a person → cents; null when it does not parse (so callers can refuse it instead of
+ * silently booking 0). «1.234,56», «1.500», «12,40», «1500.00», «12.5». With a comma, the dots are thousands
+ * separators and the comma is the decimal mark. Without one, a single dot followed by exactly three digits after a
+ * 1–3 digit integer part (not 0) is a thousands separator («1.500»); several dots must be valid groups («1.000.000»);
+ * any other single dot is the decimal mark. Mirrored by parseCents() in assets/js/finance-form.js.
+ */
+function financeParseCents(string $value): ?int {
+    $s = preg_replace('/[\s\x{00A0}]+/u', '', $value);
+    if ($s === null || $s === '') return null;
+    $sign = '';
+    if ($s[0] === '-') { $sign = '-'; $s = substr($s, 1); }
+    $group = '/^\d{1,3}(?:\.\d{3})+$/D';
+    if (str_contains($s, ',')) {
+        if (substr_count($s, ',') !== 1) return null;
+        [$int, $frac] = explode(',', $s);
+        if (!preg_match('/^\d+$/D', $frac)) return null;
+        if (str_contains($int, '.')) {
+            if (!preg_match($group, $int)) return null;
+            $int = str_replace('.', '', $int);
+        }
+        return financeParseDecimalCents($sign . $int . '.' . $frac);
+    }
+    $dots = substr_count($s, '.');
+    if ($dots >= 2) {
+        return preg_match($group, $s) ? financeParseDecimalCents($sign . str_replace('.', '', $s)) : null;
+    }
+    if ($dots === 1 && preg_match('/^([1-9]\d{0,2})\.(\d{3})$/D', $s, $m)) {
+        return financeParseDecimalCents($sign . $m[1] . $m[2]);
+    }
+    return financeParseDecimalCents($sign . $s);
+}
+
+/** Existing callers (database values, computed numbers): same parser, 0 for anything invalid. Pages that read what a person typed use financeParseCents()/financeRequireCents() instead. */
+function financeToCents($value): int {
+    if ($value === null || is_bool($value) || is_array($value)) return 0;
+    if (is_int($value) || is_float($value)) return financeParseDecimalCents(trim((string) $value)) ?? 0;
+    return financeParseCents((string) $value) ?? 0;
+}
+
+/** Amount typed on a page: empty → 0 (the usual "must be positive" checks then speak); non-empty and unparseable → refused in Greek. */
+function financeRequireCents($value): int {
+    $raw = trim((string) $value);
+    if ($raw === '') return 0;
+    $cents = financeParseCents($raw);
+    if ($cents === null) throw new InvalidArgumentException('Μη έγκυρο ποσό «' . mb_substr($raw, 0, 30) . '». Γράψτε π.χ. 1.234,56');
+    return $cents;
 }
 
 function financeFromCents(int $cents): string {

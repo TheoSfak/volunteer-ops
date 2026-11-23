@@ -18,11 +18,25 @@ test('toCents / fromCents / display agree with financeToCents()', () => {
     assert.equal(F.toCents('12.5'), 1250);
     assert.equal(F.toCents(' 12 '), 1200);
     assert.equal(F.toCents('0.005'), 1);
-    assert.equal(F.toCents('1.234,56'), 0);
+    assert.equal(F.toCents('1.234,56'), 123456);
     assert.equal(F.toCents(''), 0);
     assert.equal(F.fromCents(1250), '12.50');
     assert.equal(F.fromCents(-5), '-0.05');
     assert.equal(F.display(123450), '1234,50');
+});
+
+
+test('parseCents reads el-GR amounts (same table as FinanceMoneyTest::amountExamples)', () => {
+    const table = [
+        ['1.500', 150000], ['1.234,56', 123456], ['12,40', 1240], ['1500.00', 150000], ['12.5', 1250],
+        ['12.000', 1200000], ['1.000.000', 100000000], ['1500', 150000], ['0,5', 50], ['0.500', 50],
+        ['1000.500', 100050], ['-1.500,25', -150025], [' 1 234,50 ', 123450],
+        ['1.23.4', null], ['abc', null], ['1,2,3', null], ['', null], ['1.2345,6', null], ['1,5.0', null], ['--5', null],
+    ];
+    for (const [input, cents] of table) {
+        assert.equal(F.parseCents(input), cents, input);
+        assert.equal(F.toCents(input), cents === null ? 0 : cents, input);
+    }
 });
 
 test('splits match the PHP results', () => {

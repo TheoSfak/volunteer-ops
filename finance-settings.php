@@ -20,11 +20,11 @@ if (isPost()) {
                 $openingDate = post('opening_date') !== '' ? post('opening_date') : null;
                 if ($openingDate !== null && !financeValidDate($openingDate)) throw new InvalidArgumentException('Μη έγκυρη ημερομηνία αρχικού υπολοίπου.');
                 $rawOpening = str_replace(' ', '', trim(post('opening_balance')));
-                if ($rawOpening !== '' && !preg_match('/^-?\d{1,10}(?:[.,]\d+)?$/D', $rawOpening)) throw new InvalidArgumentException('Μη έγκυρο αρχικό υπόλοιπο. Γράψτε π.χ. 1500.00');
+                $openingCents = financeRequireCents($rawOpening); // refuses «1.2.3», «abc»; accepts 1.500 / 1.234,56 / 1500.00
                 $oldAccount = $id > 0 ? dbFetchOne("SELECT name, kind, iban, opening_balance, opening_date, is_active FROM finance_accounts WHERE id = ?", [$id]) : null;
                 if ($id > 0 && !$oldAccount) throw new InvalidArgumentException('Ο λογαριασμός δεν βρέθηκε.');
                 $params = [$name, $kind, strtoupper(preg_replace('/\s+/', '', post('iban'))) ?: null,
-                           financeFromCents(financeToCents($rawOpening)), $openingDate, post('is_active', '1') === '1' ? 1 : 0];
+                           financeFromCents($openingCents), $openingDate, post('is_active', '1') === '1' ? 1 : 0];
                 $newAccount = ['name' => $params[0], 'kind' => $params[1], 'iban' => $params[2], 'opening_balance' => $params[3], 'opening_date' => $params[4], 'is_active' => $params[5]];
                 if ($id > 0) {
                     if ($params[5] === 0 && financeIsLastActiveAccount($id)) throw new InvalidArgumentException('Πρέπει να μείνει τουλάχιστον ένας ενεργός λογαριασμός.');
