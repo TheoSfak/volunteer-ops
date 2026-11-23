@@ -206,7 +206,7 @@ include __DIR__ . '/includes/header.php';
             <?php endif; ?>
         </div>
         <?php if ($canScan): ?>
-            <div class="small text-muted mt-2"><i class="bi bi-shield-exclamation me-1"></i>Η εικόνα αποστέλλεται στον πάροχο AI (<?= h($scanProviderText) ?>) για ανάγνωση. Δεν αποθηκεύεται τίποτα πριν πατήσετε «Αποθήκευση».</div>
+            <div class="small text-muted mt-2"><i class="bi bi-shield-exclamation me-1"></i>Η εικόνα αποστέλλεται στον πάροχο AI (<?= h($scanProviderText) ?>) για ανάγνωση. Στα δωρεάν πλάνα ο πάροχος μπορεί να την κρατήσει και να τη χρησιμοποιήσει σύμφωνα με τους όρους του· μη σαρώνετε παραστατικά με προσωπικά δεδομένα ιδιωτών (π.χ. όνομα και ΑΦΜ δωρητή) αν αυτό δεν είναι αποδεκτό. Δεν αποθηκεύεται τίποτα στο σύστημα πριν πατήσετε «Αποθήκευση».</div>
         <?php else: ?>
             <div class="small text-muted mt-2">Η ανάγνωση με AI χρειάζεται ενεργό AI με κλειδί Gemini, Groq ή Grok στις Ρυθμίσεις. Μπορείτε να συμπληρώσετε τα στοιχεία χειροκίνητα.</div>
         <?php endif; ?>

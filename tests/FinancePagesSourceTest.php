@@ -245,4 +245,22 @@ final class FinancePagesSourceTest extends TestCase
         $this->assertStringContainsString('$editMethods = [\'Μετρητά\', \'Τραπεζική κατάθεση\', \'Κάρτα\', \'IRIS\', \'Άλλο\'];', $s);
         $this->assertStringContainsString('(παλιά τιμή)', $s);
     }
+
+    public function test_the_scan_privacy_notice_names_the_provider_and_the_free_plan_retention(): void
+    {
+        $s = self::src('finance-document-form.php');
+        $this->assertStringContainsString('Η εικόνα αποστέλλεται στον πάροχο AI (<?= h($scanProviderText) ?>)', $s);
+        $this->assertStringContainsString('Στα δωρεάν πλάνα ο πάροχος μπορεί να την κρατήσει και να τη χρησιμοποιήσει σύμφωνα με τους όρους του', $s);
+        $this->assertStringContainsString('μη σαρώνετε παραστατικά με προσωπικά δεδομένα ιδιωτών', $s);
+    }
+
+    public function test_the_manual_describes_the_amount_formats_books_start_and_pay_date(): void
+    {
+        $m = self::src('docs/manual-admin.html');
+        foreach (['<code>1.500</code>', 'Έναρξη βιβλίων', 'Ληγμένο τιμολόγιο', 'Έσοδο / Έξοδο', 'ημερομηνία πληρωμής</strong> είναι η ημερομηνία του παραστατικού',
+                  'Στα δωρεάν πλάνα ο πάροχος μπορεί να την κρατήσει'] as $needle) {
+            $this->assertStringContainsString($needle, $m, $needle);
+        }
+        $this->assertStringNotContainsString('ό,τι άλλο απορρίπτεται', $m);
+    }
 }
