@@ -153,10 +153,36 @@ final class FinancePagesSourceTest extends TestCase
             $this->assertStringContainsString('href="' . $href . '"', $section, $href);
         }
         $this->assertSame(1, substr_count($h, 'href="subscriptions.php"'), 'Συνδρομές appears once, under Οικονομικά');
-        $this->assertStringContainsString("hasPagePermission('subscriptions_manage')", $section);
+        $this->assertSame(1, substr_count($h, "hasPagePermission('subscriptions_manage')"), 'the dues permission is evaluated once, into $canDues');
+        $this->assertStringContainsString('<?php if ($canDues): ?>', $section, 'the Συνδρομές item reuses $canDues');
 
         $theme = self::src('includes/sidebar-theme.php');
         $this->assertStringContainsString("'finance'", $theme);
+    }
+
+    public function test_final_review_hardening_is_in_place(): void
+    {
+        $this->assertStringContainsString('Content-Security-Policy: sandbox', self::src('finance-file.php'));
+
+        $form = self::src('finance-document-form.php');
+        $this->assertStringContainsString('aiVisionChain()', $form);
+        $this->assertStringContainsString('για ανάγνωση.', $form);
+        $this->assertStringContainsString("'π.χ. Google'", $form, 'falls back to the original text for an empty chain');
+
+        $settings = self::src('finance-settings.php');
+        $this->assertSame(2, substr_count($settings, 'financeIsLastActiveAccount('), 'update-to-inactive and delete are both guarded');
+        $this->assertStringContainsString("logAudit('finance_update_account', 'finance_accounts', \$id, \$oldAccount, \$newAccount)", $settings);
+        $this->assertStringContainsString("logAudit('finance_create_account', 'finance_accounts', \$id, null, \$newAccount)", $settings);
+        $this->assertStringContainsString("logAudit('finance_update_category', 'finance_categories', \$id, \$old, [", $settings);
+        $this->assertStringContainsString("logAudit('finance_create_category', 'finance_categories', \$id, null, [", $settings);
+
+        $mov = self::src('finance-movements.php');
+        $this->assertStringContainsString("logAudit('finance_create_movement', 'finance_movements', \$mid, null, \$new)", $mov);
+        $this->assertStringContainsString("'from_account_id' => \$from, 'to_account_id' => \$to, 'amount' => \$cents", $mov);
+
+        $subs = self::src('subscriptions.php');
+        $this->assertSame(3, substr_count($subs, 'catch (Throwable $e)'), 'record, edit and delete each survive a failed transaction');
+        $this->assertStringContainsString("financeSyncSubscriptionMovement(\$subscriptionId, (int) getCurrentUserId(), \$old['payment_method'])", $subs);
     }
 
     public function test_reports_export_csv_with_a_bom(): void

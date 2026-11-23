@@ -17,6 +17,7 @@ if (ob_get_level() > 0) ob_clean();
 header('Content-Type: ' . $mime);
 header('Content-Length: ' . filesize($path));
 header('X-Content-Type-Options: nosniff');
+header('Content-Security-Policy: sandbox'); // a stored upload must never run script in our origin
 header("Content-Disposition: inline; filename=\"" . $ascii . "\"; filename*=UTF-8''" . rawurlencode($name));
 readfile($path);
 exit;

@@ -98,6 +98,15 @@ $vatLines = $existing ? dbFetchAll("SELECT rate, net, vat FROM finance_document_
 $payments = $existing ? dbFetchAll("SELECT m.*, a.name AS account_name FROM finance_movements m JOIN finance_accounts a ON a.id = m.account_id WHERE m.document_id = ? ORDER BY m.movement_date, m.id", [$id]) : [];
 $defaultRate = (int) financeSetting('finance_default_vat_rate', '24');
 $canScan = aiVisionAvailable();
+// Name the providers the scan may really use (the chain, in failover order), with where each one is based.
+$scanProviders = [];
+if ($canScan) {
+    foreach (aiVisionChain() as $p) {
+        $meta = aiProviders()[$p] ?? [];
+        $scanProviders[] = ($meta['label'] ?? $p) . (!empty($meta['jurisdiction']) ? ' — ' . $meta['jurisdiction'] : '');
+    }
+}
+$scanProviderText = $scanProviders ? implode(', ', $scanProviders) : 'π.χ. Google';
 $val = fn(string $k) => h((string) ($existing[$k] ?? ''));
 $docTypes = ['INVOICE' => 'Τιμολόγιο', 'RECEIPT' => 'Απόδειξη', 'DONATION' => 'Απόδειξη δωρεάς', 'DEPOSIT' => 'Αποδεικτικό κατάθεσης', 'OTHER' => 'Άλλο'];
 $rateOptions = function (int $selected): string {
@@ -144,7 +153,7 @@ include __DIR__ . '/includes/header.php';
             <?php endif; ?>
         </div>
         <?php if ($canScan): ?>
-            <div class="small text-muted mt-2"><i class="bi bi-shield-exclamation me-1"></i>Η εικόνα αποστέλλεται στον πάροχο AI (π.χ. Google) για ανάγνωση. Δεν αποθηκεύεται τίποτα πριν πατήσετε «Αποθήκευση».</div>
+            <div class="small text-muted mt-2"><i class="bi bi-shield-exclamation me-1"></i>Η εικόνα αποστέλλεται στον πάροχο AI (<?= h($scanProviderText) ?>) για ανάγνωση. Δεν αποθηκεύεται τίποτα πριν πατήσετε «Αποθήκευση».</div>
         <?php else: ?>
             <div class="small text-muted mt-2">Η ανάγνωση με AI χρειάζεται ενεργό AI με κλειδί Gemini, Groq ή Grok στις Ρυθμίσεις. Μπορείτε να συμπληρώσετε τα στοιχεία χειροκίνητα.</div>
         <?php endif; ?>

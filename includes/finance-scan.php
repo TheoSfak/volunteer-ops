@@ -62,7 +62,7 @@ function financeValidateScan(array $raw, array $categories, string $today, int $
     $doubt = function (string $field) use (&$uncertain) { if (!in_array($field, $uncertain, true)) $uncertain[] = $field; };
     $str = function ($v, int $max): ?string {
         if (!is_string($v)) return null;
-        $v = trim((string) preg_replace('/\p{Cc}/u', '', $v));
+        $v = trim((string) preg_replace('/[\p{Cc}\s]+/u', ' ', $v)); // control characters count as word breaks
         return $v !== '' ? mb_substr($v, 0, $max) : null;
     };
 

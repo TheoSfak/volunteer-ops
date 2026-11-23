@@ -90,8 +90,8 @@ final class FinanceScanTest extends TestCase
             'direction' => 'OUT', 'counterparty_name' => "ACME\nLTD\x07", 'doc_number' => "A\r\n1",
             'category' => 'Δωρεές', 'vat_lines' => [['rate' => 24, 'net' => 10, 'vat' => 'abc']], 'gross_total' => 0,
         ], self::CATS, '2026-11-22', 24);
-        $this->assertSame('ACMELTD', $v['counterparty_name']);
-        $this->assertSame('A1', $v['doc_number']);
+        $this->assertSame('ACME LTD', $v['counterparty_name']);
+        $this->assertSame('A 1', $v['doc_number']);
         $this->assertNull($v['category_id']);
         $this->assertContains('category', $v['uncertain']);
         $this->assertContains('vat_lines', $v['uncertain']);
