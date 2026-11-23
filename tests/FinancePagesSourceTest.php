@@ -162,7 +162,7 @@ final class FinancePagesSourceTest extends TestCase
 
     public function test_final_review_hardening_is_in_place(): void
     {
-        $this->assertStringContainsString('Content-Security-Policy: sandbox', self::src('finance-file.php'));
+        $this->assertStringContainsString("if (\$mime !== 'application/pdf') header('Content-Security-Policy: sandbox');", self::src('finance-file.php'));
 
         $form = self::src('finance-document-form.php');
         $this->assertStringContainsString('aiVisionChain()', $form);

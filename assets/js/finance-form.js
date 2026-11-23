@@ -85,7 +85,10 @@
             const viewport = page.getViewport({scale: Math.min(3, MAX_EDGE / Math.max(base.width, base.height))});
             const c = document.createElement('canvas');
             c.width = Math.round(viewport.width); c.height = Math.round(viewport.height);
-            await page.render({canvasContext: c.getContext('2d'), viewport}).promise;
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, c.width, c.height); // JPEG has no alpha: white page, not black
+            // intent 'print' renders without requestAnimationFrame, so it also finishes in a background tab.
+            await page.render({canvasContext: ctx, viewport, intent: 'print'}).promise;
             return c.toDataURL('image/jpeg', 0.85);
         }
         const url = URL.createObjectURL(file);

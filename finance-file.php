@@ -17,7 +17,9 @@ if (ob_get_level() > 0) ob_clean();
 header('Content-Type: ' . $mime);
 header('Content-Length: ' . filesize($path));
 header('X-Content-Type-Options: nosniff');
-header('Content-Security-Policy: sandbox'); // a stored upload must never run script in our origin
+// Images only: a sandbox CSP stops Chrome's built-in viewer from showing a PDF inline,
+// and browsers' PDF viewers never run the PDF's script in our origin anyway.
+if ($mime !== 'application/pdf') header('Content-Security-Policy: sandbox');
 header("Content-Disposition: inline; filename=\"" . $ascii . "\"; filename*=UTF-8''" . rawurlencode($name));
 readfile($path);
 exit;
