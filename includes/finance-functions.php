@@ -470,3 +470,21 @@ function financeImportPastDues(string $fromDate, int $userId): int {
     }
     return $booked;
 }
+
+// ─── Uploads ─────────────────────────────────────────────────────────────────
+
+/** Store an uploaded document file under a random name. null when no file was submitted. */
+function financeStoreUpload(array $file): ?array {
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) return null;
+    $allowed = ['application/pdf' => 'pdf', 'image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
+    $mime = !empty($file['tmp_name']) ? (new finfo(FILEINFO_MIME_TYPE))->file($file['tmp_name']) : false;
+    if (($file['error'] ?? 1) !== UPLOAD_ERR_OK || ($file['size'] ?? 0) > 10 * 1024 * 1024 || !isset($allowed[$mime])) {
+        throw new RuntimeException('Το αρχείο πρέπει να είναι PDF, JPG, PNG ή WebP έως 10MB.');
+    }
+    $dir = financeUploadDir();
+    if (!is_dir($dir) && !mkdir($dir, 0755, true) && !is_dir($dir)) throw new RuntimeException('Δεν ήταν δυνατή η δημιουργία του φακέλου παραστατικών.');
+    ensurePrivateUploadDir($dir);
+    $stored = 'doc-' . date('Ymd') . '-' . bin2hex(random_bytes(8)) . '.' . $allowed[$mime];
+    if (!move_uploaded_file($file['tmp_name'], $dir . $stored)) throw new RuntimeException('Δεν ήταν δυνατή η αποθήκευση του αρχείου.');
+    return ['original' => mb_substr(basename((string) ($file['name'] ?? $stored)), 0, 255), 'stored' => $stored, 'mime' => $mime];
+}
