@@ -405,3 +405,65 @@ function financeVatSummary(string $from, string $to): array {
         return ['direction' => $r['direction'], 'rate' => (int) round((float) $r['rate']), 'net' => $net, 'vat' => $vat, 'gross' => $net + $vat];
     }, $rows);
 }
+
+// ─── Dues (Ετήσιες Συνδρομές) → cash book ────────────────────────────────────
+
+const FINANCE_DUES_METHOD_KEYS = ['Μετρητά' => 'cash', 'Τραπεζική κατάθεση' => 'bank', 'IRIS' => 'bank', 'Κάρτα' => 'card'];
+
+function financeDuesMethodKey(?string $method): string {
+    return FINANCE_DUES_METHOD_KEYS[trim((string) $method)] ?? 'cash';
+}
+
+function financeCashAccountId(): int {
+    return (int) (dbFetchValue("SELECT id FROM finance_accounts WHERE is_active = 1 ORDER BY kind = 'CASH' DESC, sort_order, id LIMIT 1") ?: 0);
+}
+
+/** An unmapped or deactivated mapping falls back to cash, so a dues payment is never silently left out of the books. */
+function financeDuesAccountFor(?string $method): int {
+    $id = (int) financeSetting('finance_dues_account_' . financeDuesMethodKey($method), '0');
+    if ($id > 0 && dbFetchOne("SELECT id FROM finance_accounts WHERE id = ? AND is_active = 1", [$id])) return $id;
+    return financeCashAccountId();
+}
+
+function financeDuesCategoryId(): ?int {
+    $id = dbFetchValue("SELECT id FROM finance_categories WHERE direction = 'IN' AND name = ?", [FINANCE_DUES_CATEGORY]);
+    return $id ? (int) $id : null;
+}
+
+/**
+ * Make the cash book agree with one dues row: a paid amount → exactly one IN movement; no amount, or the row is
+ * gone → no movement. Called after every insert/update/delete in subscriptions.php. Safe before migration 227 ran.
+ */
+function financeSyncSubscriptionMovement(int $subscriptionId, int $userId): void {
+    if (!dbTableExists('finance_movements')) return;
+    $sub = dbFetchOne("SELECT vs.id, vs.amount, vs.payment_date, vs.payment_method, u.name
+                       FROM volunteer_subscriptions vs JOIN users u ON u.id = vs.user_id WHERE vs.id = ?", [$subscriptionId]);
+    $existing = dbFetchOne("SELECT id FROM finance_movements WHERE subscription_id = ?", [$subscriptionId]);
+    $cents = $sub ? financeToCents($sub['amount']) : 0;
+    if ($cents <= 0) {
+        if ($existing) dbExecute("DELETE FROM finance_movements WHERE id = ?", [$existing['id']]);
+        return;
+    }
+    $accountId = financeDuesAccountFor($sub['payment_method']);
+    if ($accountId === 0) return; // no active account at all: nothing to book into
+    $desc = mb_substr('Συνδρομή — ' . $sub['name'], 0, 255);
+    $params = [$accountId, financeFromCents($cents), $sub['payment_date'], financeDuesCategoryId(), $desc];
+    if ($existing) {
+        dbExecute("UPDATE finance_movements SET account_id = ?, amount = ?, movement_date = ?, category_id = ?, description = ? WHERE id = ?",
+            array_merge($params, [$existing['id']]));
+    } else {
+        dbExecute("INSERT INTO finance_movements (account_id, amount, movement_date, category_id, description, direction, subscription_id, created_by)
+                   VALUES (?, ?, ?, ?, ?, 'IN', ?, ?)", array_merge($params, [$subscriptionId, $userId]));
+    }
+}
+
+/** One-off: book the dues paid on/after $fromDate that have no movement yet. Returns how many were booked. */
+function financeImportPastDues(string $fromDate, int $userId): int {
+    if (!financeValidDate($fromDate)) throw new InvalidArgumentException('Μη έγκυρη ημερομηνία.');
+    $ids = dbFetchAll("SELECT vs.id FROM volunteer_subscriptions vs LEFT JOIN finance_movements m ON m.subscription_id = vs.id
+                       WHERE vs.payment_date >= ? AND vs.amount > 0 AND m.id IS NULL ORDER BY vs.payment_date", [$fromDate]);
+    foreach ($ids as $r) {
+        financeSyncSubscriptionMovement((int) $r['id'], $userId);
+    }
+    return count($ids);
+}

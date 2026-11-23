@@ -2,6 +2,7 @@
 /** Annual volunteer subscription management. */
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/includes/subscription-iris.php';
+require_once __DIR__ . '/includes/finance-functions.php';
 requirePermission('subscriptions_manage');
 
 $pageTitle = 'Ετήσιες Συνδρομές';
@@ -256,12 +257,16 @@ if (isPost()) {
                 redirect('subscriptions.php');
             }
 
-            $subscriptionId = dbInsert("INSERT INTO volunteer_subscriptions
-                (user_id, payment_date, expiry_date, renewal_kind, coverage_years, amount, payment_method, receipt_number, receipt_original_name, receipt_stored_name, notes, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
-                $userId, $paymentDate, $expiryDate, $isReactivation ? 'REACTIVATION' : 'RENEWAL', $coverageYears, $amount === '' ? null : $amount,
-                $method ?: null, $receiptNumber ?: null, $receiptOriginal, $receiptStored, $notes ?: null, getCurrentUserId()
-            ]);
+            $subscriptionId = financeTransaction(function () use ($userId, $paymentDate, $expiryDate, $isReactivation, $coverageYears, $amount, $method, $receiptNumber, $receiptOriginal, $receiptStored, $notes) {
+                $newId = (int) dbInsert("INSERT INTO volunteer_subscriptions
+                    (user_id, payment_date, expiry_date, renewal_kind, coverage_years, amount, payment_method, receipt_number, receipt_original_name, receipt_stored_name, notes, created_by)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", [
+                    $userId, $paymentDate, $expiryDate, $isReactivation ? 'REACTIVATION' : 'RENEWAL', $coverageYears, $amount === '' ? null : $amount,
+                    $method ?: null, $receiptNumber ?: null, $receiptOriginal, $receiptStored, $notes ?: null, getCurrentUserId()
+                ]);
+                financeSyncSubscriptionMovement($newId, (int) getCurrentUserId());
+                return $newId;
+            });
             unset($_SESSION['subscription_payment_form']);
             if ($irisRequest) subscriptionIrisCompleteLatestRequest($userId);
             logAudit('record_subscription_payment', 'volunteer_subscriptions', $subscriptionId, null, [
@@ -323,6 +328,7 @@ if (isPost()) {
                     redirect('subscriptions.php?edit=' . $subscriptionId);
                 }
                 dbExecute("UPDATE volunteer_subscriptions SET payment_date = ?, expiry_date = ?, amount = ?, payment_method = ?, receipt_number = ?, receipt_original_name = ?, receipt_stored_name = ?, notes = ?, renewal_kind = ?, reminder_sent_3m = ?, reminder_sent_1m = ?, reminder_sent_1w = ?, reminder_sent_expired = ? WHERE id = ?", [$paymentDate, $expiryDate, $amount === '' ? null : $amount, trim(post('payment_method')) ?: null, $receiptNumber ?: null, $receiptOriginal, $receiptStored, trim(post('notes')) ?: null, post('renewal_kind') === 'REACTIVATION' ? 'REACTIVATION' : 'RENEWAL', $reset ? 0 : $old['reminder_sent_3m'], $reset ? 0 : $old['reminder_sent_1m'], $reset ? 0 : $old['reminder_sent_1w'], $reset ? 0 : $old['reminder_sent_expired'], $subscriptionId]);
+                financeSyncSubscriptionMovement($subscriptionId, (int) getCurrentUserId());
                 logAudit('edit_subscription', 'volunteer_subscriptions', $subscriptionId, [
                     'payment_date' => $old['payment_date'],
                     'expiry_date' => $old['expiry_date'],
@@ -355,6 +361,7 @@ if (isPost()) {
             redirect('subscriptions.php?show_history=1&history_user_id=' . (int)$old['user_id'] . '#subscriptionPaymentHistory');
         }
         dbExecute("DELETE FROM volunteer_subscriptions WHERE id = ?", [$subscriptionId]);
+        financeSyncSubscriptionMovement($subscriptionId, (int) getCurrentUserId());
         if (!empty($old['receipt_stored_name'])) {
             $receiptPath = __DIR__ . '/uploads/subscription-receipts/' . basename($old['receipt_stored_name']);
             if (is_file($receiptPath)) @unlink($receiptPath);
