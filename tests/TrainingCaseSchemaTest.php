@@ -129,6 +129,6 @@ final class TrainingCaseSchemaTest extends TestCase
             $this->assertStringContainsString($needle, $schema, "schema.sql: $needle");
             $this->assertStringContainsString($needle, $migrations, "migrations.php: $needle");
         }
-        $this->assertSame(226, DB_SCHEMA_VERSION);
+        $this->assertSame(227, DB_SCHEMA_VERSION);
     }
 }

@@ -61,6 +61,9 @@ function getPermissionMap(): array {
             ['slug' => 'citizens_view',      'label' => 'Πολίτες (Προβολή)',                   'icon' => 'bi-person-vcard',     'description' => 'Λίστα πολιτών (implied από citizens_manage)'],
             ['slug' => 'citizens_manage',    'label' => 'Πολίτες (Διαχείριση)',                'icon' => 'bi-file-earmark-medical', 'description' => 'Πιστοποιητικά πολιτών & τύποι πιστοποιητικών'],
         ],
+        'Οικονομικά' => [
+            ['slug' => 'finance_manage',     'label' => 'Οικονομικά',                         'icon' => 'bi-wallet2',          'description' => 'Ταμείο, παραστατικά (σάρωση/upload), υποχρεώσεις, αναφορές ΦΠΑ'],
+        ],
         'Ρυθμίσεις' => [
             ['slug' => 'positions_manage',   'label' => 'Θέσεις Εθελοντών',                   'icon' => 'bi-person-badge',     'description' => 'Διαχείριση θέσεων/ρόλων εντός του σώματος'],
             ['slug' => 'skills_manage',      'label' => 'Δεξιότητες',                         'icon' => 'bi-stars',            'description' => 'Διαχείριση δεξιοτήτων εθελοντών'],
