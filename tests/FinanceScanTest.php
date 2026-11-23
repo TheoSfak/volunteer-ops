@@ -84,10 +84,35 @@ final class FinanceScanTest extends TestCase
         $this->assertTrue($v['totals_ok']);
     }
 
+    public function test_stricter_field_checks(): void
+    {
+        $v = financeValidateScan([
+            'direction' => 'OUT', 'counterparty_name' => "ACME\nLTD\x07", 'doc_number' => "A\r\n1",
+            'category' => 'Δωρεές', 'vat_lines' => [['rate' => 24, 'net' => 10, 'vat' => 'abc']], 'gross_total' => 0,
+        ], self::CATS, '2026-11-22', 24);
+        $this->assertSame('ACMELTD', $v['counterparty_name']);
+        $this->assertSame('A1', $v['doc_number']);
+        $this->assertNull($v['category_id']);
+        $this->assertContains('category', $v['uncertain']);
+        $this->assertContains('vat_lines', $v['uncertain']);
+        $this->assertSame('12.40', $v['gross_total'], 'a zero total is dropped; the lines supply it');
+        $this->assertContains('gross_total', $v['uncertain']);
+
+        $v = financeValidateScan(['gross_total' => str_repeat('9', 30)], self::CATS, '2026-11-22', 24);
+        $this->assertNull($v['gross_total']);
+        $this->assertContains('gross_total', $v['uncertain']);
+    }
+
     public function test_only_real_images_are_sent(): void
     {
-        $png = 'data:image/png;base64,' . base64_encode(str_repeat("\x89PNG", 50));
+        $im = imagecreatetruecolor(40, 40);
+        ob_start(); imagepng($im); $pngBin = ob_get_clean();
+        ob_start(); imagejpeg($im); $jpgBin = ob_get_clean();
+        $png = 'data:image/png;base64,' . base64_encode($pngBin);
         $this->assertTrue(financeScanImageOk($png));
+        $this->assertTrue(financeScanImageOk('data:image/jpeg;base64,' . base64_encode($jpgBin)));
+        $this->assertFalse(financeScanImageOk('data:image/png;base64,' . base64_encode($jpgBin)), 'JPEG bytes declared as PNG');
+        $this->assertFalse(financeScanImageOk('data:image/png;base64,' . base64_encode(str_repeat("\x89PNG", 50))), 'valid base64 but not an image');
         $this->assertFalse(financeScanImageOk('data:image/gif;base64,' . base64_encode(str_repeat('x', 200))));
         $this->assertFalse(financeScanImageOk('data:image/png;base64,***not base64***'));
         $this->assertFalse(financeScanImageOk('https://example.com/a.png'));

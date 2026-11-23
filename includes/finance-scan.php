@@ -15,7 +15,11 @@ function financeScanImageOk(string $dataUrl): bool {
     if (strlen($dataUrl) > 8000000) return false;
     if (!preg_match('#^data:image/(jpeg|png|webp);base64,#', $dataUrl, $m)) return false;
     $bin = base64_decode(substr($dataUrl, strlen($m[0])), true);
-    return $bin !== false && strlen($bin) >= 100;
+    if ($bin === false || strlen($bin) < 100) return false;
+    $info = @getimagesizefromstring($bin);
+    if (!$info) return false;
+    $expected = ['jpeg' => IMAGETYPE_JPEG, 'png' => IMAGETYPE_PNG, 'webp' => IMAGETYPE_WEBP];
+    return $info[2] === $expected[$m[1]];
 }
 
 function financeScanMessages(string $imageDataUrl, array $categoryNames): array {
@@ -56,7 +60,11 @@ function financeScanAmount($v): ?int {
 function financeValidateScan(array $raw, array $categories, string $today, int $defaultRate): array {
     $uncertain = array_values(array_intersect(array_map('strval', (array) ($raw['uncertain'] ?? [])), FINANCE_SCAN_FIELDS));
     $doubt = function (string $field) use (&$uncertain) { if (!in_array($field, $uncertain, true)) $uncertain[] = $field; };
-    $str = fn($v, int $max) => is_string($v) && trim($v) !== '' ? mb_substr(trim($v), 0, $max) : null;
+    $str = function ($v, int $max): ?string {
+        if (!is_string($v)) return null;
+        $v = trim((string) preg_replace('/\p{Cc}/u', '', $v));
+        return $v !== '' ? mb_substr($v, 0, $max) : null;
+    };
 
     $direction = in_array($raw['direction'] ?? null, FINANCE_DIRECTIONS, true) ? $raw['direction'] : null;
     $docType = in_array($raw['doc_type'] ?? null, FINANCE_DOC_TYPES, true) ? $raw['doc_type'] : null;
@@ -77,13 +85,16 @@ function financeValidateScan(array $raw, array $categories, string $today, int $
         $net = financeScanAmount($l['net'] ?? null);
         $vatC = financeScanAmount($l['vat'] ?? null);
         if (!in_array($rate, FINANCE_VAT_RATES, true) || $net === null) { $doubt('vat_lines'); continue; }
-        if ($vatC === null) $vatC = financeSplitNet($net, $rate)['vat'];
+        if ($vatC === null) {
+            if (($l['vat'] ?? null) !== null) $doubt('vat_lines');
+            $vatC = financeSplitNet($net, $rate)['vat'];
+        }
         if ($net + $vatC <= 0) continue;
         $lines[] = ['rate' => $rate, 'net' => $net, 'vat' => $vatC];
     }
 
     $gross = financeScanAmount($raw['gross_total'] ?? null);
-    if (($raw['gross_total'] ?? null) !== null && $gross === null) $doubt('gross_total');
+    if (($raw['gross_total'] ?? null) !== null && ($gross === null || $gross <= 0)) { $gross = null; $doubt('gross_total'); }
     if (!$lines && $gross !== null && $gross > 0) {
         $s = financeSplitGross($gross, in_array($defaultRate, FINANCE_VAT_RATES, true) ? $defaultRate : 24);
         $lines[] = ['rate' => $s['rate'], 'net' => $s['net'], 'vat' => $s['vat']];
@@ -103,6 +114,8 @@ function financeValidateScan(array $raw, array $categories, string $today, int $
             }
         }
     }
+
+    if ($wanted !== '' && $categoryId === null) $doubt('category');
 
     return [
         'direction' => $direction,
