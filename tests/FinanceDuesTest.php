@@ -158,6 +158,7 @@ final class FinanceDuesTest extends TestCase
 
     public function test_the_books_start_warning_shows_only_while_no_start_can_be_derived(): void
     {
+        $hidden = array_column(dbFetchAll("SELECT id FROM finance_accounts WHERE is_active = 1 AND name NOT LIKE 'TESTFIN%'"), 'id');
         dbExecute("UPDATE finance_accounts SET is_active = 0 WHERE name NOT LIKE 'TESTFIN%'"); // hide the seeded accounts for this test
         try {
             financeSaveSetting('finance_books_start', '');
@@ -165,7 +166,7 @@ final class FinanceDuesTest extends TestCase
             financeSaveSetting('finance_books_start', '2026-01-01');
             $this->assertNull(financeBooksStartWarning());
         } finally {
-            dbExecute("UPDATE finance_accounts SET is_active = 1 WHERE name NOT LIKE 'TESTFIN%'");
+            foreach ($hidden as $id) dbExecute("UPDATE finance_accounts SET is_active = 1 WHERE id = ?", [$id]); // only those it hid
         }
     }
 
