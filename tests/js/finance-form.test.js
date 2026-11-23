@@ -40,3 +40,12 @@ test('totals and mismatch', () => {
     assert.equal(F.mismatch(1807, 1805), false);
     assert.equal(F.mismatch(1808, 1805), true);
 });
+
+test('validVat mirrors financeValidVatNumber() (same values as FinanceMoneyTest)', () => {
+    assert.equal(F.validVat('090000045'), true);
+    assert.equal(F.validVat('090000046'), false);
+    assert.equal(F.validVat('000000000'), false);
+    assert.equal(F.validVat('12345'), false);
+    assert.equal(F.validVat('09000004A'), false);
+    assert.equal(F.validVat('090000045\n'), false);
+});

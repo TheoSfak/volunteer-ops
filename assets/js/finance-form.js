@@ -38,6 +38,13 @@
         return {net, vat, gross: net + vat};
     }
     function mismatch(typed, linesGross) { return Math.abs(typed - linesGross) > TOLERANCE_CENTS; }
+    /** Mirror of financeValidVatNumber(): 9 digits, weights 2^8..2^1, (sum mod 11) mod 10 = ninth digit. */
+    function validVat(afm) {
+        if (!/^\d{9}$/.test(afm) || afm === '000000000') return false;
+        let sum = 0;
+        for (let i = 0; i < 8; i++) sum += Number(afm[i]) * Math.pow(2, 8 - i);
+        return (sum % 11) % 10 === Number(afm[8]);
+    }
 
     // ── Browser only ────────────────────────────────────────────────────────
     function loadScript(src) {
@@ -154,6 +161,10 @@
             if (totals(readLines()).gross <= 0) {
                 ev.preventDefault(); alert('Συμπληρώστε τουλάχιστον ένα ποσό.'); return;
             }
+            const vatEl = $('#counterpartyVat');
+            if (vatEl && vatEl.value.trim() !== '' && !validVat(vatEl.value.trim())) {
+                ev.preventDefault(); vatEl.focus(); alert('Το ΑΦΜ δεν είναι έγκυρο (έλεγχος ψηφίου). Διορθώστε το ή αφήστε το κενό.'); return;
+            }
             const box = $('[name="total_confirmed"]');
             if (!$('#totalMismatch').classList.contains('d-none') && !box.checked) {
                 ev.preventDefault(); box.focus(); alert('Το τυπωμένο σύνολο διαφέρει από τις γραμμές ΦΠΑ. Διορθώστε ή επιβεβαιώστε.');
@@ -207,7 +218,7 @@
         });
     }
 
-    const api = {VAT_RATES, TOLERANCE_CENTS, toCents, fromCents, display, splitGross, splitNet, totals, mismatch, prepareImage, initForm};
+    const api = {VAT_RATES, TOLERANCE_CENTS, toCents, fromCents, display, splitGross, splitNet, totals, mismatch, validVat, prepareImage, initForm};
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.VoFinance = api;
     if (typeof document !== 'undefined') {

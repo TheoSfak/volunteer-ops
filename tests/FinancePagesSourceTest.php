@@ -54,4 +54,17 @@ final class FinancePagesSourceTest extends TestCase
         $this->assertStringContainsString('ensurePrivateUploadDir(', $s);
         $this->assertStringContainsString('basename(', $s);
     }
+
+    public function test_the_form_audits_pay_now_keeps_existing_links_and_hides_database_errors(): void
+    {
+        $s = self::src('finance-document-form.php');
+        $this->assertSame(2, substr_count($s, "logAudit('finance_pay_document'"), 'pay form and pay-now both audit');
+        $this->assertStringContainsString('(ανενεργή)', $s);
+        $this->assertStringContainsString('deleted_at IS NULL OR id = ?', $s);
+        $this->assertStringContainsString('catch (PDOException', $s);
+        $this->assertStringContainsString('error_log(', $s);
+        $this->assertStringContainsString("'#pay'", $s);
+        $this->assertStringContainsString("\$existing ?: null, \$doc + ['vat_lines'", $s);
+        $this->assertStringContainsString("\$accounts ? 'checked' : 'disabled'", $s);
+    }
 }

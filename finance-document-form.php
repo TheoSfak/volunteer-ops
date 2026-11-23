@@ -15,6 +15,7 @@ $back = 'finance-documents.php?direction=' . $direction;
 if (isPost()) {
     verifyCsrf();
     $action = post('action');
+    $failUrl = $existing ? 'finance-document-form.php?id=' . $id . ($action === 'pay' ? '#pay' : '') : 'finance-document-form.php?direction=' . $direction;
     try {
         if ($action === 'delete' && $existing) {
             $row = financeDeleteDocument($id);
@@ -48,11 +49,14 @@ if (isPost()) {
             ];
             if ($upload) $doc += ['file_original_name' => $upload['original'], 'file_stored_name' => $upload['stored'], 'file_mime' => $upload['mime']];
             try {
-                $savedId = financeTransaction(function () use ($doc, $lines, $uid, $existing, $id) {
+                $payMov = null;
+                $savedId = financeTransaction(function () use ($doc, $lines, $uid, $existing, $id, &$payMov) {
                     $savedId = financeSaveDocument($doc, $lines, $uid, $existing ? $id : null);
                     if (!$existing && post('pay_now') === '1') {
                         $st = financeDocumentStatus($savedId);
-                        financePayDocument($savedId, (int) post('pay_account_id'), post('pay_date') ?: $doc['doc_date'], $st['remaining'], $uid);
+                        $payAccount = (int) post('pay_account_id');
+                        $payDate = post('pay_date') ?: $doc['doc_date'];
+                        $payMov = ['id' => financePayDocument($savedId, $payAccount, $payDate, $st['remaining'], $uid), 'account_id' => $payAccount, 'amount' => $st['remaining'], 'date' => $payDate];
                     }
                     return $savedId;
                 });
@@ -61,20 +65,34 @@ if (isPost()) {
                 throw $e;
             }
             if ($upload && $existing && !empty($existing['file_stored_name'])) @unlink(financeUploadDir() . basename($existing['file_stored_name']));
-            logAudit($existing ? 'finance_update_document' : 'finance_create_document', 'finance_documents', $savedId);
+            logAudit($existing ? 'finance_update_document' : 'finance_create_document', 'finance_documents', $savedId, $existing ?: null, $doc + ['vat_lines' => $lines]);
+            if ($payMov) logAudit('finance_pay_document', 'finance_movements', $payMov['id'], null, ['document_id' => $savedId, 'account_id' => $payMov['account_id'], 'amount' => $payMov['amount'], 'date' => $payMov['date']]);
             setFlash('success', $existing ? 'Το παραστατικό ενημερώθηκε.' : 'Το παραστατικό καταχωρήθηκε.');
             redirect($existing ? 'finance-document-form.php?id=' . $savedId : $back);
         }
     } catch (InvalidArgumentException | RuntimeException $e) {
         setFlash('error', $e->getMessage());
-        redirect($existing ? 'finance-document-form.php?id=' . $id : 'finance-document-form.php?direction=' . $direction);
+        redirect($failUrl);
+    } catch (PDOException $e) {
+        error_log('finance-document-form: ' . $e->getMessage());
+        setFlash('error', 'Παρουσιάστηκε σφάλμα βάσης δεδομένων. Η ενέργεια δεν ολοκληρώθηκε.');
+        redirect($failUrl);
     }
 }
 
 $pageTitle = $existing ? 'Παραστατικό' : ($direction === 'IN' ? 'Νέο έσοδο' : 'Νέο έξοδο');
 $categories = financeCategories($direction);
 $accounts = financeAccounts();
-$missions = dbFetchAll("SELECT id, title FROM missions WHERE deleted_at IS NULL ORDER BY id DESC LIMIT 100");
+if (!empty($existing['category_id']) && !in_array((int) $existing['category_id'], array_map('intval', array_column($categories, 'id')), true)) {
+    $cur = dbFetchOne("SELECT id, name, direction FROM finance_categories WHERE id = ?", [(int) $existing['category_id']]);
+    if ($cur) { $cur['name'] .= ' (ανενεργή)'; $categories[] = $cur; }
+}
+$missions = dbFetchAll("SELECT id, title FROM missions WHERE (deleted_at IS NULL OR id = ?) ORDER BY id DESC LIMIT 100", [(int) ($existing['mission_id'] ?? 0)]);
+// Keep a saved mission that fell outside the newest 100 (or was soft-deleted) so an edit does not drop the link.
+if (!empty($existing['mission_id']) && !in_array((int) $existing['mission_id'], array_map('intval', array_column($missions, 'id')), true)) {
+    $m = dbFetchOne("SELECT id, title FROM missions WHERE id = ?", [(int) $existing['mission_id']]);
+    if ($m) $missions[] = $m;
+}
 $vehicles = dbFetchAll("SELECT id, plate_number, label FROM vehicles ORDER BY plate_number");
 $vatLines = $existing ? dbFetchAll("SELECT rate, net, vat FROM finance_document_vat WHERE document_id = ? ORDER BY id", [$id]) : [];
 $payments = $existing ? dbFetchAll("SELECT m.*, a.name AS account_name FROM finance_movements m JOIN finance_accounts a ON a.id = m.account_id WHERE m.document_id = ? ORDER BY m.movement_date, m.id", [$id]) : [];
@@ -174,7 +192,7 @@ include __DIR__ . '/includes/header.php';
 
     <?php if (!$existing): ?>
     <div class="card mb-3"><div class="card-body">
-        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="pay_now" value="1" id="payNow" checked>
+        <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="pay_now" value="1" id="payNow" <?= $accounts ? 'checked' : 'disabled' ?>>
             <label class="form-check-label" for="payNow"><?= $direction === 'IN' ? 'Εισπράχθηκε ήδη' : 'Πληρώθηκε ήδη' ?></label></div>
         <div class="row g-2 mt-1">
             <div class="col-md-4"><select class="form-select" name="pay_account_id"><?php foreach ($accounts as $a): ?><option value="<?= (int) $a['id'] ?>"><?= h($a['name']) ?></option><?php endforeach; ?></select></div>
