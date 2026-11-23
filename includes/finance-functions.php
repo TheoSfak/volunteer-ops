@@ -462,8 +462,11 @@ function financeImportPastDues(string $fromDate, int $userId): int {
     if (!financeValidDate($fromDate)) throw new InvalidArgumentException('Μη έγκυρη ημερομηνία.');
     $ids = dbFetchAll("SELECT vs.id FROM volunteer_subscriptions vs LEFT JOIN finance_movements m ON m.subscription_id = vs.id
                        WHERE vs.payment_date >= ? AND vs.amount > 0 AND m.id IS NULL ORDER BY vs.payment_date", [$fromDate]);
+    if (financeCashAccountId() === 0) return 0; // no active account: nothing can be booked
+    $booked = 0;
     foreach ($ids as $r) {
         financeSyncSubscriptionMovement((int) $r['id'], $userId);
+        if (dbFetchOne("SELECT id FROM finance_movements WHERE subscription_id = ?", [$r['id']])) $booked++;
     }
-    return count($ids);
+    return $booked;
 }

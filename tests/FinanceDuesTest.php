@@ -107,4 +107,16 @@ final class FinanceDuesTest extends TestCase
         $this->assertNotNull($this->movement($new1));
         $this->assertNull($this->movement($new2));
     }
+
+    public function test_importing_books_nothing_and_reports_zero_when_no_account_is_active(): void
+    {
+        $this->sub('2026-01-10', '30.00', 'Μετρητά');
+        $active = array_column(dbFetchAll("SELECT id FROM finance_accounts WHERE is_active = 1"), "id");
+        dbExecute("UPDATE finance_accounts SET is_active = 0");
+        try {
+            $this->assertSame(0, financeImportPastDues('2026-01-01', self::$userId));
+        } finally {
+            foreach ($active as $id) dbExecute("UPDATE finance_accounts SET is_active = 1 WHERE id = ?", [$id]);
+        }
+    }
 }

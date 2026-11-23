@@ -327,8 +327,10 @@ if (isPost()) {
                     setFlash('error', $e->getMessage());
                     redirect('subscriptions.php?edit=' . $subscriptionId);
                 }
-                dbExecute("UPDATE volunteer_subscriptions SET payment_date = ?, expiry_date = ?, amount = ?, payment_method = ?, receipt_number = ?, receipt_original_name = ?, receipt_stored_name = ?, notes = ?, renewal_kind = ?, reminder_sent_3m = ?, reminder_sent_1m = ?, reminder_sent_1w = ?, reminder_sent_expired = ? WHERE id = ?", [$paymentDate, $expiryDate, $amount === '' ? null : $amount, trim(post('payment_method')) ?: null, $receiptNumber ?: null, $receiptOriginal, $receiptStored, trim(post('notes')) ?: null, post('renewal_kind') === 'REACTIVATION' ? 'REACTIVATION' : 'RENEWAL', $reset ? 0 : $old['reminder_sent_3m'], $reset ? 0 : $old['reminder_sent_1m'], $reset ? 0 : $old['reminder_sent_1w'], $reset ? 0 : $old['reminder_sent_expired'], $subscriptionId]);
-                financeSyncSubscriptionMovement($subscriptionId, (int) getCurrentUserId());
+                financeTransaction(function () use ($paymentDate, $expiryDate, $amount, $receiptNumber, $receiptOriginal, $receiptStored, $reset, $old, $subscriptionId) {
+                    dbExecute("UPDATE volunteer_subscriptions SET payment_date = ?, expiry_date = ?, amount = ?, payment_method = ?, receipt_number = ?, receipt_original_name = ?, receipt_stored_name = ?, notes = ?, renewal_kind = ?, reminder_sent_3m = ?, reminder_sent_1m = ?, reminder_sent_1w = ?, reminder_sent_expired = ? WHERE id = ?", [$paymentDate, $expiryDate, $amount === '' ? null : $amount, trim(post('payment_method')) ?: null, $receiptNumber ?: null, $receiptOriginal, $receiptStored, trim(post('notes')) ?: null, post('renewal_kind') === 'REACTIVATION' ? 'REACTIVATION' : 'RENEWAL', $reset ? 0 : $old['reminder_sent_3m'], $reset ? 0 : $old['reminder_sent_1m'], $reset ? 0 : $old['reminder_sent_1w'], $reset ? 0 : $old['reminder_sent_expired'], $subscriptionId]);
+                    financeSyncSubscriptionMovement($subscriptionId, (int) getCurrentUserId());
+                });
                 logAudit('edit_subscription', 'volunteer_subscriptions', $subscriptionId, [
                     'payment_date' => $old['payment_date'],
                     'expiry_date' => $old['expiry_date'],
@@ -360,8 +362,10 @@ if (isPost()) {
             setFlash('error', 'Η διαγραφή απαιτεί ρητή επιβεβαίωση.');
             redirect('subscriptions.php?show_history=1&history_user_id=' . (int)$old['user_id'] . '#subscriptionPaymentHistory');
         }
-        dbExecute("DELETE FROM volunteer_subscriptions WHERE id = ?", [$subscriptionId]);
-        financeSyncSubscriptionMovement($subscriptionId, (int) getCurrentUserId());
+        financeTransaction(function () use ($subscriptionId) {
+            dbExecute("DELETE FROM volunteer_subscriptions WHERE id = ?", [$subscriptionId]);
+            financeSyncSubscriptionMovement($subscriptionId, (int) getCurrentUserId());
+        });
         if (!empty($old['receipt_stored_name'])) {
             $receiptPath = __DIR__ . '/uploads/subscription-receipts/' . basename($old['receipt_stored_name']);
             if (is_file($receiptPath)) @unlink($receiptPath);
