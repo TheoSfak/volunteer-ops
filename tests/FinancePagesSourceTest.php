@@ -284,6 +284,13 @@ final class FinancePagesSourceTest extends TestCase
         $this->assertStringContainsString("['input', 'change'].forEach(n => payDateEl.addEventListener(n, () => { if (!syncing) payFollows = false; }))", $js);
     }
 
+    public function test_dues_account_selects_have_no_separate_default_entry(): void
+    {
+        $src = self::src('finance-settings.php');
+        $this->assertStringNotContainsString('Ταμείο μετρητών (προεπιλογή)', $src); // looked like a second cash account
+        $this->assertStringContainsString("\$cur = financeCashAccountId();", $src);
+    }
+
     public function test_dues_list_and_accept_members_only_never_guests_or_mission_visitors(): void
     {
         $src = self::src('subscriptions.php');
