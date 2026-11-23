@@ -34,7 +34,7 @@ if (isPost()) {
     } catch (InvalidArgumentException $e) {
         setFlash('error', $e->getMessage());
     }
-    redirect('finance-movements.php?' . http_build_query(array_filter(['from' => get('from'), 'to' => get('to'), 'account_id' => get('account_id')])));
+    redirect('finance-movements.php?' . http_build_query(array_filter(['from' => get('from'), 'to' => get('to'), 'account_id' => get('account_id'), 'direction' => get('direction')])));
 }
 
 $pageTitle = 'Κινήσεις';
@@ -60,7 +60,11 @@ $allAccounts = financeAccounts(false);
 $catsIn = financeCategories('IN');
 $catsOut = financeCategories('OUT');
 $tot = ['IN' => 0, 'OUT' => 0];
-foreach ($rows as $r) if (!$r['transfer_group']) $tot[$r['direction']] += financeToCents($r['amount']);
+// Totals come from their own aggregate, so the 500-row display limit never skews them.
+foreach (dbFetchAll("SELECT m.direction, ROUND(SUM(m.amount) * 100) AS cents FROM finance_movements m WHERE " . implode(' AND ', $where) . " AND m.transfer_group IS NULL GROUP BY m.direction", $params) as $t) {
+    $tot[$t['direction']] = (int) $t['cents'];
+}
+$truncated = count($rows) >= 500;
 
 include __DIR__ . '/includes/header.php';
 ?>
@@ -118,6 +122,7 @@ include __DIR__ . '/includes/header.php';
 </div></form>
 
 <div class="d-flex gap-3 mb-2 small"><span class="text-success">Έσοδα <?= financeFormat($tot['IN']) ?></span><span class="text-danger">Έξοδα <?= financeFormat($tot['OUT']) ?></span><span>Διαφορά <?= financeFormat($tot['IN'] - $tot['OUT']) ?></span><span class="text-muted">(χωρίς μεταφορές)</span></div>
+<?php if ($truncated): ?><div class="alert alert-warning py-2 small">Εμφανίζονται οι 500 πιο πρόσφατες κινήσεις — περιορίστε τις ημερομηνίες.</div><?php endif; ?>
 <div class="card"><div class="table-responsive"><table class="table table-hover align-middle mb-0">
     <thead><tr><th>Ημ/νία</th><th>Λογαριασμός</th><th>Περιγραφή</th><th>Κατηγορία</th><th class="text-end">Ποσό</th><th></th></tr></thead>
     <tbody>

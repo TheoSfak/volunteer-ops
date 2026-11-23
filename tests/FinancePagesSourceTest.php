@@ -92,6 +92,41 @@ final class FinancePagesSourceTest extends TestCase
         $this->assertStringContainsString('(ανενεργός)', self::src('finance-settings.php'));
     }
 
+    public function test_fix_round_1_totals_opening_balance_categories_and_missing_ids(): void
+    {
+        $m = self::src('finance-movements.php');
+        $this->assertStringContainsString('m.transfer_group IS NULL GROUP BY m.direction', $m);
+        $this->assertStringContainsString('Εμφανίζονται οι 500 πιο πρόσφατες κινήσεις', $m);
+        $this->assertStringContainsString("'direction' => get('direction')", $m);
+        $this->assertStringNotContainsString("\$tot[\$r['direction']] +=", $m);
+        $s = self::src('finance-settings.php');
+        foreach (['Μη έγκυρο αρχικό υπόλοιπο. Γράψτε π.χ. 1500.00', 'AND id <> ?', "\$old['direction'] === 'IN'", "\$cat['direction'] === 'IN'",
+                  'Ο λογαριασμός δεν βρέθηκε.', 'Η κατηγορία δεν βρέθηκε.', '$before, $keys'] as $needle) {
+            $this->assertStringContainsString($needle, $s, $needle);
+        }
+    }
+
+    public function test_the_cash_book_totals_aggregate_ignores_transfers_and_the_row_limit(): void
+    {
+        require_once __DIR__ . '/../includes/finance-functions.php';
+        $acc = (int) dbFetchValue("SELECT id FROM finance_accounts WHERE is_active = 1 ORDER BY id LIMIT 1");
+        if ($acc === 0) { $this->markTestSkipped('no active account'); }
+        $day = '2031-03-15';
+        dbExecute("DELETE FROM finance_movements WHERE movement_date = ?", [$day]);
+        $uid = (int) dbInsert("INSERT INTO users (name, email, password) VALUES (?, ?, 'x')", ['Δοκιμή', 'finance-pages-' . uniqid('', true) . '@example.invalid']);
+        try {
+            financeAddMovement(['account_id' => $acc, 'direction' => 'IN', 'amount' => 1050, 'movement_date' => $day, 'description' => 't'], $uid);
+            financeAddMovement(['account_id' => $acc, 'direction' => 'OUT', 'amount' => 250, 'movement_date' => $day, 'description' => 't'], $uid);
+            $rows = dbFetchAll("SELECT m.direction, ROUND(SUM(m.amount) * 100) AS cents FROM finance_movements m WHERE m.movement_date BETWEEN ? AND ? AND m.transfer_group IS NULL GROUP BY m.direction", [$day, $day]);
+            $by = array_column($rows, 'cents', 'direction');
+            $this->assertSame(1050, (int) $by['IN']);
+            $this->assertSame(250, (int) $by['OUT']);
+        } finally {
+            dbExecute("DELETE FROM finance_movements WHERE movement_date = ?", [$day]);
+            dbExecute("DELETE FROM users WHERE id = ?", [$uid]);
+        }
+    }
+
     public function test_the_form_audits_pay_now_keeps_existing_links_and_hides_database_errors(): void
     {
         $s = self::src('finance-document-form.php');
