@@ -7,6 +7,10 @@ requirePermission('subscriptions_manage');
 
 $pageTitle = 'Ετήσιες Συνδρομές';
 
+// Annual dues concern the organisation's own members only: guest / partner-team accounts (is_external)
+// and walk-up mission visitors (is_mission_visitor) are never listed or accepted.
+const SUBSCRIPTION_MEMBER_WHERE = 'is_active = 1 AND deleted_at IS NULL AND is_external = 0 AND is_mission_visitor = 0';
+
 /**
  * Store either a normally selected receipt or a photo captured by the mobile camera.
  * Returns [originalName, storedName], or null when no file was submitted.
@@ -193,7 +197,7 @@ if (isPost()) {
         $notes = trim(post('notes'));
         $irisRequestId = (int)post('iris_request_id');
         $irisRequest = $irisRequestId ? dbFetchOne("SELECT * FROM subscription_iris_requests WHERE id = ? AND user_id = ? AND status IN ('REPORTED', 'SEEN')", [$irisRequestId, $userId]) : null;
-        $volunteer = dbFetchOne("SELECT id, name FROM users WHERE id = ? AND is_active = 1", [$userId]);
+        $volunteer = dbFetchOne("SELECT id, name FROM users WHERE id = ? AND " . SUBSCRIPTION_MEMBER_WHERE, [$userId]);
 
         if (!$volunteer || !isValidSubscriptionDate($paymentDate) || !isValidSubscriptionDate($requestedExpiryDate)) {
             rememberSubscriptionPaymentForm();
@@ -414,9 +418,9 @@ if (isPost()) {
     }
 }
 
-$volunteers = dbFetchAll("SELECT id, name, email FROM users WHERE is_active = 1 ORDER BY name");
+$volunteers = dbFetchAll("SELECT id, name, email FROM users WHERE " . SUBSCRIPTION_MEMBER_WHERE . " ORDER BY name");
 $preselectedPaymentUserId = (int)get('user_id', 0);
-if ($preselectedPaymentUserId && !(int)dbFetchValue("SELECT COUNT(*) FROM users WHERE id = ? AND is_active = 1", [$preselectedPaymentUserId])) {
+if ($preselectedPaymentUserId && !(int)dbFetchValue("SELECT COUNT(*) FROM users WHERE id = ? AND " . SUBSCRIPTION_MEMBER_WHERE, [$preselectedPaymentUserId])) {
     $preselectedPaymentUserId = 0;
 }
 $openPaymentModal = get('open_payment') === '1' && $preselectedPaymentUserId > 0;
@@ -433,7 +437,7 @@ $oldPaymentForm = $_SESSION['subscription_payment_form'] ?? null;
 unset($_SESSION['subscription_payment_form']);
 if ($oldPaymentForm && !empty($oldPaymentForm['user_id'])) {
     $restoredUserId = (int)$oldPaymentForm['user_id'];
-    if ((int)dbFetchValue("SELECT COUNT(*) FROM users WHERE id = ? AND is_active = 1", [$restoredUserId])) {
+    if ((int)dbFetchValue("SELECT COUNT(*) FROM users WHERE id = ? AND " . SUBSCRIPTION_MEMBER_WHERE, [$restoredUserId])) {
         $preselectedPaymentUserId = $restoredUserId;
     }
 }
