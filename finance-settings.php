@@ -21,27 +21,32 @@ if (isPost()) {
                 if ($openingDate !== null && !financeValidDate($openingDate)) throw new InvalidArgumentException('Μη έγκυρη ημερομηνία αρχικού υπολοίπου.');
                 $rawOpening = str_replace(' ', '', trim(post('opening_balance')));
                 if ($rawOpening !== '' && !preg_match('/^-?\d{1,10}(?:[.,]\d+)?$/D', $rawOpening)) throw new InvalidArgumentException('Μη έγκυρο αρχικό υπόλοιπο. Γράψτε π.χ. 1500.00');
-                if ($id > 0 && !dbFetchOne("SELECT id FROM finance_accounts WHERE id = ?", [$id])) throw new InvalidArgumentException('Ο λογαριασμός δεν βρέθηκε.');
+                $oldAccount = $id > 0 ? dbFetchOne("SELECT name, kind, iban, opening_balance, opening_date, is_active FROM finance_accounts WHERE id = ?", [$id]) : null;
+                if ($id > 0 && !$oldAccount) throw new InvalidArgumentException('Ο λογαριασμός δεν βρέθηκε.');
                 $params = [$name, $kind, strtoupper(preg_replace('/\s+/', '', post('iban'))) ?: null,
                            financeFromCents(financeToCents($rawOpening)), $openingDate, post('is_active', '1') === '1' ? 1 : 0];
+                $newAccount = ['name' => $params[0], 'kind' => $params[1], 'iban' => $params[2], 'opening_balance' => $params[3], 'opening_date' => $params[4], 'is_active' => $params[5]];
                 if ($id > 0) {
+                    if ($params[5] === 0 && financeIsLastActiveAccount($id)) throw new InvalidArgumentException('Πρέπει να μείνει τουλάχιστον ένας ενεργός λογαριασμός.');
                     dbExecute("UPDATE finance_accounts SET name = ?, kind = ?, iban = ?, opening_balance = ?, opening_date = ?, is_active = ? WHERE id = ?", array_merge($params, [$id]));
-                    logAudit('finance_update_account', 'finance_accounts', $id);
+                    logAudit('finance_update_account', 'finance_accounts', $id, $oldAccount, $newAccount);
                 } else {
                     $next = (int) dbFetchValue("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM finance_accounts");
                     $id = (int) dbInsert("INSERT INTO finance_accounts (name, kind, iban, opening_balance, opening_date, is_active, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)", array_merge($params, [$next]));
-                    logAudit('finance_create_account', 'finance_accounts', $id);
+                    logAudit('finance_create_account', 'finance_accounts', $id, null, $newAccount);
                 }
                 setFlash('success', 'Ο λογαριασμός αποθηκεύτηκε.');
                 break;
             case 'delete_account':
                 $id = (int) post('id');
-                if (!dbFetchOne("SELECT id FROM finance_accounts WHERE id = ?", [$id])) throw new InvalidArgumentException('Ο λογαριασμός δεν βρέθηκε.');
+                $delAccount = dbFetchOne("SELECT name, kind, iban, opening_balance, opening_date, is_active FROM finance_accounts WHERE id = ?", [$id]);
+                if (!$delAccount) throw new InvalidArgumentException('Ο λογαριασμός δεν βρέθηκε.');
+                if (financeIsLastActiveAccount($id)) throw new InvalidArgumentException('Πρέπει να μείνει τουλάχιστον ένας ενεργός λογαριασμός.');
                 if ((int) dbFetchValue("SELECT COUNT(*) FROM finance_movements WHERE account_id = ?", [$id]) > 0) {
                     throw new InvalidArgumentException('Ο λογαριασμός έχει κινήσεις· μπορείτε μόνο να τον απενεργοποιήσετε.');
                 }
                 dbExecute("DELETE FROM finance_accounts WHERE id = ?", [$id]);
-                logAudit('finance_delete_account', 'finance_accounts', $id);
+                logAudit('finance_delete_account', 'finance_accounts', $id, $delAccount, null);
                 setFlash('success', 'Ο λογαριασμός διαγράφηκε.');
                 break;
             case 'save_category':
@@ -50,18 +55,18 @@ if (isPost()) {
                 if ($name === '') throw new InvalidArgumentException('Το όνομα κατηγορίας είναι υποχρεωτικό.');
                 $active = post('is_active', '1') === '1' ? 1 : 0;
                 if ($id > 0) {
-                    $old = dbFetchOne("SELECT name, direction FROM finance_categories WHERE id = ?", [$id]);
+                    $old = dbFetchOne("SELECT name, direction, is_active FROM finance_categories WHERE id = ?", [$id]);
                     if (!$old) throw new InvalidArgumentException('Η κατηγορία δεν βρέθηκε.');
                     if ($old['direction'] === 'IN' && $old['name'] === FINANCE_DUES_CATEGORY && $old['name'] !== $name) throw new InvalidArgumentException('Η κατηγορία «' . FINANCE_DUES_CATEGORY . '» χρησιμοποιείται από τις συνδρομές και δεν μετονομάζεται.');
                     if (dbFetchOne("SELECT id FROM finance_categories WHERE direction = ? AND name = ? AND id <> ?", [$old['direction'], $name, $id])) throw new InvalidArgumentException('Υπάρχει ήδη κατηγορία με αυτό το όνομα.');
                     dbExecute("UPDATE finance_categories SET name = ?, is_active = ? WHERE id = ?", [$name, $active, $id]);
-                    logAudit('finance_update_category', 'finance_categories', $id);
+                    logAudit('finance_update_category', 'finance_categories', $id, $old, ['name' => $name, 'direction' => $old['direction'], 'is_active' => $active]);
                 } else {
                     $direction = in_array(post('direction'), FINANCE_DIRECTIONS, true) ? post('direction') : 'OUT';
                     if (dbFetchOne("SELECT id FROM finance_categories WHERE direction = ? AND name = ?", [$direction, $name])) throw new InvalidArgumentException('Υπάρχει ήδη κατηγορία με αυτό το όνομα.');
                     $next = (int) dbFetchValue("SELECT COALESCE(MAX(sort_order), 0) + 1 FROM finance_categories WHERE direction = ?", [$direction]);
                     $id = (int) dbInsert("INSERT INTO finance_categories (name, direction, sort_order) VALUES (?, ?, ?)", [$name, $direction, $next]);
-                    logAudit('finance_create_category', 'finance_categories', $id);
+                    logAudit('finance_create_category', 'finance_categories', $id, null, ['name' => $name, 'direction' => $direction, 'is_active' => 1]);
                 }
                 setFlash('success', 'Η κατηγορία αποθηκεύτηκε.');
                 break;
@@ -73,7 +78,7 @@ if (isPost()) {
                 if (!$cat) throw new InvalidArgumentException('Η κατηγορία δεν βρέθηκε.');
                 if ($cat['direction'] === 'IN' && $cat['name'] === FINANCE_DUES_CATEGORY) throw new InvalidArgumentException('Η κατηγορία των συνδρομών δεν διαγράφεται.');
                 dbExecute("DELETE FROM finance_categories WHERE id = ?", [$id]);
-                logAudit('finance_delete_category', 'finance_categories', $id);
+                logAudit('finance_delete_category', 'finance_categories', $id, $cat, null);
                 setFlash('success', 'Η κατηγορία διαγράφηκε.');
                 break;
             case 'save_general':
