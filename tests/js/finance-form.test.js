@@ -56,3 +56,13 @@ test('the submit check strips non-digits like the server', () => {
     assert.equal(F.validVat(F.cleanVat('EL090000046')), false);
     assert.equal(F.cleanVat('EL'), '');
 });
+
+test('pdf.js is opened with eval disabled (CVE-2024-4367)', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../../assets/js/finance-form.js'), 'utf8');
+    assert.match(src, /getDocument\(\{[^}]*isEvalSupported:\s*false/);
+});
+
+test('the VAT mirror docblock sits directly above validVat', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../../assets/js/finance-form.js'), 'utf8');
+    assert.match(src, /Mirror of financeValidVatNumber\(\)[^\n]*\*\/\r?\n\s*function validVat\(/);
+});

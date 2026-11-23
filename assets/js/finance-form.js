@@ -38,9 +38,9 @@
         return {net, vat, gross: net + vat};
     }
     function mismatch(typed, linesGross) { return Math.abs(typed - linesGross) > TOLERANCE_CENTS; }
-    /** Mirror of financeValidVatNumber(): 9 digits, weights 2^8..2^1, (sum mod 11) mod 10 = ninth digit. */
     /** The server strips non-digits before checking (EL prefix, spaces). */
     function cleanVat(v) { return String(v).replace(/\D/g, ''); }
+    /** Mirror of financeValidVatNumber(): 9 digits, weights 2^8..2^1, (sum mod 11) mod 10 = ninth digit. */
     function validVat(afm) {
         if (!/^\d{9}$/.test(afm) || afm === '000000000') return false;
         let sum = 0;
@@ -79,7 +79,7 @@
     async function prepareImage(file) {
         if (file.type === 'application/pdf') {
             const lib = await pdfjs();
-            const pdf = await lib.getDocument({data: await file.arrayBuffer()}).promise;
+            const pdf = await lib.getDocument({data: await file.arrayBuffer(), isEvalSupported: false}).promise;
             const page = await pdf.getPage(1);
             const base = page.getViewport({scale: 1});
             const viewport = page.getViewport({scale: Math.min(3, MAX_EDGE / Math.max(base.width, base.height))});
