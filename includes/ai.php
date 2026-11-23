@@ -51,6 +51,8 @@ function aiProviders(): array {
             // lists what a given key can actually call.
             'default_model' => 'gemini-3.6-flash',
             'models'        => ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-pro'],
+            // Flash/Pro models read images: the configured chat model is used for receipts too.
+            'vision_model'  => '',
             'reasoning_effort' => true,
             'key_url'       => 'https://aistudio.google.com/apikey',
             'key_hint'      => 'Διαθέτει δωρεάν επίπεδο με ημερήσιο όριο αιτημάτων — αρκετό για εκθέσεις αποστολών.',
@@ -78,6 +80,8 @@ function aiProviders(): array {
             'default_model' => 'llama-3.3-70b-versatile',
             'models'        => ['llama-3.3-70b-versatile', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b',
                                 'moonshotai/kimi-k2-instruct', 'qwen/qwen3-32b', 'llama-3.1-8b-instant'],
+            // The Llama 3.3 chat default is text-only; Groq's catalogue changes, override with the ai_vision_model_groq setting.
+            'vision_model'  => 'meta-llama/llama-4-scout-17b-16e-instruct',
             // Supported by SOME of the models above and rejected with a 400 by
             // others (the Llama ones), and which is which changes as the
             // catalogue does. Never sent, same as the other two: an
@@ -96,6 +100,8 @@ function aiProviders(): array {
             'base_url'      => 'https://api.x.ai/v1',
             'default_model' => 'grok-4-fast-reasoning',
             'models'        => ['grok-4-fast-reasoning', 'grok-4-fast-non-reasoning', 'grok-4', 'grok-3-mini', 'grok-3'],
+            // Reads images; billed, so it is reached only after the free tiers.
+            'vision_model'  => 'grok-4-fast-non-reasoning',
             // false, and not because the models cannot reason: xAI accepts
             // reasoning_effort on its small models and REJECTS it outright on
             // the grok-4 family. Sending it would 400 every call on the
@@ -118,6 +124,8 @@ function aiProviders(): array {
             'base_url'      => 'https://api.deepseek.com/v1',
             'default_model' => 'deepseek-flash',
             'models'        => ['deepseek-flash', 'deepseek-v4-pro'],
+            // No image input on its API: never used for receipts.
+            'vision_model'  => false,
             // Whether this provider honours OpenAI's reasoning_effort
             // parameter. Declared per provider rather than sent blindly: an
             // unknown parameter is usually ignored, but a provider that
