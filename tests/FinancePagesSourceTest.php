@@ -14,7 +14,8 @@ final class FinancePagesSourceTest extends TestCase
 
     public static function pages(): array
     {
-        return [['finance-documents.php'], ['finance-document-form.php'], ['finance-file.php']];
+        return [['finance-documents.php'], ['finance-document-form.php'], ['finance-file.php'],
+                ['finance-movements.php'], ['finance-payables.php'], ['finance-settings.php']];
     }
 
     /** @dataProvider pages */
@@ -53,6 +54,42 @@ final class FinancePagesSourceTest extends TestCase
         $s = self::src('finance-file.php');
         $this->assertStringContainsString('ensurePrivateUploadDir(', $s);
         $this->assertStringContainsString('basename(', $s);
+    }
+
+    public function test_dues_movements_are_not_editable_from_the_cash_book(): void
+    {
+        $s = self::src('finance-movements.php');
+        $this->assertStringContainsString('subscription_id', $s);
+        $this->assertStringContainsString('subscriptions.php', $s);
+    }
+
+    public function test_settings_offer_the_dues_mapping_and_the_import(): void
+    {
+        $s = self::src('finance-settings.php');
+        foreach (['finance_dues_account_', 'import_dues', 'financeImportPastDues(', 'finance_default_vat_rate'] as $needle) {
+            $this->assertStringContainsString($needle, $s, $needle);
+        }
+    }
+
+    public function test_movements_and_settings_audit_and_hide_database_errors(): void
+    {
+        foreach (['finance-movements.php', 'finance-settings.php'] as $file) {
+            $s = self::src($file);
+            $this->assertStringContainsString('catch (PDOException', $s, $file);
+            $this->assertStringContainsString('error_log(', $s, $file);
+            $this->assertLessThan(strpos($s, 'catch (InvalidArgumentException'), strpos($s, 'catch (PDOException'), "$file: PDOException first");
+        }
+        foreach (['finance_create_movement', 'finance_transfer', 'finance_delete_movement'] as $a) {
+            $this->assertStringContainsString("logAudit('$a'", self::src('finance-movements.php'), $a);
+        }
+        foreach (['create_account', 'update_account', 'delete_account', 'create_category', 'update_category', 'delete_category', 'update_settings', 'import_dues'] as $a) {
+            $this->assertStringContainsString("logAudit('finance_$a'", self::src('finance-settings.php'), $a);
+        }
+    }
+
+    public function test_settings_keep_an_inactive_mapped_dues_account_selected(): void
+    {
+        $this->assertStringContainsString('(ανενεργός)', self::src('finance-settings.php'));
     }
 
     public function test_the_form_audits_pay_now_keeps_existing_links_and_hides_database_errors(): void
