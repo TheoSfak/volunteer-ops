@@ -1609,6 +1609,52 @@ if (isLoggedIn()) {
             <?php endif; ?>
             <?php endif; // Επιχειρησιακό section ?>
 
+            <?php $canFinance = isSystemAdmin() || hasPagePermission('finance_manage'); $canDues = isSystemAdmin() || hasPagePermission('subscriptions_manage'); ?>
+            <?php if ($canFinance || $canDues): ?>
+            <div class="sidebar-section" data-sec="finance">Οικονομικά</div>
+            <?php if ($canFinance): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'finance' ? 'active' : '' ?>" href="finance.php">
+                    <i class="bi bi-wallet2"></i> Επισκόπηση
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'finance-movements' ? 'active' : '' ?>" href="finance-movements.php">
+                    <i class="bi bi-arrow-left-right"></i> Κινήσεις
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= in_array($currentPage, ['finance-documents', 'finance-document-form'], true) ? 'active' : '' ?>" href="finance-documents.php">
+                    <i class="bi bi-receipt"></i> Παραστατικά
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'finance-payables' ? 'active' : '' ?>" href="finance-payables.php">
+                    <i class="bi bi-hourglass-split"></i> Υποχρεώσεις
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php if (isSystemAdmin() || hasPagePermission('subscriptions_manage')): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'subscriptions' ? 'active' : '' ?>" href="subscriptions.php">
+                    <i class="bi bi-cash-coin"></i> Ετήσιες Συνδρομές
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php if ($canFinance): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'finance-reports' ? 'active' : '' ?>" href="finance-reports.php">
+                    <i class="bi bi-graph-up-arrow"></i> Αναφορές
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage === 'finance-settings' ? 'active' : '' ?>" href="finance-settings.php">
+                    <i class="bi bi-gear"></i> Ρυθμίσεις Οικονομικών
+                </a>
+            </li>
+            <?php endif; ?>
+            <?php endif; // Οικονομικά section ?>
+
             <div class="sidebar-section" data-sec="manage">Διαχείριση</div>
             
             <li class="nav-item">
@@ -1745,16 +1791,9 @@ if (isLoggedIn()) {
                 </a>
             </li>
             <?php endif; ?>
-            <?php if (isSystemAdmin() || hasPagePermission('subscriptions_manage')): ?>
-            <li class="nav-item">
-                <a class="nav-link <?= $currentPage === 'subscriptions' ? 'active' : '' ?>" href="subscriptions.php">
-                    <i class="bi bi-cash-coin"></i> Ετήσιες Συνδρομές
-                </a>
-            </li>
-            <?php endif; ?>
             <?php if (isSystemAdmin()): ?>
             <li class="nav-item">
-                <a class="nav-link <?= $currentPage === 'certificate-types' ? 'active' : '' ?>" href="certificate-types.php">
+                <a class="nav-link <?= $currentPage === 'certificate-types' ?'active' : '' ?>" href="certificate-types.php">
                     <i class="bi bi-award-fill"></i> Τύποι Πιστοποιητικών
                 </a>
             </li>

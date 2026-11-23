@@ -15,7 +15,8 @@ final class FinancePagesSourceTest extends TestCase
     public static function pages(): array
     {
         return [['finance-documents.php'], ['finance-document-form.php'], ['finance-file.php'],
-                ['finance-movements.php'], ['finance-payables.php'], ['finance-settings.php']];
+                ['finance-movements.php'], ['finance-payables.php'], ['finance-settings.php'],
+                ['finance.php'], ['finance-reports.php']];
     }
 
     /** @dataProvider pages */
@@ -139,5 +140,30 @@ final class FinancePagesSourceTest extends TestCase
         $this->assertStringContainsString("'#pay'", $s);
         $this->assertStringContainsString("\$existing ?: null, \$doc + ['vat_lines'", $s);
         $this->assertStringContainsString("\$accounts ? 'checked' : 'disabled'", $s);
+    }
+    public function test_the_menu_has_an_oikonomika_section_holding_the_dues(): void
+    {
+        $h = self::src('includes/header.php');
+        $this->assertStringContainsString('data-sec="finance">Οικονομικά</div>', $h);
+        $start = strpos($h, 'data-sec="finance"');
+        $end = strpos($h, '// Οικονομικά section', $start);
+        $this->assertNotFalse($end);
+        $section = substr($h, $start, $end - $start);
+        foreach (['finance.php', 'finance-movements.php', 'finance-documents.php', 'finance-payables.php', 'subscriptions.php', 'finance-reports.php', 'finance-settings.php'] as $href) {
+            $this->assertStringContainsString('href="' . $href . '"', $section, $href);
+        }
+        $this->assertSame(1, substr_count($h, 'href="subscriptions.php"'), 'Συνδρομές appears once, under Οικονομικά');
+        $this->assertStringContainsString("hasPagePermission('subscriptions_manage')", $section);
+
+        $theme = self::src('includes/sidebar-theme.php');
+        $this->assertStringContainsString("'finance'", $theme);
+    }
+
+    public function test_reports_export_csv_with_a_bom(): void
+    {
+        $s = self::src('finance-reports.php');
+        $this->assertStringContainsString("export') === 'csv'", $s);
+        $this->assertStringContainsString('fputcsvSafe(', $s);
+        $this->assertStringContainsString('"\xEF\xBB\xBF"', $s);
     }
 }
