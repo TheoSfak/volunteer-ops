@@ -214,4 +214,14 @@ final class FinancePagesSourceTest extends TestCase
         $js = self::src('assets/js/finance-form.js');
         $this->assertStringContainsString('syncPayDate();', $js);
     }
+
+    public function test_a_due_date_unticks_paid_already_with_the_greek_note(): void
+    {
+        $s = self::src('finance-document-form.php');
+        $this->assertStringContainsString('Με προθεσμία πληρωμής: σημειώθηκε ως απλήρωτο. Τσεκάρετε αν έχει ήδη πληρωθεί.', $s);
+        $this->assertStringContainsString('id="payNowDueNote"', $s);
+        $js = self::src('assets/js/finance-form.js');
+        $this->assertStringContainsString('applyDueDate();', $js);
+        $this->assertStringContainsString('shouldUntickPaid(', $js);
+    }
 }

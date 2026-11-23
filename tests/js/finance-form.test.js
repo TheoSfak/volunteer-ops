@@ -111,3 +111,13 @@ test('nextPayDate follows the document date until the user takes over', () => {
     assert.equal(F.nextPayDate(true, '', '2026-11-23'), '2026-11-23', 'a cleared document date leaves the pay date alone');
     assert.equal(F.nextPayDate(true, 'garbage', '2026-11-23'), '2026-11-23');
 });
+
+test('shouldUntickPaid: a due date unticks «Πληρώθηκε ήδη» once, never against the user', () => {
+    const base = {due: '2026-12-01', checked: true, handled: false, userSet: false};
+    assert.equal(F.shouldUntickPaid(base), true);
+    assert.equal(F.shouldUntickPaid({...base, due: ''}), false, 'no due date');
+    assert.equal(F.shouldUntickPaid({...base, due: '  '}), false);
+    assert.equal(F.shouldUntickPaid({...base, checked: false}), false, 'already unticked');
+    assert.equal(F.shouldUntickPaid({...base, handled: true}), false, 'only once: a second due date does not untick again');
+    assert.equal(F.shouldUntickPaid({...base, userSet: true}), false, 'the user re-ticked it (or ticked it themselves)');
+});

@@ -82,6 +82,14 @@
         return follows && /^\d{4}-\d{2}-\d{2}$/.test(String(docDate)) ? String(docDate) : String(payDate);
     }
 
+    /**
+     * A due date on a new document means the bill is still owed: untick «Πληρώθηκε ήδη» — once, and never after the
+     * person has touched the switch themselves (so re-ticking it is final).
+     */
+    function shouldUntickPaid(state) {
+        return String(state.due || '').trim() !== '' && !!state.checked && !state.handled && !state.userSet;
+    }
+
     /** ISO yyyy-mm-dd → dd/mm/yyyy; anything else comes back unchanged. */
     function formatDmy(iso) {
         const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso));
@@ -245,6 +253,22 @@
             syncPayDate();
         }
 
+        // ── A due date means «unpaid»: untick «Πληρώθηκε ήδη» once, with a note ──
+        const payNowEl = $('#payNow'), dueEl = $('#dueDate'), dueNote = $('#payNowDueNote');
+        let dueHandled = false, paidTouched = !!payNowEl && payNowEl.dataset.userSet === '1';
+        function applyDueDate() {
+            if (!payNowEl || !dueEl) return;
+            if (!shouldUntickPaid({due: dueEl.value, checked: payNowEl.checked, handled: dueHandled, userSet: paidTouched})) return;
+            dueHandled = true;
+            payNowEl.checked = false;
+            payNowEl.dispatchEvent(new Event('input', {bubbles: true})); // refresh the opening warning; not a 'change', so it is not a user choice
+            if (dueNote) dueNote.classList.remove('d-none');
+        }
+        if (payNowEl && dueEl) {
+            payNowEl.addEventListener('change', () => { paidTouched = true; if (dueNote) dueNote.classList.add('d-none'); });
+            ['input', 'change'].forEach(n => dueEl.addEventListener(n, applyDueDate));
+        }
+
         // ── Scan ───────────────────────────────────────────────────────────
         // AI output is untrusted: it only ever goes through .value / .textContent, never HTML.
         const file = $('#docFile'), btnCam = $('#btnCamera'), btnScan = $('#btnScan'), status = $('#scanStatus');
@@ -280,6 +304,7 @@
                     if (map[f]) $('#' + map[f]).classList.add('border-warning', 'border-2');
                 });
                 syncPayDate();
+                applyDueDate();
                 $('#scanSource').value = 'AI';
                 $('#scanProvider').value = json.provider_label || '';
                 refresh();
@@ -312,7 +337,7 @@
         });
     }
 
-    const api = {VAT_RATES, TOLERANCE_CENTS, toCents, fromCents, display, splitGross, splitNet, parseCents, totals, mismatch, cleanVat, validVat, nextPayDate, formatDmy, paidBeforeOpening, openingWarning, prepareImage, initForm, initOpeningWarnings};
+    const api = {VAT_RATES, TOLERANCE_CENTS, toCents, fromCents, display, splitGross, splitNet, parseCents, totals, mismatch, cleanVat, validVat, nextPayDate, shouldUntickPaid, formatDmy, paidBeforeOpening, openingWarning, prepareImage, initForm, initOpeningWarnings};
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.VoFinance = api;
     if (typeof document !== 'undefined') {
