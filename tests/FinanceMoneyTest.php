@@ -25,6 +25,7 @@ final class FinanceMoneyTest extends TestCase
         $this->assertSame(0, financeToCents('abc'));
         $this->assertSame(0, financeToCents('1.234,56'));
         $this->assertSame(0, financeToCents(null));
+        $this->assertSame(0, financeToCents('99999999999999999999'));
     }
 
     public function test_cents_format_back(): void
@@ -93,6 +94,7 @@ final class FinanceMoneyTest extends TestCase
         $this->assertFalse(financeValidVatNumber('000000000'));
         $this->assertFalse(financeValidVatNumber('12345'));
         $this->assertFalse(financeValidVatNumber('09000004A'));
+        $this->assertFalse(financeValidVatNumber("090000045\n"));
     }
 
     public function test_dates_are_strict(): void
@@ -101,6 +103,7 @@ final class FinanceMoneyTest extends TestCase
         $this->assertFalse(financeValidDate('2026-02-30'));
         $this->assertFalse(financeValidDate('28/02/2026'));
         $this->assertFalse(financeValidDate(''));
+        $this->assertFalse(financeValidDate("2026-02-28\n"));
         $this->assertFalse(financeValidDate(null));
     }
 }

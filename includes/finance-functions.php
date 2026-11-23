@@ -24,7 +24,7 @@ const FINANCE_DUES_CATEGORY = 'Συνδρομές μελών';
 function financeToCents($value): int {
     if ($value === null || is_bool($value)) return 0;
     $s = str_replace([' ', ','], ['', '.'], trim((string) $value));
-    if (!preg_match('/^(-?)(\d+)(?:\.(\d+))?$/', $s, $m)) return 0;
+    if (!preg_match('/^(-?)(\d{1,10})(?:\.(\d+))?$/D', $s, $m)) return 0;
     $frac = str_pad($m[3] ?? '', 3, '0');
     $cents = (int) $m[2] * 100 + (int) substr($frac, 0, 2) + ((int) $frac[2] >= 5 ? 1 : 0);
     return $m[1] === '-' ? -$cents : $cents;
@@ -84,7 +84,7 @@ function financeReminderStageFor(string $due, string $today): int {
 
 /** Greek ΑΦΜ: 9 digits, weights 2^8..2^1 on the first eight, (sum mod 11) mod 10 = the ninth. */
 function financeValidVatNumber(string $afm): bool {
-    if (!preg_match('/^\d{9}$/', $afm) || $afm === '000000000') return false;
+    if (!preg_match('/^\d{9}$/D', $afm) || $afm === '000000000') return false;
     $sum = 0;
     for ($i = 0; $i < 8; $i++) {
         $sum += (int) $afm[$i] * (2 ** (8 - $i));
@@ -93,6 +93,6 @@ function financeValidVatNumber(string $afm): bool {
 }
 
 function financeValidDate($value): bool {
-    if (!is_string($value) || !preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $value, $m)) return false;
+    if (!is_string($value) || !preg_match('/^(\d{4})-(\d{2})-(\d{2})$/D', $value, $m)) return false;
     return checkdate((int) $m[2], (int) $m[3], (int) $m[1]);
 }
