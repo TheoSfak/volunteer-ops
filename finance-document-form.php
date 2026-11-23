@@ -169,7 +169,7 @@ $dec = fn($v) => str_replace('.', ',', (string) $v);
 include __DIR__ . '/includes/header.php';
 ?>
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3 mb-0"><i class="bi bi-receipt me-2"></i><?= h($pageTitle) ?>
+    <h1 class="h3 mb-0"><i class="bi bi-receipt me-2"></i><span id="docPageTitle"><?= h($pageTitle) ?></span>
         <span id="dirBadge" class="badge <?= $direction === 'IN' ? 'bg-success' : 'bg-danger' ?> align-middle"><?= $direction === 'IN' ? 'Έσοδο' : 'Έξοδο' ?></span>
         <?php if ($existing): ?><?= financeStatusBadge($existing['status'], $direction) ?><?php endif; ?></h1>
     <a class="btn btn-outline-secondary" href="<?= h($back) ?>"><i class="bi bi-arrow-left me-1"></i>Πίσω</a>

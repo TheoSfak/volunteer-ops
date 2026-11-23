@@ -260,6 +260,8 @@
             const t = directionTexts(dir);
             const badge = document.getElementById('dirBadge');
             if (badge) { badge.textContent = t.badge; badge.classList.toggle('bg-success', dir === 'IN'); badge.classList.toggle('bg-danger', dir === 'OUT'); }
+            const pt = document.getElementById('docPageTitle'); // only a new document's title names the direction
+            if (pt && Number(form.querySelector('[name="id"]')?.value || 0) === 0) { pt.textContent = dir === 'IN' ? 'Νέο έσοδο' : 'Νέο έξοδο'; document.title = document.title.replace(/^Νέο (έσοδο|έξοδο)/, pt.textContent); }
             const cl = document.getElementById('counterpartyLabel'); if (cl) cl.textContent = t.counterparty;
             const pl = document.getElementById('payNowLabel'); if (pl) pl.textContent = t.payNow;
             const dn = document.getElementById('payNowDueNote'); if (dn) dn.textContent = t.dueNote;
