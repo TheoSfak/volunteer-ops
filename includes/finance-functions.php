@@ -471,6 +471,18 @@ function financeIsLastActiveAccount(int $id): bool {
     return (int) dbFetchValue("SELECT COUNT(*) FROM finance_accounts WHERE is_active = 1 AND id <> ?", [$id]) === 0;
 }
 
+/**
+ * The date the books start (setting «Έναρξη βιβλίων»), else the earliest opening date of an active account, else null.
+ * Dues paid before it are not booked as new movements.
+ */
+function financeBooksStart(): ?string {
+    $s = financeSetting('finance_books_start', '');
+    if (financeValidDate($s)) return $s;
+    if (!dbTableExists('finance_accounts')) return null;
+    $d = dbFetchValue("SELECT MIN(opening_date) FROM finance_accounts WHERE is_active = 1 AND opening_date IS NOT NULL");
+    return financeValidDate($d) ? (string) $d : null;
+}
+
 function financeDuesMethodKey(?string $method): string {
     return FINANCE_DUES_METHOD_KEYS[trim((string) $method)] ?? 'cash';
 }
@@ -505,6 +517,10 @@ function financeSyncSubscriptionMovement(int $subscriptionId, int $userId, ?stri
         if ($existing) dbExecute("DELETE FROM finance_movements WHERE id = ?", [$existing['id']]);
         return;
     }
+    // Dues paid before the books start are already inside the opening balances: a NEW movement would count them twice.
+    // (An existing movement is still updated below, or deleted above.)
+    $booksStart = financeBooksStart();
+    if (!$existing && $booksStart !== null && (string) $sub['payment_date'] < $booksStart) return;
     // An existing movement keeps the account the treasurer left it in; only a changed payment method re-resolves it.
     $methodChanged = $previousMethod !== null && trim($previousMethod) !== trim((string) $sub['payment_method']);
     $accountId = ($existing && !$methodChanged) ? (int) $existing['account_id'] : financeDuesAccountFor($sub['payment_method']);
@@ -523,6 +539,7 @@ function financeSyncSubscriptionMovement(int $subscriptionId, int $userId, ?stri
 /** One-off: book the dues paid on/after $fromDate that have no movement yet. Returns how many were booked. */
 function financeImportPastDues(string $fromDate, int $userId): int {
     if (!financeValidDate($fromDate)) throw new InvalidArgumentException('Μη έγκυρη ημερομηνία.');
+    if (!financeValidDate(financeSetting('finance_books_start', ''))) financeSaveSetting('finance_books_start', $fromDate); // the first import fixes the start of the books
     $ids = dbFetchAll("SELECT vs.id FROM volunteer_subscriptions vs LEFT JOIN finance_movements m ON m.subscription_id = vs.id
                        WHERE vs.payment_date >= ? AND vs.amount > 0 AND m.id IS NULL ORDER BY vs.payment_date", [$fromDate]);
     if (financeCashAccountId() === 0) return 0; // no active account: nothing can be booked

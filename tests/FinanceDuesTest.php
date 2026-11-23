@@ -26,7 +26,7 @@ final class FinanceDuesTest extends TestCase
         dbExecute("DELETE FROM finance_movements WHERE subscription_id IN (SELECT id FROM volunteer_subscriptions WHERE user_id = ?)", [self::$userId]);
         dbExecute("DELETE FROM volunteer_subscriptions WHERE user_id = ?", [self::$userId]);
         dbExecute("DELETE FROM finance_accounts WHERE name LIKE 'TESTFIN%'");
-        dbExecute("DELETE FROM settings WHERE setting_key LIKE 'finance_dues_account_%'");
+        dbExecute("DELETE FROM settings WHERE setting_key LIKE 'finance_dues_account_%' OR setting_key = 'finance_books_start'");
     }
 
     private function sub(string $date, ?string $amount, ?string $method): int
@@ -111,6 +111,57 @@ final class FinanceDuesTest extends TestCase
         dbExecute("UPDATE volunteer_subscriptions SET payment_method = 'Μετρητά' WHERE id = ?", [$sub]);
         financeSyncSubscriptionMovement($sub, self::$userId, 'Τραπεζική κατάθεση');
         $this->assertSame(financeDuesAccountFor('Μετρητά'), (int) $this->movement($sub)['account_id']);
+    }
+
+    public function test_dues_paid_before_the_books_start_get_no_new_movement(): void
+    {
+        financeSaveSetting('finance_books_start', '2026-01-01');
+        $old = $this->sub('2025-03-10', '30.00', 'Μετρητά');
+        financeSyncSubscriptionMovement($old, self::$userId);
+        $this->assertNull($this->movement($old), 'a 2025 row must not be booked behind a 2026 opening balance');
+
+        $new = $this->sub('2026-01-01', '30.00', 'Μετρητά');
+        financeSyncSubscriptionMovement($new, self::$userId);
+        $this->assertNotNull($this->movement($new), 'the start day itself is booked');
+
+        $later = $this->sub('2026-02-01', '30.00', 'Μετρητά');
+        financeSyncSubscriptionMovement($later, self::$userId);
+        $this->assertNotNull($this->movement($later));
+    }
+
+    public function test_an_existing_movement_is_still_updated_and_deleted_even_when_dated_before_the_books_start(): void
+    {
+        $sub = $this->sub('2026-03-01', '30.00', 'Μετρητά');
+        financeSyncSubscriptionMovement($sub, self::$userId);
+        financeSaveSetting('finance_books_start', '2026-06-01');
+        dbExecute("UPDATE volunteer_subscriptions SET amount = '45.00' WHERE id = ?", [$sub]);
+        financeSyncSubscriptionMovement($sub, self::$userId);
+        $this->assertSame('45.00', $this->movement($sub)['amount']);
+        dbExecute("UPDATE volunteer_subscriptions SET amount = NULL WHERE id = ?", [$sub]);
+        financeSyncSubscriptionMovement($sub, self::$userId);
+        $this->assertNull($this->movement($sub));
+    }
+
+    public function test_without_a_books_start_setting_the_earliest_active_opening_date_guards(): void
+    {
+        $acc = (int) dbInsert("INSERT INTO finance_accounts (name, kind, opening_date) VALUES ('TESTFIN dated', 'CASH', '2000-01-01')");
+        $this->assertNotNull(financeBooksStart());
+        $this->assertLessThanOrEqual('2000-01-01', financeBooksStart());
+        $before = $this->sub('1999-05-05', '30.00', 'Μετρητά');
+        financeSyncSubscriptionMovement($before, self::$userId);
+        $this->assertNull($this->movement($before));
+        dbExecute("UPDATE finance_accounts SET is_active = 0 WHERE id = ?", [$acc]);
+        financeSaveSetting('finance_books_start', '1990-01-01');
+        $this->assertSame('1990-01-01', financeBooksStart(), 'the explicit setting wins');
+    }
+
+    public function test_the_import_sets_the_books_start_when_empty_and_keeps_an_existing_one(): void
+    {
+        financeSaveSetting('finance_books_start', '');
+        financeImportPastDues('2026-02-01', self::$userId);
+        $this->assertSame('2026-02-01', financeSetting('finance_books_start'));
+        financeImportPastDues('2026-05-01', self::$userId);
+        $this->assertSame('2026-02-01', financeSetting('finance_books_start'));
     }
 
     public function test_a_dues_movement_cannot_be_deleted_from_the_cash_book(): void
