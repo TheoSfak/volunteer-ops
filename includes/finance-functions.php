@@ -488,3 +488,46 @@ function financeStoreUpload(array $file): ?array {
     if (!move_uploaded_file($file['tmp_name'], $dir . $stored)) throw new RuntimeException('Δεν ήταν δυνατή η αποθήκευση του αρχείου.');
     return ['original' => mb_substr(basename((string) ($file['name'] ?? $stored)), 0, 255), 'stored' => $stored, 'mime' => $mime];
 }
+
+// ─── Reminders ───────────────────────────────────────────────────────────────
+
+/** Active system admins plus active users whose custom role grants finance_manage. */
+function financeManagerIds(): array {
+    $rows = dbFetchAll("SELECT DISTINCT u.id FROM users u
+        LEFT JOIN custom_role_permissions p ON p.role_id = u.custom_role_id AND p.page_slug = 'finance_manage'
+        WHERE u.is_active = 1 AND u.deleted_at IS NULL AND (u.role = ? OR p.page_slug IS NOT NULL)", [ROLE_SYSTEM_ADMIN]);
+    return array_map('intval', array_column($rows, 'id'));
+}
+
+/**
+ * Announce each unpaid document once per stage (7 days before, the due date, overdue). Returns documents announced.
+ * The stage is recorded only after at least one manager was notified without error, so a document
+ * nobody could be reached about is retried on the next run; a failure for one recipient never stops the rest.
+ */
+function financeSendDueReminders(string $today, ?callable $notify = null): int {
+    if (!financeValidDate($today)) return 0;
+    $notify = $notify ?? fn(int $uid, string $title, string $msg, string $type) => sendNotification($uid, $title, $msg, $type);
+    $recipients = financeManagerIds();
+    $sent = 0;
+    foreach (financeOpenPayables($today) as $doc) {
+        if (empty($doc['due_date'])) continue;
+        $stage = financeReminderStageFor($doc['due_date'], $today);
+        if ($stage === 0 || $stage <= (int) $doc['reminder_stage']) continue;
+        $title = [1 => 'Τιμολόγιο λήγει σύντομα', 2 => 'Τιμολόγιο λήγει σήμερα', 3 => 'Ληγμένο τιμολόγιο'][$stage];
+        $msg = $doc['counterparty_name'] . ($doc['doc_number'] ? ' (' . $doc['doc_number'] . ')' : '') . ': υπόλοιπο '
+            . financeFormat($doc['remaining']) . ', προθεσμία ' . formatDate($doc['due_date']) . '.';
+        $delivered = 0;
+        foreach ($recipients as $uid) {
+            try {
+                $notify($uid, $title, $msg, $stage === 3 ? 'danger' : 'warning');
+                $delivered++;
+            } catch (Throwable $e) {
+                error_log('financeSendDueReminders: notify failed for user ' . $uid . ': ' . $e->getMessage());
+            }
+        }
+        if ($delivered === 0) continue;
+        dbExecute("UPDATE finance_documents SET reminder_stage = ? WHERE id = ?", [$stage, $doc['id']]);
+        $sent++;
+    }
+    return $sent;
+}
