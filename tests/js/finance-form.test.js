@@ -66,3 +66,28 @@ test('the VAT mirror docblock sits directly above validVat', () => {
     const src = fs.readFileSync(path.join(__dirname, '../../assets/js/finance-form.js'), 'utf8');
     assert.match(src, /Mirror of financeValidVatNumber\(\)[^\n]*\*\/\r?\n\s*function validVat\(/);
 });
+
+test('paidBeforeOpening compares ISO dates strictly; an empty opening date never warns', () => {
+    assert.equal(F.paidBeforeOpening('2026-01-01', '2025-12-31'), true);
+    assert.equal(F.paidBeforeOpening('2026-01-01', '2026-01-01'), false);
+    assert.equal(F.paidBeforeOpening('2026-01-01', '2026-02-01'), false);
+    assert.equal(F.paidBeforeOpening('', '2025-12-31'), false);
+    assert.equal(F.paidBeforeOpening('2026-01-01', ''), false);
+    assert.equal(F.paidBeforeOpening('garbage', '2025-12-31'), false);
+});
+
+test('openingWarning words the Greek warning with the dd/mm/yyyy opening date, or stays empty', () => {
+    assert.equal(F.formatDmy('2026-03-07'), '07/03/2026');
+    const w = F.openingWarning('Ταμείο <b>', '2026-03-07', '2026-01-02');
+    assert.match(w, /^Προσοχή: η ημερομηνία πληρωμής είναι πριν από την έναρξη του λογαριασμού «Ταμείο <b>» \(07\/03\/2026\)\. /);
+    assert.match(w, /θα μετρηθεί δύο φορές\.$/);
+    assert.equal(F.openingWarning('Ταμείο', '', '2026-01-02'), '');
+    assert.equal(F.openingWarning('Ταμείο', '2026-03-07', '2026-03-07'), '');
+});
+
+test('the account name only reaches the page through textContent', () => {
+    const src = fs.readFileSync(path.join(__dirname, '../../assets/js/finance-form.js'), 'utf8');
+    const block = src.slice(src.indexOf('function initOpeningWarnings'));
+    assert.match(block, /box\.textContent = text/);
+    assert.doesNotMatch(block, /innerHTML/);
+});

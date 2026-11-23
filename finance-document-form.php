@@ -235,13 +235,14 @@ include __DIR__ . '/includes/header.php';
     </div></div>
 
     <?php if (!$existing): ?>
-    <div class="card mb-3"><div class="card-body">
+    <div class="card mb-3"><div class="card-body" data-opening-warning data-date-fallback="#docDate">
         <div class="form-check form-switch"><input class="form-check-input" type="checkbox" name="pay_now" value="1" id="payNow" <?= $accounts ? (!$sticky || post('pay_now') === '1' ? 'checked' : '') : 'disabled' ?>>
             <label class="form-check-label" for="payNow"><?= $direction === 'IN' ? 'Εισπράχθηκε ήδη' : 'Πληρώθηκε ήδη' ?></label></div>
         <div class="row g-2 mt-1">
-            <div class="col-md-4"><select class="form-select" name="pay_account_id"><?php foreach ($accounts as $a): ?><option value="<?= (int) $a['id'] ?>"<?= $sticky && (int) post('pay_account_id') === (int) $a['id'] ? ' selected' : '' ?>><?= h($a['name']) ?></option><?php endforeach; ?></select></div>
+            <div class="col-md-4"><select class="form-select" name="pay_account_id"><?php foreach ($accounts as $a): ?><option value="<?= (int) $a['id'] ?>" data-opening-date="<?= h((string) ($a['opening_date'] ?? '')) ?>"<?= $sticky && (int) post('pay_account_id') === (int) $a['id'] ? ' selected' : '' ?>><?= h($a['name']) ?></option><?php endforeach; ?></select></div>
             <div class="col-md-4"><input type="date" class="form-control" name="pay_date" value="<?= $sticky && post('pay_date') !== '' ? h(post('pay_date')) : date('Y-m-d') ?>"></div>
         </div>
+        <div class="alert alert-warning py-1 px-2 mt-2 mb-0 small d-none opening-warning" role="alert"></div>
         <div class="form-text">Ξετσεκάρετε για τιμολόγιο που οφείλεται ακόμα: θα εμφανιστεί στις Υποχρεώσεις.</div>
     </div></div>
     <?php endif; ?>
@@ -257,12 +258,13 @@ include __DIR__ . '/includes/header.php';
         <li class="list-group-item d-flex justify-content-between"><span><?= h(formatDate($p['movement_date'])) ?> · <?= h($p['account_name']) ?></span><span><?= financeFormat(financeToCents($p['amount'])) ?></span></li>
     <?php endforeach; ?></ul><?php endif; ?>
     <?php if ($existing['remaining'] > 0): ?>
-    <form method="post" class="row g-2 align-items-end">
+    <form method="post" class="row g-2 align-items-end" data-opening-warning>
         <?= csrfField() ?><input type="hidden" name="action" value="pay"><input type="hidden" name="id" value="<?= (int) $id ?>">
-        <div class="col-md-4"><label class="form-label">Λογαριασμός</label><select class="form-select" name="pay_account_id"><?php foreach ($accounts as $a): ?><option value="<?= (int) $a['id'] ?>"><?= h($a['name']) ?></option><?php endforeach; ?></select></div>
+        <div class="col-md-4"><label class="form-label">Λογαριασμός</label><select class="form-select" name="pay_account_id"><?php foreach ($accounts as $a): ?><option value="<?= (int) $a['id'] ?>" data-opening-date="<?= h((string) ($a['opening_date'] ?? '')) ?>"><?= h($a['name']) ?></option><?php endforeach; ?></select></div>
         <div class="col-md-3"><label class="form-label">Ημερομηνία</label><input type="date" class="form-control" name="pay_date" value="<?= date('Y-m-d') ?>"></div>
         <div class="col-md-3"><label class="form-label">Ποσό</label><input class="form-control text-end" name="pay_amount" inputmode="decimal" value="<?= h($dec(financeFromCents($existing['remaining']))) ?>"></div>
         <div class="col-md-2"><button class="btn btn-success w-100"><?= $direction === 'IN' ? 'Είσπραξη' : 'Πληρωμή' ?></button></div>
+        <div class="col-12"><div class="alert alert-warning py-1 px-2 mb-0 small d-none opening-warning" role="alert"></div></div>
     </form>
     <?php endif; ?>
 </div></div>

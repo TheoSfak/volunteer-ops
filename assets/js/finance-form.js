@@ -48,6 +48,23 @@
         return (sum % 11) % 10 === Number(afm[8]);
     }
 
+    /** ISO yyyy-mm-dd → dd/mm/yyyy; anything else comes back unchanged. */
+    function formatDmy(iso) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso));
+        return m ? m[3] + '/' + m[2] + '/' + m[1] : String(iso);
+    }
+    /** True when the account has an opening date and the payment is dated strictly before it (both ISO dates; blank/invalid → false). */
+    function paidBeforeOpening(openingDate, payDate) {
+        const re = /^\d{4}-\d{2}-\d{2}$/;
+        return re.test(String(openingDate)) && re.test(String(payDate)) && String(payDate) < String(openingDate);
+    }
+    /** The non-blocking Greek warning for a payment dated before the account's opening date, or '' when there is nothing to say. */
+    function openingWarning(accountName, openingDate, payDate) {
+        if (!paidBeforeOpening(openingDate, payDate)) return '';
+        return 'Προσοχή: η ημερομηνία πληρωμής είναι πριν από την έναρξη του λογαριασμού «' + accountName + '» (' + formatDmy(openingDate) +
+            '). Το αρχικό του υπόλοιπο μάλλον την περιλαμβάνει ήδη — θα μετρηθεί δύο φορές.';
+    }
+
     // ── Browser only ────────────────────────────────────────────────────────
     function loadScript(src) {
         return new Promise((resolve, reject) => {
@@ -223,13 +240,33 @@
         });
     }
 
-    const api = {VAT_RATES, TOLERANCE_CENTS, toCents, fromCents, display, splitGross, splitNet, totals, mismatch, cleanVat, validVat, prepareImage, initForm};
+    /** Live opening-date warning for every [data-opening-warning] block (pay-now card, payments form). Text via textContent only. */
+    function initOpeningWarnings(doc) {
+        doc.querySelectorAll('[data-opening-warning]').forEach(scope => {
+            const acc = scope.querySelector('[name="pay_account_id"]'), date = scope.querySelector('[name="pay_date"]');
+            const box = scope.querySelector('.opening-warning'), now = scope.querySelector('[name="pay_now"]');
+            const fb = scope.dataset.dateFallback ? doc.querySelector(scope.dataset.dateFallback) : null;
+            if (!acc || !date || !box) return;
+            const update = () => {
+                const opt = acc.selectedOptions && acc.selectedOptions[0];
+                const day = date.value || (fb ? fb.value : '');
+                const text = opt && !(now && !now.checked) ? openingWarning(opt.textContent, opt.dataset.openingDate || '', day) : '';
+                box.textContent = text;
+                box.classList.toggle('d-none', text === '');
+            };
+            [acc, date, now, fb].forEach(el => { if (el) { el.addEventListener('change', update); el.addEventListener('input', update); } });
+            update();
+        });
+    }
+
+    const api = {VAT_RATES, TOLERANCE_CENTS, toCents, fromCents, display, splitGross, splitNet, totals, mismatch, cleanVat, validVat, formatDmy, paidBeforeOpening, openingWarning, prepareImage, initForm, initOpeningWarnings};
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     root.VoFinance = api;
     if (typeof document !== 'undefined') {
         document.addEventListener('DOMContentLoaded', () => {
             const form = document.getElementById('financeDocumentForm');
             if (form) initForm(form);
+            initOpeningWarnings(document);
         });
     }
 })(typeof window !== 'undefined' ? window : globalThis);

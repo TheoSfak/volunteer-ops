@@ -192,4 +192,13 @@ final class FinancePagesSourceTest extends TestCase
         $this->assertStringContainsString('fputcsvSafe(', $s);
         $this->assertStringContainsString('"\xEF\xBB\xBF"', $s);
     }
+
+    public function test_payment_forms_carry_the_opening_date_for_the_live_warning(): void
+    {
+        $s = self::src('finance-document-form.php');
+        $this->assertSame(2, substr_count($s, 'data-opening-date="'), 'pay-now and the payments form options');
+        $this->assertSame(2, substr_count($s, 'class="alert alert-warning py-1 px-2'), 'one warning box per pay block, besides the totals alert');
+        $this->assertSame(2, substr_count($s, 'opening-warning"'));
+        $this->assertSame(2, substr_count($s, 'data-opening-warning'));
+    }
 }
