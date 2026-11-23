@@ -196,4 +196,11 @@ final class FinanceDuesTest extends TestCase
             foreach ($active as $id) dbExecute("UPDATE finance_accounts SET is_active = 1 WHERE id = ?", [$id]);
         }
     }
+
+    public function test_a_dues_method_is_recognised_whatever_its_case_accents_or_spelling(): void
+    {
+        foreach (['τράπεζα', 'Τράπεζα', ' ΤΡΑΠΕΖΑ ', 'κατάθεση', 'Κατάθεση', 'τραπεζική κατάθεση', 'iris', ' IRIS '] as $m) $this->assertSame('bank', financeDuesMethodKey($m), $m);
+        foreach (['κάρτα', 'ΚΑΡΤΑ', 'pos', 'POS'] as $m) $this->assertSame('card', financeDuesMethodKey($m), $m);
+        foreach (['μετρητά', 'ΜΕΤΡΗΤΑ', 'Μετρητά', 'τίποτα', ''] as $m) $this->assertSame('cash', financeDuesMethodKey($m), $m);
+    }
 }

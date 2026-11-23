@@ -483,8 +483,29 @@ function financeBooksStart(): ?string {
     return financeValidDate($d) ? (string) $d : null;
 }
 
+/** Lower case, no Greek accents, one space between words: «Τράπεζα», «ΤΡΑΠΕΖΑ» and «τραπεζα» are the same thing. */
+function financeNormalizeMethod(?string $method): string {
+    $s = mb_strtolower(trim((string) $method), 'UTF-8');
+    $s = strtr($s, ['ά' => 'α', 'έ' => 'ε', 'ή' => 'η', 'ί' => 'ι', 'ό' => 'ο', 'ύ' => 'υ', 'ώ' => 'ω', 'ϊ' => 'ι', 'ΐ' => 'ι', 'ϋ' => 'υ', 'ΰ' => 'υ', 'ς' => 'σ']);
+    return trim((string) preg_replace('/\s+/u', ' ', $s));
+}
+
+/**
+ * cash / bank / card for a free-text or listed payment method. Case, accents and spaces do not matter; «τράπεζα»,
+ * «κατάθεση», «IRIS» → bank, «κάρτα», «POS» → card, anything else (μετρητά, άλλο, a typo) → cash.
+ */
 function financeDuesMethodKey(?string $method): string {
-    return FINANCE_DUES_METHOD_KEYS[trim((string) $method)] ?? 'cash';
+    $n = financeNormalizeMethod($method);
+    foreach (FINANCE_DUES_METHOD_KEYS as $label => $key) {
+        if ($n === financeNormalizeMethod($label)) return $key;
+    }
+    foreach (preg_split('/[^\p{L}\p{N}]+/u', $n, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $word) {
+        if (str_starts_with($word, 'τραπεζ') || str_starts_with($word, 'καταθεσ') || $word === 'iris') return 'bank';
+    }
+    foreach (preg_split('/[^\p{L}\p{N}]+/u', $n, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $word) {
+        if (str_starts_with($word, 'καρτ') || $word === 'pos') return 'card';
+    }
+    return 'cash';
 }
 
 function financeCashAccountId(): int {

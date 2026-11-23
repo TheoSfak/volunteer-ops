@@ -237,4 +237,12 @@ final class FinancePagesSourceTest extends TestCase
         $js = self::src('assets/js/finance-form.js');
         $this->assertStringContainsString("dirField.value = dir;", $js);
     }
+
+    public function test_the_subscription_edit_form_uses_a_method_select_that_keeps_a_legacy_value(): void
+    {
+        $s = self::src('subscriptions.php');
+        $this->assertStringNotContainsString('<input class="form-control" name="payment_method" value="<?= h($editing[\'payment_method\']) ?>">', $s);
+        $this->assertStringContainsString('$editMethods = [\'Μετρητά\', \'Τραπεζική κατάθεση\', \'Κάρτα\', \'IRIS\', \'Άλλο\'];', $s);
+        $this->assertStringContainsString('(παλιά τιμή)', $s);
+    }
 }

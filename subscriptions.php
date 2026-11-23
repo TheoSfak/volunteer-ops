@@ -614,7 +614,12 @@ include __DIR__ . '/includes/header.php';
             <div class="col-md-3"><label class="form-label">Λήξη</label><input class="form-control subscription-datepicker" type="text" name="expiry_date" value="<?= h($editing['expiry_date']) ?>" required><div class="form-text" id="editExpiryHint"></div></div>
             <div class="col-md-2"><label class="form-label">Ποσό</label><input class="form-control" type="number" step="0.01" name="amount" value="<?= h($editing['amount']) ?>"></div>
             <div class="col-md-2"><label class="form-label">Τύπος</label><select class="form-select" name="renewal_kind"><option value="RENEWAL" <?= $editing['renewal_kind'] === 'RENEWAL' ? 'selected' : '' ?>>Ανανέωση</option><option value="REACTIVATION" <?= $editing['renewal_kind'] === 'REACTIVATION' ? 'selected' : '' ?>>Επανενεργοποίηση</option></select></div>
-            <div class="col-md-2"><label class="form-label">Τρόπος</label><input class="form-control" name="payment_method" value="<?= h($editing['payment_method']) ?>"></div>
+            <?php // The same listed methods as the record form: free text used to land in the cash account when it was not spelled exactly.
+                $editMethods = ['Μετρητά', 'Τραπεζική κατάθεση', 'Κάρτα', 'IRIS', 'Άλλο'];
+                $editMethodNow = trim((string) $editing['payment_method']); ?>
+            <div class="col-md-2"><label class="form-label">Τρόπος</label><select class="form-select" name="payment_method"><option value="">—</option>
+                <?php foreach ($editMethods as $editMethod): ?><option value="<?= h($editMethod) ?>" <?= $editMethodNow === $editMethod ? 'selected' : '' ?>><?= h($editMethod) ?></option><?php endforeach; ?>
+                <?php if ($editMethodNow !== '' && !in_array($editMethodNow, $editMethods, true)): ?><option value="<?= h($editMethodNow) ?>" selected><?= h($editMethodNow) ?> (παλιά τιμή)</option><?php endif; ?></select></div>
             <div class="col-md-3"><label class="form-label">Αριθμός απόδειξης</label><input class="form-control" name="receipt_number" maxlength="100" value="<?= h($editing['receipt_number'] ?? '') ?>"></div>
             <div class="col-md-6" id="editReceiptUpload"><label class="form-label">Αντικατάσταση απόδειξης</label><input type="file" class="form-control" name="receipt" accept=".pdf,.jpg,.jpeg,.png"><div class="form-text">PDF, JPG ή PNG έως 10MB. Οι εικόνες περιορίζονται αυτόματα έως 1920×1080. Η νέα απόδειξη αντικαθιστά την καταχωρημένη.</div></div>
             <div class="col-12"><label class="form-label">Σημειώσεις</label><textarea class="form-control" name="notes" rows="2"><?= h($editing['notes']) ?></textarea></div>
