@@ -22,6 +22,20 @@ define('BACKUP_DIR', __DIR__ . '/backups');
 define('UPDATE_LOG_FILE', __DIR__ . '/update.log');
 require_once __DIR__ . '/includes/update-check.php';
 
+const GITHUB_TOKEN_SETTING = 'github_update_token';
+
+/**
+ * Authorization header for the two GitHub requests below, when an admin has
+ * stored a fine-grained PAT via the "Πρόσβαση GitHub" card (needed once the
+ * repo is private — the public API returns 404 for both the release lookup
+ * and the zipball download without one). Empty when none is set, so this
+ * keeps working against a public repo too.
+ */
+function githubAuthHeaders(): array {
+    $token = trim((string) getSetting(GITHUB_TOKEN_SETTING, ''));
+    return $token !== '' ? ['Authorization: Bearer ' . $token] : [];
+}
+
 // Error logging for update process
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
@@ -51,10 +65,10 @@ function getLatestRelease() {
     $context = stream_context_create([
         'http' => [
             'method' => 'GET',
-            'header' => [
+            'header' => array_merge([
                 'User-Agent: VolunteerOps-Updater',
                 'Accept: application/vnd.github.v3+json'
-            ],
+            ], githubAuthHeaders()),
             'timeout' => UPDATE_CHECK_TIMEOUT
         ],
         'ssl' => [
@@ -320,10 +334,10 @@ function downloadUpdate($zipUrl, $version) {
     $context = stream_context_create([
         'http' => [
             'method' => 'GET',
-            'header' => [
+            'header' => array_merge([
                 'User-Agent: VolunteerOps-Updater',
                 'Accept: application/vnd.github.v3+json'
-            ],
+            ], githubAuthHeaders()),
             'timeout' => 120,
             'follow_location' => true
         ],
@@ -902,7 +916,34 @@ if (isPost()) {
                 // Re-check now: skip the stored answer (see updateCheckCached())
                 $forceCheck = true;
                 break;
-                
+
+            case 'save_github_token':
+                // Blank submit keeps the stored token, same "keep existing"
+                // behaviour as the API key fields in settings.php.
+                $tokenInput = trim(post('github_token', ''));
+                if ($tokenInput !== '') {
+                    $exists = dbFetchValue("SELECT COUNT(*) FROM settings WHERE setting_key = ?", [GITHUB_TOKEN_SETTING]);
+                    if ($exists) {
+                        dbExecute("UPDATE settings SET setting_value = ?, updated_at = NOW() WHERE setting_key = ?", [$tokenInput, GITHUB_TOKEN_SETTING]);
+                    } else {
+                        dbInsert("INSERT INTO settings (setting_key, setting_value, created_at, updated_at) VALUES (?, ?, NOW(), NOW())", [GITHUB_TOKEN_SETTING, $tokenInput]);
+                    }
+                    clearSettingsCache();
+                    setFlash('success', 'Το GitHub token αποθηκεύτηκε.');
+                    $forceCheck = true; // the stored "repo is private" error is now stale
+                } else {
+                    setFlash('warning', 'Δεν δόθηκε token — δεν άλλαξε τίποτα.');
+                }
+                redirect('update.php');
+                break;
+
+            case 'clear_github_token':
+                dbExecute("DELETE FROM settings WHERE setting_key = ?", [GITHUB_TOKEN_SETTING]);
+                clearSettingsCache();
+                setFlash('success', 'Το GitHub token αφαιρέθηκε.');
+                redirect('update.php');
+                break;
+
             case 'create_backup':
                 $actionResult = createBackup();
                 if (empty($actionResult['errors'])) {
@@ -1205,6 +1246,8 @@ if (isPost()) {
     }
 }
 
+$githubTokenSet = trim((string) getSetting(GITHUB_TOKEN_SETTING, '')) !== '';
+
 // Check for updates
 try {
     $latestRelease = updateCheckCached($forceCheck, 'getLatestRelease');
@@ -1256,7 +1299,9 @@ include __DIR__ . '/includes/header.php';
                         <?= h($checkError) ?>
                         <hr>
                         <small class="text-muted">
-                            Βεβαιωθείτε ότι έχετε ρυθμίσει σωστά το GITHUB_REPO στο αρχείο update.php
+                            Βεβαιωθείτε ότι έχετε ρυθμίσει σωστά το GITHUB_REPO στο αρχείο update.php.
+                            Αν το repository είναι <strong>private</strong>, προσθέστε token στο πλαίσιο
+                            «Πρόσβαση GitHub» δεξιά.
                         </small>
                     </div>
                 <?php elseif ($updateAvailable): ?>
@@ -1481,6 +1526,46 @@ include __DIR__ . '/includes/header.php';
 
     <!-- Sidebar -->
     <div class="col-lg-4">
+        <!-- GitHub Access (private repo) -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-github me-1"></i>Πρόσβαση GitHub</h5>
+            </div>
+            <div class="card-body">
+                <p class="small text-muted">
+                    Χρειάζεται μόνο όταν το repository <code><?= h(GITHUB_REPO) ?></code> είναι
+                    <strong>private</strong> — χωρίς token, ο έλεγχος και η λήψη ενημέρωσης αποτυχαίνουν.
+                    Δημιουργήστε ένα <em>fine-grained personal access token</em> από το
+                    <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub</a>,
+                    περιορισμένο σε αυτό το repository με δικαίωμα μόνο <strong>Contents: Read-only</strong>.
+                </p>
+                <?php if ($githubTokenSet): ?>
+                    <div class="alert alert-success py-2 small mb-3">
+                        <i class="bi bi-check-circle me-1"></i>Έχει αποθηκευτεί token.
+                    </div>
+                <?php endif; ?>
+                <form method="post" class="mb-2">
+                    <?= csrfField() ?>
+                    <input type="hidden" name="action" value="save_github_token">
+                    <div class="input-group">
+                        <input type="password" class="form-control form-control-sm" name="github_token"
+                               autocomplete="new-password" value=""
+                               placeholder="<?= $githubTokenSet ? 'Αφήστε κενό για να παραμείνει' : 'github_pat_...' ?>">
+                        <button type="submit" class="btn btn-sm btn-outline-primary">Αποθήκευση</button>
+                    </div>
+                </form>
+                <?php if ($githubTokenSet): ?>
+                    <form method="post" onsubmit="return confirm('Αφαίρεση του αποθηκευμένου token;');">
+                        <?= csrfField() ?>
+                        <input type="hidden" name="action" value="clear_github_token">
+                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                            <i class="bi bi-trash me-1"></i>Αφαίρεση token
+                        </button>
+                    </form>
+                <?php endif; ?>
+            </div>
+        </div>
+
         <!-- Quick Actions -->
         <div class="card mb-4">
             <div class="card-header">
