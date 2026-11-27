@@ -422,9 +422,9 @@
             return true;
         }
         const saved = savedDeviceId();
-        if (!saved) return false;
+        if (!saved) { log('autoConnect: no remembered device - pair manually once first'); return false; }
         const transport = detectTransport();
-        if (!transport) return false;
+        if (!transport) { log('autoConnect: no BLE transport available on this page'); return false; }
         let pick;
         try {
             if (transport === 'native') {
@@ -432,12 +432,20 @@
             } else {
                 const known = await root.navigator.bluetooth.getDevices();
                 const match = known.find(d => d.id === saved);
-                if (!match) return false;
+                if (!match) {
+                    log('autoConnect: remembered device not in navigator.bluetooth.getDevices() (' + known.length + ' granted)');
+                    return false;
+                }
                 pick = {kind: 'web', btDevice: match};
             }
-        } catch (e) { return false; }
+        } catch (e) {
+            log('autoConnect: getDevices() failed: ' + (e && e.message ? e.message : e));
+            return false;
+        }
+        log('autoConnect: reconnecting to remembered device…');
         const ok = await connectToDevice(pick);
         if (ok) startAutoSending();
+        else log('autoConnect: connectToDevice() failed');
         return ok;
     }
 
