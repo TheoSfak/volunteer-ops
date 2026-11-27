@@ -7166,6 +7166,19 @@ const WR_BOOT = {
     chatHeadsAtLoad: <?= json_encode((object) $chatHeadsAtLoad) ?>,
 };
 </script>
+<?php if (($_GET['meshdebug'] ?? '') === '1'): /* TEMPORARY, remove once the LoRa field test is done - deliberately
+    outside WR_BOOT (not a real boot value, and every WR_BOOT key must be read by the big script or the boot tests
+    fail) so it needs its own tiny script, read by renderMeshDebug() in the big script below. */ ?>
+<script>
+window.MESH_DEBUG_SERVER = {
+    meshFallbackSetting: <?= json_encode(meshFallbackEnabled()) ?>,
+    iTakePartInActionRoom: <?= json_encode($iTakePartInActionRoom) ?>,
+    myAssignmentsCount: <?= (int) count($myAssignments) ?>,
+    canManageWarRoom: <?= json_encode($canManageWarRoom) ?>,
+    meshBleAvailable: <?= json_encode($meshBleAvailable) ?>,
+};
+</script>
+<?php endif; ?>
 <?php if ($__wrExt): ?>
 <script src="<?= h($__wrExtUrl) ?>"></script>
 <script>
@@ -25796,6 +25809,7 @@ function renderMeshDebug() {
         // meshFallback is itself null exactly when the boot flag was off (or MeshBle never
         // loaded) - read that instead of taking a second direct look at the boot flag itself.
         'meshFallback: ' + (meshFallback ? ('mode=' + meshFallback.mode + ' offlineSince=' + meshFallback.offlineSince) : 'NULL (boot flag off or MeshBle not loaded)'),
+        'server (why the boot flag is what it is): ' + JSON.stringify(window.MESH_DEBUG_SERVER || 'not present - reload with &meshdebug=1'),
         'pollIsOffline(): ' + pollIsOffline(),
         'lastPollFailure: ' + JSON.stringify(lastPollFailure),
         'lastPollOkAt age(ms): ' + (Date.now() - lastPollOkAt),
