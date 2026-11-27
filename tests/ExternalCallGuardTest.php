@@ -503,7 +503,7 @@ PHP;
         $this->assertStringContainsString("require_once __DIR__ . '/includes/update-check.php';", $update);
         $this->assertStringContainsString("updateCheckCached(\$forceCheck, 'getLatestRelease')", $update);
         $this->assertStringNotContainsString("= getLatestRelease();", $update);
-        $this->assertStringContainsString("'timeout' => UPDATE_CHECK_TIMEOUT", $update);
+        $this->assertStringContainsString('int $timeoutSeconds = UPDATE_CHECK_TIMEOUT', $update);
 
         // No request made while a person waits may run longer than 8 s.
         $this->assertStringContainsString('CURLOPT_TIMEOUT        => 8,', $read('includes/webpush.php'));

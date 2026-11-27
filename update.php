@@ -13,11 +13,6 @@ requireRole([ROLE_SYSTEM_ADMIN]);
 // ============================================================
 define('GITHUB_REPO', 'TheoSfak/volunteer-ops'); // GitHub repository
 define('GITHUB_API_URL', 'https://api.github.com/repos/' . GITHUB_REPO);
-
-// SSL CA bundle: prefer XAMPP's bundled CA cert, fall back to system default
-$sslCaFile = 'C:/xampp/apache/bin/curl-ca-bundle.crt';
-define('SSL_VERIFY', file_exists($sslCaFile));
-define('SSL_CA_FILE', $sslCaFile);
 define('BACKUP_DIR', __DIR__ . '/backups');
 define('UPDATE_LOG_FILE', __DIR__ . '/update.log');
 require_once __DIR__ . '/includes/update-check.php';
@@ -34,6 +29,45 @@ const GITHUB_TOKEN_SETTING = 'github_update_token';
 function githubAuthHeaders(): array {
     $token = trim((string) getSetting(GITHUB_TOKEN_SETTING, ''));
     return $token !== '' ? ['Authorization: Bearer ' . $token] : [];
+}
+
+/**
+ * One GET against GitHub, cURL rather than file_get_contents()/stream_context.
+ * This project's other outbound calls (includes/weather.php, ai.php, osm.php...)
+ * all go through curl and are proven working on the live hosting; the old
+ * file_get_contents() path here relied on php.ini's allow_url_fopen plus a
+ * hand-picked SSL CA file that pointed at a local XAMPP install path and was
+ * never going to exist on the actual server, so verification against a real
+ * host could silently fall back to no SSL verification at best and fail
+ * outright at worst - with the generic "Αδυναμία σύνδεσης" message hiding
+ * which of those it was. curl uses its own correctly-configured CA bundle, so
+ * CURLOPT_SSL_VERIFYPEER can just stay on.
+ * Sets $httpCode (0 if no response reached the server at all) and $curlError
+ * (empty on success) by reference, so the caller can show the real reason
+ * instead of guessing.
+ */
+function githubCurlGet(string $url, ?int &$httpCode = null, ?string &$curlError = null, int $timeoutSeconds = UPDATE_CHECK_TIMEOUT) {
+    $httpCode = 0;
+    $curlError = '';
+    if (!function_exists('curl_init')) {
+        $curlError = 'Η επέκταση PHP curl δεν είναι ενεργοποιημένη.';
+        return false;
+    }
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_CONNECTTIMEOUT => min($timeoutSeconds, 10),
+        CURLOPT_TIMEOUT        => $timeoutSeconds,
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_USERAGENT      => 'VolunteerOps-Updater/' . APP_VERSION,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_HTTPHEADER     => array_merge(['Accept: application/vnd.github.v3+json'], githubAuthHeaders()),
+    ]);
+    $response = curl_exec($ch);
+    $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlError = curl_error($ch);
+    curl_close($ch);
+    return $response;
 }
 
 // Error logging for update process
@@ -62,48 +96,39 @@ function getLatestRelease() {
     // (and holds their session file), and the answer is stored for hours by
     // updateCheckCached(), so a slow or blocked GitHub costs one page view in a
     // while a few seconds, not every view a minute.
-    $context = stream_context_create([
-        'http' => [
-            'method' => 'GET',
-            'header' => array_merge([
-                'User-Agent: VolunteerOps-Updater',
-                'Accept: application/vnd.github.v3+json'
-            ], githubAuthHeaders()),
-            'timeout' => UPDATE_CHECK_TIMEOUT
-        ],
-        'ssl' => [
-            'verify_peer' => SSL_VERIFY,
-            'verify_peer_name' => SSL_VERIFY,
-            'cafile' => SSL_CA_FILE
-        ]
-    ]);
-
     $startedAt = microtime(true);
-    $response = @file_get_contents($url, false, $context);
-    $status = updateCheckHttpStatus($http_response_header ?? []);
-    externalCallLog('github', 'api.github.com', $status, $startedAt, UPDATE_CHECK_TIMEOUT);
+    $httpCode = 0;
+    $curlError = '';
+    $response = githubCurlGet($url, $httpCode, $curlError);
+    externalCallLog('github', 'api.github.com', $httpCode, $startedAt, UPDATE_CHECK_TIMEOUT, $curlError);
 
-    if ($response === false) {
+    if ($response === false || $httpCode < 200 || $httpCode >= 300) {
         // No answer at all (blocked, unresolvable, too slow): the same host
-        // would only make us wait the same time again for the tags.
-        if ($status === 0) {
-            return ['error' => 'Αδυναμία σύνδεσης με GitHub. Ελέγξτε τη σύνδεση internet.'];
+        // would only make us wait the same time again for the tags. The
+        // real reason (DNS, TLS, timeout, ...) goes in the message instead
+        // of staying hidden in the server's error log.
+        if ($httpCode === 0) {
+            $detail = $curlError !== '' ? ' (' . $curlError . ')' : '';
+            return ['error' => 'Αδυναμία σύνδεσης με GitHub. Ελέγξτε τη σύνδεση internet.' . $detail];
         }
         // Try alternative - get tags
         $tagsUrl = GITHUB_API_URL . '/tags';
         $startedAt = microtime(true);
-        $response = @file_get_contents($tagsUrl, false, $context);
-        externalCallLog('github', 'api.github.com', updateCheckHttpStatus($http_response_header ?? []), $startedAt, UPDATE_CHECK_TIMEOUT);
+        $tagsHttpCode = 0;
+        $tagsCurlError = '';
+        $response = githubCurlGet($tagsUrl, $tagsHttpCode, $tagsCurlError);
+        externalCallLog('github', 'api.github.com', $tagsHttpCode, $startedAt, UPDATE_CHECK_TIMEOUT, $tagsCurlError);
 
-        if ($response === false) {
-            return ['error' => 'Αδυναμία σύνδεσης με GitHub. Ελέγξτε τη σύνδεση internet.'];
+        if ($response === false || $tagsHttpCode < 200 || $tagsHttpCode >= 300) {
+            $detail = $tagsCurlError !== '' ? ' (' . $tagsCurlError . ')' : ($tagsHttpCode !== 0 ? " (HTTP {$tagsHttpCode})" : '');
+            return ['error' => 'Αδυναμία σύνδεσης με GitHub. Ελέγξτε τη σύνδεση internet.' . $detail];
         }
-        
+
         $tags = json_decode($response, true);
         if (empty($tags)) {
             return ['error' => 'Δεν βρέθηκαν εκδόσεις στο repository.'];
         }
-        
+
         return [
             'tag_name' => $tags[0]['name'],
             'name' => $tags[0]['name'],
@@ -113,7 +138,7 @@ function getLatestRelease() {
             'html_url' => 'https://github.com/' . GITHUB_REPO . '/releases/tag/' . $tags[0]['name']
         ];
     }
-    
+
     return json_decode($response, true);
 }
 
@@ -331,29 +356,17 @@ function downloadUpdate($zipUrl, $version) {
         mkdir($tempDir, 0755, true);
     }
     
-    $context = stream_context_create([
-        'http' => [
-            'method' => 'GET',
-            'header' => array_merge([
-                'User-Agent: VolunteerOps-Updater',
-                'Accept: application/vnd.github.v3+json'
-            ], githubAuthHeaders()),
-            'timeout' => 120,
-            'follow_location' => true
-        ],
-        'ssl' => [
-            'verify_peer' => SSL_VERIFY,
-            'verify_peer_name' => SSL_VERIFY,
-            'cafile' => SSL_CA_FILE
-        ]
-    ]);
-    
-    $zipContent = @file_get_contents($zipUrl, false, $context);
-    
-    if ($zipContent === false) {
-        throw new Exception('Αδυναμία λήψης αρχείου ενημέρωσης');
+    $startedAt = microtime(true);
+    $httpCode = 0;
+    $curlError = '';
+    $zipContent = githubCurlGet($zipUrl, $httpCode, $curlError, 120);
+    externalCallLog('github', 'codeload.github.com', $httpCode, $startedAt, 120, $curlError);
+
+    if ($zipContent === false || $httpCode < 200 || $httpCode >= 300) {
+        $detail = $curlError !== '' ? ' (' . $curlError . ')' : ($httpCode !== 0 ? " (HTTP {$httpCode})" : '');
+        throw new Exception('Αδυναμία λήψης αρχείου ενημέρωσης' . $detail);
     }
-    
+
     file_put_contents($zipFile, $zipContent);
     updateLog('Λήψη ολοκληρώθηκε: ' . round(strlen($zipContent) / 1024 / 1024, 2) . ' MB');
     

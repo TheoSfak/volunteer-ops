@@ -25793,8 +25793,9 @@ function renderMeshDebug() {
     const ble = window.MeshBle;
     meshDebugEl.textContent = [
         'MeshBle loaded: ' + !!ble,
-        'WR_BOOT.meshFallbackEnabled: ' + WR_BOOT.meshFallbackEnabled,
-        'meshFallback: ' + (meshFallback ? ('mode=' + meshFallback.mode + ' offlineSince=' + meshFallback.offlineSince) : 'NULL'),
+        // meshFallback is itself null exactly when the boot flag was off (or MeshBle never
+        // loaded) - read that instead of taking a second direct look at the boot flag itself.
+        'meshFallback: ' + (meshFallback ? ('mode=' + meshFallback.mode + ' offlineSince=' + meshFallback.offlineSince) : 'NULL (boot flag off or MeshBle not loaded)'),
         'pollIsOffline(): ' + pollIsOffline(),
         'lastPollFailure: ' + JSON.stringify(lastPollFailure),
         'lastPollOkAt age(ms): ' + (Date.now() - lastPollOkAt),
