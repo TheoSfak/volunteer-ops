@@ -125,8 +125,18 @@
         try {
             port = existingPort || await navigator.serial.requestPort();
             await port.open({baudRate: BAUD_RATE});
-            // Some boards reset when DTR/RTS toggle; leave both low.
-            try { await port.setSignals({dataTerminalReady: false, requestToSend: false}); } catch (e) { /* not every adapter has them */ }
+            // DTR high, not low: a native-USB CDC-ACM board (the ThinkNode-M3 is
+            // nRF52840) commonly gates its serial stream on DTR being asserted -
+            // the firmware only starts writing to the endpoint once the host says
+            // "I'm listening". Low was chosen to protect auto-reset boards (classic
+            // Arduino/CH340 adapters toggle into the bootloader on a DTR edge), but
+            // that is a different class of hardware from this one, and asserting
+            // true is what let the earlier raw pyserial test (which defaults DTR
+            // true) receive data at all, while this code's own `listening` state
+            // never got a single byte back through a real navigator.serial
+            // connection (confirmed via console logging: reader.read() never
+            // resolved even once - a real receive problem, not a parsing one).
+            try { await port.setSignals({dataTerminalReady: true, requestToSend: true}); } catch (e) { /* not every adapter has them */ }
             frames = new MP.FrameReader();
             writer = port.writable.getWriter();
             reader = port.readable.getReader();
