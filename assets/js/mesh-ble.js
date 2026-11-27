@@ -229,6 +229,15 @@
      * notification already auto-delivers without a tap.
      */
     function handleDecodedMessage(msg) {
+        // The handshake's actual finish line - myInfo/nodeInfo/configComplete was
+        // always logged (see logLineFor), but nothing ever moved the status out of
+        // 'reading' to match: a hardware test watching the log scroll by looked
+        // successful while the banner above it kept saying "waiting for the node"
+        // forever, even once it plainly wasn't anymore.
+        if (msg.type === 'configComplete') {
+            if (state.phase === 'reading') setPhase('done');
+            return;
+        }
         if (msg.type !== 'packet' || !msg.packet || msg.packet.portnum !== MP.PORT.PRIVATE) return;
         const order = MP.decodeOrderMsg(msg.packet.payload);
         if (!order || order.type !== MP.ORDER_MSG.NOTIFY) return;
