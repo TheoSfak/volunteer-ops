@@ -25801,6 +25801,10 @@ function renderMeshDebug() {
         'lastPollOkAt age(ms): ' + (Date.now() - lastPollOkAt),
         'ble.state.phase: ' + (ble ? ble.state.phase : '-'),
         'ble.savedDeviceId(): ' + (ble ? ble.savedDeviceId() : '-'),
+        'latestAutoPosition age(ms): ' + (latestAutoPosition ? (Date.now() - latestAutoPosition.timestamp) : 'NULL'),
+        'AUTO_PING_MAX_FIX_AGE_MS: ' + AUTO_PING_MAX_FIX_AGE_MS,
+        '--- last 6 ble.state.log lines ---',
+        (ble && ble.state.log.length ? ble.state.log.slice(-6).join('\n') : '(empty)'),
     ].join('\n');
 }
 
