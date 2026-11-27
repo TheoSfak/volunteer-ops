@@ -149,17 +149,30 @@
             for (;;) {
                 const {value, done} = await mine.read();
                 if (done) break;
+                // TEMPORARY, remove once the LoRa field test is done: no on-screen log
+                // pane exists here (unlike mesh-ble.js's modal), and the laptop is a
+                // normal desktop Chrome where F12 DevTools needs no special setup, so
+                // console is the quickest way to see whether anything is arriving at
+                // all on a real navigator.serial connection (never actually exercised
+                // before - the 2026-11-03 hardware check fed real bytes into a FAKE
+                // port, not a real one).
+                console.debug('[mesh-gateway] serial bytes received:', value ? value.length : 0);
                 if (value && value.length) handleBytes(value);
             }
         } catch (e) {
+            console.debug('[mesh-gateway] readLoop threw:', e);
             if (!closing) { await release(); setPhase('lost', e && e.message ? e.message : ''); return; }
         }
+        console.debug('[mesh-gateway] readLoop ended (done=true or closing)');
         if (!closing) { await release(); setPhase('lost'); }
     }
 
     function handleBytes(chunk) {
-        frames.push(chunk).forEach(payload => {
+        const parsed = frames.push(chunk);
+        console.debug('[mesh-gateway] handleBytes: frames completed by this chunk:', parsed.length);
+        parsed.forEach(payload => {
             const msg = MP.decodeFromRadio(payload);
+            console.debug('[mesh-gateway] decoded frame type:', msg.type, msg);
             if (msg.type === 'myInfo') {
                 myNum = msg.nodeNum;
                 state.ownNode = {num: myNum, name: MP.nodeHex(myNum)};
