@@ -7166,7 +7166,9 @@ const WR_BOOT = {
     chatHeadsAtLoad: <?= json_encode((object) $chatHeadsAtLoad) ?>,
 };
 </script>
-<?php if (($_GET['meshdebug'] ?? '') === '1'): /* TEMPORARY, remove once the LoRa field test is done - deliberately
+<?php if (($_GET['meshdebug'] ?? '') === '1' || $meshBleAvailable): /* TEMPORARY, remove once the LoRa field test is
+    done - also on for anyone the BLE feature itself is available to (admin or an eligible field participant),
+    with no param needed, since the APK has no address bar to add it to. Deliberately
     outside WR_BOOT (not a real boot value, and every WR_BOOT key must be read by the big script or the boot tests
     fail) so it needs its own tiny script, read by renderMeshDebug() in the big script below. */ ?>
 <script>
@@ -25791,7 +25793,14 @@ function meshFallbackTick() {
 // TEMPORARY (remove once the LoRa fallback field test is done): an on-screen
 // readout for phones where remote Chrome debugging isn't practical to set up.
 // Opt-in via ?meshdebug=1 so it never shows up unasked.
-const MESH_DEBUG = /(?:^\?|[?&])meshdebug=1(?:&|$)/.test(location.search);
+// Also shows with no param needed for anyone the BLE feature itself is even
+// available to (admin or an eligible field participant - window.MeshBle only
+// loads at all when $meshBleAvailable was true server-side): the APK has no
+// address bar to add &meshdebug=1 to, and the field test has to run inside
+// the APK (the native BluetoothLe path, not Chrome's Web Bluetooth - see
+// autoConnect()'s 'native' branch), not in a regular mobile browser tab, and
+// the phone account testing this is ordinarily a plain participant, not admin.
+const MESH_DEBUG = /(?:^\?|[?&])meshdebug=1(?:&|$)/.test(location.search) || !!window.MeshBle;
 let meshDebugEl = null;
 function renderMeshDebug() {
     if (!MESH_DEBUG) return;
