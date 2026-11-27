@@ -25775,6 +25775,34 @@ function meshFallbackTick() {
     else if (change === 'exited') window.MeshBle.disconnect(false);
 }
 
+// TEMPORARY (remove once the LoRa fallback field test is done): an on-screen
+// readout for phones where remote Chrome debugging isn't practical to set up.
+// Opt-in via ?meshdebug=1 so it never shows up unasked.
+const MESH_DEBUG = /(?:^\?|[?&])meshdebug=1(?:&|$)/.test(location.search);
+let meshDebugEl = null;
+function renderMeshDebug() {
+    if (!MESH_DEBUG) return;
+    if (!meshDebugEl) {
+        meshDebugEl = document.createElement('div');
+        meshDebugEl.id = 'meshDebugOverlay';
+        meshDebugEl.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;'
+            + 'background:#000;color:#0f0;font:11px monospace;padding:6px;'
+            + 'white-space:pre-wrap;max-height:45vh;overflow:auto;';
+        document.body.appendChild(meshDebugEl);
+    }
+    const ble = window.MeshBle;
+    meshDebugEl.textContent = [
+        'MeshBle loaded: ' + !!ble,
+        'WR_BOOT.meshFallbackEnabled: ' + WR_BOOT.meshFallbackEnabled,
+        'meshFallback: ' + (meshFallback ? ('mode=' + meshFallback.mode + ' offlineSince=' + meshFallback.offlineSince) : 'NULL'),
+        'pollIsOffline(): ' + pollIsOffline(),
+        'lastPollFailure: ' + JSON.stringify(lastPollFailure),
+        'lastPollOkAt age(ms): ' + (Date.now() - lastPollOkAt),
+        'ble.state.phase: ' + (ble ? ble.state.phase : '-'),
+        'ble.savedDeviceId(): ' + (ble ? ble.savedDeviceId() : '-'),
+    ].join('\n');
+}
+
 // Told people what was wrong and left them with nothing to do about it — the
 // one thing everybody tried anyway was to reload, so the banner now carries
 // the button. Built ONCE and thereafter only updated, never re-innerHTML'd:
@@ -25784,6 +25812,7 @@ function meshFallbackTick() {
 let pollStaleBuilt = false;
 function renderPollStaleness() {
     meshFallbackTick();
+    renderMeshDebug();
     const el = document.getElementById('pollStaleBanner');
     if (!el) return;
     const ageMs = Date.now() - lastPollOkAt;
@@ -25828,7 +25857,9 @@ function renderPollStaleness() {
     const offline = pollIsOffline();
     document.getElementById('pollStaleTitle').textContent = t(offline ? 'poll.offline_title' : 'poll.stale_title', {age});
     document.getElementById('pollStaleHelp').textContent = offline
-        ? t('poll.offline_help') + (nativeTrackingLive ? ' ' + t('myping.native_keeps') : '')
+        ? t('poll.offline_help')
+            + (nativeTrackingLive ? ' ' + t('myping.native_keeps') : '')
+            + (meshFallback && meshFallback.mode === 'mesh' ? ' ' + t('poll.offline_mesh_active') : '')
         : t('poll.stale_help');
     // A time on every attempt, so a press of «Ανανέωση» visibly does something
     // even when the answer is still no.
