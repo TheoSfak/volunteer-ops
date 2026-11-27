@@ -407,7 +407,20 @@
      * throws) if there is nothing remembered yet, or it cannot be reached.
      */
     async function autoConnect() {
-        if (state.phase === 'connecting' || state.phase === 'reading' || state.phase === 'done') return false;
+        if (state.phase === 'connecting') return false;
+        if (state.phase === 'reading' || state.phase === 'done') {
+            // Already connected - typically because the volunteer paired manually
+            // with M1's button earlier in this same page session, well before any
+            // connection trouble. Entering MESH found a live link already up, so
+            // there is nothing to (re)connect, but the auto-send loop below this
+            // function still needs starting - without this, entering MESH after an
+            // earlier manual connect never sent anything at all (M3's intent,
+            // starting at the `if (ok) startAutoSending();` line, was unreachable
+            // whenever a manual connect had already happened, which is the normal
+            // real-world order: pair once, then lose the normal connection later).
+            if (!sendTimer) startAutoSending();
+            return true;
+        }
         const saved = savedDeviceId();
         if (!saved) return false;
         const transport = detectTransport();
