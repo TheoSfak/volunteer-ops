@@ -25826,8 +25826,17 @@ function renderMeshDebug() {
         'ble.savedDeviceId(): ' + (ble ? ble.savedDeviceId() : '-'),
         'latestAutoPosition age(ms): ' + (latestAutoPosition ? (Date.now() - latestAutoPosition.timestamp) : 'NULL'),
         'AUTO_PING_MAX_FIX_AGE_MS: ' + AUTO_PING_MAX_FIX_AGE_MS,
-        '--- last 6 ble.state.log lines ---',
-        (ble && ble.state.log.length ? ble.state.log.slice(-6).join('\n') : '(empty)'),
+        // A busy mesh channel floods ble.state.log with ordinary "packet from X" heard
+        // lines (useful for M4's order downlink, drowning it out for THIS purpose), so
+        // the auto-send/autoConnect lines that actually answer "did sending even happen"
+        // get their own section instead of being whatever happens to still be in the
+        // last few entries.
+        '--- auto-send / autoConnect log lines (all of them, oldest first) ---',
+        (ble && ble.state.log.length
+            ? (ble.state.log.filter(l => /^auto|^autoConnect/.test(l)).join('\n') || '(none yet)')
+            : '(empty)'),
+        '--- last 4 ble.state.log lines of any kind ---',
+        (ble && ble.state.log.length ? ble.state.log.slice(-4).join('\n') : '(empty)'),
     ].join('\n');
 }
 

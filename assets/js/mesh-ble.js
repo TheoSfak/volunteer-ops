@@ -418,7 +418,10 @@
             // starting at the `if (ok) startAutoSending();` line, was unreachable
             // whenever a manual connect had already happened, which is the normal
             // real-world order: pair once, then lose the normal connection later).
-            if (!sendTimer) startAutoSending();
+            if (!sendTimer) {
+                log('autoConnect: already connected, starting auto-send');
+                startAutoSending();
+            }
             return true;
         }
         const saved = savedDeviceId();
