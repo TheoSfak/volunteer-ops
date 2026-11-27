@@ -25809,11 +25809,22 @@ function renderMeshDebug() {
         meshDebugEl.id = 'meshDebugOverlay';
         meshDebugEl.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:99999;'
             + 'background:#000;color:#0f0;font:11px monospace;padding:6px;'
-            + 'white-space:pre-wrap;max-height:45vh;overflow:auto;';
+            + 'white-space:pre-wrap;max-height:60vh;overflow-y:auto;'
+            + '-webkit-overflow-scrolling:touch;touch-action:pan-y;';
         document.body.appendChild(meshDebugEl);
     }
     const ble = window.MeshBle;
     meshDebugEl.textContent = [
+        // Most important line first, no scrolling needed to see it: a busy mesh channel
+        // floods ble.state.log with ordinary "packet from X" heard lines, drowning out
+        // whether a position was actually auto-sent, so that gets pulled out and put
+        // right at the top instead of making someone scroll a fixed box on a phone to
+        // find it.
+        '>>> auto-send / autoConnect lines (all of them, oldest first) <<<',
+        (ble && ble.state.log.length
+            ? (ble.state.log.filter(l => /^auto|^autoConnect/.test(l)).join('\n') || '(none yet)')
+            : '(empty)'),
+        '--- everything else below ---',
         'MeshBle loaded: ' + !!ble,
         // meshFallback is itself null exactly when the boot flag was off (or MeshBle never
         // loaded) - read that instead of taking a second direct look at the boot flag itself.
@@ -25826,17 +25837,7 @@ function renderMeshDebug() {
         'ble.savedDeviceId(): ' + (ble ? ble.savedDeviceId() : '-'),
         'latestAutoPosition age(ms): ' + (latestAutoPosition ? (Date.now() - latestAutoPosition.timestamp) : 'NULL'),
         'AUTO_PING_MAX_FIX_AGE_MS: ' + AUTO_PING_MAX_FIX_AGE_MS,
-        // A busy mesh channel floods ble.state.log with ordinary "packet from X" heard
-        // lines (useful for M4's order downlink, drowning it out for THIS purpose), so
-        // the auto-send/autoConnect lines that actually answer "did sending even happen"
-        // get their own section instead of being whatever happens to still be in the
-        // last few entries.
-        '--- auto-send / autoConnect log lines (all of them, oldest first) ---',
-        (ble && ble.state.log.length
-            ? (ble.state.log.filter(l => /^auto|^autoConnect/.test(l)).join('\n') || '(none yet)')
-            : '(empty)'),
-        '--- last 4 ble.state.log lines of any kind ---',
-        (ble && ble.state.log.length ? ble.state.log.slice(-4).join('\n') : '(empty)'),
+        'last 4 ble.state.log lines of any kind: ' + (ble && ble.state.log.length ? ('\n' + ble.state.log.slice(-4).join('\n')) : '(empty)'),
     ].join('\n');
 }
 
